@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  stage0:
+    name: Stage 0 (lume0, C) — ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: make -C bootstrap/lume0
+      - name: Test
+        run: make -C bootstrap/lume0 test
+      - name: Test under ASan/UBSan
+        run: make -C bootstrap/lume0 asan
+
+  docs:
+    name: Documentation & examples
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Required files exist
+        run: |
+          set -e
+          for f in README.md docs/00-catalog.md docs/01-survey.md docs/02-principles.md \
+                   docs/03-specification.md docs/04-roadmap.md docs/05-vision.md \
+                   grammar/lume.ebnf examples/README.md; do
+            test -f "$f" || { echo "missing $f"; exit 1; }
+          done
+      - name: Every example is listed in examples/README.md
+        run: |
+          set -e
+          for f in examples/*.lume examples/future/*.lume; do
+            name=${f#examples/}
+            grep -q "$name" examples/README.md || { echo "$name not listed in examples/README.md"; exit 1; }
+          done
+      - name: No tabs in Lume sources or docs
+        run: |
+          ! grep -rnP '\t' --include='*.lume' --include='*.md' --include='*.ebnf' --exclude='bad_*.lume' . || { echo "tabs found"; exit 1; }
+      - name: Spec cites principles that exist
+        run: |
+          set -e
+          for p in $(grep -oE '\bP[0-9]+\b' docs/03-specification.md | sort -u); do
+            grep -q "\*\*$p " docs/02-principles.md || { echo "spec cites $p but principles.md lacks it"; exit 1; }
+          done

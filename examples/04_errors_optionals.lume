@@ -1,0 +1,35 @@
+## Errors are values: error sets, `fail`, `?`, `catch`, optionals with `?.` and `??`.
+use std.io
+
+type DivError = error ByZero | Overflow
+
+fn divide(a: int, b: int) -> int ! DivError
+    requires a >= 0
+    ensures result * b <= a
+    if b == 0
+        fail DivError.ByZero
+    a / b
+
+fn safe_div(a: int, b: int) -> int ! DivError
+    let q = divide(a, b)?        # propagate
+    q * 2
+
+fn find(items: [str], wanted: str) -> int?
+    for (i, item) in items.enumerate()
+        if item == wanted
+            return i
+    none
+
+fn main()
+    io.println("{safe_div(10, 2) catch 0}")       # 10
+    io.println("{safe_div(10, 0) catch -1}")      # -1
+    match divide(7, 0)
+        ok(v)  => io.println("ok {v}")
+        err(e) => io.println("error: {e}")
+
+    let names = ["ana", "bia", "caio"]
+    let idx = find(names, "bia")
+    io.println("bia at {idx ?? -1}")
+    io.println("zoe at {find(names, "zoe") ?? -1}")
+    let upper = names.first()?.upper() ?? "none"
+    io.println(upper)

@@ -1,0 +1,22 @@
+## Bindings, numbers, strings, control flow.
+use std.io
+
+fn main()
+    let x = 10                  # int (i64)
+    var total = 0               # mutable
+    for i in 1..=x
+        total += i
+    io.println("sum 1..{x} = {total}")
+
+    let pi: f64 = 3.14159
+    io.println("area r=2: {pi * 2.0 ** 2:.3}")
+
+    let grade = if total > 50 then "high" else "low"
+    io.println("grade: {grade}")
+
+    var n = 27
+    var steps = 0
+    while n != 1
+        n = if n % 2 == 0 then n / 2 else 3 * n + 1
+        steps += 1
+    io.println("collatz(27) takes {steps} steps")

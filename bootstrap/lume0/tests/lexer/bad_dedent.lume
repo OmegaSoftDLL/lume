@@ -1,0 +1,5 @@
+# expect: L0002
+fn main()
+    if true
+        let x = 1
+      let y = 2

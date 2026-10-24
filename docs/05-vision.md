@@ -236,20 +236,38 @@ collision appears (there is a small JS library and a LaTeX package with the name
 with the same feel: **Lúmen**, **Faro** (lighthouse), **Ígnis**, **Aurea**, **Omega** (the author's
 brand). Decide before the first public release, not before.
 
-## 6. Where to start (the first 90 days)
+## 6. Where to start (the first 90 days) — and how Lume becomes self-evolving
 
-1. Freeze **`lume-core`** (the ~30-construct typed IR) and write its interpreter. Everything else is
-   sugar, so the core is where correctness is cheap to get right.
+**No Rust, no third language in the loop.** The bootstrap strategy is the classic one, chosen so
+that Lume owns itself as early as possible:
+
+- **Stage 0 — `lume0`**: a *disposable* interpreter for `lume-core` + the minimal surface syntax,
+  written in portable C (no dependencies, builds with any C compiler on any machine, including a
+  future bare-metal port). It exists only to run Stage 1 once. It is deliberately small (~5–8k
+  lines), unoptimised, and frozen after Stage 1 runs.
+- **Stage 1 — `lumec` written in Lume**: the real compiler (parser, type checker, effects,
+  ownership, Cranelift/LLVM/MLIR backends through a C ABI) written *in Lume*, interpreted by
+  `lume0` to compile itself the first time. From then on `lumec` compiles `lumec`. Stage 0 is kept
+  in the repository only as the reproducibility root (the "trusting trust" defence: anyone can
+  rebuild Lume from C).
+- **Stage 2 — self-evolution**: once `lumec` is self-hosted, the language evolves *through its own
+  tooling*: proposals are Lume programs that use `lume agent` (the compiler as a service) to
+  transform the compiler's own source, the standard library, or the spec; every proposal must pass
+  the spec's conformance suite, the self-build (`lumec` builds `lumec` builds `lumec` — three
+  stages bit-identical), the verified-core proofs, and the benchmark gates. AI models write
+  proposals; the gates decide; humans set direction and veto. `lume evolve` is the command; the
+  editions mechanism keeps old code compiling. See `04-roadmap.md` §Stage 2 for the governance.
+
+Order of work:
+
+1. Freeze **`lume-core`** (the ~30-construct typed IR) and the Stage 0 interpreter in C.
 2. Parser + formatter for the surface syntax, with the JSON diagnostics protocol from day one —
    the AI-authorship workflow is tested on the compiler itself (an LLM writing Lume, the compiler
    correcting it) before any human ergonomics are polished.
 3. Type checker with inference, ADTs, traits, effects (inference only; no handlers yet).
 4. Ownership/borrow checker on the core IR.
-5. Cranelift backend → native binaries. At this point Lume replaces Go/Python scripts.
+5. Native backend → binaries. At this point Lume replaces Go/Python scripts and `lumec` is
+   written in Lume.
 6. Then, in order of leverage: `table`/`query` (the data story is Lume's most *visible*
    differentiator), `comptime` + macros (unlocks everything else as libraries), tensors/`grad`
-   (the AI story), `freestanding` + a toy kernel (the OS story).
-
-The compiler is written in Rust until self-hosting (phase 5), because Rust's ecosystem (Cranelift,
-MLIR bindings, LSP crates) shortens the road, and because a Rust compiler for Lume is itself the
-best stress test of "what Rust got wrong that Lume must fix".
+   (the AI story), `freestanding` + a toy kernel (the OS story), and `lume evolve`.

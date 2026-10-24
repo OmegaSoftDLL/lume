@@ -1,0 +1,27 @@
+## [Stage 4] A model is a typed value; grad is a compiler operator; shapes are types.
+use std.io
+use std.tensor (tensor)
+use std.nn (relu, cross_entropy, Adam)
+use std.data (mnist)
+
+type Mlp = model
+    w1: tensor[f32, 784, 128]
+    b1: tensor[f32, 128]
+    w2: tensor[f32, 128, 10]
+    b2: tensor[f32, 10]
+    fn forward(self, x: tensor[f32, batch, 784]) -> tensor[f32, batch, 10]
+        relu(x @ self.w1 + self.b1) @ self.w2 + self.b2
+
+fn loss(m: Mlp, x: tensor[f32, batch, 784], y: tensor[u8, batch]) -> f32
+    cross_entropy(m.forward(x), y)
+
+fn main() ! Error / {io, rand, gpu}
+    var m = Mlp.init(rand)
+    var opt = Adam(lr: 1e-3)
+    let g = grad(loss)                                   # ∇ wrt m, compiled for CPU or GPU
+    for epoch in 0..5
+        for (x, y) in mnist.train.batches(128)
+            m = opt.step(m, g(m, x, y))
+        io.println("epoch {epoch}: acc {mnist.test.accuracy(m):.3}")
+    m.save("mlp.safetensors")?
+    m.export_onnx("mlp.onnx")?

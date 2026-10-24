@@ -65,29 +65,48 @@ fn main() ! Error
 
 ```
 lume/
-├── README.md                  ← you are here
+├── README.md
 ├── docs/
-│   ├── 01-survey.md           ← what every language taught us (the good and the bad)
-│   ├── 02-principles.md       ← the design principles derived from the survey
-│   ├── 03-specification.md    ← the language specification (syntax, types, memory, concurrency…)
-│   └── 04-roadmap.md          ← how to build the compiler, phase by phase
-├── grammar/
-│   └── lume.ebnf              ← formal grammar
-├── examples/                  ← .lume programs that illustrate the language
-└── compiler/                  ← `lumec`, the compiler (Rust). Phase 1: lexer done and tested
+│   ├── 00-catalog.md          ← ~260 languages, by era and family
+│   ├── 01-survey.md           ← what each got right / wrong, and what Lume takes
+│   ├── 02-principles.md       ← P1–P32: the rules the design obeys
+│   ├── 03-specification.md    ← the language specification v0.1 (normative)
+│   ├── 04-roadmap.md          ← Stages 0–5 and the self-evolution governance
+│   └── 05-vision.md           ← why: a language for the AI era, from kernel to mind
+├── grammar/lume.ebnf          ← formal grammar
+├── examples/                  ← .lume programs per stage (future/ for later stages)
+├── bootstrap/lume0/           ← Stage 0: disposable C interpreter (the seed) — lexer done
+├── compiler/                  ← Stage 1+: lumec, written in Lume
+├── std/                       ← standard library, in Lume
+├── tests/conformance/         ← normative tests, stage-tagged
+└── .github/workflows/ci.yml   ← CI: build + test lume0 on Linux/macOS, docs checks
 ```
+
+## How Lume is built (no third language in the loop)
+
+1. **Stage 0 — `lume0`** (C, disposable): a small interpreter for the core subset. Its only job is
+   to run Stage 1 once. Then it is frozen as the reproducibility root.
+2. **Stage 1 — `lumec`** (Lume): the real compiler, written in Lume, compiled by `lume0` the first
+   time, then by itself (triple build: A → B → C, B ≡ C).
+3. **Stage 2+ — `lume evolve`**: the language evolves through its own tooling. AI proposes changes
+   via the compiler-as-a-service API; automated gates (conformance, triple self-build, proofs,
+   benchmarks, size budget) verify; humans decide. See `docs/04-roadmap.md`.
 
 ## Status
 
-- [x] Phase 0 — Survey, principles, specification v0.1, grammar, examples
-- [x] Phase 1 (started) — Lexer in Rust with tests (`cd compiler && cargo test`)
-- [ ] Phase 1 — Parser → AST
-- [ ] Phase 2 — Type checker + interpreter/REPL
-- [ ] Phase 3 — Ownership/borrow checker
-- [ ] Phase 4 — Native backend (Cranelift → LLVM) and WASM
-- [ ] Phase 5 — Self-hosting (a Lume compiler written in Lume)
+- [x] Phase 0 — Catalog, survey, principles, specification v0.1, grammar, roadmap, vision, examples
+- [x] Stage 0 — Lexer (`bootstrap/lume0`): layout tokens, all literals, diagnostics, tests, ASan clean
+- [ ] Stage 0 — Parser → AST, checker, interpreter; `lume0 run` on all Stage-0 examples
+- [ ] Stage 1 — `lumec` in Lume; triple self-build; `lume0` frozen
+- [ ] Stage 2 — `comptime`, macros, `table`/`query`, package manager
+- [ ] Stage 3 — Ownership checker, structured concurrency, effects, `@gc` regions
+- [ ] Stage 4 — Tensors, autodiff, GPU kernels, `prob`, `rule`, `llm fn`
+- [ ] Stage 5 — Bare metal, `lume-os`, verified core
 
-See `docs/04-roadmap.md` for each phase in detail.
+## Contributing
+
+Read `docs/02-principles.md` first; every change cites the principles it serves. Language changes
+go through an RFC in `docs/rfcs/`. CI must be green (`make -C bootstrap/lume0 test`).
 
 ## License
 

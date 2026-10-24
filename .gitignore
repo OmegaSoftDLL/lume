@@ -1,0 +1,12 @@
+# build outputs
+bootstrap/lume0/lume0
+bootstrap/lume0/*.o
+bootstrap/lume0/*.dSYM/
+compiler/build/
+*.lumb
+
+# editors / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store

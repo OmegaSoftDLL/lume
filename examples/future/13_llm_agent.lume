@@ -1,0 +1,35 @@
+## [Stage 4] An agent is an ordinary program: typed tools, table memory, llm fn planner, supervision.
+use std.io
+use std.data (table, query)
+use std.llm
+use std.actor (supervisor, restart)
+
+type Invoice = record
+    number: str
+    total:  decimal(12, 2)
+    items:  [Item]
+type Item = record
+    desc:   str
+    amount: decimal(12, 2)
+
+extern llm fn extract(text: str) -> Invoice ! llm.Error / {llm}
+    """Extract the invoice fields from the text. Dates ISO-8601, amounts as decimal."""
+    ensures result.total == result.items.sum(.amount)
+
+type Memory = record
+    seen: table[Invoice]
+
+fn tool_lookup(mem: Memory, number: str) -> Invoice?
+    (query mem.seen where number == number).first()
+
+extern llm fn plan(goal: str, tools: [llm.Tool]) -> llm.Plan ! llm.Error / {llm}
+    """Choose the next tool call to reach the goal, or finish."""
+
+fn main() ! Error / {io, llm}
+    with llm.handler = llm.local("qwen3-8b", budget: 2.00)
+        var mem = Memory(seen: table[Invoice]())
+        let inv = extract(io.read_file("invoice.txt")?)?
+        mem.seen.insert(inv)
+        io.println("{inv.number}: {inv.total}")
+        supervisor(restart: .one_for_one)
+            spawn agent_loop(mem, goal: "reconcile all invoices in inbox/")
