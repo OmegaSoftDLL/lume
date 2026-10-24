@@ -70,6 +70,11 @@ binaries.
    `lume agent` (compiler-as-a-service over stdio JSON-RPC: parse/check/symbols/fix-its/holes).
 8. `std/` — the standard library core: `core, io, fs, fmt, str, collections, math, decimal, time,
    rand, json, regex, test, bench`.
+8b. **Tooling for the AI-author loop and the C ecosystem (ship with the first compiler):** `lume lsp`
+    (language server) and `lume dap` (debug adapter) so agents get interactive diagnostics; `import c
+    "header.h"` and `@export("C")` for FFI and incremental migration. (Scan: NanoLang, Carbon, Zig, Mojo.)
+8c. **P35 — mandatory tests:** the compiler reports a `pub` function with no test/example (warning in
+    debug, error under `--strict`).
 9. Diagnostics style guide (`docs/diagnostics.md`) and the first 100 diagnostics written to it.
 
 **Exit criterion (the triple build):** `lume0` runs `lumec` to compile `lumec` → binary **A**;
@@ -92,7 +97,10 @@ started on).
 3. `decimal`, `date/time/duration/money` literals and arithmetic (`std.decimal`, `std.time`).
 4. **`lume pkg`**: content-addressed store (`~/.lume/store/<hash>`), `lume.toml` written in the
    restricted Lume config subset, lockfiles, enforced semantic versioning via API diff, capability
-   grants per dependency, signed packages, a registry protocol (self-hostable).
+   grants per dependency (capabilities declared in package metadata and checked, scan: Austral),
+   signed packages, a registry protocol (self-hostable). **Content-address definitions by AST hash**
+   (scan: Unison) so tests and proofs are cached per definition and renames are non-breaking.
+5b. **`LAWS` (P34):** project-level invariants compiled to obligations checked on every build.
 5. `shape` structural types, multiple-dispatch trait parameters, properties, `report`.
 6. REPL with tables as first-class values (the dot prompt reborn), notebooks protocol (Jupyter kernel).
 7. **Exit criterion:** a complete business application (inventory + invoicing + reports) in
@@ -105,7 +113,8 @@ started on).
 2. **Structured concurrency** (§10): `scope`, `spawn`, `chan`, `select`, work-stealing runtime,
    `par for/map/reduce`; `std.actor` with supervisors; `std.time.logical`.
 3. **Effect handlers** (`effect`/`with handler`), `async` as an effect (no colouring), `yield`
-   generators via handlers.
+   generators via handlers; `sample`/`observe`/`infer` are handlers too (scan: Koka). Add
+   **Perceus-style reuse analysis** so functional updates happen in place without a GC (scan: Koka).
 4. `@gc` regions (a precise, incremental collector scoped to declared types).
 5. Allocator contexts (`with alloc`), `freestanding`-ready `std.collections`.
 6. `lume prove` v0: contracts on the pure subset discharged with an SMT solver (Z3/cvc5 through FFI);
@@ -125,9 +134,11 @@ started on).
 4. `model` types, `std.nn` (layers, optimisers, data loaders), safetensors/ONNX import-export.
 5. `prob` effect + `std.prob` (MCMC, SVI, SMC handlers).
 6. `rule` blocks → Rete/semi-naive Datalog over `table`s (`std.rules`).
-7. `extern llm fn` + `std.llm`: schema-constrained decoding, retries, budgets, caching, provider
-   handlers (local models through llama.cpp FFI first — this project values running offline),
-   `test llm` in the test runner, prompt optimisation against evals.
+7. `extern llm fn` + `std.llm`: schema-constrained decoding, **plus a schema-aligned parsing fallback
+   for providers without constrained decoding** (scan: BAML); retries and a repair loop driven by the
+   same JSON diagnostics; budgets, caching, provider handlers (local models through llama.cpp FFI
+   first — this project values running offline); **an eval + record/replay mocking framework** so
+   `test llm` runs deterministic regression suites over prompts and model versions.
 8. `std.neuro`: spiking networks as actors on logical time.
 9. **Exit criteria:** (a) MNIST trained end-to-end in pure Lume on CPU and GPU from the same
    source; (b) an agent in `examples/apps/agent/` with typed tools, `table` memory, an `llm fn`
