@@ -126,3 +126,13 @@ must name the principle it breaks.
   program's meaning (P9/P25), weakening compile-time safety, or hiding anything from the author
   themselves. Protection applies only to the author's own artifact; the toolchain ships no feature
   for attacking, deobfuscating or evading anyone else's software. See `06-software-protection.md`.
+
+## I. AI-authorship guardrails (from the competitive scan, `07-competitive.md`)
+
+- **P34 — Project-level laws.** A project may declare invariants in a `LAWS` block that the compiler
+  turns into a proof/test obligation on *every* build, so an edit (human or AI) cannot silently break
+  a cross-cutting rule. Per-function contracts (P15) guard a function; laws guard the whole program.
+  (Modelled on Bend 2.)
+- **P35 — No untested public surface.** Every `pub` function carries at least one test or example
+  the test runner executes; the compiler's JSON diagnostics report a missing one. AI-written code is
+  never merged as untested code. (Modelled on NanoLang's mandatory `shadow` block.)

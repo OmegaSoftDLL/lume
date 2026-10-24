@@ -74,7 +74,8 @@ lume/
 │   ├── 03-specification.md    ← the language specification v0.1 (normative)
 │   ├── 04-roadmap.md          ← Stages 0–5 and the self-evolution governance
 │   ├── 05-vision.md           ← why: a language for the AI era, from kernel to mind
-│   └── 06-software-protection.md ← anti-reverse-engineering as a toolchain goal (P33)
+│   ├── 06-software-protection.md ← anti-reverse-engineering as a toolchain goal (P33)
+│   └── 07-competitive.md         ← scan of comparable projects and the ideas Lume adopts
 ├── grammar/lume.ebnf          ← formal grammar
 ├── examples/                  ← .lume programs per stage (future/ for later stages)
 ├── bootstrap/lume0/           ← Stage 0: disposable C interpreter (the seed) — lexer done
