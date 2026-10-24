@@ -1,0 +1,23 @@
+names: [ana, bia, caio, duda]
+joined: ana | bia | caio | duda
+upper first: ANA
+has caio: true
+starts ana: true  ends duda: true
+index of caio: 8
+replaced: ana-bia-caio-duda
+reversed: emul
+dashes: ==========
+parsed + 8 = 50
+sorted: [1, 2, 3, 5, 8, 9]  reversed: [3, 9, 1, 8, 2, 5]
+take 3: [5, 2, 8]  drop 2: [8, 1, 9, 3]
+sum via reduce: 28
+any > 8: true  all > 0: true
+contains 8: true  index of 8: 2
+zip: [(a, 1), (b, 2), (c, 3)]
+concat: [1, 2, 3, 4, 5]
+ana age: 30  has zoe: false
+keys: [ana, bia]
+sqrt 144 = 12
+floor 3.7 = 3  ceil 3.2 = 4  round 3.5 = 4
+pow 2^10 = 1024
+max 9  min 3  abs 7

@@ -1,0 +1,26 @@
+source:
+fn add(a, b)
+    let r = a + b
+    return r
+
+tokens:
+  KEYWORD fn
+  IDENT add
+  OP (
+  IDENT a
+  OP ,
+  IDENT b
+  OP )
+  NEWLINE \n
+  KEYWORD let
+  IDENT r
+  OP =
+  IDENT a
+  OP +
+  IDENT b
+  NEWLINE \n
+  KEYWORD return
+  IDENT r
+  EOF 
+
+total tokens: 18

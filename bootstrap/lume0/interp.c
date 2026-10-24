@@ -431,6 +431,57 @@ BI(bi_min) { (void)site; (void)ip; Val *m = a[0]; for (int i = 1; i < n; i++) if
 BI(bi_abs) { (void)n; (void)site; Val *v = a[0]; if (v->kind == V_INT) return v_int(ip, v->i < 0 ? -v->i : v->i); if (v->kind == V_FLOAT) return v_float(ip, fabs(v->f)); if (v->kind == V_DEC) return v_dec(ip, v->i < 0 ? -v->i : v->i, v->scale); return v; }
 BI(bi_count) { (void)n; Val *src = to_iter_list(ip, a[0]); (void)site; return v_int(ip, src->n); }
 BI(bi_println); BI(bi_print);
+/* --- extended std: strings --- */
+BI(bi_contains) { (void)n; (void)site; Val *c = a[0];
+    if (c->kind == V_STR) { Val *sub = a[1]; if (sub->slen == 0) return v_bool(ip, true); for (int i = 0; i + sub->slen <= c->slen; i++) if (memcmp(c->s + i, sub->s, (size_t)sub->slen) == 0) return v_bool(ip, true); return v_bool(ip, false); }
+    if (c->kind == V_MAP) { int kl; char *ks = val_to_cstr(ip, a[1], &kl); for (int i = 0; i < c->nent; i++) if (c->ent[i].klen == kl && memcmp(c->ent[i].key, ks, (size_t)kl) == 0) return v_bool(ip, true); return v_bool(ip, false); }
+    Val *lst = to_iter_list(ip, c); for (int i = 0; i < lst->n; i++) if (val_equal(lst->items[i], a[1])) return v_bool(ip, true); return v_bool(ip, false); }
+BI(bi_starts_with) { (void)n; (void)site; Val *s = a[0], *p = a[1]; return v_bool(ip, p->slen <= s->slen && memcmp(s->s, p->s, (size_t)p->slen) == 0); }
+BI(bi_ends_with) { (void)n; (void)site; Val *s = a[0], *p = a[1]; return v_bool(ip, p->slen <= s->slen && memcmp(s->s + (s->slen - p->slen), p->s, (size_t)p->slen) == 0); }
+BI(bi_index_of) { (void)n; (void)site; Val *c = a[0];
+    if (c->kind == V_STR) { Val *sub = a[1]; for (int i = 0; i + sub->slen <= c->slen; i++) if (memcmp(c->s + i, sub->s, (size_t)sub->slen) == 0) return v_int(ip, i); return v_int(ip, -1); }
+    Val *lst = to_iter_list(ip, c); for (int i = 0; i < lst->n; i++) if (val_equal(lst->items[i], a[1])) return v_int(ip, i); return v_int(ip, -1); }
+BI(bi_split) { (void)n; (void)site; Val *s = a[0], *sep = a[1]; Val *out = v_list(ip);
+    if (sep->slen == 0) { for (int i = 0; i < s->slen; i++) v_push(ip, out, v_str(ip, s->s + i, 1)); return out; }
+    int start = 0; for (int i = 0; i + sep->slen <= s->slen; ) { if (memcmp(s->s + i, sep->s, (size_t)sep->slen) == 0) { v_push(ip, out, v_str(ip, s->s + start, i - start)); i += sep->slen; start = i; } else i++; }
+    v_push(ip, out, v_str(ip, s->s + start, s->slen - start)); return out; }
+BI(bi_replace) { (void)n; (void)site; Val *s = a[0], *from = a[1], *to = a[2]; if (from->slen == 0) return s;
+    char *buf = lume_rt_alloc(ip, (size_t)s->slen * (to->slen > from->slen ? (size_t)(to->slen) : 1) + (size_t)s->slen + 1); int w = 0;
+    for (int i = 0; i < s->slen; ) { if (i + from->slen <= s->slen && memcmp(s->s + i, from->s, (size_t)from->slen) == 0) { memcpy(buf + w, to->s, (size_t)to->slen); w += to->slen; i += from->slen; } else buf[w++] = s->s[i++]; }
+    buf[w] = 0; return v_str_owned(ip, buf, w); }
+BI(bi_repeat) { (void)n; (void)site; Val *s = a[0]; long long cnt = a[1]->i; if (cnt < 0) cnt = 0; char *buf = lume_rt_alloc(ip, (size_t)(s->slen) * (size_t)cnt + 1); int w = 0; for (long long k = 0; k < cnt; k++) { memcpy(buf + w, s->s, (size_t)s->slen); w += s->slen; } buf[w] = 0; return v_str_owned(ip, buf, w); }
+BI(bi_chars) { (void)n; (void)site; return to_iter_list(ip, a[0]); }
+BI(bi_join) { (void)n; (void)site; Val *lst = to_iter_list(ip, a[0]); Val *sep = n >= 2 ? a[1] : NULL;
+    int cap = 64, w = 0; char *buf = lume_rt_alloc(ip, (size_t)cap);
+    for (int i = 0; i < lst->n; i++) { if (i && sep) { while (w + sep->slen + 1 > cap) { cap *= 2; char *nb = lume_rt_alloc(ip, (size_t)cap); memcpy(nb, buf, (size_t)w); buf = nb; } memcpy(buf + w, sep->s, (size_t)sep->slen); w += sep->slen; }
+        int el; char *es = val_to_cstr(ip, lst->items[i], &el); while (w + el + 1 > cap) { cap *= 2; char *nb = lume_rt_alloc(ip, (size_t)cap); memcpy(nb, buf, (size_t)w); buf = nb; } memcpy(buf + w, es, (size_t)el); w += el; }
+    buf[w] = 0; return v_str_owned(ip, buf, w); }
+BI(bi_parse_int) { (void)n; (void)site; Val *s = a[0]; if (s->kind != V_STR || s->slen == 0) return v_opt_none(ip); long long v = 0; int i = 0; bool neg = false; if (s->s[0] == '-') { neg = true; i = 1; } if (i >= s->slen) return v_opt_none(ip); for (; i < s->slen; i++) { char c = s->s[i]; if (c < '0' || c > '9') return v_opt_none(ip); v = v * 10 + (c - '0'); } return v_opt_some(ip, v_int(ip, neg ? -v : v)); }
+/* --- extended std: lists --- */
+BI(bi_reverse) { (void)n; (void)site; Val *src = to_iter_list(ip, a[0]);
+    if (a[0]->kind == V_STR) { char *buf = lume_rt_alloc(ip, (size_t)src->n * 4 + 1); int w = 0; for (int i = src->n - 1; i >= 0; i--) { int cl; char *cs = val_to_cstr(ip, src->items[i], &cl); memcpy(buf + w, cs, (size_t)cl); w += cl; } buf[w] = 0; return v_str_owned(ip, buf, w); }
+    Val *out = v_list(ip); for (int i = src->n - 1; i >= 0; i--) v_push(ip, out, src->items[i]); return out; }
+BI(bi_take) { (void)n; (void)site; Val *src = to_iter_list(ip, a[0]); long long k = a[1]->i; Val *out = v_list(ip); for (int i = 0; i < src->n && i < k; i++) v_push(ip, out, src->items[i]); return out; }
+BI(bi_drop) { (void)n; (void)site; Val *src = to_iter_list(ip, a[0]); long long k = a[1]->i; Val *out = v_list(ip); for (int i = (int)k; i < src->n; i++) if (i >= 0) v_push(ip, out, src->items[i]); return out; }
+BI(bi_reduce) { (void)n; Val *src = to_iter_list(ip, a[0]); Val *acc = a[1]; Val *f = a[2]; for (int i = 0; i < src->n; i++) { Val *args2[2] = { acc, src->items[i] }; acc = call_value(ip, f, args2, 2, site); if (ip->flow != FL_NORMAL) return acc; } return acc; }
+BI(bi_any) { (void)n; Val *src = to_iter_list(ip, a[0]); Val *f = a[1]; for (int i = 0; i < src->n; i++) { Val *r = call_value(ip, f, &src->items[i], 1, site); if (ip->flow != FL_NORMAL) return r; if (val_truthy(r)) return v_bool(ip, true); } return v_bool(ip, false); }
+BI(bi_all) { (void)n; Val *src = to_iter_list(ip, a[0]); Val *f = a[1]; for (int i = 0; i < src->n; i++) { Val *r = call_value(ip, f, &src->items[i], 1, site); if (ip->flow != FL_NORMAL) return r; if (!val_truthy(r)) return v_bool(ip, false); } return v_bool(ip, true); }
+BI(bi_zip) { (void)n; (void)site; Val *x = to_iter_list(ip, a[0]); Val *y = to_iter_list(ip, a[1]); Val *out = v_list(ip); int m = x->n < y->n ? x->n : y->n; for (int i = 0; i < m; i++) { Val *t = v_list(ip); t->kind = V_TUPLE; v_push(ip, t, x->items[i]); v_push(ip, t, y->items[i]); v_push(ip, out, t); } return out; }
+BI(bi_concat) { (void)site; Val *out = v_list(ip); for (int k = 0; k < n; k++) { Val *s = to_iter_list(ip, a[k]); for (int i = 0; i < s->n; i++) v_push(ip, out, s->items[i]); } return out; }
+BI(bi_range) { (void)site; Val *v = v_unit(ip); v->kind = V_RANGE; v->lo = n >= 2 ? a[0]->i : 0; v->hi = n >= 2 ? a[1]->i : a[0]->i; v->inc = false; return to_iter_list(ip, v); }
+/* --- extended std: maps --- */
+BI(bi_get) { (void)n; (void)site; Val *m = a[0]; int kl; char *ks = val_to_cstr(ip, a[1], &kl); for (int i = 0; i < m->nent; i++) if (m->ent[i].klen == kl && memcmp(m->ent[i].key, ks, (size_t)kl) == 0) return v_opt_some(ip, m->ent[i].val); return v_opt_none(ip); }
+BI(bi_has) { (void)n; (void)site; Val *m = a[0]; int kl; char *ks = val_to_cstr(ip, a[1], &kl); for (int i = 0; i < m->nent; i++) if (m->ent[i].klen == kl && memcmp(m->ent[i].key, ks, (size_t)kl) == 0) return v_bool(ip, true); return v_bool(ip, false); }
+BI(bi_entries) { (void)n; (void)site; Val *m = a[0]; Val *out = v_list(ip); for (int i = 0; i < m->nent; i++) { Val *t = v_list(ip); t->kind = V_TUPLE; v_push(ip, t, v_str(ip, m->ent[i].key, m->ent[i].klen)); v_push(ip, t, m->ent[i].val); v_push(ip, out, t); } return out; }
+/* --- extended std: io --- */
+BI(bi_eprintln) { (void)site; for (int i = 0; i < n; i++) { if (i) fputc(' ', stderr); int l; char *s = val_to_cstr(ip, a[i], &l); fwrite(s, 1, (size_t)l, stderr); } fputc('\n', stderr); return v_unit(ip); }
+/* --- math --- */
+BI(bi_sqrt) { (void)n; (void)site; return v_float(ip, sqrt(as_double(a[0]))); }
+BI(bi_floor) { (void)n; (void)site; return v_int(ip, (long long)floor(as_double(a[0]))); }
+BI(bi_ceil) { (void)n; (void)site; return v_int(ip, (long long)ceil(as_double(a[0]))); }
+BI(bi_round) { (void)n; (void)site; return v_int(ip, llround(as_double(a[0]))); }
+BI(bi_pow) { (void)n; (void)site; return v_float(ip, pow(as_double(a[0]), as_double(a[1]))); }
+
 
 static Val *mk_builtin(Interp *ip, const char *name, Val *(*fn)(Interp *, Val **, int, const Node *)) {
     Val *v = v_unit(ip); v->kind = V_BUILTIN; v->builtin = fn; v->bname = name; return v;
@@ -441,6 +492,13 @@ static Val *lookup_builtin(Interp *ip, const char *name, int len) {
         {"sorted",bi_sorted},{"first",bi_first},{"last",bi_last},{"enumerate",bi_enumerate},
         {"push",bi_push},{"keys",bi_keys},{"values",bi_values},{"str",bi_str},{"upper",bi_upper},
         {"lower",bi_lower},{"trim",bi_trim},{"max",bi_max},{"min",bi_min},{"abs",bi_abs},{"count",bi_count},
+        {"contains",bi_contains},{"starts_with",bi_starts_with},{"ends_with",bi_ends_with},
+        {"index_of",bi_index_of},{"split",bi_split},{"replace",bi_replace},{"repeat",bi_repeat},
+        {"chars",bi_chars},{"join",bi_join},{"parse_int",bi_parse_int},{"reverse",bi_reverse},
+        {"take",bi_take},{"drop",bi_drop},{"reduce",bi_reduce},{"fold",bi_reduce},{"any",bi_any},
+        {"all",bi_all},{"zip",bi_zip},{"concat",bi_concat},{"range",bi_range},
+        {"get",bi_get},{"has",bi_has},{"entries",bi_entries},
+        {"sqrt",bi_sqrt},{"floor",bi_floor},{"ceil",bi_ceil},{"round",bi_round},{"pow",bi_pow},
     };
     for (size_t i = 0; i < sizeof T / sizeof T[0]; i++)
         if ((int)strlen(T[i].n) == len && memcmp(T[i].n, name, (size_t)len) == 0) return mk_builtin(ip, T[i].n, T[i].f);
@@ -697,7 +755,13 @@ static Val *eval_call(Interp *ip, const Node *call, Env *env, Val *prepend) {
         if (recvn->kind == N_IDENT && text_is(recvn, "io")) {
             if (ml == 7 && memcmp(m, "println", 7) == 0) return bi_println(ip, vals, na, call);
             if (ml == 5 && memcmp(m, "print", 5) == 0) return bi_print(ip, vals, na, call);
+            if (ml == 8 && memcmp(m, "eprintln", 8) == 0) return bi_eprintln(ip, vals, na, call);
             rerror(ip, call, "unknown io function"); return v_unit(ip);
+        }
+        if (recvn->kind == N_IDENT && text_is(recvn, "math")) {
+            Val *mf = lookup_builtin(ip, m, ml);
+            if (mf) return mf->builtin(ip, vals, na, call);
+            rerror(ip, call, "unknown math function"); return v_unit(ip);
         }
         if (recvn->kind == N_IDENT && find_type(recvn->text, recvn->text_len)) {
             const VarReg *vr = find_var(m, ml); return construct_variant(ip, vr, m, ml, vals, na, call);
@@ -841,6 +905,12 @@ static Val *eval(Interp *ip, const Node *n, Env *env) {
             if (inc) hi += 1;
             if (lo < 0) lo = 0;
             if (hi > lst->n) hi = lst->n;
+            if (coll->kind == V_STR) {                        /* slicing a string yields a string */
+                int bl = 0; for (long long i = lo; i < hi; i++) bl += lst->items[i]->kind == V_CHAR ? 4 : 1;
+                char *buf = lume_rt_alloc(ip, (size_t)bl + 1); int w = 0;
+                for (long long i = lo; i < hi; i++) { int cl; char *cs = val_to_cstr(ip, lst->items[i], &cl); memcpy(buf + w, cs, (size_t)cl); w += cl; }
+                buf[w] = 0; return v_str_owned(ip, buf, w);
+            }
             Val *out = v_list(ip); for (long long i = lo; i < hi; i++) v_push(ip, out, lst->items[i]); return out;
         }
         Val *idx = eval(ip, idxn, env); if (ip->flow != FL_NORMAL) return idx;

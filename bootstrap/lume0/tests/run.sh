@@ -39,6 +39,13 @@ for exp in ../../tests/conformance/stage0/*.expected; do
     if $BIN run "$src" 2>/dev/null | diff -u "$exp" - >/dev/null; then ok "run $base"; else bad "run $base"; $BIN run "$src" 2>/dev/null | diff -u "$exp" - | head -20; fi
 done
 
+echo "== Lume-in-Lume: the Stage-1 tokenizer runs under lume0"
+tz=../../compiler/stage1/tokenize.lume
+tzexp=../../tests/conformance/stage1/tokenize.expected
+if [ -f "$tz" ] && [ -f "$tzexp" ]; then
+    if $BIN run "$tz" 2>/dev/null | diff -u "$tzexp" - >/dev/null; then ok "compiler/stage1/tokenize.lume"; else bad "compiler/stage1/tokenize.lume"; $BIN run "$tz" 2>/dev/null | diff -u "$tzexp" - | head -20; fi
+fi
+
 echo "== negative lexer cases"
 for src in tests/lexer/bad_*.lume; do
     code=$(sed -n '1s/^# expect: //p' "$src")

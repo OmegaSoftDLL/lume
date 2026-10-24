@@ -395,7 +395,8 @@ language in the catalog is covered.
 **Good**
 - Garbage collection + a VM made memory safety mainstream (1995). Portability. Huge standard library. The best tooling ecosystem (IntelliJ, Maven/Gradle, profilers, JFR). The JIT (HotSpot) is a masterpiece: adaptive optimisation beats static compilation for many workloads.
 - Backward compatibility taken seriously for 30 years; a binary from 1998 runs today.
-- Interfaces, generics (2004), lambdas (2014), records, sealed classes, pattern matching, virtual threads (2023) — slow but steady, and the enterprise trusts it.
+- Interfaces, generics (2004), lambdas (2014), records, sealed classes, pattern matching, and **virtual threads** (Project Loom, 2023), which make millions of concurrent tasks cheap on the JVM — slow but steady, and the enterprise trusts it.
+- **The JVM hosted the first mainstream "many agents at once" platforms**: Akka brought the actor model to the JVM, and JADE (Java Agent DEvelopment Framework) was a standard multi-agent platform. The actor *theory* is Hewitt's (1973) and the first great *implementation* was Erlang, but Java/JVM is where large-scale concurrent-agent systems became an industry.
 
 **Bad**
 - Verbosity (`public static void main(String[] args)`, getters/setters, factory-factory patterns); checked exceptions (everyone agrees they failed); `null` (Hoare's "billion-dollar mistake" — Java made it a NullPointerException culture); type erasure in generics; primitives vs boxed types; slow startup and heavy memory for CLI tools; the Oracle licensing scare; XML-era configuration culture.
@@ -405,6 +406,7 @@ language in the catalog is covered.
 - No `null`, no checked exceptions, no boxing: generics are reified and monomorphised.
 - Serious tooling from day one: `lume fmt/test/doc/bench/prof` and a language server (LSP) shipped with the compiler.
 - Long-term stability as a value, with editions to evolve.
+- **Cheap massive concurrency** (the Loom lesson): Lume's task runtime multiplexes millions of lightweight tasks, so running many agents at once is normal, not exotic. Combined with the Erlang-style `std.actor` supervisors (see Erlang) and the "an agent is a program" model (see §2.5 of the vision), Lume targets multi-agent orchestration — many agents running, supervised and messaging each other concurrently — as a first-class use case, the thing JVM agent platforms (JADE/Akka) were built for, but with static types, no `null`, and compile-time data-race freedom.
 
 ### JavaScript / TypeScript ★
 
