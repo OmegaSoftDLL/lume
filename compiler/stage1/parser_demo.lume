@@ -1,0 +1,20 @@
+## parser_demo.lume — lex + parse a small Lume program and print its AST (run by lume0).
+## Pipeline across modules: lexer -> parser -> AST pretty-printer. The lumec front-end in Lume.
+use token
+use lexer
+use ast
+use parser
+use std.io
+
+fn main()
+    let program = "let x = 2 + 3 * 4\nlet y = max(x, 10) - 1\nx + y"
+    io.println("source:")
+    io.println(program)
+    io.println("")
+    io.println("parsed AST:")
+    let toks = lex(program)
+    let prog = parse_program(toks)
+    for s in prog
+        io.println("  {show_stmt(s)}")
+    io.println("")
+    io.println("statements: {prog.len()}")

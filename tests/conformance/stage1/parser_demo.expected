@@ -1,0 +1,11 @@
+source:
+let x = 2 + 3 * 4
+let y = max(x, 10) - 1
+x + y
+
+parsed AST:
+  let x = (2 + (3 * 4))
+  let y = (max(x, 10) - 1)
+  (x + y)
+
+statements: 3
