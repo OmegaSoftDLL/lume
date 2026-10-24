@@ -22,7 +22,10 @@ examples (01–07): bindings, loops, `if`/`match`, records, enums, error unions,
 comprehensions, UFCS method calls, traits with dynamic dispatch, generics, contracts
 (`requires`/`ensures`/`invariant` with `old()`), `defer`, exact `decimal`, string interpolation
 with format specs, and pipelines. 31 tests pass; ASan/UBSan clean.
-Next: widen coverage (more of `std`, `std.sh` for example 08), then start Stage 1 (`lumec` in Lume).
+Stage-0 std is broad (strings, lists, maps, math, higher-order fns) and the interpreter now loads
+local modules via `use` (multi-file Lume programs). Stage-1 groundwork lives in `compiler/stage1/`:
+a tokenizer, a full little compiler (lexer + Pratt parser + evaluator), and a multi-file module
+demo, all written in Lume and run by lume0.
 
 ```
 ./lume0 run    ../../examples/03_records_enums.lume   # run a program

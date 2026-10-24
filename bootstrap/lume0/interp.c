@@ -1086,11 +1086,66 @@ static void collect(Interp *ip, const Node *mod) {
     }
 }
 
+/* ---------- local module loading (use <path>) ---------- */
+typedef struct { char **paths; int n, cap; } Visited;
+static bool visited_add(Visited *v, const char *path) {
+    for (int i = 0; i < v->n; i++) if (strcmp(v->paths[i], path) == 0) return false;
+    if (v->n == v->cap) { v->cap = v->cap ? v->cap*2 : 8; v->paths = realloc(v->paths, (size_t)v->cap*sizeof(char*)); }
+    char *dup = malloc(strlen(path) + 1); strcpy(dup, path); v->paths[v->n++] = dup; return true;
+}
+static void dirname_of(const char *file, char *out, size_t cap) {
+    const char *slash = strrchr(file, '/');
+    if (!slash) { snprintf(out, cap, "."); return; }
+    size_t n = (size_t)(slash - file); if (n >= cap) n = cap - 1;
+    memcpy(out, file, n); out[n] = 0;
+}
+/* probe the longest existing <dir>/<seg1>/.../<segk>.lume for a use's ident segments */
+static char *resolve_use(const Node *use, const char *dir) {
+    const Node *segn[16]; int m = 0;
+    for (int i = 0; i < use->nkid && m < 16; i++)
+        if (use->kids[i]->kind == N_IDENT && !(use->kids[i]->text_len == 1 && use->kids[i]->text[0] == '*'))
+            segn[m++] = use->kids[i];
+    static char path[1024];
+    for (int k = m; k >= 1; k--) {
+        int w = snprintf(path, sizeof path, "%s", dir);
+        for (int i = 0; i < k; i++) w += snprintf(path + w, sizeof path - (size_t)w, "/%.*s", segn[i]->text_len, segn[i]->text);
+        snprintf(path + w, sizeof path - (size_t)w, ".lume");
+        FILE *f = fopen(path, "rb"); if (f) { fclose(f); return path; }
+    }
+    return NULL;
+}
+static void load_module(Interp *ip, const Node *mod, const char *dir, DiagList *diags, Visited *vis,
+                        const Node ***list, int *nlist, int *clist) {
+    for (int i = 0; i < mod->nkid; i++) {
+        const Node *it = mod->kids[i];
+        if (it->kind != N_USE) continue;
+        char *path = resolve_use(it, dir);
+        if (!path) continue;                      /* std or external: skip */
+        if (!visited_add(vis, path)) continue;
+        size_t len = 0; char *src = read_file(path, &len);
+        if (!src) continue;
+        char *srcbuf = arena_alloc(ip->a, len + 1); memcpy(srcbuf, src, len); srcbuf[len] = 0; free(src);
+        TokenList toks = {0};
+        lume_lex(srcbuf, len, &toks, diags);
+        const Node *dep = lume_parse(&toks, ip->a, diags);
+        tokens_free(&toks);
+        char depdir[1024]; dirname_of(path, depdir, sizeof depdir);
+        load_module(ip, dep, depdir, diags, vis, list, nlist, clist);   /* deps first */
+        if (*nlist == *clist) { *clist = *clist ? *clist*2 : 8; *list = realloc(*list, (size_t)*clist*sizeof(Node*)); }
+        (*list)[(*nlist)++] = dep;
+    }
+}
+
 int lume_run(const Node *module, const char *file, DiagList *diags) {
     memset(&REG, 0, sizeof REG);
     Interp ip; memset(&ip, 0, sizeof ip);
     ip.rt = arena_new(); ip.a = arena_new(); ip.d = diags; ip.file = file; ip.flow = FL_NORMAL;
     ip.globals = env_new(&ip, NULL);
+    /* load local module dependencies first, then collect them, then the entry module */
+    char dir[1024]; dirname_of(file, dir, sizeof dir);
+    Visited vis = {0}; const Node **deps = NULL; int ndeps = 0, cdeps = 0;
+    load_module(&ip, module, dir, diags, &vis, &deps, &ndeps, &cdeps);
+    for (int i = 0; i < ndeps; i++) collect(&ip, deps[i]);
     collect(&ip, module);
     Val *mainfn = env_get(ip.globals, "main", 4);
     if (mainfn && mainfn->kind == V_CLOSURE && mainfn->is_closure_fn) {
@@ -1107,6 +1162,8 @@ int lume_run(const Node *module, const char *file, DiagList *diags) {
     }
     int rc = ip.had_runtime_error && ip.exit_code == 0 ? 1 : ip.exit_code;
     free(REG.types); free(REG.vars); free(REG.meths); free(REG.defs); free(REG.impls);
+    for (int i = 0; i < vis.n; i++) free(vis.paths[i]);
+    free(vis.paths); free(deps);
     arena_free(ip.rt); arena_free(ip.a);
     return rc;
 }

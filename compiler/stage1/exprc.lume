@@ -1,0 +1,142 @@
+## exprc.lume — a complete little compiler written in Lume, run by lume0.
+##
+## Pipeline, all in Lume: lexer -> Pratt parser (AST as a recursive enum) -> evaluator, over a
+## small expression language with variables and `let`. A Stage-1 building block: it shows Lume
+## expressing lexing, a recursive AST, precedence parsing and tree-walking evaluation.
+##
+## Run:  lume0 run compiler/stage1/exprc.lume
+
+use std.io
+
+# ---------- tokens ----------
+type Tok = record
+    kind: str      # "num" | "id" | "op" | "kw" | "end"
+    text: str
+
+fn is_digit(c: char) -> bool = c >= '0' and c <= '9'
+fn is_alpha(c: char) -> bool = (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or c == '_'
+
+fn lex(src: str) -> [Tok]
+    var toks = []
+    var i = 0
+    let n = src.len()
+    while i < n
+        let c = src[i]
+        if c == ' ' or c == '\n'
+            i += 1
+        elif is_digit(c)
+            var j = i
+            while j < n and is_digit(src[j])
+                j += 1
+            toks.push(Tok(kind: "num", text: src[i..j]))
+            i = j
+        elif is_alpha(c)
+            var j = i
+            while j < n and (is_alpha(src[j]) or is_digit(src[j]))
+                j += 1
+            let w = src[i..j]
+            toks.push(Tok(kind: if w == "let" then "kw" else "id", text: w))
+            i = j
+        else
+            toks.push(Tok(kind: "op", text: "{c}"))
+            i += 1
+    toks.push(Tok(kind: "end", text: ""))
+    toks
+
+# ---------- AST ----------
+type Expr = enum
+    Num(value: int)
+    Var(name: str)
+    Bin(op: str, left: Expr, right: Expr)
+
+# ---------- parser (Pratt) ----------
+type Parser = record
+    toks: [Tok]
+    pos:  int
+
+fn peek(p: Parser) -> Tok = p.toks[p.pos]
+fn advance(p: mut Parser) -> Tok
+    let t = p.toks[p.pos]
+    p.pos += 1
+    t
+
+fn lbp(op: str) -> int
+    if op == "+" or op == "-"
+        10
+    elif op == "*" or op == "/"
+        20
+    else
+        0
+
+fn parse_primary(p: mut Parser) -> Expr
+    let t = advance(p)
+    if t.kind == "num"
+        Num(value: t.text.parse_int() ?? 0)
+    elif t.kind == "id"
+        Var(name: t.text)
+    elif t.kind == "op" and t.text == "("
+        let e = parse_expr(p, 0)
+        advance(p)            # consume ")"
+        e
+    else
+        Num(value: 0)
+
+fn parse_expr(p: mut Parser, min_bp: int) -> Expr
+    var left = parse_primary(p)
+    while true
+        let t = peek(p)
+        if t.kind != "op"
+            break
+        let bp = lbp(t.text)
+        if bp == 0 or bp < min_bp
+            break
+        advance(p)
+        let right = parse_expr(p, bp + 1)
+        left = Bin(op: t.text, left: left, right: right)
+    left
+
+# ---------- evaluator ----------
+fn eval(e: Expr, env: map[str, int]) -> int
+    match e
+        Num(value)       => value
+        Var(name)        => env.get(name) ?? 0
+        Bin(op, l, r)    => do
+            let a = eval(l, env)
+            let b = eval(r, env)
+            match op
+                "+" => a + b
+                "-" => a - b
+                "*" => a * b
+                "/" => if b == 0 then 0 else a / b
+                _   => 0
+
+# ---------- pretty printer ----------
+fn show_ast(e: Expr) -> str
+    match e
+        Num(value)    => "{value}"
+        Var(name)     => name
+        Bin(op, l, r) => "({show_ast(l)} {op} {show_ast(r)})"
+
+fn run_line(src: str, env: mut map[str, int])
+    let toks = lex(src)
+    var p = Parser(toks: toks, pos: 0)
+    let first = peek(p)
+    if first.kind == "kw" and first.text == "let"
+        advance(p)
+        let name = advance(p).text
+        advance(p)                     # consume "="
+        let e = parse_expr(p, 0)
+        let v = eval(e, env)
+        env[name] = v
+        io.println("let {name} = {show_ast(e)}  =>  {v}")
+    else
+        let e = parse_expr(p, 0)
+        io.println("{show_ast(e)}  =>  {eval(e, env)}")
+
+fn main()
+    var env = {"base": 10}
+    run_line("let x = 2 + 3 * 4", env)
+    run_line("let y = (2 + 3) * 4", env)
+    run_line("x + y", env)
+    run_line("base * 2 - x", env)
+    run_line("x * x + y", env)
