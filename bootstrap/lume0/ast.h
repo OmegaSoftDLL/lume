@@ -66,6 +66,8 @@ void  node_add(Arena *a, Node *parent, Node *child);
 void  node_set_text(Node *n, const char *text, int len);
 
 void  ast_print_json(const Node *root);
+int   lume_node_kind_count(void);
+const char *lume_node_kind_at(int i);
 
 #endif
 

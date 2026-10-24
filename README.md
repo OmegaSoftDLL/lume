@@ -10,6 +10,11 @@ The one-sentence answer:
 
 **Readable like Python and Pascal, safe like Rust, simple like Go, fast like C, data-oriented like dBase/Clipper, metaprogrammable like Nim and Lisp, dependable like Ada — with a single command-line tool that builds, formats, tests, documents and packages.**
 
+> **Lume is authored by AI, reviewed by humans.** Its primary user is a model, not a person: the
+> design optimises for machine checkability and an unambiguous edit→check→fix loop over human typing
+> convenience. `lume describe` even teaches the language to a model that has never seen it. See
+> `docs/08-ai-first.md`.
+
 ## The ten pillars
 
 | # | Pillar | Inherited from |
@@ -75,7 +80,8 @@ lume/
 │   ├── 04-roadmap.md          ← Stages 0–5 and the self-evolution governance
 │   ├── 05-vision.md           ← why: a language for the AI era, from kernel to mind
 │   ├── 06-software-protection.md ← anti-reverse-engineering as a toolchain goal (P33)
-│   └── 07-competitive.md         ← scan of comparable projects and the ideas Lume adopts
+│   ├── 07-competitive.md         ← scan of comparable projects and the ideas Lume adopts
+│   └── 08-ai-first.md            ← Lume is authored by AI, reviewed by humans (the center of gravity)
 ├── grammar/lume.ebnf          ← formal grammar
 ├── examples/                  ← .lume programs per stage (future/ for later stages)
 ├── bootstrap/lume0/           ← Stage 0: disposable C interpreter (the seed) — lexer done

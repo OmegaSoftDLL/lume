@@ -111,3 +111,6 @@ static void print_node(const Node *n, int indent) {
 }
 
 void ast_print_json(const Node *root) { print_node(root, 0); putchar('\n'); }
+
+int lume_node_kind_count(void) { return N__COUNT; }
+const char *lume_node_kind_at(int i) { return node_kind_name((NodeKind)i); }

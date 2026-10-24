@@ -5,6 +5,12 @@
 #include <string.h>
 #include <ctype.h>
 
+int lume_keyword_count(void);
+const char *lume_keyword_at(int i);
+int lume_operator_count(void);
+const char *lume_operator_at(int i);
+int lume_token_kind_count(void);
+
 const char *token_kind_name(TokenKind k) {
     static const char *names[] = {
 #define X(k) #k,
@@ -482,3 +488,9 @@ void tokens_print(const TokenList *t, bool json) {
     }
     if (json) puts("]");
 }
+
+int lume_keyword_count(void) { return (int)(sizeof KEYWORDS / sizeof KEYWORDS[0]); }
+const char *lume_keyword_at(int i) { return KEYWORDS[i].word; }
+int lume_operator_count(void) { return (int)(sizeof OPERATORS / sizeof OPERATORS[0]); }
+const char *lume_operator_at(int i) { return OPERATORS[i].text; }
+int lume_token_kind_count(void) { return TK__COUNT; }

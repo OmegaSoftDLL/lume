@@ -6,9 +6,12 @@ must name the principle it breaks.
 
 ## A. Who the language is for
 
-- **P1 — Four readers.** Every construct is judged for the human, the AI author, the machine and
-  the model inside the program (see `05-vision.md` §1). A feature that helps one and hurts another
-  is redesigned until it helps all four or is dropped.
+- **P1 — AI author, human reviewer (primary).** Lume is authored by an AI model and reviewed and
+  directed by a human (see `08-ai-first.md`). Constructs are judged for four readers — the AI author
+  (primary), the human reviewer, the machine, and the model inside the program — but when machine
+  checkability conflicts with human writing-convenience, the machine wins, because the AI writes the
+  code and the human only needs to understand and approve the result. A feature that eases human
+  typing but weakens the compiler's ability to catch the AI's mistakes is dropped.
 - **P2 — Progressive depth, no cliffs.** A beginner's script and a verified kernel module are the
   same language. Adding types, contracts, effects or ownership annotations refines a program; it
   never requires rewriting it in another language or dialect.
