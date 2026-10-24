@@ -1,7 +1,7 @@
 # lume0 — Stage 0 bootstrap (C11, no dependencies)
 CC      ?= cc
 CFLAGS  ?= -std=c11 -O2 -Wall -Wextra -Wpedantic -Werror -Wshadow -Wconversion -Wno-sign-conversion
-SRC      = main.c lexer.c diag.c
+SRC      = main.c lexer.c diag.c ast.c parser.c
 BIN      = lume0
 
 all: $(BIN)

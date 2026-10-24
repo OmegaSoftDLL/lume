@@ -1,0 +1,4 @@
+# expect: P0032
+fn main()
+    if true
+    x = 1

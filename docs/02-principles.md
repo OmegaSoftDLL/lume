@@ -116,3 +116,13 @@ must name the principle it breaks.
 - **P32 — Batteries included, capabilities declared.** A rich standard library ships with the
   compiler; packages declare effects; the store is content-addressed so two versions coexist and
   builds are reproducible.
+
+
+## H. Software protection
+
+- **P33 — The author owns the artifact.** The toolchain lets the author of a program control how
+  much its shipped binary reveals (symbol stripping, obfuscation, constant encryption, selective
+  virtualisation, tamper seals), per build profile, opt-in and composable, *without* changing the
+  program's meaning (P9/P25), weakening compile-time safety, or hiding anything from the author
+  themselves. Protection applies only to the author's own artifact; the toolchain ships no feature
+  for attacking, deobfuscating or evading anyone else's software. See `06-software-protection.md`.
