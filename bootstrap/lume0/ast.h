@@ -4,6 +4,7 @@
 #define LUME0_AST_H
 
 #include "lume0.h"
+#include <stdio.h>
 
 #define NODE_KINDS(X) \
     X(N_MODULE) X(N_USE) X(N_MOD) X(N_CONST) X(N_ATTR) X(N_DOC) \
@@ -73,6 +74,10 @@ const char *lume_node_kind_at(int i);
 
 /* Parser (spec §2–§9): tokens -> AST. Returns the module root (never NULL; errors in diags). */
 Node *lume_parse(const TokenList *toks, Arena *arena, DiagList *diags);
+
+/* Lume Binary Encoding: structure in, no text re-parse (docs/09-lbe.md) */
+void  lbe_write(const Node *root, FILE *f);
+Node *lbe_read(const unsigned char *buf, size_t n, Arena *a);
 
 /* Tree-walking interpreter (Stage 0). Runs the core subset; evaluates dynamically with runtime
  * contract checks. Returns process exit code; diagnostics for load errors go to `diags`. */

@@ -81,7 +81,8 @@ lume/
 │   ├── 05-vision.md           ← why: a language for the AI era, from kernel to mind
 │   ├── 06-software-protection.md ← anti-reverse-engineering as a toolchain goal (P33)
 │   ├── 07-competitive.md         ← scan of comparable projects and the ideas Lume adopts
-│   └── 08-ai-first.md            ← Lume is authored by AI, reviewed by humans (the center of gravity)
+│   ├── 08-ai-first.md            ← Lume is authored by AI, reviewed by humans (the center of gravity)
+│   └── 09-lbe.md                 ← LBE: the AI emits structure (binary AST), the machine emits the bits
 ├── grammar/lume.ebnf          ← formal grammar
 ├── examples/                  ← .lume programs per stage (future/ for later stages)
 ├── bootstrap/lume0/           ← Stage 0: disposable C interpreter (the seed) — lexer done

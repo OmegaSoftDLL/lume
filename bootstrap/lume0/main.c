@@ -18,6 +18,8 @@ static int usage(void) {
           "  lume0 tokens <file.lume> [--json]   lex and print tokens\n"
           "  lume0 parse  <file.lume> [--json]   parse and print the AST\n"
           "  lume0 describe [--json]              emit a machine-readable self-description of the language\n"
+          "  lume0 emit <file.lume> <out.lbe>     compile source to the Lume Binary Encoding (AST, no text)\n"
+          "  lume0 run    <file.lbe>              load and run an LBE program directly (no re-parse)\n"
           "  lume0 check  <file.lume> [--json]   lex + parse; report diagnostics only\n"
           "  lume0 run    <file.lume>            run (in progress)\n"
           "  lume0 --version\n", stderr);
@@ -44,6 +46,19 @@ int main(int argc, char **argv) {
         printf("  \"spec\": \"docs/03-specification.md\",\n  \"self_description\": \"docs/08-ai-first.md\"\n}\n");
         return 0;
     }
+    if (argc >= 4 && strcmp(argv[1], "emit") == 0) {
+        size_t len = 0; char *src = read_file(argv[2], &len);
+        if (!src) { fprintf(stderr, "lume0: cannot read %s\n", argv[2]); return 66; }
+        DiagList d = {0}; TokenList t = {0};
+        bool ok0 = lume_lex(src, len, &t, &d);
+        Arena *ar = arena_new();
+        Node *root = lume_parse(&t, ar, &d);
+        int rc0 = 0;
+        if (d.errors) { diag_print(&d, argv[2], false); rc0 = 1; }
+        else { FILE *out = fopen(argv[3], "wb"); if (!out) { fprintf(stderr, "lume0: cannot write %s\n", argv[3]); rc0 = 73; } else { lbe_write(root, out); fclose(out); } }
+        (void)ok0; arena_free(ar); tokens_free(&t); diag_free(&d); free(src);
+        return rc0;
+    }
     if (argc < 3) return usage();
     const char *cmd = argv[1], *path = argv[2];
     bool json = argc >= 4 && strcmp(argv[3], "--json") == 0;
@@ -54,7 +69,10 @@ int main(int argc, char **argv) {
 
     DiagList diags = {0};
     TokenList toks = {0};
-    bool ok = lume_lex(src, len, &toks, &diags);
+    size_t _pl = strlen(path);
+    bool is_lbe = _pl > 4 && strcmp(path + _pl - 4, ".lbe") == 0;
+    bool ok = true;
+    if (!is_lbe) ok = lume_lex(src, len, &toks, &diags);
 
     int rc = 0;
     if (strcmp(cmd, "tokens") == 0) {
@@ -77,7 +95,14 @@ int main(int argc, char **argv) {
         arena_free(arena);
     } else if (strcmp(cmd, "run") == 0) {
         Arena *arena = arena_new();
-        Node *root = lume_parse(&toks, arena, &diags);
+        size_t pl = strlen(path);
+        Node *root;
+        if (pl > 4 && strcmp(path + pl - 4, ".lbe") == 0) {
+            root = lbe_read((const unsigned char *)src, len, arena);   /* structure in, no re-parse */
+            if (!root) { fprintf(stderr, "lume0: %s is not a valid LBE file\n", path); arena_free(arena); tokens_free(&toks); diag_free(&diags); free(src); return 65; }
+        } else {
+            root = lume_parse(&toks, arena, &diags);
+        }
         if (diags.errors) { diag_print(&diags, path, json); rc = 1; }
         else { rc = lume_run(root, path, &diags); diag_print(&diags, path, json); if (diags.errors && rc == 0) rc = 1; }
         arena_free(arena);
