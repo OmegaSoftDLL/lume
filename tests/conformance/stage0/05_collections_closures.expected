@@ -1,0 +1,8 @@
+evens [8, 2] squares [25, 9, 64, 1, 81, 4]
+min 1 max 9 slice [2, 3]
+a -> 2
+b -> 0
+unique: 3
+total 250
+hi big 8
+hi big 9

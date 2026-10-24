@@ -60,6 +60,7 @@ typedef struct Arena Arena;
 Arena *arena_new(void);
 void   arena_free(Arena *a);
 
+void *arena_alloc(Arena *a, size_t n);
 Node *node_new(Arena *a, NodeKind kind, int line, int col);
 void  node_add(Arena *a, Node *parent, Node *child);
 void  node_set_text(Node *n, const char *text, int len);
@@ -70,3 +71,7 @@ void  ast_print_json(const Node *root);
 
 /* Parser (spec §2–§9): tokens -> AST. Returns the module root (never NULL; errors in diags). */
 Node *lume_parse(const TokenList *toks, Arena *arena, DiagList *diags);
+
+/* Tree-walking interpreter (Stage 0). Runs the core subset; evaluates dynamically with runtime
+ * contract checks. Returns process exit code; diagnostics for load errors go to `diags`. */
+int lume_run(const Node *module, const char *file, DiagList *diags);

@@ -17,16 +17,16 @@ make asan       # same tests under AddressSanitizer + UBSan
 ./lume0 check  ../../examples/03_records_enums.lume --json
 ```
 
-Status: **lexer + parser complete** (spec §1–§9). The lexer produces layout tokens and all literal
-forms with diagnostics `L0001–L0060`; the recursive-descent + Pratt parser builds an AST for modules,
-`use`, functions with contracts and effects, `record`/`enum`/`error` types, traits/impls, generics,
-all statements and the full expression grammar, with diagnostics `P0001–P0999` and recovery. All 8
-Stage-0/1 examples parse; the `future/` examples lex (their syntax lands in later stages).
-Next: `check.c` (name resolution + type inference), then `interp.c` (tree-walking evaluator), then
-`lume0 run`.
+Status: **lexer + parser + interpreter working** (spec §1–§9). `lume0 run` executes the Stage-0
+examples (01–07): bindings, loops, `if`/`match`, records, enums, error unions, optionals, closures,
+comprehensions, UFCS method calls, traits with dynamic dispatch, generics, contracts
+(`requires`/`ensures`/`invariant` with `old()`), `defer`, exact `decimal`, string interpolation
+with format specs, and pipelines. 31 tests pass; ASan/UBSan clean.
+Next: widen coverage (more of `std`, `std.sh` for example 08), then start Stage 1 (`lumec` in Lume).
 
 ```
-./lume0 parse ../../examples/03_records_enums.lume --json   # print the AST as JSON
+./lume0 run    ../../examples/03_records_enums.lume   # run a program
+./lume0 parse  ../../examples/03_records_enums.lume    # print the AST
 ```
 
-Size budget: <= 8,000 lines of C in total (currently ~2,000).
+Size budget: <= 8,000 lines of C in total (currently ~3,350).

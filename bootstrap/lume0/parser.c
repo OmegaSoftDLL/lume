@@ -933,6 +933,14 @@ static Node *parse_postfix(P *p, Node *left) {
             advance(p); Node *t = node_new(p->a, N_TRYOP, left->line, left->col); node_add(p->a, t, left); left = t;
         } else if (k == TK_QUESTION && peek(p, 1) == TK_DOT) {
             break;
+        } else if ((left->kind == N_FIELD_GET || left->kind == N_CALL) &&
+                   (k == TK_PIPEPIPE || (k == TK_PIPE && (peek(p, 1) == TK_IDENT || peek(p, 1) == TK_KW_OWN || peek(p, 1) == TK_KW_MUT)))) {
+            /* trailing closure: recv.method |args| body  ==  method(recv, |args| body) */
+            Node *clo = parse_closure(p, 0);
+            Node *arg = node_new(p->a, N_ARG, clo->line, clo->col);
+            node_add(p->a, arg, clo);
+            if (left->kind == N_CALL) { node_add(p->a, left, arg); }
+            else { Node *call = node_new(p->a, N_CALL, left->line, left->col); node_add(p->a, call, left); node_add(p->a, call, arg); left = call; }
         } else {
             break;
         }

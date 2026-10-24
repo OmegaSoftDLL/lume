@@ -31,6 +31,14 @@ for src in $EX/future/*.lume; do
     fi
 done
 
+echo "== run: stage-0 conformance (stdout must match)"
+for exp in ../../tests/conformance/stage0/*.expected; do
+    [ -f "$exp" ] || continue
+    base=$(basename "$exp" .expected)
+    src="$EX/$base.lume"
+    if $BIN run "$src" 2>/dev/null | diff -u "$exp" - >/dev/null; then ok "run $base"; else bad "run $base"; $BIN run "$src" 2>/dev/null | diff -u "$exp" - | head -20; fi
+done
+
 echo "== negative lexer cases"
 for src in tests/lexer/bad_*.lume; do
     code=$(sed -n '1s/^# expect: //p' "$src")

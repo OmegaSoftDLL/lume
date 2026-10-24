@@ -23,7 +23,7 @@ Arena *arena_new(void) {
     if (!a) { fputs("lume0: out of memory\n", stderr); exit(70); }
     return a;
 }
-static void *arena_alloc(Arena *a, size_t n) {
+void *arena_alloc(Arena *a, size_t n) {
     n = (n + 15) & ~(size_t)15;
     if (!a->head || a->head->used + n > ARENA_BLOCK) {
         size_t cap = n > ARENA_BLOCK ? n : ARENA_BLOCK;

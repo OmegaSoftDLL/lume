@@ -1,5 +1,6 @@
 #include "lume0.h"
 #include "ast.h"
+#include "value.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -49,9 +50,11 @@ int main(int argc, char **argv) {
         rc = diags.errors == 0 ? 0 : 1;
         arena_free(arena);
     } else if (strcmp(cmd, "run") == 0) {
-        diag_print(&diags, path, json);
-        if (ok) { fputs("lume0: `run` is not implemented yet (Stage 0: lexer+parser done; checker+interpreter next)\n", stderr); rc = 2; }
-        else rc = 1;
+        Arena *arena = arena_new();
+        Node *root = lume_parse(&toks, arena, &diags);
+        if (diags.errors) { diag_print(&diags, path, json); rc = 1; }
+        else { rc = lume_run(root, path, &diags); diag_print(&diags, path, json); if (diags.errors && rc == 0) rc = 1; }
+        arena_free(arena);
     } else {
         rc = usage();
     }
