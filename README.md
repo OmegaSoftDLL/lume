@@ -24,6 +24,7 @@ The one-sentence answer:
 | 8 | Contracts in the code: `requires`, `ensures`, `invariant`, range types | Ada, Eiffel, Pascal |
 | 9 | Full control when needed: `unsafe`, `asm`, explicit memory layout | C, Assembly, Zig |
 | 10 | One tool, one static binary, fast compilation | Go, Cargo (Rust) |
+| 11 | Ship-time protection of your own artifact (opt-in) | ProGuard/R8, LLVM-obfuscator, VMProtect |
 
 ## A taste
 
@@ -72,7 +73,8 @@ lume/
 │   ├── 02-principles.md       ← P1–P32: the rules the design obeys
 │   ├── 03-specification.md    ← the language specification v0.1 (normative)
 │   ├── 04-roadmap.md          ← Stages 0–5 and the self-evolution governance
-│   └── 05-vision.md           ← why: a language for the AI era, from kernel to mind
+│   ├── 05-vision.md           ← why: a language for the AI era, from kernel to mind
+│   └── 06-software-protection.md ← anti-reverse-engineering as a toolchain goal (P33)
 ├── grammar/lume.ebnf          ← formal grammar
 ├── examples/                  ← .lume programs per stage (future/ for later stages)
 ├── bootstrap/lume0/           ← Stage 0: disposable C interpreter (the seed) — lexer done
@@ -95,8 +97,8 @@ lume/
 ## Status
 
 - [x] Phase 0 — Catalog, survey, principles, specification v0.1, grammar, roadmap, vision, examples
-- [x] Stage 0 — Lexer (`bootstrap/lume0`): layout tokens, all literals, diagnostics, tests, ASan clean
-- [ ] Stage 0 — Parser → AST, checker, interpreter; `lume0 run` on all Stage-0 examples
+- [x] Stage 0 — Lexer + parser (`bootstrap/lume0`): tokens, AST for spec §1–§9, diagnostics, tests, ASan clean
+- [ ] Stage 0 — Checker + interpreter; `lume0 run` on all Stage-0 examples
 - [ ] Stage 1 — `lumec` in Lume; triple self-build; `lume0` frozen
 - [ ] Stage 2 — `comptime`, macros, `table`/`query`, package manager
 - [ ] Stage 3 — Ownership checker, structured concurrency, effects, `@gc` regions
@@ -110,4 +112,16 @@ go through an RFC in `docs/rfcs/`. CI must be green (`make -C bootstrap/lume0 te
 
 ## License
 
-To be decided (suggestion: MIT or Apache-2.0, like Rust/Go).
+Dual-licensed under **MIT** (`LICENSE-MIT`) **or Apache-2.0** (`LICENSE-APACHE`), at your option —
+the same scheme as the Rust project (Go uses BSD-3-Clause; both are permissive). See `COPYRIGHT`.
+The license covers the Lume toolchain, standard library and docs; it does not restrict what you do
+with programs you write in Lume or the binaries it produces for you.
+
+## Software protection (anti-reverse-engineering)
+
+Protecting the programs you ship is a first-class toolchain goal (`docs/06-software-protection.md`,
+principle P33): per-profile symbol stripping, constant/string encryption, control-flow obfuscation,
+selective bytecode virtualisation and tamper seals — opt-in, composable, and applied only to your
+own artifact without changing its behaviour or weakening compile-time safety. Models and LLM
+prompts embedded in a program are protected the same way. Lume ships no tooling for attacking,
+deobfuscating or evading anyone else's software.

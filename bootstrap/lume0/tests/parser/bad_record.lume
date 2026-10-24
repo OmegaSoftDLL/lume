@@ -1,0 +1,3 @@
+# expect: P0064
+type P = record
+    x f64

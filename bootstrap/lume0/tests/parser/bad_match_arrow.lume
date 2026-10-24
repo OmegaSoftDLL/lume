@@ -1,0 +1,4 @@
+# expect: P0142
+fn main()
+    match x
+        0 "zero"

@@ -1,0 +1,3 @@
+# expect: P0040
+fn main -> int
+    1
