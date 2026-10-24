@@ -97,8 +97,8 @@ lume/
 ## Status
 
 - [x] Phase 0 — Catalog, survey, principles, specification v0.1, grammar, roadmap, vision, examples
-- [x] Stage 0 — Lexer + parser (`bootstrap/lume0`): tokens, AST for spec §1–§9, diagnostics, tests, ASan clean
-- [ ] Stage 0 — Checker + interpreter; `lume0 run` on all Stage-0 examples
+- [x] Stage 0 — Lexer + parser + **tree-walking interpreter** (`bootstrap/lume0`): `lume0 run` executes examples 01–07; 31 tests, ASan clean
+- [ ] Stage 1 — `lumec` in Lume; triple self-build; `lume0` frozen
 - [ ] Stage 1 — `lumec` in Lume; triple self-build; `lume0` frozen
 - [ ] Stage 2 — `comptime`, macros, `table`/`query`, package manager
 - [ ] Stage 3 — Ownership checker, structured concurrency, effects, `@gc` regions

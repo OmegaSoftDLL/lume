@@ -1,0 +1,4 @@
+sum 1..10 = 55
+area r=2: 12.566
+grade: high
+collatz(27) takes 111 steps
