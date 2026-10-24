@@ -39,6 +39,11 @@ for exp in ../../tests/conformance/stage0/*.expected; do
     if $BIN run "$src" 2>/dev/null | diff -u "$exp" - >/dev/null; then ok "run $base"; else bad "run $base"; $BIN run "$src" 2>/dev/null | diff -u "$exp" - | head -20; fi
 done
 
+echo "== AI-first: `lume0 describe` emits valid JSON"
+if command -v python3 >/dev/null 2>&1; then
+    if $BIN describe | python3 -c 'import json,sys; json.load(sys.stdin)' 2>/dev/null; then ok "describe --json"; else bad "describe --json"; fi
+fi
+
 echo "== Lume-in-Lume: Stage-1 programs run under lume0"
 for exp in ../../tests/conformance/stage1/*.expected; do
     [ -f "$exp" ] || continue
