@@ -63,7 +63,11 @@ already here: **reparse-free, structurally valid by construction.**
 ## Roadmap placement
 
 - Stage 0 (done): `emit`/`run .lbe`, the round-trip proof.
-- Stage 1: the native backend makes "lower structure to machine bits" literal (LBE → C/native).
+- Stage 1: the native backend makes "lower structure to machine bits" literal. **Done in miniature:**
+  `compiler/stage1/codegen.lume` is a code generator *written in Lume* that lowers the AST to C; the
+  Lume-written lexer → parser → codegen pipeline emits C that the system compiler turns into a native
+  binary with correct output (conformance: `codegen -> C -> native binary`). Structure in, bits out,
+  with the compiler itself written in Lume.
 - Stage 2: content-addressed definitions (per-AST-hash) + constrained-decoding grammar so an AI
   emits only valid node sequences.
 - Stage 2+: projectional editing — the AI edits LBE, the human sees the text projection.

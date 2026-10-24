@@ -1,0 +1,13 @@
+## codegen_demo.lume — lex + parse + generate C, written in Lume, run by lume0.
+## Prints ONLY the generated C to stdout; the toolchain then compiles it to a native binary.
+use token
+use lexer
+use ast
+use parser
+use codegen
+use std.io
+
+fn main()
+    let program = "let x = 2 + 3 * 4\nlet y = max(x, 10) + sum(1, 2, 3)\nlet z = (x + y) * 2\nz - x"
+    let prog = parse_program(lex(program))
+    io.print(cgen(prog))

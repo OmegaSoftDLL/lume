@@ -284,6 +284,8 @@ static void lex_string_body(Lexer *lx, int quotes, bool interpolate, bool escape
             continue;
         }
         if (interpolate) {
+            if (c == '{' && peek(lx, 1) == '{') { advance(lx); advance(lx); continue; }   /* {{ literal */
+            if (c == '}' && peek(lx, 1) == '}') { advance(lx); advance(lx); continue; }   /* }} literal */
             if (c == '{') depth++;
             else if (c == '}') { if (depth > 0) depth--; }
             else if (depth > 0 && c == '"') {
