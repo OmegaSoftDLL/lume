@@ -1,0 +1,35 @@
+source:
+fn add(a, b)
+    let r = a + b
+    if r >= 10
+        return r
+    r
+
+tokens (line:col kind text):
+  1:1 KW fn
+  1:4 IDENT add
+  1:7 OP (
+  1:8 IDENT a
+  1:9 OP ,
+  1:11 IDENT b
+  1:12 OP )
+  1:13 NEWLINE
+  2:5 KW let
+  2:9 IDENT r
+  2:11 OP =
+  2:13 IDENT a
+  2:15 OP +
+  2:17 IDENT b
+  2:18 NEWLINE
+  3:5 KW if
+  3:8 IDENT r
+  3:10 OP >=
+  3:13 INT 10
+  3:15 NEWLINE
+  4:9 KW return
+  4:16 IDENT r
+  4:17 NEWLINE
+  5:5 IDENT r
+  5:6 EOF 
+
+total: 25 tokens

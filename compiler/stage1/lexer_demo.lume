@@ -1,0 +1,19 @@
+## lexer_demo.lume — runs the multi-module Lume lexer (lexer + token) under lume0.
+use token
+use lexer
+use std.io
+
+fn main()
+    let program = "fn add(a, b)\n    let r = a + b\n    if r >= 10\n        return r\n    r"
+    io.println("source:")
+    io.println(program)
+    io.println("")
+    io.println("tokens (line:col kind text):")
+    let toks = lex(program)
+    for t in toks
+        if t.kind == Newline
+            io.println("  {t.line}:{t.col} NEWLINE")
+        else
+            io.println("  {t.line}:{t.col} {kind_name(t.kind)} {t.text}")
+    io.println("")
+    io.println("total: {toks.len()} tokens")

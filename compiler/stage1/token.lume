@@ -1,0 +1,35 @@
+## token.lume — token types for the self-hosted Lume front-end (library module).
+type Kind = enum
+    Ident
+    Kw
+    Int
+    Str
+    Op
+    Newline
+    End
+
+type Token = record
+    kind: Kind
+    text: str
+    line: int
+    col:  int
+
+fn kind_name(k: Kind) -> str
+    match k
+        Ident   => "IDENT"
+        Kw      => "KW"
+        Int     => "INT"
+        Str     => "STR"
+        Op      => "OP"
+        Newline => "NEWLINE"
+        End     => "EOF"
+
+fn is_keyword(w: str) -> bool
+    let kws = ["fn", "let", "var", "if", "elif", "else", "match", "for", "while", "loop",
+               "return", "break", "continue", "type", "record", "enum", "error", "trait",
+               "impl", "use", "mod", "pub", "true", "false", "and", "or", "not", "in", "is",
+               "as", "mut", "own", "defer", "fail", "requires", "ensures", "invariant"]
+    for k in kws
+        if k == w
+            return true
+    false

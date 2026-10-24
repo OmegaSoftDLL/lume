@@ -1,0 +1,69 @@
+## lexer.lume — a lexer for a core slice of Lume, written in Lume (library module).
+## Imports the token types and produces a list of Token with line/col positions.
+use token
+
+fn is_digit(c: char) -> bool = c >= '0' and c <= '9'
+fn is_alpha(c: char) -> bool = (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or c == '_'
+fn is_alnum(c: char) -> bool = is_alpha(c) or is_digit(c)
+
+fn is_two_op(s: str) -> bool
+    let ops = ["->", "=>", "==", "!=", "<=", ">=", "..", "+=", "-=", "*=", "/=", "|>", "&&", "||"]
+    for o in ops
+        if o == s
+            return true
+    false
+
+fn lex(src: str) -> [Token]
+    var toks = []
+    var i = 0
+    var line = 1
+    var col = 1
+    let n = src.len()
+    while i < n
+        let c = src[i]
+        if c == '\n'
+            toks.push(Token(kind: Newline, text: "\\n", line: line, col: col))
+            i += 1
+            line += 1
+            col = 1
+        elif c == ' '
+            i += 1
+            col += 1
+        elif c == '#'
+            while i < n and src[i] != '\n'
+                i += 1
+        elif is_digit(c)
+            var j = i
+            while j < n and is_digit(src[j])
+                j += 1
+            toks.push(Token(kind: Int, text: src[i..j], line: line, col: col))
+            col += j - i
+            i = j
+        elif is_alpha(c)
+            var j = i
+            while j < n and is_alnum(src[j])
+                j += 1
+            let w = src[i..j]
+            let k = if is_keyword(w) then Kw else Ident
+            toks.push(Token(kind: k, text: w, line: line, col: col))
+            col += j - i
+            i = j
+        elif c == '"'
+            var j = i + 1
+            while j < n and src[j] != '"'
+                j += 1
+            toks.push(Token(kind: Str, text: src[i..=j], line: line, col: col))
+            col += j - i + 1
+            i = j + 1
+        else
+            let two = if i + 1 < n then src[i..i + 2] else "?"
+            if i + 1 < n and is_two_op(two)
+                toks.push(Token(kind: Op, text: two, line: line, col: col))
+                i += 2
+                col += 2
+            else
+                toks.push(Token(kind: Op, text: "{c}", line: line, col: col))
+                i += 1
+                col += 1
+    toks.push(Token(kind: End, text: "", line: line, col: col))
+    toks
