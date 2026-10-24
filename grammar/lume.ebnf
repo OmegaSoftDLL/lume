@@ -1,0 +1,228 @@
+(* ============================================================================
+   Lume — formal grammar, edition 2026, spec v0.1
+   Notation: ISO/IEC 14977 EBNF with the extensions:  X*  zero or more,  X+  one or more,
+   X?  optional,  "x" terminals,  (* comments *).
+   Layout tokens NEWLINE, INDENT, DEDENT are produced by the lexer (spec §1.5).
+   Sections tagged [Stage N] are parsed by Stage 0/1 and rejected with a diagnostic until
+   that stage implements them.
+   ============================================================================ *)
+
+(* ---------- Lexical ---------- *)
+
+letter      = ? Unicode XID_Start ? | "_" ;
+digit       = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" ;
+ident       = letter , { letter | digit } | "`" , { ? any char except "`" ? } , "`" ;
+int_lit     = dec_lit | "0x" , hex_digit , { hex_digit | "_" } | "0b" , bin_digit , { bin_digit | "_" }
+            | "0o" , oct_digit , { oct_digit | "_" } ;
+dec_lit     = digit , { digit | "_" } ;
+float_lit   = dec_lit , "." , dec_lit , [ exponent ] | dec_lit , exponent ;
+exponent    = ( "e" | "E" ) , [ "+" | "-" ] , dec_lit ;
+char_lit    = "'" , ( ? char ? | escape ) , "'" ;
+escape      = "\\" , ( "n" | "t" | "r" | "0" | "\\" | "'" | '"' | "{" | "}" | "u{" , hex_digit+ , "}" ) ;
+str_lit     = '"' , { str_char | escape | interp } , '"'
+            | 'r"' , { ? any except '"' ? } , '"'
+            | '"""' , { ? any ? } , '"""'
+            | 'b"' , { str_char | escape } , '"'
+            | 're"' , { ? any except '"' ? } , '"' ;
+str_char    = ? any char except '"' , "\\" , "{" ? ;
+interp      = "{" , expr , [ ":" , fmt_spec ] , "}" ;
+fmt_spec    = { ? any char except "}" ? } ;
+date_lit    = digit digit digit digit , "-" , digit digit , "-" , digit digit , "d" ;      (* [Stage 2] *)
+duration_lit= dec_lit , [ "." , dec_lit ] , ( "ns" | "us" | "ms" | "s" | "m" | "h" | "d" ) ; (* [Stage 2] *)
+comment     = "#" , { ? any ? } , NEWLINE | "#[" , { ? any ? | comment } , "]#" ;
+doc_comment = "##" , { ? any ? } , NEWLINE ;
+
+(* ---------- Module ---------- *)
+
+module      = [ "mod" , path , NEWLINE ] , { item | stmt } ;      (* top-level stmts ⇒ script *)
+path        = ident , { "." , ident } ;
+
+item        = { doc_comment } , { attribute } , [ visibility ] ,
+              ( use_decl | fn_decl | type_decl | trait_decl | impl_decl | const_decl
+              | mod_decl | macro_decl | effect_decl | extern_decl ) ;
+visibility  = "pub" , [ "(" , "crate" , ")" ] ;
+attribute   = "@" , ident , [ "(" , [ attr_arg , { "," , attr_arg } ] , ")" ] , [ NEWLINE ] ;
+attr_arg    = expr | ident , ":" , expr ;
+
+use_decl    = "use" , use_path , NEWLINE ;
+use_path    = path , [ "." , "*" | "(" , ident , { "," , ident } , ")" | "as" , ident ] ;
+mod_decl    = "mod" , ident , block ;
+const_decl  = "const" , ident , [ ":" , type ] , "=" , expr , NEWLINE ;
+extern_decl = "extern" , ( str_lit | "llm" ) , fn_decl ;                       (* [Stage 4/5] *)
+
+(* ---------- Functions ---------- *)
+
+fn_decl     = "fn" , ident , [ generics ] , "(" , [ params ] , ")" ,
+              [ "->" , type , [ "!" , [ type ] ] ] , [ "/" , effect_row ] , [ "from" , ident ] ,
+              ( "=" , expr , NEWLINE | fn_body ) ;
+fn_body     = NEWLINE , INDENT , { doc_string } , { contract } , { stmt } , DEDENT ;
+doc_string  = '"""' , { ? any ? } , '"""' , NEWLINE ;
+contract    = ( "requires" | "ensures" ) , expr , [ "or" , "fail" , expr ] , NEWLINE ;
+params      = param , { "," , param } , [ "," ] ;
+param       = [ "own" | "mut" ] , ( "self" | ident , ":" , [ "..." ] , type , [ "=" , expr ] ) ;
+generics    = "[" , generic , { "," , generic } , "]" ;
+generic     = ident , [ ":" , bounds ] | ident , ":" , type ;               (* type or comptime value *)
+bounds      = type , { "+" , type } ;
+effect_row  = "{" , [ ident , { "," , ident } ] , "}" ;
+
+(* ---------- Types ---------- *)
+
+type_decl   = "type" , ident , [ generics ] , "=" , type_def ;
+type_def    = record_def | enum_def | error_def | "distinct" , type , NEWLINE
+            | model_def | type , NEWLINE ;
+record_def  = "record" , ( NEWLINE , INDENT , { field | invariant | prop_decl } , DEDENT
+                         | "{" , [ field_inline , { "," , field_inline } ] , "}" , NEWLINE ) ;
+field       = { attribute } , [ "pub" ] , ident , ":" , type , [ "=" , expr ] , NEWLINE ;
+field_inline= ident , ":" , type ;
+invariant   = "invariant" , expr , NEWLINE ;
+prop_decl   = [ "pub" ] , "prop" , ident , ":" , type , NEWLINE , INDENT ,
+              [ "get" , "=" , expr , NEWLINE ] , [ "set" , "(" , ident , ")" , { contract } , "=" , expr , NEWLINE ] , DEDENT ;
+enum_def    = "enum" , ( variant , { "|" , variant } , NEWLINE
+                       | NEWLINE , INDENT , { variant , NEWLINE } , DEDENT ) ;
+variant     = ident , [ "(" , [ field_inline , { "," , field_inline } ] , ")" ] ;
+error_def   = "error" , ( variant , { "|" , variant } , NEWLINE
+                        | NEWLINE , INDENT , { variant , NEWLINE } , DEDENT ) ;
+model_def   = "model" , NEWLINE , INDENT , { field | fn_decl } , DEDENT ;        (* [Stage 4] *)
+
+type        = type_atom , { "?" } , [ "!" , [ type_atom ] ] ;
+type_atom   = path , [ "[" , type_arg , { "," , type_arg } , "]" ]
+            | "(" , [ type , { "," , type } ] , ")"
+            | "[" , type , [ ";" , expr ] , "]"
+            | type_atom , "[" , "]"                                   (* slice view T[] *)
+            | "fn" , "(" , [ type , { "," , type } ] , ")" , [ "->" , type ] , [ "/" , effect_row ]
+            | "dyn" , type_atom | "impl" , type_atom
+            | "own" , type_atom | "mut" , type_atom | "&" , type_atom
+            | type_atom , "in" , expr , ".." , [ "=" ] , expr
+            | type_atom , "where" , expr
+            | "Self" | "never" | "_" ;
+type_arg    = type | expr ;
+
+(* ---------- Traits & impls ---------- *)
+
+trait_decl  = "trait" , ident , [ generics ] , [ ":" , bounds ] , NEWLINE , INDENT ,
+              { fn_sig_or_default | "type" , ident , [ "=" , type ] , NEWLINE
+              | "const" , ident , ":" , type , [ "=" , expr ] , NEWLINE } , DEDENT ;
+fn_sig_or_default = fn_decl | "fn" , ident , [ generics ] , "(" , [ params ] , ")" ,
+                    [ "->" , type , [ "!" , [ type ] ] ] , [ "/" , effect_row ] , NEWLINE ;
+impl_decl   = [ "@extension" ] , "impl" , [ generics ] , type , [ "for" , type ] , [ where_clause ] ,
+              NEWLINE , INDENT , { fn_decl | "type" , ident , "=" , type , NEWLINE
+                                 | "const" , ident , "=" , expr , NEWLINE } , DEDENT ;
+where_clause= "where" , ident , ":" , bounds , { "," , ident , ":" , bounds } ;
+
+(* ---------- Macros & effects ---------- *)
+
+macro_decl  = "macro" , ident , "(" , [ ident , { "," , ident } ] , ")" , block ;    (* [Stage 2] *)
+effect_decl = "effect" , ident , NEWLINE , INDENT , { fn_sig_or_default } , DEDENT ; (* [Stage 3] *)
+
+(* ---------- Blocks & statements ---------- *)
+
+block       = NEWLINE , INDENT , { stmt } , DEDENT
+            | "{" , { stmt_inline , [ ";" ] } , "}" ;                 (* explicit-brace form *)
+stmt        = let_stmt | var_stmt | assign_stmt | expr_stmt | if_stmt | while_stmt | for_stmt
+            | loop_stmt | match_stmt | "break" , [ label ] , [ expr ] , NEWLINE
+            | "continue" , [ label ] , NEWLINE | "return" , [ expr ] , NEWLINE
+            | "defer" , expr , NEWLINE | "errdefer" , expr , NEWLINE
+            | "fail" , expr , NEWLINE | "panic" , [ expr ] , NEWLINE
+            | "assert" , expr , [ "," , expr ] , NEWLINE
+            | "using" , ident , "=" , expr , block
+            | "unsafe" , block | "comptime" , block
+            | "scope" , [ ident ] , block | "with" , ident , "=" , expr , block
+            | "select" , NEWLINE , INDENT , { select_arm } , DEDENT
+            | "index" , expr , "by" , ( ident | "(" , ident , { "," , ident } , ")" ) , NEWLINE   (* [Stage 2] *)
+            | "persist" , type , ident , "at" , expr , NEWLINE                                 (* [Stage 2] *)
+            | item ;
+stmt_inline = ? stmt without the trailing NEWLINE ? ;
+label       = "'" , ident ;
+let_stmt    = "let" , pattern , [ ":" , type ] , "=" , expr , NEWLINE ;
+var_stmt    = "var" , pattern , [ ":" , type ] , [ "=" , expr ] , NEWLINE ;
+assign_stmt = expr , assign_op , expr , NEWLINE ;
+assign_op   = "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "**=" | "&=" | "|=" | "^=" | "<<=" | ">>=" ;
+expr_stmt   = expr , NEWLINE ;
+if_stmt     = "if" , expr , block , { "elif" , expr , block } , [ "else" , block ] ;
+while_stmt  = [ label , ":" ] , "while" , expr , block , [ "else" , block ] ;
+for_stmt    = [ label , ":" ] , "for" , [ "own" ] , pattern , "in" , [ "par" ] , expr , block , [ "else" , block ] ;
+loop_stmt   = [ label , ":" ] , "loop" , block ;
+match_stmt  = "match" , expr , NEWLINE , INDENT , { match_arm } , DEDENT ;
+match_arm   = pattern , { "|" , pattern } , [ "if" , expr ] , "=>" , ( expr , NEWLINE | block ) ;
+select_arm  = pattern , "=" , expr , "=>" , ( expr , NEWLINE | block ) ;
+
+(* ---------- Patterns ---------- *)
+
+pattern     = pat_atom , [ "@" , pattern ] ;
+pat_atom    = "_" | literal | literal , ".." , [ "=" ] , literal
+            | [ "own" | "mut" ] , ident
+            | path , [ "(" , [ pat_field , { "," , pat_field } , [ "," , ".." ] ] , ")" ]
+            | "(" , [ pattern , { "," , pattern } ] , ")"
+            | "[" , [ pat_elem , { "," , pat_elem } ] , "]"
+            | "some" , "(" , pattern , ")" | "none" | "ok" , "(" , pattern , ")" | "err" , "(" , pattern , ")"
+            | "is" , type ;
+pat_field   = pattern | ident , ":" , pattern ;
+pat_elem    = pattern | ".." , [ ident ] ;
+
+(* ---------- Expressions (precedence encoded) ---------- *)
+
+expr        = pipe_expr ;
+pipe_expr   = or_expr , { "|>" , or_expr } ;
+or_expr     = and_expr , { ( "or" | "||" ) , and_expr } ;
+and_expr    = coalesce_expr , { ( "and" | "&&" ) , coalesce_expr } ;
+coalesce_expr = cmp_expr , [ "??" , coalesce_expr ] ;
+cmp_expr    = range_expr , [ ( "==" | "!=" | "<" | "<=" | ">" | ">=" | "in" | "not" , "in" | "is" ) , range_expr
+                           | "as" , [ "!" | "?" ] , type ] ;
+range_expr  = bitor_expr , [ ( ".." | "..=" ) , [ bitor_expr ] ] | ( ".." | "..=" ) , bitor_expr ;
+bitor_expr  = bitxor_expr , { "|" , bitxor_expr } ;
+bitxor_expr = bitand_expr , { "^" , bitand_expr } ;
+bitand_expr = shift_expr , { "&" , shift_expr } ;
+shift_expr  = add_expr , { ( "<<" | ">>" ) , add_expr } ;
+add_expr    = mul_expr , { ( "+" | "-" | "+%" | "-%" | "+|" | "-|" | "+?" | "-?" | ".+" | ".-" ) , mul_expr } ;
+mul_expr    = pow_expr , { ( "*" | "/" | "%" | "@" | ".*" | "./" ) , pow_expr } ;
+pow_expr    = unary_expr , [ "**" , pow_expr ] ;
+unary_expr  = ( "-" | "not" | "!" | "~" | "own" | "mut" | "&" ) , unary_expr | postfix_expr ;
+postfix_expr= primary , { "(" , [ args ] , ")" | "[" , index_arg , "]" | "." , ident | "." , dec_lit
+                        | "?." , ident | "?" | "." , "await" } ;
+index_arg   = expr | [ expr ] , ( ".." | "..=" ) , [ expr ] ;
+args        = arg , { "," , arg } , [ "," ] ;
+arg         = [ ident , ":" ] , [ "own" ] , expr ;
+primary     = literal | path | "self" | "none" | "todo" , [ str_lit ] | "?"
+            | "(" , expr , ")" | "(" , [ expr , { "," , expr } , [ "," ] ] , ")"      (* unit / tuple *)
+            | "[" , [ list_body ] , "]" | "{" , [ map_or_set_body ] , "}"
+            | closure | if_expr | match_expr | block_expr | loop_expr
+            | "." , ident                                               (* field accessor: .salary *)
+            | query_expr | comptime_expr | quote_expr | sample_expr | grad_expr ;
+literal     = int_lit | float_lit | str_lit | char_lit | "true" | "false" | date_lit | duration_lit ;
+list_body   = expr , ";" , expr | expr , { "," , expr } , [ "," ] | comprehension ;
+map_or_set_body = expr , ":" , expr , { "," , expr , ":" , expr } , [ "," ]
+            | expr , { "," , expr } , [ "," ] | map_comprehension | comprehension ;
+comprehension   = expr , "for" , pattern , "in" , expr , { "for" , pattern , "in" , expr } , [ "if" , expr ] ;
+map_comprehension = expr , ":" , expr , "for" , pattern , "in" , expr , [ "if" , expr ] ;
+closure     = [ "own" ] , "|" , [ closure_params ] , "|" , [ "->" , type ] , ( expr | block ) ;
+closure_params = closure_param , { "," , closure_param } ;
+closure_param  = [ "own" | "mut" ] , pattern , [ ":" , type ] ;
+if_expr     = "if" , expr , ( "then" , expr , "else" , expr | block , { "elif" , expr , block } , "else" , block ) ;
+match_expr  = match_stmt ;
+block_expr  = "do" , block ;
+loop_expr   = loop_stmt ;
+
+(* ---------- Data expressions [Stage 2] ---------- *)
+
+query_expr  = "query" , expr , NEWLINE , INDENT , { query_clause , NEWLINE } , DEDENT ;
+query_clause= "join" , expr , "on" , expr | "where" , expr | "group" , "by" , expr , { "," , expr }
+            | "having" , expr | "order" , "by" , order_key , { "," , order_key }
+            | "select" , expr | "limit" , expr | "offset" , expr | "distinct" ;
+order_key   = expr , [ "asc" | "desc" ] ;
+
+(* ---------- Comptime & macros [Stage 2] ---------- *)
+
+comptime_expr = "comptime" , ( expr | block ) ;
+quote_expr  = "quote" , block ;                                      (* "$" , ident splices inside *)
+
+(* ---------- AI expressions [Stage 4] ---------- *)
+
+sample_expr = "sample" , expr | "observe" , expr , "~" , expr
+            | "infer" , expr , [ "with" , expr ] ;
+grad_expr   = ( "grad" | "vjp" | "jvp" | "vmap" | "jit" ) , "(" , expr , [ "," , args ] , ")" ;
+
+(* ---------- Kernel functions [Stage 4/5] ---------- *)
+(* kernel_fn   = "kernel" , fn_decl ;  — parsed as fn_decl with the contextual keyword "kernel". *)
+
+(* ---------- Script mode ---------- *)
+(* A module with no `fn main` and with top-level stmts is executed top to bottom. *)

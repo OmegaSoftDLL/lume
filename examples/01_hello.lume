@@ -1,0 +1,5 @@
+## Hello — a Lume script: no `main`, top-level statements run in order.
+use std.io
+
+let name = "world"
+io.println("Hello, {name}!")

@@ -1,0 +1,76 @@
+   1:1   KW_LET       let
+   1:5   IDENT        a
+   1:7   EQ           =
+   1:9   INT          0xFF
+   1:14  PLUS         +
+   1:16  INT          0b1010
+   1:23  PLUS         +
+   1:25  INT          0o755
+   1:31  PLUS         +
+   1:33  INT          1_000
+   1:38  NEWLINE     
+   2:1   KW_LET       let
+   2:5   IDENT        b
+   2:7   EQ           =
+   2:9   FLOAT        3.14
+   2:14  PLUS         +
+   2:16  FLOAT        1e-9
+   2:21  PLUS         +
+   2:23  FLOAT        2.5e3
+   2:28  NEWLINE     
+   3:1   KW_LET       let
+   3:5   IDENT        c
+   3:7   EQ           =
+   3:9   CHAR         'a'
+   3:13  PLUS         +
+   3:15  CHAR         '\n'
+   3:20  PLUS         +
+   3:22  CHAR         '\u{1F600}'
+   3:33  NEWLINE     
+   4:1   KW_LET       let
+   4:5   IDENT        d
+   4:7   EQ           =
+   4:9   BYTE_STRING  b"bytes"
+   4:18  PLUS         +
+   4:20  REGEX        re"\d+"
+   4:28  PLUS         +
+   4:30  STRING       """
+multi
+"""
+   6:4   NEWLINE     
+   7:1   LABEL        'outer
+   7:7   COLON        :
+   7:9   KW_FOR       for
+   7:13  IDENT        i
+   7:15  KW_IN        in
+   7:18  INT          0
+   7:19  DOTDOT_EQ    ..=
+   7:22  INT          9
+   7:23  NEWLINE     
+   8:5   INDENT      
+   8:5   KW_BREAK     break
+   8:11  LABEL        'outer
+   8:17  NEWLINE     
+   9:1   DEDENT      
+   9:1   KW_LET       let
+   9:5   IDENT        e
+   9:7   EQ           =
+   9:9   IDENT        x
+   9:10  QUESTION     ?
+   9:11  DOT          .
+   9:12  IDENT        y
+   9:14  QQ           ??
+   9:17  IDENT        z
+   9:18  NEWLINE     
+  10:1   KW_LET       let
+  10:5   IDENT        f
+  10:7   EQ           =
+  10:9   IDENT        a
+  10:11  PLUS_WRAP    +%
+  10:14  IDENT        b
+  10:16  MINUS_SAT    -|
+  10:19  IDENT        c
+  10:21  POW          **
+  10:24  INT          2
+  10:25  NEWLINE     
+  11:1   EOF         

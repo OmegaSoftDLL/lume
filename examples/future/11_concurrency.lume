@@ -1,0 +1,27 @@
+## [Stage 3] Structured concurrency, channels, select, actors.
+use std.io
+use std.net.http
+use std.task (scope, chan, select)
+use std.time
+
+fn fetch_all(urls: [str]) -> [str] ! http.Error / {net, async}
+    scope s
+        let handles = [s.spawn http.get(u) for u in urls]
+        [h.await?.body for h in handles]
+
+fn main() ! Error
+    let pages = fetch_all(["https://example.com", "https://lume-lang.org"])?
+    io.println("{pages.len()} pages")
+
+    let (tx, rx) = chan[int](capacity: 16)
+    scope s
+        s.spawn
+            for i in 0..10
+                tx.send(i)
+            tx.close()
+        s.spawn
+            for v in rx
+                io.println("got {v}")
+
+    par for i in 0..1_000_000
+        work(i)

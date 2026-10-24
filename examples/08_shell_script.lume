@@ -1,0 +1,10 @@
+## Lume as a Bash replacement: typed processes, pipelines, no quoting hell. [Stage 1: std.sh]
+use std.io
+use std.sh (run, lines)
+
+fn main() ! ShError
+    let big = run("du", "-sh", "~/Projetos")? |> lines()
+    for line in big
+        io.println(line)
+    let branch = run("git", "rev-parse", "--abbrev-ref", "HEAD")?.stdout.trim()
+    io.println("on branch {branch}")

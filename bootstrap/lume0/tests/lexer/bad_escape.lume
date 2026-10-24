@@ -1,0 +1,2 @@
+# expect: L0021
+let s = "bad \q escape"

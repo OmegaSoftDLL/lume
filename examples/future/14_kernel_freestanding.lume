@@ -1,0 +1,33 @@
+## [Stage 5] Bare metal: no runtime, typed MMIO, interrupt effect, capability types.
+@target(freestanding) @no_std
+mod boot
+
+use std.os.cap (cap, Page, Port)
+use std.mem
+
+@bits type UartStatus = record { tx_ready: 1, rx_ready: 1, error: 1, _: 5 }
+@repr(c) type UartRegs = record
+    data:   u8
+    status: UartStatus
+@mmio(0x1000_0000) var UART: UartRegs
+
+fn putc(c: u8) / {realtime}
+    while not UART.status.tx_ready
+        pass
+    UART.data = c
+
+fn puts(s: str) / {realtime}
+    for b in s.bytes()
+        putc(b)
+
+@interrupt(irq: 1) fn on_keyboard() / {interrupt}      # no alloc, no blocking: enforced
+    let code = unsafe mem.read_volatile(ptr[u8](0x60))
+    keyboard_queue.push_nonblocking(code)
+
+fn map_page(page: own cap[Page], at: usize) / {unsafe}   # linear capability: used exactly once
+    unsafe page_table.install(own page, at)
+
+pub fn _start() -> never
+    puts("lume-os: hello from Lume\n")
+    loop
+        halt()

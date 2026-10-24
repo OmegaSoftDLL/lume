@@ -1,0 +1,44 @@
+## [Stage 2] Data as a first-class citizen: table, index, query, persist.
+use std.io
+use std.data (table, query, index, persist)
+
+type Customer = record
+    id:      int
+    name:    str
+    city:    str
+    balance: decimal(12, 2)
+
+type Order = record
+    id:          int
+    customer_id: int
+    total:       decimal(12, 2)
+    placed:      date
+
+fn main() ! Error
+    let customers = table[Customer].read_csv("customers.csv")?
+    let orders    = table[Order].read_csv("orders.csv")?
+    index customers by id
+    index orders by customer_id
+
+    let vip = query customers
+        where balance > 10_000 and city == "Curitiba"
+        order by balance desc
+        limit 20
+
+    let by_city = query customers
+        group by city
+        select (city, count(), sum(balance) as total)
+        order by total desc
+
+    let recent = query orders
+        join customers on orders.customer_id == customers.id
+        where placed >= 2026-01-01d
+        select (customers.name, orders.total, orders.placed)
+
+    for c in vip
+        io.println("{c.name:<20} {c.balance:>12}")
+    for row in by_city
+        io.println("{row.city}: {row.count} customers, {row.total}")
+
+    persist table[Customer] store at "data/customers"
+    store.insert(Customer(id: 99, name: "Novo", city: "Curitiba", balance: 0))?
