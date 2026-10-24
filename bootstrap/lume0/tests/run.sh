@@ -52,6 +52,17 @@ for exp in ../../tests/conformance/stage1/*.expected; do
     if [ -f "$src" ] && $BIN run "$src" 2>/dev/null | diff -u "$exp" - >/dev/null; then ok "compiler/stage1/$base.lume"; else bad "compiler/stage1/$base.lume"; $BIN run "$src" 2>/dev/null | diff -u "$exp" - | head -20; fi
 done
 
+echo "== LBE: emit to binary AST and run it with no re-parse (output must match text run)"
+tmpd=$(mktemp -d)
+for exp in ../../tests/conformance/stage0/*.expected; do
+    [ -f "$exp" ] || continue
+    base=$(basename "$exp" .expected)
+    src="$EX/$base.lume"
+    $BIN emit "$src" "$tmpd/$base.lbe" 2>/dev/null
+    if $BIN run "$tmpd/$base.lbe" 2>/dev/null | diff -u "$exp" - >/dev/null; then ok "lbe $base"; else bad "lbe $base"; fi
+done
+rm -rf "$tmpd"
+
 echo "== negative lexer cases"
 for src in tests/lexer/bad_*.lume; do
     code=$(sed -n '1s/^# expect: //p' "$src")
