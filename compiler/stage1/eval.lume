@@ -1,0 +1,44 @@
+## eval.lume — a tree-walking evaluator over the AST (library module).
+## Completes the lex -> parse -> eval pipeline, all written in Lume.
+use ast
+
+fn eval_expr(e: Expr, env: map[str, int]) -> int
+    match e
+        Num(v)        => v
+        Str(_)        => 0
+        Name(id)      => env.get(id) ?? 0
+        Call(c, args) => do
+            let vs = args.map(|a| eval_expr(a, env))
+            if c == "max"
+                if vs[0] > vs[1] then vs[0] else vs[1]
+            elif c == "min"
+                if vs[0] < vs[1] then vs[0] else vs[1]
+            elif c == "sum"
+                vs.reduce(0, |acc, x| acc + x)
+            else
+                0
+        Bin(op, l, r) => do
+            let a = eval_expr(l, env)
+            let b = eval_expr(r, env)
+            match op
+                "+"  => a + b
+                "-"  => a - b
+                "*"  => a * b
+                "/"  => if b == 0 then 0 else a / b
+                "==" => if a == b then 1 else 0
+                "!=" => if a != b then 1 else 0
+                "<"  => if a < b then 1 else 0
+                ">"  => if a > b then 1 else 0
+                "<=" => if a <= b then 1 else 0
+                ">=" => if a >= b then 1 else 0
+                _    => 0
+
+fn run_program(prog: [Stmt]) -> map[str, int]
+    var env = {}
+    for s in prog
+        match s
+            Let(name, v) => do
+                env[name] = eval_expr(v, env)
+            Eval(v) => do
+                env["_"] = eval_expr(v, env)
+    env

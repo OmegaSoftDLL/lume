@@ -1,0 +1,25 @@
+## eval_demo.lume — the full pipeline in Lume: lex -> parse -> evaluate, run by lume0.
+## This is a complete little language implemented entirely in Lume.
+use token
+use lexer
+use ast
+use parser
+use eval
+use std.io
+
+fn interp(line: str, env: mut map[str, int])
+    let prog = parse_program(lex(line))
+    for s in prog
+        match s
+            Let(name, v) => do
+                env[name] = eval_expr(v, env)
+                io.println("let {name} = {show_expr(v)}  =>  {env[name]}")
+            Eval(v) => io.println("{show_expr(v)}  =>  {eval_expr(v, env)}")
+
+fn main()
+    var env = {}
+    interp("let x = 2 + 3 * 4", env)
+    interp("let y = max(x, 10) + sum(1, 2, 3)", env)
+    interp("let z = (x + y) * 2", env)
+    interp("z - x", env)
+    interp("z >= 100", env)
