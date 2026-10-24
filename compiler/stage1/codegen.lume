@@ -1,0 +1,41 @@
+## codegen.lume — a code generator written in Lume: AST -> C source (library module).
+## The lowering step of lumec: structure becomes the actual machine bits, via the C backend.
+use ast
+
+fn cop(op: str) -> str
+    match op
+        "==" => "=="
+        "!=" => "!="
+        _    => op
+
+fn cexpr(e: Expr) -> str
+    match e
+        Num(v)        => "{v}"
+        Str(_)        => "0"
+        Name(id)      => id
+        Bin(op, l, r) => "(" + cexpr(l) + " " + cop(op) + " " + cexpr(r) + ")"
+        Call(c, args) => do
+            if c == "max" and args.len() == 2
+                let a = cexpr(args[0])
+                let b = cexpr(args[1])
+                "((" + a + ") > (" + b + ") ? (" + a + ") : (" + b + "))"
+            elif c == "min" and args.len() == 2
+                let a = cexpr(args[0])
+                let b = cexpr(args[1])
+                "((" + a + ") < (" + b + ") ? (" + a + ") : (" + b + "))"
+            elif c == "sum"
+                "(" + args.map(cexpr).join(" + ") + ")"
+            else
+                "0"
+
+fn cgen(prog: [Stmt]) -> str
+    var out = "#include <stdio.h>\nint main(void) {{\n"
+    for s in prog
+        match s
+            Let(name, v) => do
+                out = out + "    long long " + name + " = " + cexpr(v) + ";\n"
+                out = out + "    printf(\"" + name + " = %lld\\n\", " + name + ");\n"
+            Eval(v) => do
+                out = out + "    printf(\"%lld\\n\", (long long)(" + cexpr(v) + "));\n"
+    out = out + "    return 0;\n}}\n"
+    out

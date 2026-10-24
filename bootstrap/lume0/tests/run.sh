@@ -39,6 +39,14 @@ for exp in ../../tests/conformance/stage0/*.expected; do
     if $BIN run "$src" 2>/dev/null | diff -u "$exp" - >/dev/null; then ok "run $base"; else bad "run $base"; $BIN run "$src" 2>/dev/null | diff -u "$exp" - | head -20; fi
 done
 
+echo "== codegen: a Lume-written transpiler emits C that compiles and runs (structure -> bits)"
+if command -v cc >/dev/null 2>&1; then
+    cgtmp=$(mktemp -d)
+    $BIN run ../../compiler/stage1/codegen_demo.lume > "$cgtmp/out.c" 2>/dev/null
+    if cc -o "$cgtmp/prog" "$cgtmp/out.c" 2>/dev/null && "$cgtmp/prog" 2>/dev/null | diff -u ../../tests/conformance/stage1/codegen_native.expected - >/dev/null; then ok "codegen -> C -> native binary"; else bad "codegen -> C -> native binary"; fi
+    rm -rf "$cgtmp"
+fi
+
 echo "== AI-first: `lume0 describe` emits valid JSON"
 if command -v python3 >/dev/null 2>&1; then
     if $BIN describe | python3 -c 'import json,sys; json.load(sys.stdin)' 2>/dev/null; then ok "describe --json"; else bad "describe --json"; fi
@@ -49,7 +57,8 @@ for exp in ../../tests/conformance/stage1/*.expected; do
     [ -f "$exp" ] || continue
     base=$(basename "$exp" .expected)
     src="../../compiler/stage1/$base.lume"
-    if [ -f "$src" ] && $BIN run "$src" 2>/dev/null | diff -u "$exp" - >/dev/null; then ok "compiler/stage1/$base.lume"; else bad "compiler/stage1/$base.lume"; $BIN run "$src" 2>/dev/null | diff -u "$exp" - | head -20; fi
+    [ -f "$src" ] || continue    # expected files without a matching .lume (e.g. native-binary tests) are handled elsewhere
+    if $BIN run "$src" 2>/dev/null | diff -u "$exp" - >/dev/null; then ok "compiler/stage1/$base.lume"; else bad "compiler/stage1/$base.lume"; $BIN run "$src" 2>/dev/null | diff -u "$exp" - | head -20; fi
 done
 
 echo "== LBE: emit to binary AST and run it with no re-parse (output must match text run)"
