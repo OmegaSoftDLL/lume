@@ -1,0 +1,27 @@
+## ast.lume — AST node types for the self-hosted Lume front-end (library module).
+## A statement-level program: `let name = expr` bindings and bare expressions. Expressions are
+## numbers, identifiers, string literals, calls, and binary operators with precedence.
+
+type Expr = enum
+    Num(value: int)
+    Str(value: str)
+    Name(id: str)
+    Call(callee: str, args: [Expr])
+    Bin(op: str, left: Expr, right: Expr)
+
+type Stmt = enum
+    Let(name: str, value: Expr)
+    Eval(value: Expr)
+
+fn show_expr(e: Expr) -> str
+    match e
+        Num(v)        => "{v}"
+        Str(v)        => v
+        Name(id)      => id
+        Call(c, args) => "{c}(" + args.map(show_expr).join(", ") + ")"
+        Bin(op, l, r) => "({show_expr(l)} {op} {show_expr(r)})"
+
+fn show_stmt(s: Stmt) -> str
+    match s
+        Let(name, v) => "let {name} = {show_expr(v)}"
+        Eval(v)      => show_expr(v)

@@ -1,0 +1,86 @@
+## parser.lume — a Pratt parser from tokens to the AST (library module), the next piece of lumec.
+## Reuses the token and lexer modules; builds Stmt/Expr trees for the statement subset in ast.lume.
+use token
+use ast
+
+type P = record
+    toks: [Token]
+    pos:  int
+
+fn cur(p: P) -> Token = p.toks[p.pos]
+fn eat(p: mut P) -> Token
+    let t = p.toks[p.pos]
+    p.pos += 1
+    t
+
+fn skip_newlines(p: mut P)
+    while cur(p).kind == Newline
+        eat(p)
+
+fn lbp(op: str) -> int
+    if op == "==" or op == "!=" or op == "<" or op == ">" or op == "<=" or op == ">="
+        5
+    elif op == "+" or op == "-"
+        10
+    elif op == "*" or op == "/"
+        20
+    else
+        0
+
+fn parse_primary(p: mut P) -> Expr
+    let t = eat(p)
+    if t.kind == Int
+        Num(value: t.text.parse_int() ?? 0)
+    elif t.kind == Str
+        Str(value: t.text)
+    elif t.kind == Ident
+        if cur(p).kind == Op and cur(p).text == "("
+            eat(p)                      # consume "("
+            var args = []
+            while not (cur(p).kind == Op and cur(p).text == ")") and cur(p).kind != End
+                args.push(parse_expr(p, 0))
+                if cur(p).kind == Op and cur(p).text == ","
+                    eat(p)
+            eat(p)                      # consume ")"
+            Call(callee: t.text, args: args)
+        else
+            Name(id: t.text)
+    elif t.kind == Op and t.text == "("
+        let e = parse_expr(p, 0)
+        eat(p)                          # consume ")"
+        e
+    else
+        Num(value: 0)
+
+fn parse_expr(p: mut P, min_bp: int) -> Expr
+    var left = parse_primary(p)
+    while true
+        let t = cur(p)
+        if t.kind != Op
+            break
+        let bp = lbp(t.text)
+        if bp == 0 or bp < min_bp
+            break
+        eat(p)
+        let right = parse_expr(p, bp + 1)
+        left = Bin(op: t.text, left: left, right: right)
+    left
+
+fn parse_stmt(p: mut P) -> Stmt
+    let t = cur(p)
+    if t.kind == Kw and t.text == "let"
+        eat(p)                          # let
+        let name = eat(p).text          # name
+        eat(p)                          # =
+        Let(name: name, value: parse_expr(p, 0))
+    else
+        Eval(value: parse_expr(p, 0))
+
+fn parse_program(toks: [Token]) -> [Stmt]
+    var p = P(toks: toks, pos: 0)
+    var stmts = []
+    skip_newlines(p)
+    while cur(p).kind != End
+        stmts.push(parse_stmt(p))
+        skip_newlines(p)
+    stmts
