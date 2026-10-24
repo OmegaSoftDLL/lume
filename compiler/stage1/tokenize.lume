@@ -1,0 +1,94 @@
+## tokenize.lume — the first piece of `lumec`, written in Lume and run by lume0.
+##
+## A self-contained tokenizer for a core slice of Lume: identifiers, keywords, integers,
+## strings, and the common operators/punctuation. It proves the bootstrap path — Lume code
+## that processes Lume source — before the full Stage-1 compiler is built.
+##
+## Run:  lume0 run compiler/stage1/tokenize.lume
+
+use std.io
+
+type Kind = enum
+    Ident
+    Keyword
+    Int
+    Str
+    Op
+    Newline
+    End
+
+type Token = record
+    kind: Kind
+    text: str
+
+fn is_digit(c: char) -> bool = c >= '0' and c <= '9'
+fn is_alpha(c: char) -> bool = (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or c == '_'
+fn is_alnum(c: char) -> bool = is_alpha(c) or is_digit(c)
+fn is_space(c: char) -> bool = c == ' '
+
+fn is_keyword(word: str) -> bool
+    let kws = ["fn", "let", "var", "if", "else", "match", "for", "while", "return", "type",
+               "record", "enum", "trait", "impl", "use", "mod", "true", "false", "and", "or", "not"]
+    for k in kws
+        if k == word
+            return true
+    false
+
+fn kind_name(k: Kind) -> str
+    match k
+        Ident   => "IDENT"
+        Keyword => "KEYWORD"
+        Int     => "INT"
+        Str     => "STR"
+        Op      => "OP"
+        Newline => "NEWLINE"
+        End     => "EOF"
+
+fn tokenize(src: str) -> [Token]
+    var tokens = []
+    var i = 0
+    let n = src.len()
+    while i < n
+        let c = src[i]
+        if is_space(c)
+            i += 1
+        elif c == '\n'
+            tokens.push(Token(kind: Newline, text: "\\n"))
+            i += 1
+        elif is_digit(c)
+            var j = i
+            while j < n and is_digit(src[j])
+                j += 1
+            tokens.push(Token(kind: Int, text: src[i..j]))
+            i = j
+        elif is_alpha(c)
+            var j = i
+            while j < n and is_alnum(src[j])
+                j += 1
+            let word = src[i..j]
+            let k = if is_keyword(word) then Keyword else Ident
+            tokens.push(Token(kind: k, text: word))
+            i = j
+        elif c == '"'
+            var j = i + 1
+            while j < n and src[j] != '"'
+                j += 1
+            tokens.push(Token(kind: Str, text: src[i..=j]))
+            i = j + 1
+        else
+            tokens.push(Token(kind: Op, text: "{c}"))
+            i += 1
+    tokens.push(Token(kind: End, text: ""))
+    tokens
+
+fn main()
+    let program = "fn add(a, b)\n    let r = a + b\n    return r"
+    io.println("source:")
+    io.println(program)
+    io.println("")
+    io.println("tokens:")
+    let toks = tokenize(program)
+    for t in toks
+        io.println("  {kind_name(t.kind)} {t.text}")
+    io.println("")
+    io.println("total tokens: {toks.len()}")

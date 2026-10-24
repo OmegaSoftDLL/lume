@@ -1,0 +1,68 @@
+## [Stage 3/4] Many agents running at once: a supervisor spawns N agents that work concurrently,
+## message a shared coordinator over channels, and are restarted on failure. This is the
+## "run several agents at the same time" model (what JVM platforms like JADE/Akka pioneered),
+## here with structured concurrency, typed messages, and compile-time data-race freedom.
+use std.io
+use std.task (scope, chan, select)
+use std.actor (actor, supervisor, restart)
+use std.llm
+use std.data (table, query)
+
+type Task = record
+    id:    int
+    goal:  str
+
+type Result = record
+    id:      int
+    agent:   str
+    summary: str
+
+extern llm fn solve(goal: str) -> str ! llm.Error / {llm}
+    """Work the goal and return a one-line summary of what you did."""
+
+## One worker agent: pulls tasks from a channel, solves each with an LLM, emits results.
+actor Worker
+    name:    str
+    inbox:   chan[Task]
+    results: chan[Result]
+
+    fn run(self) / {llm, async}
+        for task in self.inbox
+            let summary = solve(task.goal) catch |e| "failed: {e}"
+            self.results.send(Result(id: task.id, agent: self.name, summary: summary))
+
+## Run `n` worker agents concurrently over a backlog of tasks.
+fn orchestrate(tasks: [Task], n: int) -> table[Result] ! Error / {llm, async}
+    let work = chan[Task](capacity: tasks.len())
+    let out  = chan[Result](capacity: tasks.len())
+    var collected = table[Result]()
+
+    scope agents                                   # all agents end before the scope returns
+        supervisor(restart: .one_for_one)          # a crashed agent is restarted, others keep going
+            for i in 0..n
+                let w = Worker(name: "agent-{i}", inbox: work, results: out)
+                agents.spawn w.run()               # N agents now running at the same time
+
+        for t in tasks
+            work.send(t)
+        work.close()
+
+        for _ in 0..tasks.len()
+            collected.insert(out.recv()?)
+
+    collected
+
+fn main() ! Error / {io, llm}
+    with llm.handler = llm.local("qwen3-8b", budget: 5.00)
+        let backlog = [
+            Task(id: 1, goal: "summarise today's invoices"),
+            Task(id: 2, goal: "reconcile the bank feed"),
+            Task(id: 3, goal: "flag overdue contracts"),
+            Task(id: 4, goal: "draft the weekly report"),
+        ]
+        let results = orchestrate(backlog, n: 4)   # four agents working in parallel
+
+        let report = query results order by id
+        for r in report
+            io.println("[{r.agent}] task {r.id}: {r.summary}")
+        io.println("done: {results.len()} tasks by concurrent agents")
