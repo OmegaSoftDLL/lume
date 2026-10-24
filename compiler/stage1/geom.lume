@@ -1,0 +1,9 @@
+## geom.lume — a local library module (no `main`), imported via `use geom`.
+type Point = record
+    x: int
+    y: int
+
+fn add(a: Point, b: Point) -> Point = Point(x: a.x + b.x, y: a.y + b.y)
+fn scale(p: Point, k: int) -> Point = Point(x: p.x * k, y: p.y * k)
+fn manhattan(p: Point) -> int = abs(p.x) + abs(p.y)
+fn show_point(p: Point) -> str = "({p.x}, {p.y})"

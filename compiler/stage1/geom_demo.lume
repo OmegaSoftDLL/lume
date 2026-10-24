@@ -1,0 +1,14 @@
+## geom_demo.lume — a multi-file Lume program: imports geom.lume via `use`, run by lume0.
+## Demonstrates the interpreter's local module loading (Stage-1 groundwork for lumec's modules).
+use geom
+use std.io
+
+fn main()
+    let a = Point(x: 1, y: 2)
+    let b = Point(x: 3, y: -1)
+    let c = add(a, b)
+    io.println("a = {show_point(a)}")
+    io.println("b = {show_point(b)}")
+    io.println("a + b = {show_point(c)}")
+    io.println("c * 3 = {show_point(c.scale(3))}")
+    io.println("manhattan(c) = {c.manhattan()}")

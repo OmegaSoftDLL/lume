@@ -39,12 +39,13 @@ for exp in ../../tests/conformance/stage0/*.expected; do
     if $BIN run "$src" 2>/dev/null | diff -u "$exp" - >/dev/null; then ok "run $base"; else bad "run $base"; $BIN run "$src" 2>/dev/null | diff -u "$exp" - | head -20; fi
 done
 
-echo "== Lume-in-Lume: the Stage-1 tokenizer runs under lume0"
-tz=../../compiler/stage1/tokenize.lume
-tzexp=../../tests/conformance/stage1/tokenize.expected
-if [ -f "$tz" ] && [ -f "$tzexp" ]; then
-    if $BIN run "$tz" 2>/dev/null | diff -u "$tzexp" - >/dev/null; then ok "compiler/stage1/tokenize.lume"; else bad "compiler/stage1/tokenize.lume"; $BIN run "$tz" 2>/dev/null | diff -u "$tzexp" - | head -20; fi
-fi
+echo "== Lume-in-Lume: Stage-1 programs run under lume0"
+for exp in ../../tests/conformance/stage1/*.expected; do
+    [ -f "$exp" ] || continue
+    base=$(basename "$exp" .expected)
+    src="../../compiler/stage1/$base.lume"
+    if [ -f "$src" ] && $BIN run "$src" 2>/dev/null | diff -u "$exp" - >/dev/null; then ok "compiler/stage1/$base.lume"; else bad "compiler/stage1/$base.lume"; $BIN run "$src" 2>/dev/null | diff -u "$exp" - | head -20; fi
+done
 
 echo "== negative lexer cases"
 for src in tests/lexer/bad_*.lume; do
