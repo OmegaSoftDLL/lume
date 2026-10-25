@@ -67,6 +67,7 @@ if command -v cc >/dev/null 2>&1; then
     if cc -o "$cgtmp/fl" "$cgtmp/fl.c" 2>/dev/null && "$cgtmp/fl" 2>/dev/null | diff -u ../../tests/conformance/stage1/block_for_native.expected - >/dev/null; then ok "block_cc for-loops (range desugar + nested) -> native binary"; else bad "block_cc for-loops -> native binary"; fi
     # a full calculator compiler WRITTEN IN the ML core, reading its source from a file
     if $BIN run ../../compiler/stage1/compiler_in_core.lume ../../compiler/stage1/calc.src 2>/dev/null | diff -u ../../tests/conformance/stage1/core_compiler.expected - >/dev/null; then ok "compiler written in the ML core (lex+parse+eval)"; else bad "compiler written in the ML core"; fi
+    if $BIN run ../../compiler/stage1/compiler_in_core.lume ../../compiler/stage1/modtest.src 2>/dev/null | diff -u ../../tests/conformance/stage1/modtest_core.expected - >/dev/null; then ok "ML-core interpreter: modulo + gcd (regression)"; else bad "ML-core interpreter: modulo + gcd"; fi
     # close the loop: the core-written compiler emits a full C program -> cc -> native binary
     $BIN run ../../compiler/stage1/compiler_in_core.lume ../../compiler/stage1/calc_native.src > "$cgtmp/calc.c" 2>/dev/null
     if cc -o "$cgtmp/calc" "$cgtmp/calc.c" 2>/dev/null && "$cgtmp/calc" 2>/dev/null | diff -u ../../tests/conformance/stage1/core_native.expected - >/dev/null; then ok "core-written compiler -> C -> native binary"; else bad "core-written compiler -> native"; fi
