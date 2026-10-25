@@ -25,6 +25,9 @@ fn droponce(ts) = match ts
     Nil        => Nil
     Cons(h, t) => t
 fn skiprp(ts) = if headtext(ts) == ")" then droponce(ts) else ts
+fn skiprb(ts) = if headtext(ts) == "}" then droponce(ts) else ts
+fn recentries(ts) = if headtext(ts) == "}" then {items: Nil, rest: droponce(ts)} else recmore(headtext(ts), expr(dropkw(droponce(ts), ":")))
+fn recmore(k, rv) = if headtext(rv.rest) == "," then let rr = recentries(droponce(rv.rest)) in {items: Cons({key: k, val: rv.node}, rr.items), rest: rr.rest} else {items: Cons({key: k, val: rv.node}, Nil), rest: skiprb(rv.rest)}
 fn dropkw(ts, kw) = if headtext(ts) == kw then droponce(ts) else ts
 fn parseif(t) = let rc = expr(t) in let tb = expr(dropkw(rc.rest, "then")) in let eb = expr(dropkw(tb.rest, "else")) in {node: If(rc.node, tb.node, eb.node), rest: eb.rest}
 fn parselet(t) = let nm = headtext(t) in let rv = expr(dropkw(droponce(t), "=")) in let rb = expr(dropkw(rv.rest, "in")) in {node: LetIn(nm, rv.node, rb.node), rest: rb.rest}
@@ -35,7 +38,7 @@ fn post(ts) = postloop(prim(ts))
 fn primid(name, t) = if headtext(t) == "(" then let a = arglist(droponce(t)) in {node: Call(name, a.items), rest: a.rest} else {node: Var(name), rest: t}
 fn prim(ts) = match ts
     Nil        => {node: Num(0), rest: Nil}
-    Cons(h, t) => if h.kind == "int" then {node: Num(toint(h.text)), rest: t} else if h.kind == "str" then {node: Str(h.text), rest: t} else if h.kind == "id" then (if h.text == "if" then parseif(t) else if h.text == "let" then parselet(t) else primid(h.text, t)) else if h.text == "(" then let r = expr(t) in {node: r.node, rest: skiprp(r.rest)} else {node: Num(0), rest: t}
+    Cons(h, t) => if h.kind == "int" then {node: Num(toint(h.text)), rest: t} else if h.kind == "str" then {node: Str(h.text), rest: t} else if h.kind == "id" then (if h.text == "if" then parseif(t) else if h.text == "let" then parselet(t) else primid(h.text, t)) else if h.text == "{" then let a = recentries(t) in {node: Rec(a.items), rest: a.rest} else if h.text == "(" then let r = expr(t) in {node: r.node, rest: skiprp(r.rest)} else {node: Num(0), rest: t}
 fn arglist(ts) = if headtext(ts) == ")" then {items: Nil, rest: droponce(ts)} else argmore(expr(ts))
 fn argmore(r) = if headtext(r.rest) == "," then let rr = arglist(droponce(r.rest)) in {items: Cons(r.node, rr.items), rest: rr.rest} else {items: Cons(r.node, Nil), rest: skiprp(r.rest)}
 fn mulloop(r) = match r.rest
@@ -57,6 +60,9 @@ fn parse(s) = (expr(lex(s, 0))).node
 fn sep(xs) = match xs
     Nil        => ""
     Cons(h, t) => ", "
+fn showrec(xs) = match xs
+    Nil        => ""
+    Cons(h, t) => h.key + ": " + show(h.val) + sep(t) + showrec(t)
 fn showargs(xs) = match xs
     Nil        => ""
     Cons(h, t) => show(h) + sep(t) + showargs(t)
@@ -69,6 +75,7 @@ fn show(e) = match e
     If(c, a, b)   => "if " + show(c) + " then " + show(a) + " else " + show(b)
     LetIn(x, v, b) => "let " + x + " = " + show(v) + " in " + show(b)
     Field(o, f)   => show(o) + "." + f
+    Rec(items)    => "{" + showrec(items) + "}"
 
 print show(parse("2 + 3 * 4"))
 print show(parse("f(1, 2 + 3, g(x))"))
@@ -82,3 +89,5 @@ print show(parse("let x = 2 + 3 in x * x"))
 print show(parse("if n == 0 then Nil else Cons(n, f(n - 1))"))
 print show(parse("p.node.rest"))
 print show(parse("f(x).kind + r.a * r.b"))
+print show(parse("{tag: \"num\", val: 1 + 2}"))
+print show(parse("{node: Lit(n), rest: t}.node"))

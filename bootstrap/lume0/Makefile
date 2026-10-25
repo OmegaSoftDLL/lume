@@ -14,7 +14,7 @@ test: $(BIN)
 
 asan: CFLAGS += -g -O1 -fsanitize=address,undefined -fno-omit-frame-pointer
 asan: clean $(BIN)
-	./tests/run.sh
+	LUME0_ASAN=1 ./tests/run.sh
 
 clean:
 	rm -f $(BIN)

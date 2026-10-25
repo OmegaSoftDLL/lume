@@ -128,8 +128,11 @@ else
 fi
 
 # FULL no-toolchain pipeline: Lume-written codegen -> lume0 asm (our own ELF
-# writer, NO as/ld/cc) -> native. Gated only on Linux x86_64 (to run the ELF).
-if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ]; then
+# writer, NO as/ld/cc) -> native. Gated on Linux x86_64. Skipped under ASan, where
+# building these Lume-written programs via the instrumented seed is far too slow/heavy
+# for the runner; they are fully exercised in the normal `make test` on both OSes, and
+# elf.c/asmgen.c stay ASan-covered by the `as/ld` block above.
+if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_ASAN:-}" ]; then
     ntmp=$(mktemp -d)
     for prog in nfib ev strtest modtest reclist list calc; do
         case "$prog" in calc) exp=calc_asm;; modtest) exp=modtest_core;; list) exp=list_core_native;; *) exp=${prog}_asm;; esac
@@ -180,7 +183,7 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ]; then
     if $BIN asm "$ntmp/pp.s" "$ntmp/pp" >/dev/null 2>&1 && "$ntmp/pp" 2>/dev/null | diff -u ../../tests/conformance/stage1/lcparse_asm.expected - >/dev/null; then ok "self-host R5: core expression parser (in Lume-Core) -> native"; else bad "self-host R5: core expression parser -> native"; fi
     rm -rf "$ntmp"
 else
-    ok "no-toolchain ELF pipeline (skipped: not linux/x86_64)"
+    ok "no-toolchain ELF pipeline (skipped: not linux/x86_64, or under ASan)"
 fi
 
 echo "== AI-first: `lume0 describe` emits valid JSON"
