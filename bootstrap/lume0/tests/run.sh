@@ -115,6 +115,8 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && command -v as 
     if as -o "$atmp/st.o" "$atmp/st.s" 2>/dev/null && ld -o "$atmp/st" "$atmp/st.o" 2>/dev/null && "$atmp/st" 2>/dev/null | diff -u ../../tests/conformance/stage1/strtest_asm.expected - >/dev/null; then ok "ML-core native: strings (literals, ==, print) + ints, no C"; else bad "ML-core native: strings, no C"; fi
     $BIN run ../../compiler/stage1/data_asm_cc.lume ../../compiler/stage1/ev.src "$atmp/ev.s" >/dev/null 2>&1
     if as -o "$atmp/ev.o" "$atmp/ev.s" 2>/dev/null && ld -o "$atmp/evb" "$atmp/ev.o" 2>/dev/null && "$atmp/evb" 2>/dev/null | diff -u ../../tests/conformance/stage1/ev_asm.expected - >/dev/null; then ok "ML-core native: constructors + match -> x86-64, no C"; else bad "ML-core native: constructors + match, no C"; fi
+    $BIN run ../../compiler/stage1/data_asm_cc.lume ../../compiler/stage1/reclist.src "$atmp/rl.s" >/dev/null 2>&1
+    if as -o "$atmp/rl.o" "$atmp/rl.s" 2>/dev/null && ld -o "$atmp/rlb" "$atmp/rl.o" 2>/dev/null && "$atmp/rlb" 2>/dev/null | diff -u ../../tests/conformance/stage1/reclist_asm.expected - >/dev/null; then ok "ML-core native: records + lists -> x86-64, no C"; else bad "ML-core native: records + lists, no C"; fi
     rm -rf "$atmp"
 else
     ok "x86-64 asm backend (skipped: not linux/x86_64 or no as/ld)"
