@@ -8,10 +8,12 @@ type Expr = enum
     Name(id: str)
     Call(callee: str, args: [Expr])
     Bin(op: str, left: Expr, right: Expr)
+    If(cond: Expr, then_val: Expr, else_val: Expr)
 
 type Stmt = enum
     Let(name: str, value: Expr)
     Eval(value: Expr)
+    Fn(name: str, params: [str], body: Expr)
 
 fn show_expr(e: Expr) -> str
     match e
@@ -20,8 +22,10 @@ fn show_expr(e: Expr) -> str
         Name(id)      => id
         Call(c, args) => "{c}(" + args.map(show_expr).join(", ") + ")"
         Bin(op, l, r) => "({show_expr(l)} {op} {show_expr(r)})"
+        If(c, t, e)   => "(if {show_expr(c)} then {show_expr(t)} else {show_expr(e)})"
 
 fn show_stmt(s: Stmt) -> str
     match s
         Let(name, v) => "let {name} = {show_expr(v)}"
         Eval(v)      => show_expr(v)
+        Fn(name, ps, b) => "fn {name}(" + ps.join(", ") + ") = {show_expr(b)}"

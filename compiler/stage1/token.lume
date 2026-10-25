@@ -26,7 +26,7 @@ fn kind_name(k: Kind) -> str
 
 fn is_keyword(w: str) -> bool
     let kws = ["fn", "let", "var", "if", "elif", "else", "match", "for", "while", "loop",
-               "return", "break", "continue", "type", "record", "enum", "error", "trait",
+               "return", "break", "continue", "then", "type", "record", "enum", "error", "trait",
                "impl", "use", "mod", "pub", "true", "false", "and", "or", "not", "in", "is",
                "as", "mut", "own", "defer", "fail", "requires", "ensures", "invariant"]
     for k in kws
