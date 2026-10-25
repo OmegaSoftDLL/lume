@@ -188,6 +188,13 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_
         if ! ( $BIN asm "$ntmp/lc.s" "$ntmp/lc" >/dev/null 2>&1 && cat "../../compiler/stage1/${pr%%:*}.src" | "$ntmp/lc" >"$ntmp/lcout.s" 2>/dev/null && $BIN asm "$ntmp/lcout.s" "$ntmp/lcout" >/dev/null 2>&1 && "$ntmp/lcout" 2>/dev/null | diff -u "../../tests/conformance/stage1/${pr##*:}.expected" - >/dev/null ); then c6=0; echo "  R6c mismatch: ${pr%%:*}"; fi
     done
     if [ "$c6" = 1 ]; then ok "self-host R6c: lumec (native) reads stdin, compiles {nfib,ev,strtest,modtest,bigints} to native, no C"; else bad "self-host R6c: lumec (native) reads stdin, compiles {nfib,ev,strtest,modtest,bigints} to native, no C"; fi
+    # escape decoding: lumec (native) must decode string-literal escapes exactly like the oracle (data_asm_cc)
+    printf 'fn f() = "a\\nb"\nprint f()' >"$ntmp/esc.src"
+    $BIN run ../../compiler/stage1/data_asm_cc.lume "$ntmp/esc.src" "$ntmp/esc_o.s" >/dev/null 2>&1
+    if $BIN asm "$ntmp/esc_o.s" "$ntmp/esc_o" >/dev/null 2>&1 && "$ntmp/lc" <"$ntmp/esc.src" >"$ntmp/esc_l.s" 2>/dev/null && $BIN asm "$ntmp/esc_l.s" "$ntmp/esc_l" >/dev/null 2>&1 && "$ntmp/esc_o" >"$ntmp/esc_o.out" 2>/dev/null && "$ntmp/esc_l" >"$ntmp/esc_l.out" 2>/dev/null && [ -s "$ntmp/esc_o.out" ] && cmp -s "$ntmp/esc_o.out" "$ntmp/esc_l.out"; then ok "self-host: lumec decodes string escapes like the oracle"; else bad "self-host: lumec decodes string escapes like the oracle"; fi
+    # fixpoint: lumec compiles its own (comment-free) source to gen1; the resulting lumec2 must reproduce gen1 bit-for-bit
+    grep -vE '^[[:space:]]*$|^[[:space:]]*##' ../../compiler/stage1/lumec.src >"$ntmp/fx.src"
+    if "$ntmp/lc" <"$ntmp/fx.src" >"$ntmp/gen1.s" 2>/dev/null && $BIN asm "$ntmp/gen1.s" "$ntmp/lc2" >/dev/null 2>&1 && "$ntmp/lc2" <"$ntmp/fx.src" >"$ntmp/gen2.s" 2>/dev/null && [ -s "$ntmp/gen1.s" ] && cmp -s "$ntmp/gen1.s" "$ntmp/gen2.s"; then ok "self-host fixpoint: lumec -> lumec2 recompiles itself bit-identically"; else bad "self-host fixpoint: lumec -> lumec2 recompiles itself bit-identically"; fi
     rm -rf "$ntmp"
 else
     ok "no-toolchain ELF pipeline (skipped: not linux/x86_64, or under ASan)"
