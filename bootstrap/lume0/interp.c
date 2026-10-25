@@ -508,6 +508,15 @@ static Val *lookup_builtin(Interp *ip, const char *name, int len) {
 /* ======================================================================
  *  println/print, deep copy, resolve, forward decls
  * ====================================================================== */
+/* program args + file IO, for a file-driven lumec (set by main before lume_run) */
+static int g_argc = 0;
+static char **g_argv = NULL;
+void lume_set_args(int argc, char **argv) { g_argc = argc; g_argv = argv; }
+
+static Val *bi_args(Interp *ip, Val **a, int n, const Node *site) { (void)a; (void)n; (void)site; Val *out = v_list(ip); for (int i = 0; i < g_argc; i++) v_push(ip, out, v_str(ip, g_argv[i], (int)strlen(g_argv[i]))); return out; }
+static Val *bi_read_file(Interp *ip, Val **a, int n, const Node *site) { (void)n; (void)site; size_t len = 0; char *s = read_file(a[0]->s, &len); if (!s) return v_str(ip, "", 0); Val *v = v_str(ip, s, (int)len); free(s); return v; }
+static Val *bi_write_file(Interp *ip, Val **a, int n, const Node *site) { (void)n; (void)site; FILE *f = fopen(a[0]->s, "wb"); if (!f) return v_bool(ip, false); if (a[1]->slen) fwrite(a[1]->s, 1, (size_t)a[1]->slen, f); fclose(f); return v_bool(ip, true); }
+
 BI(bi_println) { (void)site; for (int i = 0; i < n; i++) { if (i) fputc(' ', stdout); int l; char *s = val_to_cstr(ip, a[i], &l); fwrite(s, 1, (size_t)l, stdout); } fputc('\n', stdout); return v_unit(ip); }
 BI(bi_print)   { (void)site; for (int i = 0; i < n; i++) { if (i) fputc(' ', stdout); int l; char *s = val_to_cstr(ip, a[i], &l); fwrite(s, 1, (size_t)l, stdout); } return v_unit(ip); }
 
@@ -752,13 +761,20 @@ static Val *eval_call(Interp *ip, const Node *call, Env *env, Val *prepend) {
 
     if (callee->kind == N_FIELD_GET) {
         const Node *recvn = callee->kids[0]; const char *m = callee->text; int ml = callee->text_len;
-        if (recvn->kind == N_IDENT && text_is(recvn, "io")) {
+        bool recv_bound = recvn->kind == N_IDENT && env_get(env, recvn->text, recvn->text_len) != NULL;
+        if (!recv_bound && recvn->kind == N_IDENT && text_is(recvn, "io")) {
             if (ml == 7 && memcmp(m, "println", 7) == 0) return bi_println(ip, vals, na, call);
             if (ml == 5 && memcmp(m, "print", 5) == 0) return bi_print(ip, vals, na, call);
             if (ml == 8 && memcmp(m, "eprintln", 8) == 0) return bi_eprintln(ip, vals, na, call);
+            if (ml == 9 && memcmp(m, "read_file", 9) == 0) return bi_read_file(ip, vals, na, call);
+            if (ml == 10 && memcmp(m, "write_file", 10) == 0) return bi_write_file(ip, vals, na, call);
             rerror(ip, call, "unknown io function"); return v_unit(ip);
         }
-        if (recvn->kind == N_IDENT && text_is(recvn, "math")) {
+        if (!recv_bound && recvn->kind == N_IDENT && text_is(recvn, "env")) {
+            if (ml == 4 && memcmp(m, "args", 4) == 0) return bi_args(ip, vals, na, call);
+            rerror(ip, call, "unknown env function"); return v_unit(ip);
+        }
+        if (!recv_bound && recvn->kind == N_IDENT && text_is(recvn, "math")) {
             Val *mf = lookup_builtin(ip, m, ml);
             if (mf) return mf->builtin(ip, vals, na, call);
             rerror(ip, call, "unknown math function"); return v_unit(ip);
