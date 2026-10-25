@@ -1,0 +1,23 @@
+## lumec.lume — the compiler driver, written in Lume (library module).
+## Ties the pipeline together: lex -> parse -> check -> codegen. If the checker finds problems it
+## reports them and emits nothing; otherwise it returns the generated C. This is lumec in miniature.
+use token
+use lexer
+use ast
+use parser
+use check
+use codegen
+use std.io
+
+type Output = record
+    ok:     bool
+    code:   str
+    errors: [str]
+
+fn compile(src: str) -> Output
+    let prog = parse_program(lex(src))
+    let diags = check_program(prog)
+    if diags.len() > 0
+        Output(ok: false, code: "", errors: diags.map(|d| d.msg))
+    else
+        Output(ok: true, code: cgen(prog), errors: [])
