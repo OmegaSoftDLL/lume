@@ -76,11 +76,14 @@ fn datom(p: mut DP) -> DExpr
             deat(p)
             dnl(p)
             while dcur(p).kind != Dedent and dcur(p).kind != End
+                let before = p.pos
                 let pat = dpat(p)
                 deat(p)                  # =>
                 let body = dexpr(p, 0)
                 arms.push(Arm(pat: pat, body: body))
                 dnl(p)
+                if p.pos == before
+                    return DMatch(scrut: scrut, arms: arms)
             if dcur(p).kind == Dedent
                 deat(p)
         return DMatch(scrut: scrut, arms: arms)
@@ -191,6 +194,9 @@ fn parse_data_program(src: str) -> [DStmt]
     var prog = []
     dnl(p)
     while dcur(p).kind != End
+        let before = p.pos
         prog.push(dstmt(p))
         dnl(p)
+        if p.pos == before
+            return prog
     prog
