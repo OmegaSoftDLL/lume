@@ -145,7 +145,49 @@ static void typecheck_walk(const Node *n, DiagList *d) {
     for (int i = 0; i < n->nkid; i++) typecheck_walk(n->kids[i], d);
 }
 
-/* run name resolution + basic literal type checks over a parsed module */
+/* ---- duplicate detection: repeated parameter names, repeated top-level fns ---- */
+static const Node *name_node(const Node *n) {
+    for (int i = 0; i < n->nkid; i++) if (n->kids[i]->kind == N_IDENT) return n->kids[i];
+    return NULL;
+}
+static void dup_params(const Node *fn, DiagList *d) {
+    StrSet seen = {0};
+    for (int i = 0; i < fn->nkid; i++) {
+        if (fn->kids[i]->kind != N_PARAM) continue;
+        const Node *nm = name_node(fn->kids[i]);
+        const char *p = nm ? nm->text : fn->kids[i]->text;
+        int pl = nm ? nm->text_len : fn->kids[i]->text_len;
+        if (!p || pl <= 0) continue;
+        if (sset_has(&seen, p, pl)) {
+            char b[48]; int L = pl > 47 ? 47 : pl; memcpy(b, p, (size_t)L); b[L] = 0;
+            char msg[160]; snprintf(msg, sizeof msg, "duplicate parameter `%s`", b);
+            int line = nm ? nm->line : fn->kids[i]->line, col = nm ? nm->col : fn->kids[i]->col;
+            diag_add(d, SEV_ERROR, "D0001", line, col, pl, msg, "each parameter name must be unique");
+        } else sset_add(&seen, p, pl);
+    }
+    sset_free(&seen);
+}
+static void dup_walk(const Node *n, DiagList *d) {
+    if (!n) return;
+    if (n->kind == N_FN) dup_params(n, d);
+    for (int i = 0; i < n->nkid; i++) dup_walk(n->kids[i], d);
+}
+static void dup_toplevel_fns(const Node *module, DiagList *d) {
+    StrSet seen = {0};
+    for (int i = 0; i < module->nkid; i++) {
+        if (module->kids[i]->kind != N_FN) continue;
+        const Node *nm = name_node(module->kids[i]);
+        if (!nm || !nm->text) continue;
+        if (sset_has(&seen, nm->text, nm->text_len)) {
+            char b[48]; int L = nm->text_len > 47 ? 47 : nm->text_len; memcpy(b, nm->text, (size_t)L); b[L] = 0;
+            char msg[160]; snprintf(msg, sizeof msg, "duplicate function `%s`", b);
+            diag_add(d, SEV_ERROR, "D0002", nm->line, nm->col, nm->text_len, msg, "rename one of the definitions");
+        } else sset_add(&seen, nm->text, nm->text_len);
+    }
+    sset_free(&seen);
+}
+
+/* run name resolution + basic literal type checks + duplicate detection */
 void lume_resolve(const Node *module, DiagList *diags) {
     if (!module) return;
     StrSet def = {0};
@@ -153,4 +195,6 @@ void lume_resolve(const Node *module, DiagList *diags) {
     resolve_walk(module, &def, diags);
     sset_free(&def);
     typecheck_walk(module, diags);
+    dup_walk(module, diags);
+    dup_toplevel_fns(module, diags);
 }
