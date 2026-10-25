@@ -56,11 +56,11 @@ fn cmploop(r) = match r.rest
 fn cmp(ts) = cmploop(add(ts))
 fn andloop(r) = match r.rest
     Nil        => r
-    Cons(h, t) => if h.text == "and" then let r2 = cmp(t) in andloop({node: Bin(h.text, r.node, r2.node), rest: r2.rest}) else r
+    Cons(h, t) => if h.text == "zand" then let r2 = cmp(t) in andloop({node: Bin(h.text, r.node, r2.node), rest: r2.rest}) else r
 fn booland(ts) = andloop(cmp(ts))
 fn orloop(r) = match r.rest
     Nil        => r
-    Cons(h, t) => if h.text == "or" then let r2 = booland(t) in orloop({node: Bin(h.text, r.node, r2.node), rest: r2.rest}) else r
+    Cons(h, t) => if h.text == "zor" then let r2 = booland(t) in orloop({node: Bin(h.text, r.node, r2.node), rest: r2.rest}) else r
 fn expr(ts) = cmp(ts)
 fn parse(s) = (expr(lex(s, 0))).node
 
