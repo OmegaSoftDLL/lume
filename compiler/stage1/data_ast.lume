@@ -1,0 +1,21 @@
+## data_ast.lume — AST for a small ADT language with constructors and match (library module).
+type Pat = enum
+    PWild
+    PBind(name: str)
+    PInt(n: int)
+    PCons(tag: str, subs: [Pat])
+
+type DExpr = enum
+    DInt(n: int)
+    DVar(name: str)
+    DCons(tag: str, args: [DExpr])
+    DBin(op: str, l: DExpr, r: DExpr)
+    DMatch(scrut: DExpr, arms: [Arm])
+
+type Arm = record
+    pat:  Pat
+    body: DExpr
+
+type DStmt = enum
+    DLet(name: str, value: DExpr)
+    DPrint(value: DExpr)

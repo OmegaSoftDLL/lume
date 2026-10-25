@@ -1,0 +1,121 @@
+## data_parser.lume — layout-aware parser for the ADT language (constructors + match).
+use token
+use layout
+use data_ast
+
+type DP = record
+    toks: [Token]
+    pos:  int
+
+fn dcur(p: DP) -> Token = p.toks[p.pos]
+fn deat(p: mut DP) -> Token
+    let t = p.toks[p.pos]
+    p.pos += 1
+    t
+fn dnl(p: mut DP)
+    while dcur(p).kind == Newline
+        deat(p)
+
+fn is_upper(s: str) -> bool = s.len() > 0 and s[0] >= 'A' and s[0] <= 'Z'
+
+fn dlbp(op: str) -> int
+    if op == "==" or op == "!=" or op == "<" or op == ">" or op == "<=" or op == ">="
+        5
+    elif op == "+" or op == "-"
+        10
+    elif op == "*" or op == "/" or op == "%"
+        20
+    else
+        0
+
+fn dpat(p: mut DP) -> Pat
+    let t = deat(p)
+    if t.kind == Int
+        PInt(n: t.text.parse_int() ?? 0)
+    elif t.kind == Ident and t.text == "_"
+        PWild
+    elif t.kind == Ident and is_upper(t.text)
+        var subs = []
+        if dcur(p).kind == Op and dcur(p).text == "("
+            deat(p)
+            while not (dcur(p).kind == Op and dcur(p).text == ")") and dcur(p).kind != End
+                subs.push(dpat(p))
+                if dcur(p).kind == Op and dcur(p).text == ","
+                    deat(p)
+            deat(p)
+        PCons(tag: t.text, subs: subs)
+    else
+        PBind(name: t.text)
+
+fn dprimary(p: mut DP) -> DExpr
+    if dcur(p).kind == Kw and dcur(p).text == "match"
+        deat(p)
+        let scrut = dexpr(p, 0)
+        dnl(p)
+        var arms = []
+        if dcur(p).kind == Indent
+            deat(p)
+            dnl(p)
+            while dcur(p).kind != Dedent and dcur(p).kind != End
+                let pat = dpat(p)
+                deat(p)                  # =>
+                let body = dexpr(p, 0)
+                arms.push(Arm(pat: pat, body: body))
+                dnl(p)
+            if dcur(p).kind == Dedent
+                deat(p)
+        return DMatch(scrut: scrut, arms: arms)
+    let t = deat(p)
+    if t.kind == Int
+        DInt(n: t.text.parse_int() ?? 0)
+    elif t.kind == Op and t.text == "("
+        let e = dexpr(p, 0)
+        deat(p)
+        e
+    elif t.kind == Ident and is_upper(t.text)
+        var args = []
+        if dcur(p).kind == Op and dcur(p).text == "("
+            deat(p)
+            while not (dcur(p).kind == Op and dcur(p).text == ")") and dcur(p).kind != End
+                args.push(dexpr(p, 0))
+                if dcur(p).kind == Op and dcur(p).text == ","
+                    deat(p)
+            deat(p)
+        DCons(tag: t.text, args: args)
+    elif t.kind == Ident
+        DVar(name: t.text)
+    else
+        DInt(n: 0)
+
+fn dexpr(p: mut DP, min_bp: int) -> DExpr
+    var left = dprimary(p)
+    while true
+        let t = dcur(p)
+        if t.kind != Op
+            break
+        let bp = dlbp(t.text)
+        if bp == 0 or bp < min_bp
+            break
+        deat(p)
+        left = DBin(op: t.text, l: left, r: dexpr(p, bp + 1))
+    left
+
+fn dstmt(p: mut DP) -> DStmt
+    let t = dcur(p)
+    if t.kind == Kw and t.text == "let"
+        deat(p)
+        let name = deat(p).text
+        deat(p)                          # =
+        DLet(name: name, value: dexpr(p, 0))
+    else
+        deat(p)                          # `print`
+        DPrint(value: dexpr(p, 0))
+
+fn parse_data_program(src: str) -> [DStmt]
+    var p = DP(toks: lex_layout(src), pos: 0)
+    var prog = []
+    dnl(p)
+    while dcur(p).kind != End
+        prog.push(dstmt(p))
+        dnl(p)
+    prog
