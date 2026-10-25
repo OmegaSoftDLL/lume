@@ -67,11 +67,15 @@ Each of these is a real body of work. The staged, test-first approach here delib
       `lumec2` compiles every conformance program correctly, no C in the target pipeline.
 - [ ] Lexical scoping (use-before-def / out-of-scope), fuller type checking (call arity, match
       exhaustiveness, operator types), effects/ownership/contract enforcement.
-- [~] Delete the last C — **zero-C loop proven.** `compiler/stage1/lasm.src` is an x86-64
-      assembler + ELF64 writer in Lume-Core (byte-level `emit`/`flush` runtime). Steady state
-      uses no C: `lumec` self-compiles → asm; `lasm` assembles → a `lumec` that reproduces
-      itself bit-identically and compiles programs correctly. Remaining before `bootstrap/` is
-      removed: speed up `assemble()` (slow on large inputs), add `movabs`, and ship a
-      Lume-produced seed so the first binaries don't need the C seed either.
+- [x] **Zero-C self-host, staged (GCC/Rust/Go model).** `compiler/stage1/lasm.src` is an
+      x86-64 assembler + ELF64 writer in Lume-Core (byte-level `emit`/`flush`), covering the
+      full instruction set `lumec` emits incl. 64-bit immediates (`movabs`), ~18x faster after
+      the O(n) line-split fix. `scripts/bootstrap.sh` (`make bootstrap`) runs the staged build:
+      Stage 0 (the **frozen C seed** `lume0`) mints `lumec` + `lasm`; stages 1–3 rebuild the
+      whole toolchain from Lume source with **no C**, and it asserts **stage 2 == stage 3,
+      bit for bit**. The C seed is kept only as the reproducibility root, never on the
+      steady-state path.
+- [ ] Byte-perfect `lasm` (drop the 1 trailing `\n` via a top-level expression statement in the
+      parser) and a runtime `slice`/`count` that is O(1), not O(n) via `strlen` (a further ~2x).
 
 This file is updated as the inventory grows.

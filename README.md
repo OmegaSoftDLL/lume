@@ -114,13 +114,20 @@ lume/
 
 ## How Lume is built (no third language in the loop)
 
-1. **Stage 0 — `lume0`** (C, disposable): a small interpreter for the core subset. Its only job is
-   to run Stage 1 once. Then it is frozen as the reproducibility root.
-2. **Stage 1 — `lumec`** (Lume): the real compiler, written in Lume, compiled by `lume0` the first
-   time, then by itself (triple build: A → B → C, B ≡ C).
-3. **Stage 2+ — `lume evolve`**: the language evolves through its own tooling. AI proposes changes
-   via the compiler-as-a-service API; automated gates (conformance, triple self-build, proofs,
-   benchmarks, size budget) verify; humans decide. See `docs/04-roadmap.md`.
+This is a **staged, self-verifying bootstrap** — the model GCC, Rust and Go use — run by
+[`scripts/bootstrap.sh`](scripts/bootstrap.sh) (`make bootstrap`):
+
+1. **Stage 0 — `lume0`** (C): the frozen bootstrap seed. It mints the first `lumec` (compiler)
+   and `lasm` (assembler + ELF writer) once — exactly as GCC needs a system C compiler and Rust
+   needs a prior `rustc`. It is kept as the reproducibility root and is **never on the
+   steady-state path**.
+2. **Stages 1–3 — Lume builds Lume, no C**: the seed-built tools rebuild the whole toolchain
+   (`lumec.src` + `lasm.src`) from Lume source; stage 2 and stage 3 then build it again, and the
+   bootstrap asserts **stage 2 == stage 3, bit for bit**. `lumec` emits x86-64 and `lasm` writes
+   the ELF — no C compiler, assembler or linker in the loop. This fixpoint holds today.
+3. **Stage 4+ — `lume evolve`** (future): the language evolves through its own tooling. AI proposes
+   changes via the compiler-as-a-service API; automated gates (conformance, the staged self-build,
+   proofs, benchmarks, size budget) verify; humans decide. See `docs/04-roadmap.md`.
 
 ## Status
 
@@ -139,12 +146,19 @@ lume/
 ## Quickstart
 
 ```sh
-make -C bootstrap/lume0                         # build the seed (strict warnings)
+make bootstrap          # staged self-host: C seed -> lumec+lasm -> rebuild in Lume; assert stage2==stage3
+make test               # run the conformance suite (and `make asan` for the sanitized build)
+
+# or by hand:
+make -C bootstrap/lume0                               # build the seed (strict warnings)
 bootstrap/lume0/lume0 check  examples/01_hello.lume   # lex + parse + name/type/arity checks
 bootstrap/lume0/lume0 run    examples/01_hello.lume   # interpret
-# source -> native, with no C and no as/ld:
-bootstrap/lume0/lume0 run compiler/stage1/data_asm_cc.lume compiler/stage1/calc.src /tmp/calc.s
-bootstrap/lume0/lume0 asm /tmp/calc.s /tmp/calc && /tmp/calc
+# source -> native with NO C in the loop (compiler AND assembler are Lume):
+bootstrap/lume0/lume0 run compiler/stage1/data_asm_cc.lume compiler/stage1/lumec.src /tmp/l.s
+bootstrap/lume0/lume0 asm /tmp/l.s /tmp/lumec         # one-time seed build of lumec
+bootstrap/lume0/lume0 run compiler/stage1/data_asm_cc.lume compiler/stage1/lasm.src /tmp/la.s
+bootstrap/lume0/lume0 asm /tmp/la.s /tmp/lasm         # one-time seed build of lasm
+cat compiler/stage1/nfib.src | /tmp/lumec | /tmp/lasm > /tmp/nfib && chmod +x /tmp/nfib && /tmp/nfib
 ```
 
 ## Contributing
