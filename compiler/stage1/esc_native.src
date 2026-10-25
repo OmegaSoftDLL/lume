@@ -1,0 +1,3 @@
+print "a\nb"
+print "tab\there end"
+print "quote \" and backslash \\ done"

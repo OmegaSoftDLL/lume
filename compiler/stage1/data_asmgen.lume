@@ -87,10 +87,19 @@ type AC = record
 fn sesc(s: str) -> str
     var out = ""
     for ch in s.chars()
-        if ch == '"' or ch == '\\'
-            out = out + "\\" + str(ch)
+        let c = str(ch)
+        if c == "\""
+            out = out + "\\" + "\""
+        elif c == "\\"
+            out = out + "\\" + "\\"
+        elif c == "\n"
+            out = out + "\\" + "n"
+        elif c == "\t"
+            out = out + "\\" + "t"
+        elif c == "\r"
+            out = out + "\\" + "r"
         else
-            out = out + str(ch)
+            out = out + c
     out
 
 ## maximum match-nesting depth in an expression (for scrutinee frame slots)
