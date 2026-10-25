@@ -86,21 +86,21 @@ fn areg(i: int) -> str
 ## emit asm that computes `e` and leaves its value pushed on the stack
 fn aexpr(e: DExpr, c: mut AC) -> str
     match e
-        DInt(n) => "    movq $" + str(n) + ", %rax\n    pushq %rax\n"
+        DInt(n) => "    movq $" + str(n) + ", %rdi\n    call mkint\n    pushq %rax\n"
         DVar(nm) => do
             let k = idx_of(c.locals, nm)
             "    movq " + str(0 - 8 * (k + 1)) + "(%rbp), %rax\n    pushq %rax\n"
         DBin(op, l, r) => do
             let a = aexpr(l, c)
             let b = aexpr(r, c)
-            a + b + "    popq %rcx\n    popq %rax\n" + abin(op) + "    pushq %rax\n"
+            a + b + "    popq %rcx\n    popq %rax\n    movq 8(%rax), %rax\n    movq 8(%rcx), %rcx\n" + abin(op) + "    movq %rax, %rdi\n    call mkint\n    pushq %rax\n"
         DIf(cond, t, e2) => do
             let lab = c.nlabel
             c.nlabel = c.nlabel + 1
             let cc = aexpr(cond, c)
             let tt = aexpr(t, c)
             let ee = aexpr(e2, c)
-            cc + "    popq %rax\n    testq %rax, %rax\n    jz .Le" + str(lab) + "\n" + tt + "    jmp .Lx" + str(lab) + "\n.Le" + str(lab) + ":\n" + ee + ".Lx" + str(lab) + ":\n"
+            cc + "    popq %rax\n    movq 8(%rax), %rax\n    testq %rax, %rax\n    jz .Le" + str(lab) + "\n" + tt + "    jmp .Lx" + str(lab) + "\n.Le" + str(lab) + ":\n" + ee + ".Lx" + str(lab) + ":\n"
         DLetIn(nm, v, body) => do
             let vv = aexpr(v, c)
             let k = idx_of(c.locals, nm)
@@ -137,7 +137,7 @@ fn afn(nm: str, params: [str], body: DExpr, c: mut AC) -> str
     out + "    popq %rax\n    movq %rbp, %rsp\n    popq %rbp\n    ret\n"
 
 fn runtime_tail() -> str
-    "print_int:\n    movq %rdi, %rax\n    xorq %r9, %r9\n    testq %rax, %rax\n    jge 1f\n    negq %rax\n    movq $1, %r9\n1:\n    leaq pbuf+31(%rip), %rsi\n    movb $10, (%rsi)\n    movq $1, %rcx\n    movq $10, %rbx\n2:\n    decq %rsi\n    xorq %rdx, %rdx\n    divq %rbx\n    addb $48, %dl\n    movb %dl, (%rsi)\n    incq %rcx\n    testq %rax, %rax\n    jnz 2b\n    testq %r9, %r9\n    je 3f\n    decq %rsi\n    movb $45, (%rsi)\n    incq %rcx\n3:\n    movq $1, %rax\n    movq $1, %rdi\n    movq %rcx, %rdx\n    syscall\n    ret\n"
+    "alloc:\n    movq heap_cur(%rip), %rax\n    movq %rax, %r10\n    addq %rdi, %r10\n    movq %r10, heap_cur(%rip)\n    ret\nmkint:\n    movq %rdi, %r11\n    movq $16, %rdi\n    call alloc\n    movq $0, (%rax)\n    movq %r11, 8(%rax)\n    ret\nprint_int:\n    movq %rdi, %rax\n    xorq %r9, %r9\n    testq %rax, %rax\n    jge 1f\n    negq %rax\n    movq $1, %r9\n1:\n    leaq pbuf+31(%rip), %rsi\n    movb $10, (%rsi)\n    movq $1, %rcx\n    movq $10, %rbx\n2:\n    decq %rsi\n    xorq %rdx, %rdx\n    divq %rbx\n    addb $48, %dl\n    movb %dl, (%rsi)\n    incq %rcx\n    testq %rax, %rax\n    jnz 2b\n    testq %r9, %r9\n    je 3f\n    decq %rsi\n    movb $45, (%rsi)\n    incq %rcx\n3:\n    movq $1, %rax\n    movq $1, %rdi\n    movq %rcx, %rdx\n    syscall\n    ret\n"
 
 fn agen(prog: [DStmt]) -> str
     var c = AC(locals: [], nlabel: 0)
@@ -149,7 +149,9 @@ fn agen(prog: [DStmt]) -> str
                 funcs = funcs + afn(nm, ps, body, c)
             DPrint(v) => do
                 c.locals = []
-                main = main + aexpr(v, c) + "    popq %rdi\n    call print_int\n"
+                main = main + aexpr(v, c) + "    popq %rdi\n    movq 8(%rdi), %rdi\n    call print_int\n"
             DLet(nm, v) => do
                 let _ = 0
-    "    .section .bss\n    .lcomm pbuf, 32\n    .section .text\n" + funcs + runtime_tail() + "    .globl _start\n_start:\n" + main + "    movq $60, %rax\n    xorq %rdi, %rdi\n    syscall\n"
+    let bss = "    .section .bss\n    .lcomm pbuf, 32\n    .lcomm heap_cur, 8\n    .section .text\n"
+    let heap_init = "    movq $12, %rax\n    xorq %rdi, %rdi\n    syscall\n    movq %rax, heap_cur(%rip)\n    leaq 67108864(%rax), %rdi\n    movq $12, %rax\n    syscall\n"
+    bss + funcs + runtime_tail() + "    .globl _start\n_start:\n" + heap_init + main + "    movq $60, %rax\n    xorq %rdi, %rdi\n    syscall\n"
