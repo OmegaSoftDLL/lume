@@ -18,7 +18,11 @@ fn bskip_nl(p: mut P)
         beat(p)
 
 fn blbp(op: str) -> int
-    if op == "==" or op == "!=" or op == "<" or op == ">" or op == "<=" or op == ">="
+    if op == "or"
+        2
+    elif op == "and"
+        3
+    elif op == "==" or op == "!=" or op == "<" or op == ">" or op == "<=" or op == ">="
         5
     elif op == "+" or op == "-"
         10
@@ -54,7 +58,8 @@ fn bexpr(p: mut P, min_bp: int) -> Expr
     var left = bprimary(p)
     while true
         let t = bcur(p)
-        if t.kind != Op
+        let isop = t.kind == Op or (t.kind == Kw and (t.text == "and" or t.text == "or"))
+        if not isop
             break
         let bp = blbp(t.text)
         if bp == 0 or bp < min_bp

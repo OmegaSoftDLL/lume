@@ -2,12 +2,20 @@
 ## Compiles functions, while/if/assignment/print/return/calls to C -> native.
 use block_ast
 
+fn bcop(op: str) -> str
+    if op == "and"
+        "&&"
+    elif op == "or"
+        "||"
+    else
+        op
+
 fn bcexpr(e: Expr) -> str
     match e
         Num(v)        => "{v}"
         Name(id)      => id
         Call(nm, args) => nm + "(" + args.map(bcexpr).join(", ") + ")"
-        Bin(op, l, r) => "(" + bcexpr(l) + " " + op + " " + bcexpr(r) + ")"
+        Bin(op, l, r) => "(" + bcexpr(l) + " " + bcop(op) + " " + bcexpr(r) + ")"
 
 fn collect_vars(stmts: [Stmt], acc: mut map[str, int])
     for s in stmts
