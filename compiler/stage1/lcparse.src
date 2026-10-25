@@ -28,6 +28,8 @@ fn skiprp(ts) = if headtext(ts) == ")" then droponce(ts) else ts
 fn dropkw(ts, kw) = if headtext(ts) == kw then droponce(ts) else ts
 fn parseif(t) = let rc = expr(t) in let tb = expr(dropkw(rc.rest, "then")) in let eb = expr(dropkw(tb.rest, "else")) in {node: If(rc.node, tb.node, eb.node), rest: eb.rest}
 fn parselet(t) = let nm = headtext(t) in let rv = expr(dropkw(droponce(t), "=")) in let rb = expr(dropkw(rv.rest, "in")) in {node: LetIn(nm, rv.node, rb.node), rest: rb.rest}
+fn postloop(r) = if headtext(r.rest) == "." then postloop({node: Field(r.node, headtext(droponce(r.rest))), rest: droponce(droponce(r.rest))}) else r
+fn post(ts) = postloop(prim(ts))
 
 ## --- parser: {node, rest}; AST constructors Num/Var/Bin/Call ---
 fn primid(name, t) = if headtext(t) == "(" then let a = arglist(droponce(t)) in {node: Call(name, a.items), rest: a.rest} else {node: Var(name), rest: t}
@@ -38,8 +40,8 @@ fn arglist(ts) = if headtext(ts) == ")" then {items: Nil, rest: droponce(ts)} el
 fn argmore(r) = if headtext(r.rest) == "," then let rr = arglist(droponce(r.rest)) in {items: Cons(r.node, rr.items), rest: rr.rest} else {items: Cons(r.node, Nil), rest: skiprp(r.rest)}
 fn mulloop(r) = match r.rest
     Nil        => r
-    Cons(h, t) => if h.text == "*" or h.text == "/" or h.text == "%" then let r2 = prim(t) in mulloop({node: Bin(h.text, r.node, r2.node), rest: r2.rest}) else r
-fn mul(ts) = mulloop(prim(ts))
+    Cons(h, t) => if h.text == "*" or h.text == "/" or h.text == "%" then let r2 = post(t) in mulloop({node: Bin(h.text, r.node, r2.node), rest: r2.rest}) else r
+fn mul(ts) = mulloop(post(ts))
 fn addloop(r) = match r.rest
     Nil        => r
     Cons(h, t) => if h.text == "+" or h.text == "-" then let r2 = mul(t) in addloop({node: Bin(h.text, r.node, r2.node), rest: r2.rest}) else r
@@ -66,6 +68,7 @@ fn show(e) = match e
     Call(f, args) => f + "(" + showargs(args) + ")"
     If(c, a, b)   => "if " + show(c) + " then " + show(a) + " else " + show(b)
     LetIn(x, v, b) => "let " + x + " = " + show(v) + " in " + show(b)
+    Field(o, f)   => show(o) + "." + f
 
 print show(parse("2 + 3 * 4"))
 print show(parse("f(1, 2 + 3, g(x))"))
@@ -77,3 +80,5 @@ print show(parse("greet(\"hi\", name)"))
 print show(parse("if a < b then 1 else 2"))
 print show(parse("let x = 2 + 3 in x * x"))
 print show(parse("if n == 0 then Nil else Cons(n, f(n - 1))"))
+print show(parse("p.node.rest"))
+print show(parse("f(x).kind + r.a * r.b"))
