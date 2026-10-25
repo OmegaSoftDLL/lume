@@ -38,7 +38,7 @@ static void gen_block_value(Asm *a, const Node *n);
  * frame reserves a slot for each. Params are added separately, before this. */
 static void collect_locals(const Node *n, Names *v) {
     if (!n) return;
-    if (n->kind == N_VAR || n->kind == N_LET) {
+    if (n->kind == N_VAR || n->kind == N_LET || n->kind == N_FOR) {
         const Node *pat = n->nkid ? n->kids[0] : NULL;
         if (pat && pat->text) names_add(v, pat->text, (int)pat->text_len);
     }
@@ -61,7 +61,10 @@ static void gen_bin(Asm *a, const char *op, int oplen) {
         else if(!memcmp(op,"!=",2)) fprintf(a->out,"    cmpq %%rcx, %%rax\n    setne %%al\n    movzbq %%al, %%rax\n");
         else if(!memcmp(op,"<=",2)) fprintf(a->out,"    cmpq %%rcx, %%rax\n    setle %%al\n    movzbq %%al, %%rax\n");
         else if(!memcmp(op,">=",2)) fprintf(a->out,"    cmpq %%rcx, %%rax\n    setge %%al\n    movzbq %%al, %%rax\n");
+        else if(!memcmp(op,"or",2)) fprintf(a->out,"    cmpq $0, %%rax\n    setne %%al\n    cmpq $0, %%rcx\n    setne %%cl\n    orb %%cl, %%al\n    movzbq %%al, %%rax\n");
         else a->ok=0;
+    } else if (oplen==3 && !memcmp(op,"and",3)) {
+        fprintf(a->out,"    cmpq $0, %%rax\n    setne %%al\n    cmpq $0, %%rcx\n    setne %%cl\n    andb %%cl, %%al\n    movzbq %%al, %%rax\n");
     } else a->ok=0;
     fprintf(a->out, "    pushq %%rax\n");
 }
@@ -77,6 +80,7 @@ static void gen_expr(Asm *a, const Node *n) {
     }
     case N_UNARY:
         if (n->text_len==1 && n->text[0]=='-') { gen_expr(a, n->kids[0]); fprintf(a->out, "    popq %%rax\n    negq %%rax\n    pushq %%rax\n"); }
+        else if ((n->text_len==3 && !memcmp(n->text,"not",3)) || (n->text_len==1 && n->text[0]=='!')) { gen_expr(a, n->kids[0]); fprintf(a->out, "    popq %%rax\n    cmpq $0, %%rax\n    sete %%al\n    movzbq %%al, %%rax\n    pushq %%rax\n"); }
         else a->ok=0;
         break;
     case N_BINARY: gen_expr(a, n->kids[0]); gen_expr(a, n->kids[1]); gen_bin(a, n->text, n->text_len); break;
@@ -101,6 +105,21 @@ static void gen_expr(Asm *a, const Node *n) {
         break;
     }
     case N_BLOCK: case N_DOBLOCK: gen_block_value(a, n); break;
+    case N_IF: {
+        /* an if/else (or if/elif/else) in value position: each branch yields a value */
+        int L = a->label++;
+        gen_expr(a, n->kids[0]);
+        fprintf(a->out, "    popq %%rax\n    testq %%rax, %%rax\n    jz .Lie%d\n", L);
+        const Node *th = n->kids[1];
+        if (th->kind == N_BLOCK || th->kind == N_DOBLOCK) gen_block_value(a, th); else gen_expr(a, th);
+        fprintf(a->out, "    jmp .Lix%d\n.Lie%d:\n", L, L);
+        if (n->nkid >= 3) {
+            const Node *el = n->kids[2];
+            if (el->kind == N_BLOCK || el->kind == N_DOBLOCK) gen_block_value(a, el); else gen_expr(a, el);
+        } else fprintf(a->out, "    pushq $0\n");
+        fprintf(a->out, ".Lix%d:\n", L);
+        break;
+    }
     default: a->ok = 0; break;
     }
 }
@@ -115,6 +134,10 @@ static int slot_of(Asm *a, const Node *id, int *islocal) {
 static void store_top(Asm *a, int slot, int islocal) {
     if (islocal) fprintf(a->out, "    popq %%rax\n    movq %%rax, %d(%%rbp)\n", -8*(slot+1));
     else fprintf(a->out, "    popq %%rax\n    movq %%rax, v%d(%%rip)\n", slot);
+}
+static void load_slot(Asm *a, int slot, int islocal) {
+    if (islocal) fprintf(a->out, "    movq %d(%%rbp), %%rax\n    pushq %%rax\n", -8*(slot+1));
+    else fprintf(a->out, "    movq v%d(%%rip), %%rax\n    pushq %%rax\n", slot);
 }
 
 /* a statement: leaves nothing on the value stack. */
@@ -155,6 +178,25 @@ static void gen_stmt(Asm *a, const Node *n) {
         fprintf(a->out, ".Lsx%d:\n", L);
         break;
     }
+    case N_FOR: {
+        const Node *pat = n->kids[0], *rng = n->kids[1], *body = n->kids[2];
+        if (pat->kind != N_PBIND || rng->kind != N_RANGE || rng->nkid < 2) { a->ok = 0; break; }
+        int il; int s = slot_of(a, pat, &il);
+        int inc = (rng->flags & F_INCLUSIVE) != 0;
+        int L = a->label++;
+        gen_expr(a, rng->kids[0]); store_top(a, s, il);     /* i = lo */
+        fprintf(a->out, ".Lf%d:\n", L);
+        load_slot(a, s, il);                                 /* i */
+        gen_expr(a, rng->kids[1]);                           /* hi */
+        gen_bin(a, inc ? "<=" : "<", inc ? 2 : 1);
+        fprintf(a->out, "    popq %%rax\n    testq %%rax, %%rax\n    jz .Lfe%d\n", L);
+        gen_stmt(a, body);
+        load_slot(a, s, il);
+        fprintf(a->out, "    popq %%rax\n    incq %%rax\n    pushq %%rax\n");
+        store_top(a, s, il);                                 /* i = i + 1 */
+        fprintf(a->out, "    jmp .Lf%d\n.Lfe%d:\n", L, L);
+        break;
+    }
     case N_BLOCK: case N_DOBLOCK:
         for (int i = 0; i < n->nkid; i++) gen_stmt(a, n->kids[i]);
         break;
@@ -181,6 +223,7 @@ static void gen_block_value(Asm *a, const Node *n) {
     const Node *last = n->kids[m-1];
     if (last->kind == N_EXPRSTMT) gen_expr(a, last->kids[0]);
     else if (last->kind == N_BLOCK || last->kind == N_DOBLOCK) gen_block_value(a, last);
+    else if (last->kind == N_IF || last->kind == N_IFEXPR) gen_expr(a, last);
     else if (last->kind == N_RETURN) gen_stmt(a, last);
     else { gen_stmt(a, last); fprintf(a->out, "    pushq $0\n"); }
 }
