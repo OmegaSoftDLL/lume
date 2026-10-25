@@ -429,6 +429,9 @@ fn agen(prog: [DStmt]) -> str
             DPrint(v) => do
                 collect_lets(v, mlocals)
                 mdepth = imax(mdepth, match_depth(v))
+            DExprS(v) => do
+                collect_lets(v, mlocals)
+                mdepth = imax(mdepth, match_depth(v))
             DFnS(nm, ps, body) => do
                 let _ = 0
     c.globals = gl
@@ -447,6 +450,14 @@ fn agen(prog: [DStmt]) -> str
                 c.out = []
                 aexpr(v, c)
                 c.out.push("    popq %rdi\n    call printval\n")
+                main.push(c.out.join(""))
+            DExprS(v) => do
+                c.locals = mlocals
+                c.depth = 0
+                c.bound = []
+                c.out = []
+                aexpr(v, c)
+                c.out.push("    popq %rax\n")
                 main.push(c.out.join(""))
             DLet(nm, v) => do
                 c.locals = mlocals

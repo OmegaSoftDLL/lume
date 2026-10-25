@@ -32,3 +32,4 @@ type DStmt = enum
     DLet(name: str, value: DExpr)
     DPrint(value: DExpr)
     DFnS(name: str, params: [str], body: DExpr)
+    DExprS(value: DExpr)

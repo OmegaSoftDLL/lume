@@ -91,6 +91,14 @@ subset; the triple self-build is not reached.
 - ML-core -> native covers: ints, strings (==, ordering, concat, print via write), enum
   constructors + match, records + field access, lists + indexing, builtins
   count/at/slice/toint/str, let-in, if, recursion.
+- **Top-level expression statements** (`ExprS` in `lumec.src`, `DExprS` in the `data_asmgen`
+  oracle / `data_parser`): a bare top-level expression is evaluated for its effect and its value
+  discarded (`popq %rax`, no `printval`) — as in C/Go/Rust. This let `lasm.src`'s entry point become
+  `assemble(readall())` then `flush()` (no `print`), so `lasm`'s ELF is now **byte-for-byte identical
+  to the `lume0 asm` oracle** (0 diff; previously 1 trailing `\n`). The fixpoint stays bit-identical
+  (`lumec.src` itself uses no expression statements, so its parse is unchanged). The transitional C
+  backend (`data_codegen`) and the tree-walking interpreter (`data_eval`) do not lower expression
+  statements — nothing routes them there (native/asm only).
 - `lume0 asm` encoder: mov/lea, ALU group, imul, neg/not/mul/div/idiv/inc/dec, test, cqto,
   movzbq/l, setcc, push/pop, jmp/call/jcc, syscall, ret; ModRM/SIB/REX; rip-relative;
   labels incl. GAS numeric (`1:`/`1f`/`2b`); .rodata/.ascii/.asciz; .lcomm bss.
