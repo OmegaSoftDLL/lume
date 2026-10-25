@@ -3,6 +3,7 @@
 ## ELF64 executable to stdout, byte for byte, via the `emit` runtime builtin (NO C, NO as/ld).
 ## This is a functional port of bootstrap/lume0/elf.c (same encoding logic and ELF layout):
 ##   pass 1 (layout) computes every label address; pass 2 (emit) encodes the instruction bytes.
+## movabs (REX.W B8+r imm64) is emitted for `movq $imm, %reg` when imm does not fit a signed imm32.
 ## Slice 1 scope: the instruction/directive set that lumec emits for the whole Lume-Core subset
 ## (everything in nfib.s, runtime included). See docs for what is out of scope.
 
@@ -29,6 +30,10 @@ fn b2(v) = Cons(lowbyte(v), Cons(lowbyte(v / 256), Nil))
 fn b4(v) = b4u(if v < 0 then v + 4294967296 else v)
 fn b4u(u) = Cons(u % 256, Cons((u / 256) % 256, Cons((u / 65536) % 256, Cons((u / 16777216) % 256, Nil))))
 fn b8(v) = app(b4(v), b4(v / 4294967296))
+## signed 64-bit little-endian: lo = v mod 2^32 (always >= 0), hi = (v - lo) / 2^32 is exact
+## and fits in [-2^31, 2^31), so b4 encodes it in two's complement. Used for movabs imm64.
+fn b8s(v) = b8lo(v, ((v % 4294967296) + 4294967296) % 4294967296)
+fn b8lo(v, lo) = app(b4u(lo), b4((v - lo) / 4294967296))
 
 ## --- character classes ---
 fn isdigit(c) = c >= "0" and c <= "9"
@@ -136,7 +141,12 @@ fn encjmp(mn, tgt, iend, syms) = Cons(if mn == "jmp" then 233 else 232, b4(symad
 fn encunary(mn, a, iend, syms) = if mn == "incq" then encrm(8, Cons(255, Nil), 0, a, iend, syms) else if mn == "decq" then encrm(8, Cons(255, Nil), 1, a, iend, syms) else encrm(8, Cons(247, Nil), unaryext(mn), a, iend, syms)
 fn encimul(ins, iend, syms) = if ins.a.k == 2 then app(encrm(8, Cons(105, Nil), ins.b.reg, ins.b, iend, syms), b4(ins.a.imm)) else encrm(8, Cons(15, Cons(175, Nil)), ins.b.reg, ins.a, iend, syms)
 fn encmov(mn, ins, iend, syms) = encmov2(opsizeof(mn), ins.a, ins.b, iend, syms)
-fn encmov2(os, a, b, iend, syms) = if a.k == 2 then app(encrm(os, Cons(if os == 1 then 198 else 199, Nil), 0, b, iend, syms), if os == 1 then Cons(lowbyte(a.imm), Nil) else b4(a.imm)) else if a.k == 1 then encrm(os, Cons(if os == 1 then 136 else 137, Nil), a.reg, b, iend, syms) else encrm(os, Cons(if os == 1 then 138 else 139, Nil), b.reg, a, iend, syms)
+## movabs: a 64-bit immediate to a register that does not fit a sign-extended imm32 needs
+## REX.W B8+r imm64 (10 bytes); C7 would truncate it. Mirrors the movq case of elf.c emit_ins.
+fn isbigimm(os, a, b) = os == 8 and a.k == 2 and b.k == 1 and (a.imm < 0 - 2147483648 or a.imm > 2147483647)
+fn encmovabs(a, b) = Cons(72 + (if b.reg >= 8 then 1 else 0), Cons(184 + b.reg % 8, b8s(a.imm)))
+fn encmov2(os, a, b, iend, syms) = if isbigimm(os, a, b) then encmovabs(a, b) else encmov2s(os, a, b, iend, syms)
+fn encmov2s(os, a, b, iend, syms) = if a.k == 2 then app(encrm(os, Cons(if os == 1 then 198 else 199, Nil), 0, b, iend, syms), if os == 1 then Cons(lowbyte(a.imm), Nil) else b4(a.imm)) else if a.k == 1 then encrm(os, Cons(if os == 1 then 136 else 137, Nil), a.reg, b, iend, syms) else encrm(os, Cons(if os == 1 then 138 else 139, Nil), b.reg, a, iend, syms)
 fn encalu(mn, ins, iend, syms) = encalu2(opsizeof(mn), core(mn), ins, iend, syms)
 fn encalu2(os, c, ins, iend, syms) = encalu3(os, aluext(c), alustore(c), ins.a, ins.b, iend, syms)
 fn encalu3(os, ext, sop, a, b, iend, syms) = if ext < 0 then Nil else if a.k == 2 then app(encrm(os, Cons(if os == 1 then 128 else 129, Nil), ext, b, iend, syms), if os == 1 then Cons(lowbyte(a.imm), Nil) else b4(a.imm)) else if a.k == 1 then encrm(os, Cons(if os == 1 then sop - 1 else sop, Nil), a.reg, b, iend, syms) else encrm(os, Cons(if os == 1 then sop + 1 else sop + 2, Nil), b.reg, a, iend, syms)
