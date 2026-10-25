@@ -68,6 +68,8 @@ fn dprimary(p: mut DP) -> DExpr
     let t = deat(p)
     if t.kind == Int
         DInt(n: t.text.parse_int() ?? 0)
+    elif t.kind == Str
+        DStr(value: t.text[1..t.text.len() - 1])
     elif t.kind == Op and t.text == "("
         let e = dexpr(p, 0)
         deat(p)

@@ -4,16 +4,30 @@ use std.io
 
 type RV = enum
     VInt(n: int)
+    VStr(s: str)
     VObj(tag: str, fields: [RV])
 
 fn rv_int(v: RV) -> int
     match v
         VInt(n)     => n
+        VStr(s)     => 0
         VObj(t, fs) => 0
+
+fn rv_is_str(v: RV) -> bool
+    match v
+        VStr(s) => true
+        _       => false
+
+fn rv_str(v: RV) -> str
+    match v
+        VStr(s)     => s
+        VInt(n)     => "{n}"
+        VObj(t, fs) => "<obj>"
 
 fn rv_show(v: RV) -> str
     match v
         VInt(n)     => "{n}"
+        VStr(s)     => s
         VObj(t, fs) => do
             if fs.len() == 0
                 t
@@ -29,10 +43,12 @@ fn match_pat(p: Pat, v: RV, env: mut map[str, RV]) -> bool
         PInt(k)     => do
             match v
                 VInt(m)     => m == k
+                VStr(s)     => false
                 VObj(t, fs) => false
         PCons(tag, subs) => do
             match v
                 VInt(m) => false
+                VStr(s) => false
                 VObj(vtag, fields) => do
                     if vtag != tag
                         return false
@@ -66,9 +82,14 @@ fn deval(e: DExpr, env: map[str, RV], fns: [DStmt]) -> RV
                     DPrint(v2) => do
                         let _ = 0
             result
+        DStr(sv)      => VStr(s: sv)
         DBin(op, l, r) => do
-            let a = rv_int(deval(l, env, fns))
-            let b = rv_int(deval(r, env, fns))
+            let lv = deval(l, env, fns)
+            let rv = deval(r, env, fns)
+            if op == "+" and rv_is_str(lv) and rv_is_str(rv)
+                return VStr(s: rv_str(lv) + rv_str(rv))
+            let a = rv_int(lv)
+            let b = rv_int(rv)
             match op
                 "+"  => VInt(n: a + b)
                 "-"  => VInt(n: a - b)
