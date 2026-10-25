@@ -1,4 +1,20 @@
-# Lume — the evolution of programming languages
+# Lume — the AI-first programming language
+
+<p align="center">
+  <img alt="Language: Lume" src="https://img.shields.io/badge/language-Lume-8A2BE2">
+  <img alt="Built with 100% Lume" src="https://img.shields.io/badge/built%20with-100%25%20Lume-8A2BE2">
+  <a href="https://github.com/OmegaSoftDLL/lume/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/OmegaSoftDLL/lume/actions/workflows/ci.yml/badge.svg"></a>
+  <img alt="License: MIT OR Apache-2.0" src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue">
+  <img alt="Status: bootstrap" src="https://img.shields.io/badge/status-bootstrap-orange">
+  <img alt="PRs welcome" src="https://img.shields.io/badge/PRs-welcome-brightgreen">
+</p>
+
+> **100% Lume.** The compiler that turns Lume into native machine code is itself written in
+> Lume; a program goes from Lume source to a runnable ELF executable with **no C compiler and no
+> external assembler or linker** in the loop. The C seed under `bootstrap/` is a disposable
+> bootstrap that is removed once the language self-hosts. (GitHub's language bar is computed by
+> Linguist, which only lists languages already in its catalogue, so a new language like Lume does
+> not appear there yet.)
 
 > *Lume* (Portuguese/Galician: light, glow). Working title — easy to rename, see `docs/02-principles.md`.
 
@@ -72,7 +88,10 @@ fn main() ! Error
 ```
 lume/
 ├── README.md
+├── AGENTS.md                  ← read first: rules for any contributor/agent
+├── CONTRIBUTING.md            ← how to contribute
 ├── docs/
+│   ├── PROJECT_STATE.md       ← the full source of truth: state, rules, pitfalls
 │   ├── 00-catalog.md          ← ~260 languages, by era and family
 │   ├── 01-survey.md           ← what each got right / wrong, and what Lume takes
 │   ├── 02-principles.md       ← P1–P32: the rules the design obeys
@@ -106,18 +125,34 @@ lume/
 ## Status
 
 - [x] Phase 0 — Catalog, survey, principles, specification v0.1, grammar, roadmap, vision, examples
-- [x] Stage 0 — Lexer + parser + **tree-walking interpreter** (`bootstrap/lume0`): `lume0 run` executes examples 01–07; 31 tests, ASan clean
-- [~] Stage 1 — a `lumec` written in Lume (lexers incl. layout, parsers for expressions/functions/blocks/ADTs, a checker, evaluators, C codegen, a file-driven CLI) compiles a growing subset — `let`, expressions, functions, recursion, `if`, `while`, and (interpreted) algebraic data types with `match` — to C → native; a direct x86-64 backend in the bootstrap emits assembly with no C. See `docs/10-stage1-status.md`. Remaining for the fixpoint: unify the front-ends, add strings/lists/maps/records + their codegen, then the triple self-build and freeze `lume0`
-- [~] Stage 1 — a `lumec` written in Lume (lexers incl. layout, parsers for expressions/functions/blocks/ADTs, a checker, evaluators, C codegen, a file-driven CLI) compiles a growing subset — `let`, expressions, functions, recursion, `if`, `while`, and (interpreted) algebraic data types with `match` — to C → native; a direct x86-64 backend in the bootstrap emits assembly with no C. See `docs/10-stage1-status.md`. Remaining for the fixpoint: unify the front-ends, add strings/lists/maps/records + their codegen, then the triple self-build and freeze `lume0`
+- [x] Stage 0 — Lexer + parser + **tree-walking interpreter** (`bootstrap/lume0`): `lume0 run` executes examples 01–09; ASan clean
+- [x] **Semantic `check`** — `lume0 check` is no longer parse-only: it reports undefined names (R0200), literal/annotation type mismatches (T0001), duplicate parameters/functions (D0001/D0002) and wrong call arity (A0001/A0002). This is the AI-first edit→check→fix loop made real: the compiler catches the model's mistakes.
+- [x] **No-toolchain native pipeline** — a code generator **written in Lume** (`compiler/stage1/data_asmgen.lume`) emits x86-64, and the seed's own assembler + ELF writer (`lume0 asm`) produce a native binary with **no C, no `as`/`ld`, no libc**. A full compiler written in Lume (`calc.src`: tokenizer + parser + evaluator + emitter) compiles this way and matches the interpreter.
+- [~] Stage 1 — the ML-core (constructors, `match`, records, lists, strings, builtins) lowers to C **and** to native; a file-driven `lumec` compiles a growing subset. Remaining for the fixpoint: unify the front-ends (surface Lume vs ML-core), grow the native path to the full language, then self-host `lumec` and the triple self-build. See `docs/10-stage1-status.md` and `docs/PROJECT_STATE.md`.
 - [ ] Stage 2 — `comptime`, macros, `table`/`query`, package manager
 - [ ] Stage 3 — Ownership checker, structured concurrency, effects, `@gc` regions
 - [ ] Stage 4 — Tensors, autodiff, GPU kernels, `prob`, `rule`, `llm fn`
 - [ ] Stage 5 — Bare metal, `lume-os`, verified core
 
+## Quickstart
+
+```sh
+make -C bootstrap/lume0                         # build the seed (strict warnings)
+bootstrap/lume0/lume0 check  examples/01_hello.lume   # lex + parse + name/type/arity checks
+bootstrap/lume0/lume0 run    examples/01_hello.lume   # interpret
+# source -> native, with no C and no as/ld:
+bootstrap/lume0/lume0 run compiler/stage1/data_asm_cc.lume compiler/stage1/calc.src /tmp/calc.s
+bootstrap/lume0/lume0 asm /tmp/calc.s /tmp/calc && /tmp/calc
+```
+
 ## Contributing
 
-Read `docs/02-principles.md` first; every change cites the principles it serves. Language changes
-go through an RFC in `docs/rfcs/`. CI must be green (`make -C bootstrap/lume0 test`).
+Read **[`AGENTS.md`](AGENTS.md)** and **[`docs/PROJECT_STATE.md`](docs/PROJECT_STATE.md)** first —
+they hold the rules, architecture and pitfalls — then **[`CONTRIBUTING.md`](CONTRIBUTING.md)** for
+the workflow. In short: English only in the repo; one focused change per PR; `make -C
+bootstrap/lume0 test` **and** `asan` must pass (0 failed); every fix ships with a regression test
+(golden rule: no bugs in the toolchain); `main` is protected and requires a green PR. `docs/02-principles.md`
+lists the principles (P1–P35) each change serves.
 
 ## License
 
