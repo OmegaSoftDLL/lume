@@ -47,7 +47,7 @@ fn dpat(p: mut DP) -> Pat
     else
         PBind(name: t.text)
 
-fn dprimary(p: mut DP) -> DExpr
+fn datom(p: mut DP) -> DExpr
     if dcur(p).kind == Kw and dcur(p).text == "match"
         deat(p)
         let scrut = dexpr(p, 0)
@@ -74,6 +74,14 @@ fn dprimary(p: mut DP) -> DExpr
         let e = dexpr(p, 0)
         deat(p)
         e
+    elif t.kind == Op and t.text == "["
+        var elems = []
+        while not (dcur(p).kind == Op and dcur(p).text == "]") and dcur(p).kind != End
+            elems.push(dexpr(p, 0))
+            if dcur(p).kind == Op and dcur(p).text == ","
+                deat(p)
+        deat(p)
+        DList(elems: elems)
     elif t.kind == Ident and is_upper(t.text)
         var args = []
         if dcur(p).kind == Op and dcur(p).text == "("
@@ -98,6 +106,15 @@ fn dprimary(p: mut DP) -> DExpr
             DVar(name: t.text)
     else
         DInt(n: 0)
+
+fn dprimary(p: mut DP) -> DExpr
+    var e = datom(p)
+    while dcur(p).kind == Op and dcur(p).text == "["
+        deat(p)
+        let idx = dexpr(p, 0)
+        deat(p)
+        e = DIndex(coll: e, idx: idx)
+    e
 
 fn dexpr(p: mut DP, min_bp: int) -> DExpr
     var left = dprimary(p)

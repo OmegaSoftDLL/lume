@@ -11,6 +11,8 @@ type DExpr = enum
     DVar(name: str)
     DCons(tag: str, args: [DExpr])
     DCall(name: str, args: [DExpr])
+    DList(elems: [DExpr])
+    DIndex(coll: DExpr, idx: DExpr)
     DBin(op: str, l: DExpr, r: DExpr)
     DMatch(scrut: DExpr, arms: [Arm])
 
