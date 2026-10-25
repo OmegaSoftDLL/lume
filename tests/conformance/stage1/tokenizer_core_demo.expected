@@ -1,0 +1,2 @@
+Cons(Tok(num, 12), Cons(Tok(sym, +), Cons(Tok(num, 34), Cons(Tok(sym, *), Cons(Tok(num, 5), Nil)))))
+5
