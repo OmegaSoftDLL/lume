@@ -92,6 +92,19 @@ fn bblock(p: mut P) -> [Stmt]
         beat(p)
     body
 
+fn if_tail(p: mut P) -> [Stmt]
+    bskip_nl(p)
+    if bcur(p).kind == Kw and bcur(p).text == "elif"
+        beat(p)
+        let c = bexpr(p, 0)
+        let b = bblock(p)
+        [If(cond: c, then_body: b, else_body: if_tail(p))]
+    elif bcur(p).kind == Kw and bcur(p).text == "else"
+        beat(p)
+        bblock(p)
+    else
+        []
+
 fn bstmt(p: mut P) -> Stmt
     let t = bcur(p)
     if t.kind == Kw and t.text == "fn"
@@ -127,12 +140,7 @@ fn bstmt(p: mut P) -> Stmt
         beat(p)
         let cond = bexpr(p, 0)
         let then_body = bblock(p)
-        bskip_nl(p)
-        if bcur(p).kind == Kw and bcur(p).text == "else"
-            beat(p)
-            If(cond: cond, then_body: then_body, else_body: bblock(p))
-        else
-            If(cond: cond, then_body: then_body, else_body: [])
+        If(cond: cond, then_body: then_body, else_body: if_tail(p))
     elif t.kind == Ident and t.text == "print"
         beat(p)
         Print(value: bexpr(p, 0))
