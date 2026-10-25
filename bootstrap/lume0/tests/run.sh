@@ -51,6 +51,9 @@ if command -v cc >/dev/null 2>&1; then
     if cc -o "$cgtmp/blk" "$cgtmp/blk.c" 2>/dev/null && "$cgtmp/blk" 2>/dev/null | diff -u ../../tests/conformance/stage1/block_codegen_native.expected - >/dev/null; then ok "block language (loops) -> native binary"; else bad "block language (loops) -> native binary"; fi
     # a full calculator compiler WRITTEN IN the ML core, reading its source from a file
     if $BIN run ../../compiler/stage1/compiler_in_core.lume ../../compiler/stage1/calc.src 2>/dev/null | diff -u ../../tests/conformance/stage1/core_compiler.expected - >/dev/null; then ok "compiler written in the ML core (lex+parse+eval)"; else bad "compiler written in the ML core"; fi
+    # close the loop: the core-written compiler emits a full C program -> cc -> native binary
+    $BIN run ../../compiler/stage1/compiler_in_core.lume ../../compiler/stage1/calc_native.src > "$cgtmp/calc.c" 2>/dev/null
+    if cc -o "$cgtmp/calc" "$cgtmp/calc.c" 2>/dev/null && "$cgtmp/calc" 2>/dev/null | diff -u ../../tests/conformance/stage1/core_native.expected - >/dev/null; then ok "core-written compiler -> C -> native binary"; else bad "core-written compiler -> native"; fi
     # lumec as a file-driven compiler: read .lume -> write .c -> native binary
     $BIN run ../../compiler/stage1/lumec_main.lume ../../compiler/stage1/sample.lume "$cgtmp/s.c" >/dev/null 2>&1
     if cc -o "$cgtmp/s" "$cgtmp/s.c" 2>/dev/null && "$cgtmp/s" 2>/dev/null | diff -u ../../tests/conformance/stage1/lumec_file_native.expected - >/dev/null; then ok "lumec file -> C -> native binary"; else bad "lumec file -> C -> native binary"; fi

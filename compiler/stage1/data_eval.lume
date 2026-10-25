@@ -120,6 +120,10 @@ fn deval(e: DExpr, env: map[str, RV], fns: [DStmt]) -> RV
                 result = VInt(n: rv_str(deval(args[0], env, fns)).parse_int() ?? 0)
             if not found and name == "str"
                 result = VStr(s: rv_str(deval(args[0], env, fns)))
+            if not found and name == "nl"
+                result = VStr(s: "\n")
+            if not found and name == "dq"
+                result = VStr(s: "\"")
             result
         DStr(sv)      => VStr(s: sv)
         DList(elems)  => VList(items: elems.map(|a| deval(a, env, fns)))
