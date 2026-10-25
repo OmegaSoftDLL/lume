@@ -47,6 +47,11 @@ fn bprimary(p: mut P) -> Expr
                     beat(p)
             beat(p)
             Call(name: t.text, args: cargs)
+        elif bcur(p).kind == Op and bcur(p).text == "["
+            beat(p)
+            let ix = bexpr(p, 0)
+            beat(p)
+            Index(name: t.text, idx: ix)
         else
             Name(id: t.text)
     elif t.kind == Op and t.text == "("
@@ -103,8 +108,14 @@ fn bstmt(p: mut P) -> Stmt
     elif t.kind == Kw and t.text == "var"
         beat(p)
         let name = beat(p).text
-        beat(p)                       # =
-        Assign(name: name, value: bexpr(p, 0))
+        if bcur(p).kind == Op and bcur(p).text == "["
+            beat(p)
+            let sz = bexpr(p, 0)
+            beat(p)                   # ]
+            ArrDecl(name: name, size: sz)
+        else
+            beat(p)                   # =
+            Assign(name: name, value: bexpr(p, 0))
     elif t.kind == Kw and t.text == "while"
         beat(p)
         let cond = bexpr(p, 0)
@@ -123,10 +134,16 @@ fn bstmt(p: mut P) -> Stmt
         beat(p)
         Print(value: bexpr(p, 0))
     else
-        # assignment: name = expr
         let name = beat(p).text
-        beat(p)                       # =
-        Assign(name: name, value: bexpr(p, 0))
+        if bcur(p).kind == Op and bcur(p).text == "["
+            beat(p)
+            let ix = bexpr(p, 0)
+            beat(p)                   # ]
+            beat(p)                   # =
+            AssignIdx(name: name, idx: ix, value: bexpr(p, 0))
+        else
+            beat(p)                   # =
+            Assign(name: name, value: bexpr(p, 0))
 
 fn parse_block_program(src: str) -> [Stmt]
     var p = P(toks: lex_layout(src), pos: 0)

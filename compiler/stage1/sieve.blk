@@ -1,0 +1,11 @@
+var n = 30
+var isc[30]
+var i = 2
+while i < n
+    if isc[i] == 0
+        print i
+        var j = i + i
+        while j < n
+            isc[j] = 1
+            j = j + i
+    i = i + 1

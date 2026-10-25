@@ -59,6 +59,8 @@ if command -v cc >/dev/null 2>&1; then
     if cc -o "$cgtmp/bcc2" "$cgtmp/bcc2.c" 2>/dev/null && "$cgtmp/bcc2" 2>/dev/null | diff -u ../../tests/conformance/stage1/block_cc2_native.expected - >/dev/null; then ok "block_cc (modulo + and/or) -> native binary"; else bad "block_cc (modulo + and/or) -> native binary"; fi
     $BIN run ../../compiler/stage1/block_cc.lume ../../compiler/stage1/fizz.blk "$cgtmp/fz.c" >/dev/null 2>&1
     if cc -o "$cgtmp/fz" "$cgtmp/fz.c" 2>/dev/null && "$cgtmp/fz" 2>/dev/null | diff -u ../../tests/conformance/stage1/block_fizz_native.expected - >/dev/null; then ok "block_cc FizzBuzz (strings+nested if) -> native binary"; else bad "block_cc FizzBuzz -> native binary"; fi
+    $BIN run ../../compiler/stage1/block_cc.lume ../../compiler/stage1/sieve.blk "$cgtmp/sv.c" >/dev/null 2>&1
+    if cc -o "$cgtmp/sv" "$cgtmp/sv.c" 2>/dev/null && "$cgtmp/sv" 2>/dev/null | diff -u ../../tests/conformance/stage1/block_sieve_native.expected - >/dev/null; then ok "block_cc Sieve (arrays+nested loops) -> native binary"; else bad "block_cc Sieve -> native binary"; fi
     # a full calculator compiler WRITTEN IN the ML core, reading its source from a file
     if $BIN run ../../compiler/stage1/compiler_in_core.lume ../../compiler/stage1/calc.src 2>/dev/null | diff -u ../../tests/conformance/stage1/core_compiler.expected - >/dev/null; then ok "compiler written in the ML core (lex+parse+eval)"; else bad "compiler written in the ML core"; fi
     # close the loop: the core-written compiler emits a full C program -> cc -> native binary
