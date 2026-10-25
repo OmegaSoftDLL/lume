@@ -1,0 +1,25 @@
+fn isdigit(c) = c >= "0" and c <= "9"
+fn numend(s, i) = if i < count(s) and isdigit(at(s, i)) then numend(s, i + 1) else i
+fn lex(s, i) = if i >= count(s) then Nil else if at(s, i) == " " then lex(s, i + 1) else if isdigit(at(s, i)) then Cons(slice(s, i, numend(s, i)), lex(s, numend(s, i))) else Cons(at(s, i), lex(s, i + 1))
+fn apply(op, a, b) = if op == "+" then a + b else if op == "-" then a - b else if op == "*" then a * b else if op == "/" then a / b else a % b
+fn isop(t) = t == "+" or t == "-" or t == "*" or t == "/" or t == "%"
+fn bin2(t, b, r1) = match r1
+    Cons(a, r2) => Cons(apply(t, a, b), r2)
+    Nil => Nil
+fn binop(t, st) = match st
+    Cons(b, r1) => bin2(t, b, r1)
+    Nil => Nil
+fn step(t, st) = if isop(t) then binop(t, st) else Cons(toint(t), st)
+fn run(ts, st) = match ts
+    Nil => st
+    Cons(h, t) => run(t, step(h, st))
+fn top(st) = match st
+    Cons(h, t) => h
+    Nil => 0 - 1
+fn rpn(s) = top(run(lex(s, 0), Nil))
+print rpn("3 4 +")
+print rpn("5 1 2 + 4 * + 3 -")
+print rpn("100 7 % 2 *")
+print rpn("2 3 4 * 5 6 + - +")
+print rpn("1000 10 / 10 / 10 /")
+print rpn("9 8 7 6 5 + + + +")

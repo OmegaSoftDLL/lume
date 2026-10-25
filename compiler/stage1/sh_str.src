@@ -1,0 +1,29 @@
+fn rev(s, i) = if i >= count(s) then "" else rev(s, i + 1) + at(s, i)
+fn ispal(s) = rev(s, 0) == s
+fn countc(s, c, i) = if i >= count(s) then 0 else (if at(s, i) == c then 1 else 0) + countc(s, c, i + 1)
+fn digsum(n) = if n == 0 then 0 else n % 10 + digsum(n / 10)
+fn rep(s, n) = if n == 0 then "" else s + rep(s, n - 1)
+fn pad(s, w) = if count(s) >= w then s else pad(" " + s, w)
+fn digitidx(c, i) = if at("abcdefghijklmnopqrstuvwxyz", i) == c then i else digitidx(c, i + 1)
+fn up(c) = if c >= "a" and c <= "z" then at("ABCDEFGHIJKLMNOPQRSTUVWXYZ", digitidx(c, 0)) else c
+fn upper(s, i) = if i >= count(s) then "" else up(at(s, i)) + upper(s, i + 1)
+fn split(s, sep, i, start) = if i >= count(s) then Cons(slice(s, start, i), Nil) else if at(s, i) == sep then Cons(slice(s, start, i), split(s, sep, i + 1, i + 1)) else split(s, sep, i + 1, start)
+fn lens(xs) = match xs
+    Nil => ""
+    Cons(h, t) => "[" + h + ":" + str(count(h)) + "]" + lens(t)
+fn sumnums(xs) = match xs
+    Nil => 0
+    Cons(h, t) => toint(h) + sumnums(t)
+print rev("hello world", 0)
+print ispal("racecar")
+print ispal("racecars")
+print countc("mississippi", "s", 0)
+print digsum(987654321)
+print rep("ab", 5)
+print pad("42", 8)
+print upper("Hello, World 123", 0)
+print lens(split("a,bcd,,efghi", ",", 0, 0))
+print sumnums(split("10,20,30,42", ",", 0, 0))
+print "apple" < "banana"
+print "b" > "abc"
+print slice("abcdefgh", 2, 5)
