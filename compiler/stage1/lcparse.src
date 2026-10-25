@@ -61,7 +61,7 @@ fn booland(ts) = andloop(cmp(ts))
 fn orloop(r) = match r.rest
     Nil        => r
     Cons(h, t) => if h.text == "or" then let r2 = booland(t) in orloop({node: Bin(h.text, r.node, r2.node), rest: r2.rest}) else r
-fn expr(ts) = orloop(booland(ts))
+fn expr(ts) = cmp(ts)
 fn parse(s) = (expr(lex(s, 0))).node
 
 ## --- dump the AST ---
