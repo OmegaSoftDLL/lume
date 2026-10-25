@@ -2,7 +2,8 @@
 ## (functional subset). Self-hosting rewrite (docs/11, R5). Bricks 1-2: the precedence
 ## engine plus function/constructor calls. Grammar: integers, variables, parentheses,
 ## calls `f(a, b, ...)` (constructors like Cons/Lit parse the same), and binary operators
-## (* / %, + -, comparisons) with precedence. State is threaded immutably as {node, rest}.
+## (* / %, + -, comparisons, `and`, `or`) with precedence: or < and < comparison < additive <
+## multiplicative, matching the core language. State is threaded immutably as {node, rest}.
 ## Nested match inside an expression is avoided (the core parser dislikes it) via helpers.
 ## let/if/match and record literals come in the next bricks.
 
@@ -53,7 +54,14 @@ fn cmploop(r) = match r.rest
     Nil        => r
     Cons(h, t) => if h.text == "==" or h.text == "!=" or h.text == "<" or h.text == ">" or h.text == "<=" or h.text == ">=" then let r2 = add(t) in cmploop({node: Bin(h.text, r.node, r2.node), rest: r2.rest}) else r
 fn cmp(ts) = cmploop(add(ts))
-fn expr(ts) = cmp(ts)
+fn andloop(r) = match r.rest
+    Nil        => r
+    Cons(h, t) => if h.text == "and" then let r2 = cmp(t) in andloop({node: Bin(h.text, r.node, r2.node), rest: r2.rest}) else r
+fn booland(ts) = andloop(cmp(ts))
+fn orloop(r) = match r.rest
+    Nil        => r
+    Cons(h, t) => if h.text == "or" then let r2 = booland(t) in orloop({node: Bin(h.text, r.node, r2.node), rest: r2.rest}) else r
+fn expr(ts) = orloop(booland(ts))
 fn parse(s) = (expr(lex(s, 0))).node
 
 ## --- dump the AST ---
@@ -91,3 +99,7 @@ print show(parse("p.node.rest"))
 print show(parse("f(x).kind + r.a * r.b"))
 print show(parse("{tag: \"num\", val: 1 + 2}"))
 print show(parse("{node: Lit(n), rest: t}.node"))
+print show(parse("a and b or c"))
+print show(parse("x < 1 or y > 2"))
+print show(parse("a or b and c"))
+print show(parse("i < count(s) and isalnum(at(s, i))"))
