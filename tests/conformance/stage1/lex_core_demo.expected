@@ -1,0 +1,3 @@
+Cons(a, Cons(a, Cons(d, Cons(d, Cons(., Cons(a, Cons(d, Nil)))))))
+3
+3

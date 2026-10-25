@@ -104,6 +104,18 @@ fn deval(e: DExpr, env: map[str, RV], fns: [DStmt]) -> RV
                         result = VInt(n: s.len())
                     _ => do
                         result = VInt(n: 0)
+            if not found and name == "at"
+                let asv = rv_str(deval(args[0], env, fns))
+                let aix = rv_int(deval(args[1], env, fns))
+                if aix >= 0 and aix < asv.len()
+                    result = VStr(s: asv[aix..aix + 1])
+                else
+                    result = VStr(s: "")
+            if not found and name == "slice"
+                let ssv = rv_str(deval(args[0], env, fns))
+                let sa = rv_int(deval(args[1], env, fns))
+                let sb = rv_int(deval(args[2], env, fns))
+                result = VStr(s: ssv[sa..sb])
             result
         DStr(sv)      => VStr(s: sv)
         DList(elems)  => VList(items: elems.map(|a| deval(a, env, fns)))
@@ -126,13 +138,27 @@ fn deval(e: DExpr, env: map[str, RV], fns: [DStmt]) -> RV
         DBin(op, l, r) => do
             let lv = deval(l, env, fns)
             let rv = deval(r, env, fns)
+            if op == "and"
+                return VInt(n: if rv_int(lv) != 0 and rv_int(rv) != 0 then 1 else 0)
+            if op == "or"
+                return VInt(n: if rv_int(lv) != 0 or rv_int(rv) != 0 then 1 else 0)
             if op == "+" and rv_is_str(lv) and rv_is_str(rv)
                 return VStr(s: rv_str(lv) + rv_str(rv))
             if rv_is_str(lv) and rv_is_str(rv)
+                let sl = rv_str(lv)
+                let sr = rv_str(rv)
                 if op == "=="
-                    return VInt(n: if rv_str(lv) == rv_str(rv) then 1 else 0)
+                    return VInt(n: if sl == sr then 1 else 0)
                 if op == "!="
-                    return VInt(n: if rv_str(lv) == rv_str(rv) then 0 else 1)
+                    return VInt(n: if sl == sr then 0 else 1)
+                if op == "<"
+                    return VInt(n: if sl < sr then 1 else 0)
+                if op == ">"
+                    return VInt(n: if sl > sr then 1 else 0)
+                if op == "<="
+                    return VInt(n: if sl <= sr then 1 else 0)
+                if op == ">="
+                    return VInt(n: if sl >= sr then 1 else 0)
             let a = rv_int(lv)
             let b = rv_int(rv)
             match op
@@ -142,7 +168,10 @@ fn deval(e: DExpr, env: map[str, RV], fns: [DStmt]) -> RV
                 "/"  => VInt(n: if b == 0 then 0 else a / b)
                 "<"  => VInt(n: if a < b then 1 else 0)
                 ">"  => VInt(n: if a > b then 1 else 0)
+                "<=" => VInt(n: if a <= b then 1 else 0)
+                ">=" => VInt(n: if a >= b then 1 else 0)
                 "==" => VInt(n: if a == b then 1 else 0)
+                "!=" => VInt(n: if a != b then 1 else 0)
                 _    => VInt(n: 0)
         DIf(c, a, b) => do
             if rv_int(deval(c, env, fns)) != 0

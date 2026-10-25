@@ -1,0 +1,12 @@
+## lex_core_demo.lume — a character scanner written in the ML-core language (run via the core).
+## Classifies each character of a string, functionally, with recursion over a cons-list -- the
+## beginnings of a lexer written in the rich self-hosted core. Uses strings, ordering, at/count,
+## recursion, ADTs and if.
+use data_ast
+use data_parser
+use data_eval
+use std.io
+
+fn main()
+    let program = "fn kind(c) = if c >= \"0\" and c <= \"9\" then \"d\" else if c >= \"a\" and c <= \"z\" then \"a\" else \".\"\nfn scan(s, i) = if i >= count(s) then Nil else Cons(kind(at(s, i)), scan(s, i + 1))\nfn count_kind(xs, k) = match xs\n    Nil => 0\n    Cons(h, t) => if h == k then 1 + count_kind(t, k) else count_kind(t, k)\nlet cs = scan(\"ab12 x9\", 0)\nprint cs\nprint count_kind(cs, \"d\")\nprint count_kind(cs, \"a\")\n"
+    run_data(parse_data_program(program))
