@@ -1,0 +1,7 @@
+fn m() -> int
+    let x = 1
+    let x = x + 1
+    var y = x
+    y = y + 1
+    let y = y * 2
+    y

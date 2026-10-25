@@ -1,0 +1,16 @@
+type Shape = enum
+    Circle(radius: f64)
+    Rect(w: f64, h: f64)
+    Empty
+
+fn area(s: Shape) -> f64
+    match s
+        Circle(radius)       => 3.14159 * radius ** 2
+        Rect(w, h) if w == h => w * w
+        Rect(w, h)           => w * h
+        Empty                => 0.0
+
+fn m() -> f64
+    let s = Circle(radius: 1.0)
+    let r = Rect(w: 2.0, h: 3.0)
+    area(s) + area(r) + area(Empty)

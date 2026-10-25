@@ -1,0 +1,5 @@
+# expect: D0001
+fn ok_one(a: int) -> int
+    a
+fn bad_two(p: int, q: int, p: int) -> int
+    q

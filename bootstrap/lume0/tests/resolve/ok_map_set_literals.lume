@@ -1,0 +1,7 @@
+fn m() -> int
+    var counts = {"a": 0, "b": 0}
+    counts["a"] += 2
+    let uniq = {1, 2, 2, 3}
+    for (k, v) in counts
+        let t = k
+    uniq.len()

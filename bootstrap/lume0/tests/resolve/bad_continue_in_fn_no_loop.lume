@@ -1,0 +1,4 @@
+# expect: C0001
+fn m() -> int
+    continue
+    1

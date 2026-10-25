@@ -1,0 +1,5 @@
+# expect: A0002
+fn tri(a: int, b: int, c: int) -> int
+    a + b + c
+fn m() -> int
+    tri(1, 2)

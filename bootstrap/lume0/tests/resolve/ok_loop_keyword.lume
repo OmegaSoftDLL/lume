@@ -1,0 +1,7 @@
+fn m() -> int
+    var n = 0
+    loop
+        n += 1
+        if n > 4
+            break
+    n

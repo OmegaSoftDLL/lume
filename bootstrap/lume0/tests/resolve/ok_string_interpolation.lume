@@ -1,0 +1,6 @@
+use std.io
+
+fn m(name: str) -> int
+    let n = 3
+    io.println("hi {name}, n = {n}, next = {n + 1}")
+    n

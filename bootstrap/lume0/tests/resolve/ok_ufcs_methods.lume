@@ -1,0 +1,7 @@
+fn double(x: int) -> int
+    x * 2
+fn m() -> int
+    let xs = [1, 2, 3]
+    let ys = xs.map(double)
+    let zs = xs.map(|n| n + 1)
+    5.double()

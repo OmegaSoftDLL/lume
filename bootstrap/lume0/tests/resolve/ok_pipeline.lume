@@ -1,0 +1,7 @@
+fn m() -> int
+    let nums = [5, 3, 8]
+    let total = nums
+        |> filter(|n| n > 2)
+        |> map(|n| n * 10)
+        |> sum()
+    total

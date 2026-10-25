@@ -1,0 +1,7 @@
+const LIMIT = 10
+
+fn m() -> int
+    var n = 0
+    while n < LIMIT
+        n += 1
+    LIMIT + n

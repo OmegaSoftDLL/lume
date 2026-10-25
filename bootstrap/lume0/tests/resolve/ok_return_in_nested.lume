@@ -1,0 +1,5 @@
+fn find(xs: [int], w: int) -> int
+    for (i, x) in xs.enumerate()
+        if x == w
+            return i
+    -1

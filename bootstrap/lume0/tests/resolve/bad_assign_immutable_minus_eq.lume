@@ -1,0 +1,5 @@
+# expect: M0001
+fn m() -> int
+    let n = 5
+    n -= 1
+    n

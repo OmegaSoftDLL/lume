@@ -1,0 +1,5 @@
+# expect: A0002
+fn one(a: int) -> int
+    a
+fn m() -> int
+    one()
