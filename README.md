@@ -82,7 +82,8 @@ lume/
 │   ├── 06-software-protection.md ← anti-reverse-engineering as a toolchain goal (P33)
 │   ├── 07-competitive.md         ← scan of comparable projects and the ideas Lume adopts
 │   ├── 08-ai-first.md            ← Lume is authored by AI, reviewed by humans (the center of gravity)
-│   └── 09-lbe.md                 ← LBE: the AI emits structure (binary AST), the machine emits the bits
+│   ├── 09-lbe.md                 ← LBE: the AI emits structure (binary AST), the machine emits the bits
+│   └── 10-stage1-status.md       ← honest inventory of what the Lume-written compiler covers
 ├── grammar/lume.ebnf          ← formal grammar
 ├── examples/                  ← .lume programs per stage (future/ for later stages)
 ├── bootstrap/lume0/           ← Stage 0: disposable C interpreter (the seed) — lexer done
@@ -106,8 +107,8 @@ lume/
 
 - [x] Phase 0 — Catalog, survey, principles, specification v0.1, grammar, roadmap, vision, examples
 - [x] Stage 0 — Lexer + parser + **tree-walking interpreter** (`bootstrap/lume0`): `lume0 run` executes examples 01–07; 31 tests, ASan clean
-- [~] Stage 1 — a `lumec` driver written in Lume (`compiler/stage1/lumec.lume`: lex → parse → check → codegen) compiles a growing subset (let, expressions, functions, if) to C → native binary, and a Lume-written static checker rejects bad programs; next: grow coverage to all of Lume, then the triple self-build and freeze `lume0`
-- [~] Stage 1 — a `lumec` driver written in Lume (`compiler/stage1/lumec.lume`: lex → parse → check → codegen) compiles a growing subset (let, expressions, functions, if) to C → native binary, and a Lume-written static checker rejects bad programs; next: grow coverage to all of Lume, then the triple self-build and freeze `lume0`
+- [~] Stage 1 — a `lumec` written in Lume (lexers incl. layout, parsers for expressions/functions/blocks/ADTs, a checker, evaluators, C codegen, a file-driven CLI) compiles a growing subset — `let`, expressions, functions, recursion, `if`, `while`, and (interpreted) algebraic data types with `match` — to C → native; a direct x86-64 backend in the bootstrap emits assembly with no C. See `docs/10-stage1-status.md`. Remaining for the fixpoint: unify the front-ends, add strings/lists/maps/records + their codegen, then the triple self-build and freeze `lume0`
+- [~] Stage 1 — a `lumec` written in Lume (lexers incl. layout, parsers for expressions/functions/blocks/ADTs, a checker, evaluators, C codegen, a file-driven CLI) compiles a growing subset — `let`, expressions, functions, recursion, `if`, `while`, and (interpreted) algebraic data types with `match` — to C → native; a direct x86-64 backend in the bootstrap emits assembly with no C. See `docs/10-stage1-status.md`. Remaining for the fixpoint: unify the front-ends, add strings/lists/maps/records + their codegen, then the triple self-build and freeze `lume0`
 - [ ] Stage 2 — `comptime`, macros, `table`/`query`, package manager
 - [ ] Stage 3 — Ownership checker, structured concurrency, effects, `@gc` regions
 - [ ] Stage 4 — Tensors, autodiff, GPU kernels, `prob`, `rule`, `llm fn`
