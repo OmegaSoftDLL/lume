@@ -181,6 +181,8 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_
     if $BIN asm "$ntmp/lx.s" "$ntmp/lx" >/dev/null 2>&1 && "$ntmp/lx" 2>/dev/null | diff -u ../../tests/conformance/stage1/lclex_asm.expected - >/dev/null; then ok "self-host R4: core lexer (written in Lume-Core) -> native"; else bad "self-host R4: core lexer -> native"; fi
     $BIN run ../../compiler/stage1/data_asm_cc.lume ../../compiler/stage1/lcparse.src "$ntmp/pp.s" >/dev/null 2>&1
     if $BIN asm "$ntmp/pp.s" "$ntmp/pp" >/dev/null 2>&1 && "$ntmp/pp" 2>/dev/null | diff -u ../../tests/conformance/stage1/lcparse_asm.expected - >/dev/null; then ok "self-host R5: core expression parser (in Lume-Core) -> native"; else bad "self-host R5: core expression parser -> native"; fi
+    $BIN run ../../compiler/stage1/data_asm_cc.lume ../../compiler/stage1/lumec.src "$ntmp/lc.s" >/dev/null 2>&1
+    if $BIN asm "$ntmp/lc.s" "$ntmp/lc" >/dev/null 2>&1 && "$ntmp/lc" >"$ntmp/lcout.s" 2>/dev/null && $BIN asm "$ntmp/lcout.s" "$ntmp/lcout" >/dev/null 2>&1 && "$ntmp/lcout" 2>/dev/null | diff -u ../../tests/conformance/stage1/nfib_asm.expected - >/dev/null; then ok "self-host R6: lumec (native) compiles nfib to native, no C"; else bad "self-host R6: lumec (native) compiles nfib to native, no C"; fi
     rm -rf "$ntmp"
 else
     ok "no-toolchain ELF pipeline (skipped: not linux/x86_64, or under ASan)"
