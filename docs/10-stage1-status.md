@@ -67,7 +67,11 @@ Each of these is a real body of work. The staged, test-first approach here delib
       `lumec2` compiles every conformance program correctly, no C in the target pipeline.
 - [ ] Lexical scoping (use-before-def / out-of-scope), fuller type checking (call arity, match
       exhaustiveness, operator types), effects/ownership/contract enforcement.
-- [ ] Delete the last C: rewrite the seed assembler + ELF64 writer (`lume0 asm`) in Lume so
-      `lumec` emits the ELF bytes itself, then retire `bootstrap/`.
+- [~] Delete the last C — **zero-C loop proven.** `compiler/stage1/lasm.src` is an x86-64
+      assembler + ELF64 writer in Lume-Core (byte-level `emit`/`flush` runtime). Steady state
+      uses no C: `lumec` self-compiles → asm; `lasm` assembles → a `lumec` that reproduces
+      itself bit-identically and compiles programs correctly. Remaining before `bootstrap/` is
+      removed: speed up `assemble()` (slow on large inputs), add `movabs`, and ship a
+      Lume-produced seed so the first binaries don't need the C seed either.
 
 This file is updated as the inventory grows.
