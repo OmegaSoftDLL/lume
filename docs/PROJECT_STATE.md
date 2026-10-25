@@ -113,7 +113,13 @@ subset; the triple self-build is not reached.
 - No real type system: inference, call arity, match exhaustiveness, operator types.
 - Ownership/borrow, effects (parsed then discarded), contracts (runtime only, no `prove`/SMT)
   — all documented, none enforced.
-- Concurrency (`spawn`/`select`/`async`), `comptime`/`macro`, C interop, cross-compile — keywords only.
+- Concurrency (`spawn`/`select`/`async`), `macro`, C interop, cross-compile — keywords only.
+- `comptime`: a **seed** exists (Phase 2, first brick). `lumec` folds `comptime(<expr>)` at compile time
+  over the pure core (`Num`/`Str`/`Bin` with `+ - * / % == != < > <= >= and or`/`If`/`LetIn`/`Var` bound by a
+  comptime `let`), emitting the result as a constant (`comptime(2 + 3 * 4)` emits the same asm as `14`); any
+  non-foldable expression (a function call, `match`, record/field, free `Var`, `read()`) is a hard compile-time
+  error (`ctfail` → clear stderr message, exit 3, no output). NOT yet: compile-time calls to pure user functions,
+  comptime over types, `comptime` blocks/params. See `compiler/stage1/ct.src` and the `phase-2 comptime` tests.
 - Domain features (`table`/`query`, tensor/`grad`/`llm fn`) — docs only; `examples/future/*`
   pass the lexer only.
 - `lume fmt`/`test`/`lsp`/`pkg`, P34 LAWS, P35 mandatory tests, content-addressed defs — not built.

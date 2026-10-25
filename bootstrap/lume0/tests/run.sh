@@ -239,6 +239,24 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_
     # still compile nfib correctly (assembled by lasm). The buffered `emit`/`flush` makes assembling the ~300KB
     # compiler fast enough to run here (per-byte write(1) made this > 2 minutes).
     if "$ntmp/lc" <../../compiler/stage1/lumec.src >"$ntmp/z_gen.s" 2>/dev/null && "$ntmp/lasm" <"$ntmp/z_gen.s" >"$ntmp/z_lumecB.elf" 2>/dev/null && chmod +x "$ntmp/z_lumecB.elf" && "$ntmp/z_lumecB.elf" <../../compiler/stage1/lumec.src >"$ntmp/z_gen2.s" 2>/dev/null && [ -s "$ntmp/z_gen.s" ] && cmp -s "$ntmp/z_gen.s" "$ntmp/z_gen2.s" && "$ntmp/z_lumecB.elf" <../../compiler/stage1/nfib.src >"$ntmp/z_nfib.s" 2>/dev/null && "$ntmp/lasm" <"$ntmp/z_nfib.s" >"$ntmp/z_nfib.elf" 2>/dev/null && chmod +x "$ntmp/z_nfib.elf" && "$ntmp/z_nfib.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/nfib_asm.expected - >/dev/null; then ok "self-host zero-C loop: lumec|lasm assembles the compiler, result reproduces"; else bad "self-host zero-C loop: lumec|lasm assembles the compiler, result reproduces"; fi
+    # phase-2 comptime: lumec folds comptime(expr) to a constant at COMPILE TIME (native, no C). Build ct.src
+    # with the native lumec + native lasm, run it and assert the output; then grep the emitted .s to PROVE the
+    # fold (each result is a `movq $N` immediate / a .rodata string, never a runtime add/imul).
+    "$ntmp/lc" <../../compiler/stage1/ct.src >"$ntmp/ct.s" 2>/dev/null; "$ntmp/lasm" <"$ntmp/ct.s" >"$ntmp/ct.elf" 2>/dev/null; chmod +x "$ntmp/ct.elf"
+    ct_ok=1
+    "$ntmp/ct.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/comptime_asm.expected - >/dev/null || ct_ok=0
+    # PROOF of compile-time folding: `fn main_val() = comptime(2 + 3 * 4)` must compile to a single `movq $14`
+    # immediate with NO runtime arithmetic in its body (the runtime routines, which legitimately use addq/imulq,
+    # live elsewhere -- so scope the check to main_val's body only).
+    awk '/^main_val:/{p=1} p{print} p&&/^    ret$/{exit}' "$ntmp/ct.s" >"$ntmp/ct_mv.s"
+    grep -q 'movq \$14, %rdi' "$ntmp/ct_mv.s" || ct_ok=0
+    grep -Eq 'addq|imulq|subq|idivq' "$ntmp/ct_mv.s" && ct_ok=0
+    if [ "$ct_ok" = 1 ]; then ok "phase-2 comptime: lumec folds comptime(expr) to a constant (native, no C)"; else bad "phase-2 comptime: lumec folds comptime(expr) to a constant (native, no C)"; fi
+    # a comptime over something NOT constant-foldable (here a function call) is a HARD compile-time error:
+    # lumec exits nonzero, writes a clear message to stderr, and emits no asm -- never a silently-wrong program.
+    printf 'print comptime(f(1))\n' >"$ntmp/ctbad.src"
+    "$ntmp/lc" <"$ntmp/ctbad.src" >"$ntmp/ctbad.s" 2>"$ntmp/ctbad.err"; ctbad_code=$?
+    if [ "$ctbad_code" != 0 ] && [ ! -s "$ntmp/ctbad.s" ] && grep -q "comptime error" "$ntmp/ctbad.err"; then ok "phase-2 comptime: non-constant comptime fails compilation with a clear error (no bad output)"; else bad "phase-2 comptime: non-constant comptime fails compilation with a clear error"; fi
     rm -rf "$ntmp"
 else
     ok "no-toolchain ELF pipeline (skipped: not linux/x86_64, or under ASan)"
