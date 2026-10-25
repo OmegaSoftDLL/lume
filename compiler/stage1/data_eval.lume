@@ -118,6 +118,8 @@ fn deval(e: DExpr, env: map[str, RV], fns: [DStmt]) -> RV
                 result = VStr(s: ssv[sa..sb])
             if not found and name == "toint"
                 result = VInt(n: rv_str(deval(args[0], env, fns)).parse_int() ?? 0)
+            if not found and name == "str"
+                result = VStr(s: rv_str(deval(args[0], env, fns)))
             result
         DStr(sv)      => VStr(s: sv)
         DList(elems)  => VList(items: elems.map(|a| deval(a, env, fns)))
