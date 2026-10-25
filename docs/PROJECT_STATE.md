@@ -163,6 +163,10 @@ subset; the triple self-build is not reached.
 - Lume methods supported by the interp: chars/concat/contains/entries/enumerate/join/keys/
   len/map/push/repeat/sorted/split/str (no `.slice` method — use the `slice(s,i,j)` builtin
   in the ML-core, or `.chars()` to iterate).
+- Native runtime builtins include `slicen(s, len, i, j)` — a length-aware `slice` that clamps
+  against the passed `len` instead of calling `strlen` (O(1), not O(n)). Use it on a hot path
+  that already knows the string's length (e.g. the assembler's line splitting over a large
+  source); it is in both `lumec.src` and `data_asmgen.lume` runtimes, byte-identical.
 - **Memory is the scaling wall — build strings in O(n), and index strings in O(1).** The seed
   interpreter and the native runtime (`alloc` in `data_asmgen`) have **no GC**: nothing is freed,
   so peak memory is the TOTAL allocated. Two consequences, both already hit and fixed: (1) never
