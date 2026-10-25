@@ -1,0 +1,13 @@
+fn f7(a, b, c, d, e, f, g) = a + b * 10 + c * 100 + d * 1000 + e * 10000 + f * 100000 + g * 1000000
+fn f8(a, b, c, d, e, f, g, h) = (a - b) + (c - d) * 10 + (e - f) * 100 + (g - h) * 1000
+fn f10(a, b, c, d, e, f, g, h, i, j) = let s = a + b + c + d + e + f in let t = g * 1000 + h * 100 + i * 10 + j in s * 10000 + t
+fn acc8(n, a, b, c, d, e, f, g) = if n == 0 then a + b + c + d + e + f + g else acc8(n - 1, a + 1, b, c + 2, d, e + 3, f, g + 4)
+fn nest7(x) = f7(x, x + 1, x + 2, x + 3, f7(1, 2, 3, 4, 5, 6, 7), x + 5, f7(x, x, x, x, x, x, x))
+fn swap8(a, b, c, d, e, f, g, h) = f8(h, g, f, e, d, c, b, a)
+print f7(1, 2, 3, 4, 5, 6, 7)
+print f8(9, 1, 8, 2, 7, 3, 6, 4)
+print f10(1, 2, 3, 4, 5, 6, 7, 8, 9, 0)
+print acc8(10, 0, 0, 0, 0, 0, 0, 0)
+print nest7(1)
+print swap8(1, 2, 3, 4, 5, 6, 7, 8)
+print f7(1, 2, 3, 4, 5, 6, 7) + f8(1, 2, 3, 4, 5, 6, 7, 8)

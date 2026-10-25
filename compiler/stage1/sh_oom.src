@@ -1,0 +1,4 @@
+fn dbl(s, n) = if n == 0 then s else dbl(s + s, n - 1)
+print "before"
+print count(dbl("x", 27))
+print "unreachable"
