@@ -1,0 +1,12 @@
+print [1, 2, 3]
+print [1, "x", [2, 3]]
+print []
+print {b: 1, a: "s", c: [1, 2]}
+print {}
+print Cons(1, Cons(2, Nil))
+print Nil
+print Cons({z: 1, y: 2}, [Nil])
+print [0 - 5, "a b", [[]], {k: Pair(1, "q")}]
+print 0 - 12345
+print "plain"
+print [0, 0 - 1, 9223372036854775807]
