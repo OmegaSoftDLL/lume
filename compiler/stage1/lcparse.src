@@ -64,6 +64,19 @@ fn orloop(r) = match r.rest
 fn expr(ts) = orloop(booland(ts))
 fn parse(s) = (expr(lex(s, 0))).node
 
+## --- parser: programs (fn definitions and print statements) ---
+## A statement starts with `fn` or `print`; expr stops at the next one since neither is an operator.
+fn parseparams(ts) = if headtext(ts) == ")" then {items: Nil, rest: droponce(ts)} else parammore(headtext(ts), droponce(ts))
+fn parammore(nm, ts) = if headtext(ts) == "," then let rr = parseparams(droponce(ts)) in {items: Cons(nm, rr.items), rest: rr.rest} else {items: Cons(nm, Nil), rest: skiprp(ts)}
+fn parsefn(t) = let nm = headtext(t) in let ps = parseparams(dropkw(droponce(t), "(")) in let b = expr(dropkw(ps.rest, "=")) in {node: Fn(nm, ps.items, b.node), rest: b.rest}
+fn parseprint(t) = let e = expr(t) in {node: Print(e.node), rest: e.rest}
+fn parsestmt(ts) = if headtext(ts) == "fn" then parsefn(droponce(ts)) else parseprint(droponce(ts))
+fn progmore(r) = Cons(r.node, parseprog(r.rest))
+fn parseprog(ts) = match ts
+    Nil        => Nil
+    Cons(h, t) => if h.text == "fn" or h.text == "print" then progmore(parsestmt(ts)) else Nil
+fn parseprogram(s) = parseprog(lex(s, 0))
+
 ## --- dump the AST ---
 fn sep(xs) = match xs
     Nil        => ""
@@ -85,6 +98,19 @@ fn show(e) = match e
     Field(o, f)   => show(o) + "." + f
     Rec(items)    => "{" + showrec(items) + "}"
 
+fn showparams(xs) = match xs
+    Nil        => ""
+    Cons(h, t) => h + sep(t) + showparams(t)
+fn showstmt(st) = match st
+    Fn(n, ps, b) => "fn " + n + "(" + showparams(ps) + ") = " + show(b)
+    Print(e)     => "print " + show(e)
+fn sepnl(xs) = match xs
+    Nil        => ""
+    Cons(h, t) => "\n"
+fn showprog(xs) = match xs
+    Nil        => ""
+    Cons(h, t) => showstmt(h) + sepnl(t) + showprog(t)
+
 print show(parse("2 + 3 * 4"))
 print show(parse("f(1, 2 + 3, g(x))"))
 print show(parse("Cons(h, Cons(1, Nil))"))
@@ -103,3 +129,6 @@ print show(parse("a and b or c"))
 print show(parse("x < 1 or y > 2"))
 print show(parse("a or b and c"))
 print show(parse("i < count(s) and isalnum(at(s, i))"))
+print showprog(parseprogram("fn fib(n) = if n < 2 then n else fib(n - 1) + fib(n - 2)"))
+print showprog(parseprogram("fn add(a, b) = a + b\nprint add(2, 3)"))
+print showprog(parseprogram("fn f() = 42\nfn g(x) = f() + x\nprint g(f(), h(1, k(2)))\nprint 7"))
