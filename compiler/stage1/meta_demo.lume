@@ -1,0 +1,12 @@
+## meta_demo.lume — a self-hosting-direction milestone: an interpreter (with a variable
+## environment) written in the ML-core language, run by the ML-core interpreter (data_eval),
+## which itself runs on lume0. Three levels of Lume. Uses ADTs, match, recursion, records,
+## cons-lists, strings and if -- the whole core.
+use data_ast
+use data_parser
+use data_eval
+use std.io
+
+fn main()
+    let program = "fn lookup(env, name) = match env\n    Nil => 0\n    Cons(p, rest) => if p.key == name then p.val else lookup(rest, name)\nfn ev(e, env) = match e\n    Lit(n) => n\n    Var(x) => lookup(env, x)\n    Add(a, b) => ev(a, env) + ev(b, env)\n    Mul(a, b) => ev(a, env) * ev(b, env)\nlet env = Cons({{key: \"x\", val: 10}}, Cons({{key: \"y\", val: 7}}, Nil))\nprint ev(Add(Var(\"x\"), Mul(Var(\"y\"), Lit(3))), env)\nprint ev(Mul(Add(Var(\"x\"), Lit(1)), Var(\"y\")), env)\n"
+    run_data(parse_data_program(program))
