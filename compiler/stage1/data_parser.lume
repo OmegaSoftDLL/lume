@@ -48,6 +48,14 @@ fn dpat(p: mut DP) -> Pat
         PBind(name: t.text)
 
 fn datom(p: mut DP) -> DExpr
+    if dcur(p).kind == Kw and dcur(p).text == "if"
+        deat(p)
+        let c = dexpr(p, 0)
+        deat(p)                          # then
+        let a = dexpr(p, 0)
+        deat(p)                          # else
+        let b = dexpr(p, 0)
+        return DIf(cond: c, then_val: a, else_val: b)
     if dcur(p).kind == Kw and dcur(p).text == "match"
         deat(p)
         let scrut = dexpr(p, 0)

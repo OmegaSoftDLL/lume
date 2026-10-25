@@ -128,6 +128,11 @@ fn deval(e: DExpr, env: map[str, RV], fns: [DStmt]) -> RV
             let rv = deval(r, env, fns)
             if op == "+" and rv_is_str(lv) and rv_is_str(rv)
                 return VStr(s: rv_str(lv) + rv_str(rv))
+            if rv_is_str(lv) and rv_is_str(rv)
+                if op == "=="
+                    return VInt(n: if rv_str(lv) == rv_str(rv) then 1 else 0)
+                if op == "!="
+                    return VInt(n: if rv_str(lv) == rv_str(rv) then 0 else 1)
             let a = rv_int(lv)
             let b = rv_int(rv)
             match op
@@ -139,6 +144,11 @@ fn deval(e: DExpr, env: map[str, RV], fns: [DStmt]) -> RV
                 ">"  => VInt(n: if a > b then 1 else 0)
                 "==" => VInt(n: if a == b then 1 else 0)
                 _    => VInt(n: 0)
+        DIf(c, a, b) => do
+            if rv_int(deval(c, env, fns)) != 0
+                deval(a, env, fns)
+            else
+                deval(b, env, fns)
         DMatch(scrut, arms) => do
             let v = deval(scrut, env, fns)
             var result = VInt(n: 0)
