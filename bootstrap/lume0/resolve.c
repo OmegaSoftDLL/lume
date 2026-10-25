@@ -350,6 +350,27 @@ static void match_walk(const Node *n, DiagList *d) {
     for (int i = 0; i < n->nkid; i++) match_walk(n->kids[i], d);
 }
 
+/* ---- unreachable code after a terminator in a block ----
+ * Within a block, a return/break/continue ends the flow; any statement after it
+ * (as a direct sibling) can never run. Only direct siblings are considered, so a
+ * return nested inside an if does not mark later code dead -- zero false positives. */
+static int is_terminator(NodeKind k) { return k == N_RETURN || k == N_BREAK || k == N_CONTINUE; }
+static void dead_walk(const Node *n, DiagList *d) {
+    if (!n) return;
+    if (n->kind == N_BLOCK || n->kind == N_DOBLOCK) {
+        for (int i = 0; i + 1 < n->nkid; i++) {
+            if (is_terminator(n->kids[i]->kind)) {
+                const Node *dead = n->kids[i + 1];
+                diag_add(d, SEV_ERROR, "U0002", dead->line, dead->col, 1,
+                         "unreachable code after return/break/continue",
+                         "remove it, or move it before the return/break/continue");
+                break;
+            }
+        }
+    }
+    for (int i = 0; i < n->nkid; i++) dead_walk(n->kids[i], d);
+}
+
 /* run name resolution + basic literal type checks + duplicate detection + arity */
 void lume_resolve(const Node *module, DiagList *diags) {
     if (!module) return;
@@ -370,4 +391,5 @@ void lume_resolve(const Node *module, DiagList *diags) {
     mut_walk(module, &mut_s, &immut_s, diags);
     sset_free(&mut_s); sset_free(&immut_s);
     match_walk(module, diags);
+    dead_walk(module, diags);
 }
