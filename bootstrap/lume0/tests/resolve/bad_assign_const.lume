@@ -1,0 +1,5 @@
+# expect: M0001
+const L = 1
+fn m() -> int
+    L = 5
+    L

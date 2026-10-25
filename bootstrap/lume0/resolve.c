@@ -302,7 +302,10 @@ static void mut_collect(const Node *n, StrSet *mutable_s, StrSet *immut_s) {
         if (n->text) sset_add(mutable_s, n->text, n->text_len);
         add_pbinds(n, mutable_s);
     } else if (n->kind == N_LET || n->kind == N_CONST) {
-        if (n->nkid) add_pbinds(n->kids[0], immut_s);
+        if (n->nkid) {
+            add_pbinds(n->kids[0], immut_s);
+            if (n->kids[0]->kind == N_IDENT && n->kids[0]->text) sset_add(immut_s, n->kids[0]->text, n->kids[0]->text_len);
+        }
     }
     for (int i = 0; i < n->nkid; i++) mut_collect(n->kids[i], mutable_s, immut_s);
 }
