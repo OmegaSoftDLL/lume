@@ -187,7 +187,69 @@ static void dup_toplevel_fns(const Node *module, DiagList *d) {
     sset_free(&seen);
 }
 
-/* run name resolution + basic literal type checks + duplicate detection */
+/* ---- call arity checking for direct calls to top-level functions ----
+ * Conservative: only N_CALL whose callee is a bare lowercase identifier naming a
+ * top-level fn. Methods (FIELD_GET callee), builtins, constructors and piped calls
+ * are not touched. A function with a parameter we cannot read plainly (rest, pattern,
+ * unknown) is skipped entirely, so there are no false positives. */
+typedef struct { const char *name; int len; int minreq, total, skip; } FnSig;
+typedef struct { FnSig *v; int n, cap; } FnSigs;
+static const FnSig *sig_find(const FnSigs *s, const char *p, int len) {
+    for (int i = 0; i < s->n; i++) if (s->v[i].len == len && memcmp(s->v[i].name, p, (size_t)len) == 0) return &s->v[i];
+    return NULL;
+}
+static void sigs_build(const Node *module, FnSigs *out) {
+    for (int i = 0; i < module->nkid; i++) {
+        const Node *fn = module->kids[i];
+        if (fn->kind != N_FN) continue;
+        const Node *nm = name_node(fn);
+        if (!nm || !nm->text) continue;
+        int minreq = 0, total = 0, skip = 0;
+        for (int j = 0; j < fn->nkid; j++) {
+            if (fn->kids[j]->kind != N_PARAM) continue;
+            total++;
+            const Node *pn = NULL; int hasdef = 0;
+            for (int k = 0; k < fn->kids[j]->nkid; k++) {
+                NodeKind ck = fn->kids[j]->kids[k]->kind;
+                if (ck == N_IDENT && !pn) pn = fn->kids[j]->kids[k];
+                else if (is_type_node(ck)) { /* type annotation */ }
+                else hasdef = 1;   /* a default value makes the parameter optional */
+            }
+            if (!pn && !fn->kids[j]->text) skip = 1;   /* not a plain named parameter */
+            if (!hasdef) minreq++;
+        }
+        if (out->n == out->cap) { out->cap = out->cap ? out->cap * 2 : 32; out->v = realloc(out->v, (size_t)out->cap * sizeof(FnSig)); }
+        out->v[out->n].name = nm->text; out->v[out->n].len = nm->text_len;
+        out->v[out->n].minreq = minreq; out->v[out->n].total = total; out->v[out->n].skip = skip;
+        out->n++;
+    }
+}
+static void arity_walk(const Node *n, const FnSigs *sigs, DiagList *d) {
+    if (!n) return;
+    if (n->kind == N_CALL && n->nkid >= 1 && n->kids[0]->kind == N_IDENT) {
+        const Node *callee = n->kids[0];
+        char c0 = callee->text && callee->text_len > 0 ? callee->text[0] : 0;
+        if (!(c0 >= 'A' && c0 <= 'Z')) {
+            const FnSig *sig = sig_find(sigs, callee->text, callee->text_len);
+            if (sig && !sig->skip) {
+                int argc = 0;
+                for (int i = 1; i < n->nkid; i++) if (n->kids[i]->kind == N_ARG) argc++;
+                char nm[48]; int L = callee->text_len > 47 ? 47 : callee->text_len;
+                memcpy(nm, callee->text, (size_t)L); nm[L] = 0;
+                if (argc > sig->total) {
+                    char msg[200]; snprintf(msg, sizeof msg, "too many arguments to `%s`: it takes %d, got %d", nm, sig->total, argc);
+                    diag_add(d, SEV_ERROR, "A0001", callee->line, callee->col, callee->text_len, msg, "pass the right number of arguments");
+                } else if (argc < sig->minreq) {
+                    char msg[200]; snprintf(msg, sizeof msg, "too few arguments to `%s`: it needs %d, got %d", nm, sig->minreq, argc);
+                    diag_add(d, SEV_ERROR, "A0002", callee->line, callee->col, callee->text_len, msg, "pass the required arguments");
+                }
+            }
+        }
+    }
+    for (int i = 0; i < n->nkid; i++) arity_walk(n->kids[i], sigs, d);
+}
+
+/* run name resolution + basic literal type checks + duplicate detection + arity */
 void lume_resolve(const Node *module, DiagList *diags) {
     if (!module) return;
     StrSet def = {0};
@@ -197,4 +259,8 @@ void lume_resolve(const Node *module, DiagList *diags) {
     typecheck_walk(module, diags);
     dup_walk(module, diags);
     dup_toplevel_fns(module, diags);
+    FnSigs sigs = {0};
+    sigs_build(module, &sigs);
+    arity_walk(module, &sigs, diags);
+    free(sigs.v);
 }
