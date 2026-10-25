@@ -33,11 +33,13 @@ static long long pint(const char *s, int len) {
 static void gen_expr(Asm *a, const Node *n);
 static void gen_stmt(Asm *a, const Node *n);
 static void gen_block_value(Asm *a, const Node *n);
+static void gen_value(Asm *a, const Node *n);
 
 /* collect local binding names (var/let) reachable in a function body, so the
  * frame reserves a slot for each. Params are added separately, before this. */
 static void collect_locals(const Node *n, Names *v) {
     if (!n) return;
+    if (n->kind == N_FN) return;   /* a (nested) function owns its own frame */
     if (n->kind == N_VAR || n->kind == N_LET || n->kind == N_FOR) {
         const Node *pat = n->nkid ? n->kids[0] : NULL;
         if (pat && pat->text) names_add(v, pat->text, (int)pat->text_len);
@@ -106,17 +108,18 @@ static void gen_expr(Asm *a, const Node *n) {
     }
     case N_BLOCK: case N_DOBLOCK: gen_block_value(a, n); break;
     case N_IF: {
-        /* an if/else (or if/elif/else) in value position: each branch yields a value */
+        /* flat if/elif/else in value position: kids are (cond, body) pairs with an
+         * optional trailing else body; each chosen branch yields a value. */
         int L = a->label++;
-        gen_expr(a, n->kids[0]);
-        fprintf(a->out, "    popq %%rax\n    testq %%rax, %%rax\n    jz .Lie%d\n", L);
-        const Node *th = n->kids[1];
-        if (th->kind == N_BLOCK || th->kind == N_DOBLOCK) gen_block_value(a, th); else gen_expr(a, th);
-        fprintf(a->out, "    jmp .Lix%d\n.Lie%d:\n", L, L);
-        if (n->nkid >= 3) {
-            const Node *el = n->kids[2];
-            if (el->kind == N_BLOCK || el->kind == N_DOBLOCK) gen_block_value(a, el); else gen_expr(a, el);
-        } else fprintf(a->out, "    pushq $0\n");
+        int np = n->nkid, pairs = np / 2, has_else = (np % 2 == 1);
+        for (int p = 0; p < pairs; p++) {
+            int Ln = a->label++;
+            gen_expr(a, n->kids[2*p]);
+            fprintf(a->out, "    popq %%rax\n    testq %%rax, %%rax\n    jz .Lin%d\n", Ln);
+            gen_value(a, n->kids[2*p+1]);
+            fprintf(a->out, "    jmp .Lix%d\n.Lin%d:\n", L, Ln);
+        }
+        if (has_else) gen_value(a, n->kids[np-1]); else fprintf(a->out, "    pushq $0\n");
         fprintf(a->out, ".Lix%d:\n", L);
         break;
     }
@@ -169,12 +172,17 @@ static void gen_stmt(Asm *a, const Node *n) {
         break;
     }
     case N_IF: {
+        /* flat if/elif/else statement: (cond, body) pairs + optional trailing else */
         int L = a->label++;
-        gen_expr(a, n->kids[0]);
-        fprintf(a->out, "    popq %%rax\n    testq %%rax, %%rax\n    jz .Lse%d\n", L);
-        gen_stmt(a, n->kids[1]);
-        fprintf(a->out, "    jmp .Lsx%d\n.Lse%d:\n", L, L);
-        if (n->nkid >= 3) gen_stmt(a, n->kids[2]);
+        int np = n->nkid, pairs = np / 2, has_else = (np % 2 == 1);
+        for (int p = 0; p < pairs; p++) {
+            int Ln = a->label++;
+            gen_expr(a, n->kids[2*p]);
+            fprintf(a->out, "    popq %%rax\n    testq %%rax, %%rax\n    jz .Lsn%d\n", Ln);
+            gen_stmt(a, n->kids[2*p+1]);
+            fprintf(a->out, "    jmp .Lsx%d\n.Lsn%d:\n", L, Ln);
+        }
+        if (has_else) gen_stmt(a, n->kids[np-1]);
         fprintf(a->out, ".Lsx%d:\n", L);
         break;
     }
@@ -213,6 +221,12 @@ static void gen_stmt(Asm *a, const Node *n) {
         if (a->ok) fprintf(a->out, "    addq $8, %%rsp\n");
         break;
     }
+}
+
+/* emit any node in value position (a block yields its tail, else an expression). */
+static void gen_value(Asm *a, const Node *n) {
+    if (n->kind == N_BLOCK || n->kind == N_DOBLOCK) gen_block_value(a, n);
+    else gen_expr(a, n);
 }
 
 /* a block in value position: statements for effect, last one yields the value. */
@@ -263,12 +277,24 @@ static void gen_function(Asm *a, const Node *fn) {
 
 static void gen_toplevel_stmt(Asm *a, const Node *n) {
     const Node *expr = NULL; int store = -1;
-    if (n->kind == N_LET || n->kind == N_VAR) {
+    switch (n->kind) {
+    case N_LET: case N_VAR: {
         const Node *pat = n->kids[0];
         for (int i = 1; i < n->nkid; i++) if (!(n->kids[i]->kind >= N_TYNAME && n->kids[i]->kind <= N_TYHOLE)) expr = n->kids[i];
-        if (pat->text) store = names_add(&a->globals, pat->text, pat->text_len);
-    } else if (n->kind == N_EXPRSTMT) expr = n->kids[0];
-    else return;
+        if (pat->text) store = names_add(&a->globals, pat->text, (int)pat->text_len);
+        break;
+    }
+    case N_ASSIGN:
+        if (n->kids[0]->kind != N_IDENT) return;
+        store = names_add(&a->globals, n->kids[0]->text, (int)n->kids[0]->text_len);
+        expr = n->kids[1];
+        break;
+    case N_EXPRSTMT: expr = n->kids[0]; break;
+    /* control-flow statements at top level run for their effects (globals), no print */
+    case N_WHILE: case N_FOR: case N_IF: case N_BLOCK: case N_DOBLOCK:
+        gen_stmt(a, n); return;
+    default: return;
+    }
     if (!expr) return;
     gen_expr(a, expr);
     fprintf(a->out, "    popq %%rax\n");
@@ -278,9 +304,9 @@ static void gen_toplevel_stmt(Asm *a, const Node *n) {
 
 int asm_emit(const Node *module, FILE *out) {
     Asm a = {0}; a.out = out; a.ok = 1;
-    /* discover globals (top-level let/var) so .bss slots exist */
-    for (int i = 0; i < module->nkid; i++) { const Node *s = module->kids[i];
-        if ((s->kind == N_LET || s->kind == N_VAR) && s->nkid && s->kids[0]->text) names_add(&a.globals, s->kids[0]->text, s->kids[0]->text_len); }
+    /* discover globals: every binding (var/let/for) reachable in top-level
+     * statements, so .bss slots exist. collect_locals stops at function bodies. */
+    for (int i = 0; i < module->nkid; i++) if (module->kids[i]->kind != N_FN) collect_locals(module->kids[i], &a.globals);
     int nglob = a.globals.n;
     fprintf(out, "    .section .bss\n    .lcomm pbuf, 32\n");
     for (int i = 0; i < nglob; i++) fprintf(out, "    .lcomm v%d, 8\n", i);
