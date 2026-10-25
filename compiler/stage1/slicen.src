@@ -1,0 +1,16 @@
+## Regression test for the length-aware substring builtin slicen(s, len, i, j).
+## slicen must behave exactly like slice(s, i, j) but clamp against the caller-
+## supplied length instead of calling strlen(s) internally (the O(n^2) fix for
+## line-splitting). These cases cover: in-range, upper clamp (j > len), empty
+## (i == j), and negative-i clamp -- and assert slicen == slice value-for-value.
+fn sub(s, i, j) = slicen(s, count(s), i, j)
+print sub("hello world", 0, 5)
+print sub("hello world", 6, 11)
+print sub("hello world", 6, 100)
+print sub("hello world", 0, 11)
+print sub("hello world", 3, 3)
+print sub("hello world", 0 - 2, 5)
+print count(sub("hello world", 6, 100))
+print slicen("hello world", 11, 0, 5) == slice("hello world", 0, 5)
+print slicen("hello world", 11, 6, 100) == slice("hello world", 6, 100)
+print slicen("abcdef", 6, 2, 4) == slice("abcdef", 2, 4)
