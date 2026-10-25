@@ -1,0 +1,20 @@
+## lumec_main.lume — lumec as a real command-line compiler, written in Lume.
+## Reads a .lume source file, compiles it, and writes a .c file (or prints the diagnostics).
+## Usage:  lume0 run compiler/stage1/lumec_main.lume <input.lume> <output.c>
+use lumec
+use std.io
+
+fn main()
+    let args = env.args()
+    if args.len() < 2
+        io.println("usage: lumec_main.lume <input.lume> <output.c>")
+        return
+    let src = io.read_file(args[0])
+    let out = compile(src)
+    if out.ok
+        let wrote = io.write_file(args[1], out.code)
+        io.println("compiled {args[0]} -> {args[1]} ({out.code.len()} bytes of C)")
+    else
+        io.println("{args[0]}: {out.errors.len()} error(s)")
+        for e in out.errors
+            io.println("  - {e}")

@@ -94,6 +94,7 @@ int main(int argc, char **argv) {
         rc = diags.errors == 0 ? 0 : 1;
         arena_free(arena);
     } else if (strcmp(cmd, "run") == 0) {
+        lume_set_args(argc - 3, argv + 3);   /* args after `run <file>` are the program's */
         Arena *arena = arena_new();
         size_t pl = strlen(path);
         Node *root;

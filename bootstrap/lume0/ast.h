@@ -82,3 +82,4 @@ Node *lbe_read(const unsigned char *buf, size_t n, Arena *a);
 /* Tree-walking interpreter (Stage 0). Runs the core subset; evaluates dynamically with runtime
  * contract checks. Returns process exit code; diagnostics for load errors go to `diags`. */
 int lume_run(const Node *module, const char *file, DiagList *diags);
+void lume_set_args(int argc, char **argv);
