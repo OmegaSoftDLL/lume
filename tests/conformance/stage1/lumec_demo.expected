@@ -1,0 +1,19 @@
+### good program
+compiled OK; generated C:
+#include <stdio.h>
+long long dbl(long long x) { return (x + x); }
+int main(void) {
+    long long a = dbl(21);
+    printf("a = %lld\n", a);
+    long long b = (((a > 40)) ? (a) : (0));
+    printf("b = %lld\n", b);
+    printf("%lld\n", (long long)(b));
+    return 0;
+}
+
+### bad program
+rejected with 3 error(s):
+  - undefined function: dbl
+  - undefined function: foo
+  - operator '+' needs numbers, but got a string
+

@@ -1,0 +1,19 @@
+## lumec_demo.lume — drive the Lume-written compiler on a good and a bad program (run by lume0).
+use lumec
+use std.io
+
+fn build(label: str, src: str)
+    io.println("### {label}")
+    let out = compile(src)
+    if out.ok
+        io.println("compiled OK; generated C:")
+        io.print(out.code)
+    else
+        io.println("rejected with {out.errors.len()} error(s):")
+        for e in out.errors
+            io.println("  - {e}")
+    io.println("")
+
+fn main()
+    build("good program", "fn dbl(x) = x + x\nlet a = dbl(21)\nlet b = if a > 40 then a else 0\nb")
+    build("bad program", "let a = dbl(1)\nlet b = foo(a, 2)\na + \"x\"")
