@@ -5,12 +5,14 @@ use std.io
 type RV = enum
     VInt(n: int)
     VStr(s: str)
+    VList(items: [RV])
     VObj(tag: str, fields: [RV])
 
 fn rv_int(v: RV) -> int
     match v
         VInt(n)     => n
         VStr(s)     => 0
+        VList(xs)   => 0
         VObj(t, fs) => 0
 
 fn rv_is_str(v: RV) -> bool
@@ -28,6 +30,7 @@ fn rv_show(v: RV) -> str
     match v
         VInt(n)     => "{n}"
         VStr(s)     => s
+        VList(xs)   => "[" + xs.map(rv_show).join(", ") + "]"
         VObj(t, fs) => do
             if fs.len() == 0
                 t
@@ -81,8 +84,24 @@ fn deval(e: DExpr, env: map[str, RV], fns: [DStmt]) -> RV
                         let _ = 0
                     DPrint(v2) => do
                         let _ = 0
+            if not found and name == "count"
+                let cv = deval(args[0], env, fns)
+                match cv
+                    VList(xs) => do
+                        result = VInt(n: xs.len())
+                    VStr(s) => do
+                        result = VInt(n: s.len())
+                    _ => do
+                        result = VInt(n: 0)
             result
         DStr(sv)      => VStr(s: sv)
+        DList(elems)  => VList(items: elems.map(|a| deval(a, env, fns)))
+        DIndex(coll, idx) => do
+            let cv = deval(coll, env, fns)
+            let iv = rv_int(deval(idx, env, fns))
+            match cv
+                VList(xs) => if iv >= 0 and iv < xs.len() then xs[iv] else VInt(n: 0)
+                _         => VInt(n: 0)
         DBin(op, l, r) => do
             let lv = deval(l, env, fns)
             let rv = deval(r, env, fns)
