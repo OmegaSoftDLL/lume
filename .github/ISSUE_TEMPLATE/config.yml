@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Project state, rules and architecture
+    url: https://github.com/OmegaSoftDLL/lume/blob/main/docs/PROJECT_STATE.md
+    about: Read this before opening an issue or PR.

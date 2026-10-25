@@ -1,0 +1,27 @@
+# Lume is this repository's language. GitHub Linguist counts .lume/.src/.blk as Lume.
+# The C bootstrap seed is disposable — it exists only until Lume self-hosts — so it,
+# and the build/test/CI scaffolding, are marked vendored and are not counted as the
+# project's language. The goal is a repo that reads as what it is: Lume.
+*.lume linguist-language=Lume linguist-detectable=true
+*.src  linguist-language=Lume linguist-detectable=true
+*.blk  linguist-language=Lume linguist-detectable=true
+
+# Disposable bootstrap seed (C) + build/test/CI scaffolding: not the project language.
+bootstrap/** linguist-vendored
+*.c  linguist-vendored
+*.h  linguist-vendored
+*.s  linguist-vendored
+*.S  linguist-vendored
+Makefile     linguist-vendored
+**/Makefile  linguist-vendored
+*.sh  linguist-vendored
+.github/**  linguist-vendored
+*.yml  linguist-vendored
+*.yaml linguist-vendored
+LICENSE-MIT    linguist-vendored
+LICENSE-APACHE linguist-vendored
+
+# Prose and specifications are documentation, not code.
+*.md        linguist-documentation
+docs/**     linguist-documentation
+grammar/**  linguist-documentation
