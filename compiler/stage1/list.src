@@ -1,0 +1,7 @@
+fn third(xs) = xs[2]
+fn sumlist(xs, i) = if i >= count(xs) then 0 else xs[i] + sumlist(xs, i + 1)
+fn maxlist(xs, i, best) = if i >= count(xs) then best else if xs[i] > best then maxlist(xs, i + 1, xs[i]) else maxlist(xs, i + 1, best)
+print third([10, 20, 30, 40])
+print count([1, 2, 3, 4, 5])
+print sumlist([3, 1, 4, 1, 5, 9, 2, 6], 0)
+print maxlist([3, 1, 4, 1, 5, 9, 2, 6], 0, 0)

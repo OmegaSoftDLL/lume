@@ -26,7 +26,9 @@ fn runtime() -> str
         "static Value* addv(Value* a,Value* b){{ if(a->tag==1||b->tag==1){{ const char* x=a->tag==1?a->s:\"\"; const char* y=b->tag==1?b->s:\"\"; size_t la=strlen(x),lb=strlen(y); char* r=(char*)malloc(la+lb+1); memcpy(r,x,la); memcpy(r+la,y,lb); r[la+lb]=0; return mkstr(r); }} return mkint(a->i+b->i); }}",
         "static long long eqv(Value* a,Value* b){{ if(a->tag==0&&b->tag==0) return a->i==b->i; if(a->tag==1&&b->tag==1) return strcmp(a->s,b->s)==0; if(a->tag==2&&b->tag==2) return strcmp(a->ctor,b->ctor)==0; return 0; }}",
         "static long long cmpv(Value* a,Value* b){{ if(a->tag==1&&b->tag==1){{ int r=strcmp(a->s,b->s); return r<0?-1:(r>0?1:0); }} long long x=a->i,y=b->i; return x<y?-1:(x>y?1:0); }}",
-        "static Value* count(Value* s){{ return mkint((long long)strlen(s->s)); }}",
+        "static Value* mklist(int n,Value** xs){{ Value* v=(Value*)calloc(1,sizeof(Value)); v->tag=4; v->argc=n; if(n){{ v->args=(Value**)malloc(sizeof(Value*)*n); for(int k=0;k<n;k++) v->args[k]=xs[k]; }} return v; }}",
+        "static Value* lidx(Value* c,Value* i){{ long long k=i->i; if(c->tag==4 && k>=0 && k<c->argc) return c->args[k]; return mkint(0); }}",
+        "static Value* count(Value* s){{ if(s->tag==4) return mkint(s->argc); return mkint((long long)strlen(s->s)); }}",
         "static Value* at(Value* s,Value* i){{ long long k=i->i; char* b=(char*)malloc(2); b[0]=s->s[k]; b[1]=0; return mkstr(b); }}",
         "static Value* slice(Value* s,Value* a,Value* b){{ long long i=a->i,j=b->i,L=(long long)strlen(s->s); if(i<0)i=0; if(j>L)j=L; long long n=j-i; if(n<0)n=0; char* r=(char*)malloc(n+1); memcpy(r,s->s+i,n); r[n]=0; return mkstr(r); }}",
         "static Value* toint(Value* s){{ return mkint(atoll(s->s)); }}",
@@ -115,8 +117,12 @@ fn cexpr(e: DExpr) -> str
                 let vals = fields.map(|f| cexpr(f.value)).join(", ")
                 "mkrec(" + str(fields.len()) + ", (const char*[]){{" + names + "}}, (Value*[]){{" + vals + "}})"
         DField(o, nm) => "recget(" + cexpr(o) + ", \"" + nm + "\")"
-        DList(xs)    => "__LUME_UNSUPPORTED_list__"
-        DIndex(c, i) => "__LUME_UNSUPPORTED_index__"
+        DList(xs) => do
+            if xs.len() == 0
+                "mklist(0, 0)"
+            else
+                "mklist(" + str(xs.len()) + ", (Value*[]){{" + xs.map(cexpr).join(", ") + "}})"
+        DIndex(c, i) => "lidx(" + cexpr(c) + ", " + cexpr(i) + ")"
 
 fn cmatch(scrut: DExpr, arms: [Arm]) -> str
     var out = "({{ Value* _s = " + cexpr(scrut) + "; Value* _r = 0; "
