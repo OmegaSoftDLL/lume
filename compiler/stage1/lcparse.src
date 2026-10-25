@@ -1,11 +1,12 @@
 ## lcparse.src — an expression parser for the Lume core, written in the Lume core
-## (functional subset). Self-hosting rewrite (docs/11, R5), brick 1: the precedence
-## engine over the token stream from the core lexer. Grammar here: integers, variables,
-## parentheses, and binary operators (* / %, + -, comparisons) with precedence. Parser
-## state is threaded immutably as {node, rest} over the token list, exactly like calc.src.
-## Calls, let/if/match and records come in the next R5 bricks.
+## (functional subset). Self-hosting rewrite (docs/11, R5). Bricks 1-2: the precedence
+## engine plus function/constructor calls. Grammar: integers, variables, parentheses,
+## calls `f(a, b, ...)` (constructors like Cons/Lit parse the same), and binary operators
+## (* / %, + -, comparisons) with precedence. State is threaded immutably as {node, rest}.
+## Nested match inside an expression is avoided (the core parser dislikes it) via helpers.
+## let/if/match and record literals come in the next bricks.
 
-## --- lexer (same functional style as lclex.src) ---
+## --- lexer ---
 fn isdigit(c) = c >= "0" and c <= "9"
 fn isalpha(c) = (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or c == "_"
 fn isalnum(c) = isdigit(c) or isalpha(c)
@@ -15,13 +16,22 @@ fn two(s, i) = slice(s, i, if i + 2 > count(s) then count(s) else i + 2)
 fn istwo(t) = t == "==" or t == "!=" or t == "<=" or t == ">="
 fn lex(s, i) = if i >= count(s) then Nil else let c = at(s, i) in if c == " " or c == "\t" or c == "\n" or c == "\r" then lex(s, i + 1) else if isdigit(c) then Cons({kind: "int", text: slice(s, i, numend(s, i))}, lex(s, numend(s, i))) else if isalpha(c) then Cons({kind: "id", text: slice(s, i, idend(s, i))}, lex(s, idend(s, i))) else if istwo(two(s, i)) then Cons({kind: "op", text: two(s, i)}, lex(s, i + 2)) else Cons({kind: "op", text: at(s, i)}, lex(s, i + 1))
 
-## --- parser: returns {node, rest}; AST uses constructors Num/Var/Bin ---
-fn skiprp(ts) = match ts
+## --- token-list helpers (avoid nested match in expressions) ---
+fn headtext(ts) = match ts
+    Nil        => ""
+    Cons(h, t) => h.text
+fn droponce(ts) = match ts
     Nil        => Nil
-    Cons(h, t) => if h.text == ")" then t else ts
+    Cons(h, t) => t
+fn skiprp(ts) = if headtext(ts) == ")" then droponce(ts) else ts
+
+## --- parser: {node, rest}; AST constructors Num/Var/Bin/Call ---
+fn primid(name, t) = if headtext(t) == "(" then let a = arglist(droponce(t)) in {node: Call(name, a.items), rest: a.rest} else {node: Var(name), rest: t}
 fn prim(ts) = match ts
     Nil        => {node: Num(0), rest: Nil}
-    Cons(h, t) => if h.kind == "int" then {node: Num(toint(h.text)), rest: t} else if h.kind == "id" then {node: Var(h.text), rest: t} else if h.text == "(" then let r = expr(t) in {node: r.node, rest: skiprp(r.rest)} else {node: Num(0), rest: t}
+    Cons(h, t) => if h.kind == "int" then {node: Num(toint(h.text)), rest: t} else if h.kind == "id" then primid(h.text, t) else if h.text == "(" then let r = expr(t) in {node: r.node, rest: skiprp(r.rest)} else {node: Num(0), rest: t}
+fn arglist(ts) = if headtext(ts) == ")" then {items: Nil, rest: droponce(ts)} else argmore(expr(ts))
+fn argmore(r) = if headtext(r.rest) == "," then let rr = arglist(droponce(r.rest)) in {items: Cons(r.node, rr.items), rest: rr.rest} else {items: Cons(r.node, Nil), rest: skiprp(r.rest)}
 fn mulloop(r) = match r.rest
     Nil        => r
     Cons(h, t) => if h.text == "*" or h.text == "/" or h.text == "%" then let r2 = prim(t) in mulloop({node: Bin(h.text, r.node, r2.node), rest: r2.rest}) else r
@@ -37,14 +47,21 @@ fn cmp(ts) = cmploop(add(ts))
 fn expr(ts) = cmp(ts)
 fn parse(s) = (expr(lex(s, 0))).node
 
-## --- dump the AST as a fully-parenthesised expression ---
+## --- dump the AST ---
+fn sep(xs) = match xs
+    Nil        => ""
+    Cons(h, t) => ", "
+fn showargs(xs) = match xs
+    Nil        => ""
+    Cons(h, t) => show(h) + sep(t) + showargs(t)
 fn show(e) = match e
-    Num(n)       => str(n)
-    Var(x)       => x
+    Num(n)        => str(n)
+    Var(x)        => x
     Bin(op, a, b) => "(" + show(a) + " " + op + " " + show(b) + ")"
+    Call(f, args) => f + "(" + showargs(args) + ")"
 
 print show(parse("2 + 3 * 4"))
-print show(parse("a + b * c - d"))
-print show(parse("(1 + 2) * 3"))
-print show(parse("x <= 10 == y"))
-print show(parse("n % 2 + 1"))
+print show(parse("f(1, 2 + 3, g(x))"))
+print show(parse("Cons(h, Cons(1, Nil))"))
+print show(parse("max(a, b) * 2 - min(c, d)"))
+print show(parse("a(b(c(1)), d)"))
