@@ -102,7 +102,9 @@ lume/
 │   ├── 07-competitive.md         ← scan of comparable projects and the ideas Lume adopts
 │   ├── 08-ai-first.md            ← Lume is authored by AI, reviewed by humans (the center of gravity)
 │   ├── 09-lbe.md                 ← LBE: the AI emits structure (binary AST), the machine emits the bits
-│   └── 10-stage1-status.md       ← honest inventory of what the Lume-written compiler covers
+│   ├── 10-stage1-status.md       ← honest inventory of what the Lume-written compiler covers
+│   ├── 11-self-hosting-plan.md   ← how the compiler was rewritten in Lume and reached the fixpoint
+│   └── 12-phase2-plan.md         ← Phase 2 roadmap: comptime, macros, data, tooling, self-evolution
 ├── grammar/lume.ebnf          ← formal grammar
 ├── examples/                  ← .lume programs per stage (future/ for later stages)
 ├── bootstrap/lume0/           ← Stage 0: disposable C interpreter (the seed) — lexer done
