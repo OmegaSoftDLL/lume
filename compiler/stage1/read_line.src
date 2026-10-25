@@ -1,0 +1,6 @@
+let first = read()
+fn wrap(s) = "<" + s + ">"
+print first
+print count(first)
+print wrap(first)
+print first == "hello"
