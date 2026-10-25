@@ -79,6 +79,8 @@ if command -v cc >/dev/null 2>&1; then
     # the FULL core-written compiler (tokenize+parse+eval+cgen) via data_codegen -> C -> native
     $BIN run ../../compiler/stage1/data_cc.lume ../../compiler/stage1/calc.src "$cgtmp/calc2.c" >/dev/null 2>&1
     if cc -o "$cgtmp/calc2" "$cgtmp/calc2.c" 2>/dev/null && "$cgtmp/calc2" 2>/dev/null | diff -u ../../tests/conformance/stage1/calc_core_native.expected - >/dev/null; then ok "core compiler (records+fields+builtins) -> C -> native binary"; else bad "core compiler -> C -> native"; fi
+    $BIN run ../../compiler/stage1/data_cc.lume ../../compiler/stage1/list.src "$cgtmp/list.c" >/dev/null 2>&1
+    if cc -o "$cgtmp/list" "$cgtmp/list.c" 2>/dev/null && "$cgtmp/list" 2>/dev/null | diff -u ../../tests/conformance/stage1/list_core_native.expected - >/dev/null; then ok "ML-core lists + indexing -> C -> native binary"; else bad "ML-core lists + indexing -> C -> native"; fi
     rm -rf "$cgtmp"
 fi
 
