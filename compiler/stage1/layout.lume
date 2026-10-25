@@ -1,0 +1,115 @@
+## layout.lume — a layout-aware lexer for Lume, written in Lume (library module).
+## Like lexer.lume but it emits INDENT/DEDENT around indented blocks (Python/Lume style), so a
+## future layout-aware parser can read functions, `while`, `match` and `if` blocks. Kept separate
+## from lexer.lume so the existing line-based compiler is unaffected.
+use token
+
+fn ld_is_digit(c: char) -> bool = c >= '0' and c <= '9'
+fn ld_is_alpha(c: char) -> bool = (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or c == '_'
+fn ld_is_alnum(c: char) -> bool = ld_is_alpha(c) or ld_is_digit(c)
+
+fn ld_two(s: str) -> bool
+    let ops = ["->", "=>", "==", "!=", "<=", ">=", "..", "+=", "-=", "*=", "/=", "|>", "&&", "||"]
+    for o in ops
+        if o == s
+            return true
+    false
+
+## count leading spaces at position i
+fn ld_spaces(src: str, i: int, n: int) -> int
+    var j = i
+    while j < n and src[j] == ' '
+        j += 1
+    j - i
+
+## true if the line starting at i (after `sp` spaces) is blank or a comment
+fn ld_blank(src: str, i: int, n: int) -> bool
+    let sp = ld_spaces(src, i, n)
+    let p = i + sp
+    p >= n or src[p] == '\n' or src[p] == '#'
+
+fn lex_layout(src: str) -> [Token]
+    var toks = []
+    var stack = [0]
+    var i = 0
+    var line = 1
+    let n = src.len()
+    var at_start = true
+    var paren = 0
+
+    while i < n
+        if at_start and paren == 0
+            at_start = false
+            # skip blank/comment-only lines
+            while i < n and ld_blank(src, i, n)
+                while i < n and src[i] != '\n'
+                    i += 1
+                if i < n
+                    i += 1
+                    line += 1
+            if i < n
+                let sp = ld_spaces(src, i, n)
+                i += sp
+                let top = stack[stack.len() - 1]
+                if sp > top
+                    stack.push(sp)
+                    toks.push(Token(kind: Indent, text: "", line: line, col: sp + 1))
+                elif sp < top
+                    while stack.len() > 1 and stack[stack.len() - 1] > sp
+                        let _ = stack.pop()
+                        toks.push(Token(kind: Dedent, text: "", line: line, col: sp + 1))
+        if i >= n
+            break
+        let c = src[i]
+        if c == '\n'
+            if paren == 0
+                let lastnl = toks.len() == 0 or toks[toks.len() - 1].kind == Newline or toks[toks.len() - 1].kind == Indent or toks[toks.len() - 1].kind == Dedent
+                if not lastnl
+                    toks.push(Token(kind: Newline, text: "\\n", line: line, col: 0))
+                at_start = true
+            i += 1
+            line += 1
+        elif c == ' '
+            i += 1
+        elif c == '#'
+            while i < n and src[i] != '\n'
+                i += 1
+        elif ld_is_digit(c)
+            var j = i
+            while j < n and ld_is_digit(src[j])
+                j += 1
+            toks.push(Token(kind: Int, text: src[i..j], line: line, col: i + 1))
+            i = j
+        elif ld_is_alpha(c)
+            var j = i
+            while j < n and ld_is_alnum(src[j])
+                j += 1
+            let w = src[i..j]
+            toks.push(Token(kind: if is_keyword(w) then Kw else Ident, text: w, line: line, col: i + 1))
+            i = j
+        elif c == '"'
+            var j = i + 1
+            while j < n and src[j] != '"'
+                j += 1
+            toks.push(Token(kind: Str, text: src[i..=j], line: line, col: i + 1))
+            i = j + 1
+        else
+            if c == '(' or c == '[' or c == '{'
+                paren += 1
+            elif c == ')' or c == ']' or c == '}'
+                if paren > 0
+                    paren -= 1
+            let two = if i + 1 < n then src[i..i + 2] else "?"
+            if i + 1 < n and ld_two(two)
+                toks.push(Token(kind: Op, text: two, line: line, col: i + 1))
+                i += 2
+            else
+                toks.push(Token(kind: Op, text: "{c}", line: line, col: i + 1))
+                i += 1
+
+    # close open blocks
+    while stack.len() > 1
+        let _ = stack.pop()
+        toks.push(Token(kind: Dedent, text: "", line: line, col: 1))
+    toks.push(Token(kind: End, text: "", line: line, col: 1))
+    toks

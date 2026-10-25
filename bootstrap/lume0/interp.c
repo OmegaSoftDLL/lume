@@ -420,6 +420,7 @@ BI(bi_last) { Val *src = to_iter_list(ip, a[0]); (void)n; (void)site; return src
 BI(bi_enumerate) { Val *src = to_iter_list(ip, a[0]); (void)n; (void)site; Val *out = v_list(ip);
     for (int i = 0; i < src->n; i++) { Val *t = v_list(ip); t->kind = V_TUPLE; v_push(ip, t, v_int(ip, i)); v_push(ip, t, src->items[i]); v_push(ip, out, t); } return out; }
 BI(bi_push) { (void)n; (void)site; v_push(ip, a[0], a[1]); return v_unit(ip); }
+BI(bi_pop) { (void)n; (void)site; Val *l = a[0]; if (l->n == 0) return v_opt_none(ip); Val *last = l->items[l->n - 1]; l->n -= 1; return v_opt_some(ip, last); }
 BI(bi_keys) { (void)n; (void)site; Val *out = v_list(ip); if (a[0]->kind == V_MAP) for (int i = 0; i < a[0]->nent; i++) v_push(ip, out, v_str(ip, a[0]->ent[i].key, a[0]->ent[i].klen)); return out; }
 BI(bi_values) { (void)n; (void)site; Val *out = v_list(ip); if (a[0]->kind == V_MAP) for (int i = 0; i < a[0]->nent; i++) v_push(ip, out, a[0]->ent[i].val); return out; }
 BI(bi_str) { (void)n; (void)site; int l; char *s = val_to_cstr(ip, a[0], &l); return v_str_owned(ip, s, l); }
@@ -490,7 +491,7 @@ static Val *lookup_builtin(Interp *ip, const char *name, int len) {
     struct { const char *n; Val *(*f)(Interp *, Val **, int, const Node *); } T[] = {
         {"len",bi_len},{"map",bi_map},{"filter",bi_filter},{"each",bi_each},{"sum",bi_sum},
         {"sorted",bi_sorted},{"first",bi_first},{"last",bi_last},{"enumerate",bi_enumerate},
-        {"push",bi_push},{"keys",bi_keys},{"values",bi_values},{"str",bi_str},{"upper",bi_upper},
+        {"push",bi_push},{"pop",bi_pop},{"keys",bi_keys},{"values",bi_values},{"str",bi_str},{"upper",bi_upper},
         {"lower",bi_lower},{"trim",bi_trim},{"max",bi_max},{"min",bi_min},{"abs",bi_abs},{"count",bi_count},
         {"contains",bi_contains},{"starts_with",bi_starts_with},{"ends_with",bi_ends_with},
         {"index_of",bi_index_of},{"split",bi_split},{"replace",bi_replace},{"repeat",bi_repeat},

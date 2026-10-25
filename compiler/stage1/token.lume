@@ -6,6 +6,8 @@ type Kind = enum
     Str
     Op
     Newline
+    Indent
+    Dedent
     End
 
 type Token = record
@@ -22,6 +24,8 @@ fn kind_name(k: Kind) -> str
         Str     => "STR"
         Op      => "OP"
         Newline => "NEWLINE"
+        Indent  => "INDENT"
+        Dedent  => "DEDENT"
         End     => "EOF"
 
 fn is_keyword(w: str) -> bool
