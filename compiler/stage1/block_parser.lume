@@ -32,7 +32,17 @@ fn bprimary(p: mut P) -> Expr
     if t.kind == Int
         Num(value: t.text.parse_int() ?? 0)
     elif t.kind == Ident
-        Name(id: t.text)
+        if bcur(p).kind == Op and bcur(p).text == "("
+            beat(p)
+            var cargs = []
+            while not (bcur(p).kind == Op and bcur(p).text == ")") and bcur(p).kind != End
+                cargs.push(bexpr(p, 0))
+                if bcur(p).kind == Op and bcur(p).text == ","
+                    beat(p)
+            beat(p)
+            Call(name: t.text, args: cargs)
+        else
+            Name(id: t.text)
     elif t.kind == Op and t.text == "("
         let e = bexpr(p, 0)
         beat(p)
@@ -69,7 +79,21 @@ fn bblock(p: mut P) -> [Stmt]
 
 fn bstmt(p: mut P) -> Stmt
     let t = bcur(p)
-    if t.kind == Kw and t.text == "var"
+    if t.kind == Kw and t.text == "fn"
+        beat(p)
+        let fname = beat(p).text
+        beat(p)                       # (
+        var params = []
+        while not (bcur(p).kind == Op and bcur(p).text == ")") and bcur(p).kind != End
+            params.push(beat(p).text)
+            if bcur(p).kind == Op and bcur(p).text == ","
+                beat(p)
+        beat(p)                       # )
+        Fn(name: fname, params: params, body: bblock(p))
+    elif t.kind == Kw and t.text == "return"
+        beat(p)
+        Return(value: bexpr(p, 0))
+    elif t.kind == Kw and t.text == "var"
         beat(p)
         let name = beat(p).text
         beat(p)                       # =

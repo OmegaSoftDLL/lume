@@ -1,0 +1,10 @@
+## block_fn_demo.lume — compile a block-structured program with functions, loops and recursion
+## to C -> native. The imperative compiler written in Lume now handles functions.
+use block_ast
+use block_parser
+use block_codegen
+use std.io
+
+fn main()
+    let program = "fn fact(n)\n    var r = 1\n    var i = 1\n    while i <= n\n        r = r * i\n        i = i + 1\n    return r\nfn add(a, b)\n    return a + b\nprint fact(5)\nprint fact(6)\nprint add(fact(4), 100)"
+    io.print(cgen_block(parse_block_program(program)))
