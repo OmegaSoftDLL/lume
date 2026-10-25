@@ -52,6 +52,13 @@ fn dpat(p: mut DP) -> Pat
         PBind(name: t.text)
 
 fn datom(p: mut DP) -> DExpr
+    if dcur(p).kind == Kw and dcur(p).text == "let"
+        deat(p)
+        let lname = deat(p).text
+        deat(p)                          # =
+        let lval = dexpr(p, 0)
+        deat(p)                          # in
+        return DLetIn(name: lname, value: lval, body: dexpr(p, 0))
     if dcur(p).kind == Kw and dcur(p).text == "if"
         deat(p)
         let c = dexpr(p, 0)

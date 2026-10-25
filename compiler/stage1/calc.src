@@ -1,0 +1,22 @@
+fn isdigit(c) = c >= "0" and c <= "9"
+fn numend(s, i) = if i < count(s) and isdigit(at(s, i)) then numend(s, i + 1) else i
+fn scan(s, i) = if i >= count(s) then Nil else if at(s, i) == " " then scan(s, i + 1) else if isdigit(at(s, i)) then Cons({kind: "num", text: slice(s, i, numend(s, i))}, scan(s, numend(s, i))) else Cons({kind: "sym", text: at(s, i)}, scan(s, i + 1))
+fn prim(ts) = match ts
+    Nil => {node: Lit(0), rest: Nil}
+    Cons(h, t) => {node: Lit(toint(h.text)), rest: t}
+fn termloop(r) = match r.rest
+    Nil => r
+    Cons(h, t) => if h.text == "*" or h.text == "/" then let r2 = prim(t) in termloop({node: Bin(h.text, r.node, r2.node), rest: r2.rest}) else r
+fn term(ts) = termloop(prim(ts))
+fn exprloop(r) = match r.rest
+    Nil => r
+    Cons(h, t) => if h.text == "+" or h.text == "-" then let r2 = term(t) in exprloop({node: Bin(h.text, r.node, r2.node), rest: r2.rest}) else r
+fn expr(ts) = exprloop(term(ts))
+fn ev(e) = match e
+    Lit(n) => n
+    Bin(op, a, b) => if op == "+" then ev(a) + ev(b) else if op == "-" then ev(a) - ev(b) else if op == "*" then ev(a) * ev(b) else ev(a) / ev(b)
+fn run(src) = ev(expr(scan(src, 0)).node)
+print run("2 + 3 * 4")
+print run("10 - 2 * 3 + 1")
+print run("100 / 5 / 2")
+print run("7 + 8 + 9")
