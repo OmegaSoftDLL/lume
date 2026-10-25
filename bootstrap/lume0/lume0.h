@@ -112,5 +112,6 @@ void tokens_print(const TokenList *t, bool json);
 /* ---------- Utilities ---------- */
 
 char *read_file(const char *path, size_t *out_len);
+int   elf_assemble(const char *src, const char *outpath);  /* x86-64 asm -> static ELF, no as/ld */
 
 #endif

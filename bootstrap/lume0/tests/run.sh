@@ -119,6 +119,8 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && command -v as 
     if as -o "$atmp/rl.o" "$atmp/rl.s" 2>/dev/null && ld -o "$atmp/rlb" "$atmp/rl.o" 2>/dev/null && "$atmp/rlb" 2>/dev/null | diff -u ../../tests/conformance/stage1/reclist_asm.expected - >/dev/null; then ok "ML-core native: records + lists -> x86-64, no C"; else bad "ML-core native: records + lists, no C"; fi
     $BIN run ../../compiler/stage1/data_asm_cc.lume ../../compiler/stage1/calc.src "$atmp/ca.s" >/dev/null 2>&1
     if as -o "$atmp/ca.o" "$atmp/ca.s" 2>/dev/null && ld -o "$atmp/cab" "$atmp/ca.o" 2>/dev/null && "$atmp/cab" 2>/dev/null | diff -u ../../tests/conformance/stage1/calc_asm.expected - >/dev/null; then ok "FULL core compiler (calc.src) -> x86-64 native, NO C"; else bad "FULL core compiler -> native, no C"; fi
+    $BIN asm ../../compiler/stage1/elf_hello.s "$atmp/eh" >/dev/null 2>&1
+    if "$atmp/eh" 2>/dev/null | diff -u ../../tests/conformance/stage1/elf_hello.expected - >/dev/null; then ok "lume0 asm: x86-64 -> static ELF -> runs, no as/ld/cc"; else bad "lume0 asm: x86-64 -> static ELF, no as/ld/cc"; fi
     rm -rf "$atmp"
 else
     ok "x86-64 asm backend (skipped: not linux/x86_64 or no as/ld)"

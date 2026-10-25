@@ -60,6 +60,13 @@ int main(int argc, char **argv) {
         arena_free(ar); tokens_free(&t); diag_free(&d); free(src);
         return rc0;
     }
+    if (argc >= 4 && strcmp(argv[1], "asm") == 0) {
+        size_t len = 0; char *src = read_file(argv[2], &len);
+        if (!src) { fprintf(stderr, "lume0: cannot read %s\n", argv[2]); return 66; }
+        int rc0 = elf_assemble(src, argv[3]);
+        free(src);
+        return rc0;
+    }
     if (argc >= 4 && strcmp(argv[1], "emit") == 0) {
         size_t len = 0; char *src = read_file(argv[2], &len);
         if (!src) { fprintf(stderr, "lume0: cannot read %s\n", argv[2]); return 66; }
