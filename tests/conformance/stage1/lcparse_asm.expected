@@ -5,3 +5,6 @@ Cons(h, Cons(1, Nil))
 a(b(c(1)), d)
 ev(Bin("+", Lit(2), Lit(3)))
 greet("hi", name)
+if (a < b) then 1 else 2
+let x = (2 + 3) in (x * x)
+if (n == 0) then Nil else Cons(n, f((n - 1)))
