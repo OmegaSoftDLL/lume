@@ -174,6 +174,8 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ]; then
     # several read() calls consume successive lines (native only: pinned by hand, the interpreter cannot keep a stdin cursor)
     $BIN run ../../compiler/stage1/data_asm_cc.lume ../../compiler/stage1/read_lines.src "$ntmp/rls.s" >/dev/null 2>&1
     if $BIN asm "$ntmp/rls.s" "$ntmp/rls" >/dev/null 2>&1 && printf 'one\ntwo\nthree\nfour' | "$ntmp/rls" 2>/dev/null | diff -u ../../tests/conformance/stage1/read_lines_asm.expected - >/dev/null; then ok "no-toolchain: successive read() calls -> native (pinned)"; else bad "no-toolchain: successive read() calls -> native"; fi
+    $BIN run ../../compiler/stage1/data_asm_cc.lume ../../compiler/stage1/lclex.src "$ntmp/lx.s" >/dev/null 2>&1
+    if $BIN asm "$ntmp/lx.s" "$ntmp/lx" >/dev/null 2>&1 && "$ntmp/lx" 2>/dev/null | diff -u ../../tests/conformance/stage1/lclex_asm.expected - >/dev/null; then ok "self-host R4: core lexer (written in Lume-Core) -> native"; else bad "self-host R4: core lexer -> native"; fi
     rm -rf "$ntmp"
 else
     ok "no-toolchain ELF pipeline (skipped: not linux/x86_64)"
