@@ -107,6 +107,9 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && command -v as 
     if as -o "$atmp/n.o" "$atmp/n.s" 2>/dev/null && ld -o "$atmp/n" "$atmp/n.o" 2>/dev/null && "$atmp/n" 2>/dev/null | diff -u ../../tests/conformance/stage1/nat_nested_asm.expected - >/dev/null; then ok "x86-64 asm -> native (nested for/while, fact/fib, comparisons, signed div/mod, no C)"; else bad "x86-64 asm -> native (nested for/while, fact/fib, comparisons, signed div/mod, no C)"; fi
     $BIN emit-asm ../../compiler/stage1/nat_elif.lume "$atmp/e.s" 2>/dev/null
     if as -o "$atmp/e.o" "$atmp/e.s" 2>/dev/null && ld -o "$atmp/e" "$atmp/e.o" 2>/dev/null && "$atmp/e" 2>/dev/null | diff -u ../../tests/conformance/stage1/nat_elif_asm.expected - >/dev/null; then ok "x86-64 asm -> native (if/elif/else value + top-level assign, no C)"; else bad "x86-64 asm -> native (if/elif/else value + top-level assign, no C)"; fi
+    # a code generator WRITTEN IN LUME (data_asmgen) emits x86-64 -> native, NO C anywhere
+    $BIN run ../../compiler/stage1/data_asm_cc.lume ../../compiler/stage1/nfib.src "$atmp/nf.s" >/dev/null 2>&1
+    if as -o "$atmp/nf.o" "$atmp/nf.s" 2>/dev/null && ld -o "$atmp/nf" "$atmp/nf.o" 2>/dev/null && "$atmp/nf" 2>/dev/null | diff -u ../../tests/conformance/stage1/nfib_asm.expected - >/dev/null; then ok "ML-core -> x86-64 asm (Lume-written codegen) -> native, no C"; else bad "ML-core -> x86-64 asm (Lume-written codegen) -> native, no C"; fi
     rm -rf "$atmp"
 else
     ok "x86-64 asm backend (skipped: not linux/x86_64 or no as/ld)"

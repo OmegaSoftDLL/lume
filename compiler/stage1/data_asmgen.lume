@@ -1,0 +1,155 @@
+## data_asmgen.lume — a code generator WRITTEN IN LUME that emits x86-64 machine code
+## for the ML-core language, with NO C in the pipeline. The output is assembled by
+## `as` and linked by `ld` (assembly is the next dependency to drop, via a direct ELF
+## writer). This is "Lume generating machine code": the real target of the project.
+##
+## Scope (this brick): the functional INTEGER core -- fn, let-in, if/then/else, integer
+## arithmetic (+ - * / %), comparisons, and/or/not, calls, recursion, and top-level
+## print. Strings / constructors / match / records / lists lower in later bricks.
+use data_ast
+
+fn idx_of(xs: [str], name: str) -> int
+    var i = 0
+    var found = 0 - 1
+    for x in xs
+        if x == name and found < 0
+            found = i
+        i = i + 1
+    found
+
+## collect let-bound names reachable in an expression (for frame slots)
+fn collect_lets(e: DExpr, acc: mut [str])
+    match e
+        DLetIn(nm, v, body) => do
+            acc.push(nm)
+            collect_lets(v, acc)
+            collect_lets(body, acc)
+        DBin(op, l, r) => do
+            collect_lets(l, acc)
+            collect_lets(r, acc)
+        DIf(c, t, e2) => do
+            collect_lets(c, acc)
+            collect_lets(t, acc)
+            collect_lets(e2, acc)
+        DCall(nm, args) => do
+            for a in args
+                collect_lets(a, acc)
+        DCons(tag, args) => do
+            for a in args
+                collect_lets(a, acc)
+        DMatch(scrut, arms) => do
+            collect_lets(scrut, acc)
+            for arm in arms
+                collect_lets(arm.body, acc)
+        _ => do
+            let _ = 0
+
+## emit the asm for a binary operator, operands already popped: rax=left, rcx=right
+fn abin(op: str) -> str
+    if op == "+"
+        "    addq %rcx, %rax\n"
+    elif op == "-"
+        "    subq %rcx, %rax\n"
+    elif op == "*"
+        "    imulq %rcx, %rax\n"
+    elif op == "/"
+        "    cqto\n    idivq %rcx\n"
+    elif op == "%"
+        "    cqto\n    idivq %rcx\n    movq %rdx, %rax\n"
+    elif op == "<"
+        "    cmpq %rcx, %rax\n    setl %al\n    movzbq %al, %rax\n"
+    elif op == ">"
+        "    cmpq %rcx, %rax\n    setg %al\n    movzbq %al, %rax\n"
+    elif op == "<="
+        "    cmpq %rcx, %rax\n    setle %al\n    movzbq %al, %rax\n"
+    elif op == ">="
+        "    cmpq %rcx, %rax\n    setge %al\n    movzbq %al, %rax\n"
+    elif op == "=="
+        "    cmpq %rcx, %rax\n    sete %al\n    movzbq %al, %rax\n"
+    elif op == "!="
+        "    cmpq %rcx, %rax\n    setne %al\n    movzbq %al, %rax\n"
+    elif op == "and"
+        "    cmpq $0, %rax\n    setne %al\n    cmpq $0, %rcx\n    setne %cl\n    andb %cl, %al\n    movzbq %al, %rax\n"
+    elif op == "or"
+        "    cmpq $0, %rax\n    setne %al\n    cmpq $0, %rcx\n    setne %cl\n    orb %cl, %al\n    movzbq %al, %rax\n"
+    else
+        "    # unsupported op\n"
+
+type AC = record
+    locals: [str]
+    nlabel: int
+
+fn areg(i: int) -> str
+    let regs = ["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"]
+    regs[i]
+
+## emit asm that computes `e` and leaves its value pushed on the stack
+fn aexpr(e: DExpr, c: mut AC) -> str
+    match e
+        DInt(n) => "    movq $" + str(n) + ", %rax\n    pushq %rax\n"
+        DVar(nm) => do
+            let k = idx_of(c.locals, nm)
+            "    movq " + str(0 - 8 * (k + 1)) + "(%rbp), %rax\n    pushq %rax\n"
+        DBin(op, l, r) => do
+            let a = aexpr(l, c)
+            let b = aexpr(r, c)
+            a + b + "    popq %rcx\n    popq %rax\n" + abin(op) + "    pushq %rax\n"
+        DIf(cond, t, e2) => do
+            let lab = c.nlabel
+            c.nlabel = c.nlabel + 1
+            let cc = aexpr(cond, c)
+            let tt = aexpr(t, c)
+            let ee = aexpr(e2, c)
+            cc + "    popq %rax\n    testq %rax, %rax\n    jz .Le" + str(lab) + "\n" + tt + "    jmp .Lx" + str(lab) + "\n.Le" + str(lab) + ":\n" + ee + ".Lx" + str(lab) + ":\n"
+        DLetIn(nm, v, body) => do
+            let vv = aexpr(v, c)
+            let k = idx_of(c.locals, nm)
+            let st = "    popq %rax\n    movq %rax, " + str(0 - 8 * (k + 1)) + "(%rbp)\n"
+            vv + st + aexpr(body, c)
+        DCall(nm, args) => do
+            var out = ""
+            for a in args
+                out = out + aexpr(a, c)
+            var i = args.len() - 1
+            while i >= 0
+                out = out + "    popq " + areg(i) + "\n"
+                i = i - 1
+            out + "    call " + nm + "\n    pushq %rax\n"
+        _ => "    movq $0, %rax\n    pushq %rax\n    # unsupported expr\n"
+
+fn afn(nm: str, params: [str], body: DExpr, c: mut AC) -> str
+    var locals = []
+    for p in params
+        locals.push(p)
+    collect_lets(body, locals)
+    c.locals = locals
+    var frame = locals.len() * 8
+    if frame % 16 != 0
+        frame = frame + 8
+    var out = nm + ":\n    pushq %rbp\n    movq %rsp, %rbp\n"
+    if frame > 0
+        out = out + "    subq $" + str(frame) + ", %rsp\n"
+    var i = 0
+    for p in params
+        out = out + "    movq " + areg(i) + ", " + str(0 - 8 * (i + 1)) + "(%rbp)\n"
+        i = i + 1
+    out = out + aexpr(body, c)
+    out + "    popq %rax\n    movq %rbp, %rsp\n    popq %rbp\n    ret\n"
+
+fn runtime_tail() -> str
+    "print_int:\n    movq %rdi, %rax\n    xorq %r9, %r9\n    testq %rax, %rax\n    jge 1f\n    negq %rax\n    movq $1, %r9\n1:\n    leaq pbuf+31(%rip), %rsi\n    movb $10, (%rsi)\n    movq $1, %rcx\n    movq $10, %rbx\n2:\n    decq %rsi\n    xorq %rdx, %rdx\n    divq %rbx\n    addb $48, %dl\n    movb %dl, (%rsi)\n    incq %rcx\n    testq %rax, %rax\n    jnz 2b\n    testq %r9, %r9\n    je 3f\n    decq %rsi\n    movb $45, (%rsi)\n    incq %rcx\n3:\n    movq $1, %rax\n    movq $1, %rdi\n    movq %rcx, %rdx\n    syscall\n    ret\n"
+
+fn agen(prog: [DStmt]) -> str
+    var c = AC(locals: [], nlabel: 0)
+    var funcs = ""
+    var main = ""
+    for s in prog
+        match s
+            DFnS(nm, ps, body) => do
+                funcs = funcs + afn(nm, ps, body, c)
+            DPrint(v) => do
+                c.locals = []
+                main = main + aexpr(v, c) + "    popq %rdi\n    call print_int\n"
+            DLet(nm, v) => do
+                let _ = 0
+    "    .section .bss\n    .lcomm pbuf, 32\n    .section .text\n" + funcs + runtime_tail() + "    .globl _start\n_start:\n" + main + "    movq $60, %rax\n    xorq %rdi, %rdi\n    syscall\n"
