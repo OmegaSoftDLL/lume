@@ -1,0 +1,83 @@
+## data_eval.lume — evaluator for the ADT language: tagged runtime values + pattern matching.
+use data_ast
+use std.io
+
+type RV = enum
+    VInt(n: int)
+    VObj(tag: str, fields: [RV])
+
+fn rv_int(v: RV) -> int
+    match v
+        VInt(n)     => n
+        VObj(t, fs) => 0
+
+fn rv_show(v: RV) -> str
+    match v
+        VInt(n)     => "{n}"
+        VObj(t, fs) => do
+            if fs.len() == 0
+                t
+            else
+                t + "(" + fs.map(rv_show).join(", ") + ")"
+
+fn match_pat(p: Pat, v: RV, env: mut map[str, RV]) -> bool
+    match p
+        PWild       => true
+        PBind(name) => do
+            env[name] = v
+            true
+        PInt(k)     => do
+            match v
+                VInt(m)     => m == k
+                VObj(t, fs) => false
+        PCons(tag, subs) => do
+            match v
+                VInt(m) => false
+                VObj(vtag, fields) => do
+                    if vtag != tag
+                        return false
+                    if fields.len() != subs.len()
+                        return false
+                    var ok = true
+                    for i in 0..subs.len()
+                        if not match_pat(subs[i], fields[i], env)
+                            ok = false
+                    ok
+
+fn deval(e: DExpr, env: map[str, RV]) -> RV
+    match e
+        DInt(n)       => VInt(n: n)
+        DVar(name)    => env.get(name) ?? VInt(n: 0)
+        DCons(tag, args) => VObj(tag: tag, fields: args.map(|a| deval(a, env)))
+        DBin(op, l, r) => do
+            let a = rv_int(deval(l, env))
+            let b = rv_int(deval(r, env))
+            match op
+                "+"  => VInt(n: a + b)
+                "-"  => VInt(n: a - b)
+                "*"  => VInt(n: a * b)
+                "/"  => VInt(n: if b == 0 then 0 else a / b)
+                "<"  => VInt(n: if a < b then 1 else 0)
+                ">"  => VInt(n: if a > b then 1 else 0)
+                "==" => VInt(n: if a == b then 1 else 0)
+                _    => VInt(n: 0)
+        DMatch(scrut, arms) => do
+            let v = deval(scrut, env)
+            var result = VInt(n: 0)
+            var done = false
+            for arm in arms
+                if not done
+                    var local = env
+                    if match_pat(arm.pat, v, local)
+                        result = deval(arm.body, local)
+                        done = true
+            result
+
+fn run_data(prog: [DStmt])
+    var env = {}
+    for s in prog
+        match s
+            DLet(name, v) => do
+                env[name] = deval(v, env)
+            DPrint(v) => do
+                io.println(rv_show(deval(v, env)))
