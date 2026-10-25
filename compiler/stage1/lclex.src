@@ -1,0 +1,25 @@
+## lclex.src — a lexer for the Lume core, written IN the Lume core (functional subset:
+## recursion + immutable records/lists, no var/while/mut). First module of the
+## self-hosting rewrite (plan docs/11, R4). Tokenizes core source into a list of
+## {kind, text} tokens; kind is "id" | "int" | "str" | "op". Written in the style the
+## core parser accepts: each fn body is an inline expression (the core has no string
+## patterns, so char dispatch is an if-chain, as in calc.src). Keyword classification,
+## line/col and layout come in later bricks; this proves the lexer runs, native, no C.
+
+fn isdigit(c) = c >= "0" and c <= "9"
+fn isalpha(c) = (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or c == "_"
+fn isalnum(c) = isdigit(c) or isalpha(c)
+fn idend(s, i) = if i < count(s) and isalnum(at(s, i)) then idend(s, i + 1) else i
+fn numend(s, i) = if i < count(s) and isdigit(at(s, i)) then numend(s, i + 1) else i
+fn strend(s, i) = if i >= count(s) then i else if at(s, i) == "\"" then i + 1 else if at(s, i) == "\\" then strend(s, i + 2) else strend(s, i + 1)
+fn two(s, i) = slice(s, i, if i + 2 > count(s) then count(s) else i + 2)
+fn istwo(t) = t == "==" or t == "!=" or t == "<=" or t == ">=" or t == "=>" or t == "->" or t == ".." or t == "&&" or t == "||" or t == "+=" or t == "-=" or t == "*=" or t == "/=" or t == "|>"
+fn lex(s, i) = if i >= count(s) then Nil else let c = at(s, i) in if c == " " or c == "\t" or c == "\n" or c == "\r" then lex(s, i + 1) else if isdigit(c) then Cons({kind: "int", text: slice(s, i, numend(s, i))}, lex(s, numend(s, i))) else if isalpha(c) then Cons({kind: "id", text: slice(s, i, idend(s, i))}, lex(s, idend(s, i))) else if c == "\"" then Cons({kind: "str", text: slice(s, i, strend(s, i + 1))}, lex(s, strend(s, i + 1))) else if istwo(two(s, i)) then Cons({kind: "op", text: two(s, i)}, lex(s, i + 2)) else Cons({kind: "op", text: c}, lex(s, i + 1))
+fn show(toks) = match toks
+    Nil        => ""
+    Cons(h, t) => h.kind + ":" + h.text + "\n" + show(t)
+fn tokenize(s) = show(lex(s, 0))
+
+print tokenize("fn add(a, b) = a + b")
+print tokenize("let r = {node: Lit(42)} == other")
+print tokenize("if x <= 10 then \"hi\" else n |> f")
