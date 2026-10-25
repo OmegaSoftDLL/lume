@@ -169,3 +169,16 @@ subset; the triple self-build is not reached.
 5. Turn the showcased safety features into real enforcement (effects, contracts, ownership).
 
 Keep each brick a green, tested PR, and keep it **superior to the borrowed idea**, not a clone.
+
+## 11. Publicizing the language (GitHub recognition)
+
+GitHub's repository language bar is computed by **Linguist**, which only lists languages already
+in its catalogue; a brand-new language like Lume cannot appear there via `.gitattributes`
+(the `linguist-language=Lume` override is ignored for an unknown name). Today the C seed and
+scaffolding are vendored so the bar is not dominated by C, and the "100% Lume" signal lives in the
+README badge, the repo description and topics.
+
+**Agreed future task:** once Lume is mature — a stable grammar/spec and the `.lume` extension in
+use across several public repositories — submit Lume to `github/linguist` (a PR to that repo with
+a language definition, color, sample files and usage evidence) so GitHub recognizes and displays it
+officially. Until then, do not fake it by mapping `.lume` to another language.
