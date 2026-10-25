@@ -1,0 +1,7 @@
+## fib_native.lume — recursion + if through the direct x86-64 backend (no C). Params are typed
+## because the bootstrap C parser requires it. lume0 emit-asm fib_native.lume f.s ; as ; ld ; ./f
+fn fib(n: int) -> int = if n < 2 then n else fib(n - 1) + fib(n - 2)
+fn max2(a: int, b: int) -> int = if a > b then a else b
+let r = fib(10)
+let m = max2(r, 50)
+m + fib(7)
