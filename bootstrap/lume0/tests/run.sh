@@ -73,6 +73,9 @@ if command -v cc >/dev/null 2>&1; then
     # lumec as a file-driven compiler: read .lume -> write .c -> native binary
     $BIN run ../../compiler/stage1/lumec_main.lume ../../compiler/stage1/sample.lume "$cgtmp/s.c" >/dev/null 2>&1
     if cc -o "$cgtmp/s" "$cgtmp/s.c" 2>/dev/null && "$cgtmp/s" 2>/dev/null | diff -u ../../tests/conformance/stage1/lumec_file_native.expected - >/dev/null; then ok "lumec file -> C -> native binary"; else bad "lumec file -> C -> native binary"; fi
+    # the ML-core compiler (data_codegen) lowers enum + match to C -> native binary
+    $BIN run ../../compiler/stage1/data_cc.lume ../../compiler/stage1/ev.src "$cgtmp/ev.c" >/dev/null 2>&1
+    if cc -o "$cgtmp/ev" "$cgtmp/ev.c" 2>/dev/null && "$cgtmp/ev" 2>/dev/null | diff -u ../../tests/conformance/stage1/ev_core_native.expected - >/dev/null; then ok "ML-core enum+match -> C -> native binary"; else bad "ML-core enum+match -> C -> native"; fi
     rm -rf "$cgtmp"
 fi
 

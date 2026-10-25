@@ -1,0 +1,137 @@
+## data_codegen.lume — compile the ML-core (ADT + match) language to C (library module).
+## This is the transitional path: the core language (constructors, match, let-in,
+## if, recursion, strings, ints) lowers to C with a tiny tagged-Value runtime, then
+## cc -> native. C is only the bootstrap seed; this lowering will be ported to the
+## direct machine-code backend later so the C step disappears.
+##
+## Supported now: DInt, DStr, DVar, DCons, DCall, DBin, DIf, DLetIn, DMatch
+## (patterns PWild / PBind / PInt / PCons). Records/lists/field access are not
+## lowered yet and emit a marker that fails C compilation loudly if used.
+use data_ast
+
+## --- the emitted C runtime: a dynamically tagged Value (int | str | constructor) ---
+fn runtime() -> str
+    let lines = [
+        "#include <stdio.h>",
+        "#include <stdlib.h>",
+        "#include <string.h>",
+        "typedef struct Value Value;",
+        "struct Value {{ int tag; long long i; const char* s; const char* ctor; int argc; Value** args; }};",
+        "static Value* mkint(long long n){{ Value* v=(Value*)malloc(sizeof(Value)); v->tag=0; v->i=n; return v; }}",
+        "static Value* mkstr(const char* s){{ Value* v=(Value*)malloc(sizeof(Value)); v->tag=1; v->s=s; return v; }}",
+        "static Value* mkctor(const char* c,int n,Value** a){{ Value* v=(Value*)malloc(sizeof(Value)); v->tag=2; v->ctor=c; v->argc=n; if(n){{ v->args=(Value**)malloc(sizeof(Value*)*n); for(int k=0;k<n;k++) v->args[k]=a[k]; }} else v->args=0; return v; }}",
+        "static int truthy(Value* v){{ return v->tag==0 ? (v->i!=0) : 1; }}",
+        "static long long eqv(Value* a,Value* b){{ if(a->tag==0&&b->tag==0) return a->i==b->i; if(a->tag==1&&b->tag==1) return strcmp(a->s,b->s)==0; if(a->tag==2&&b->tag==2) return strcmp(a->ctor,b->ctor)==0; return 0; }}",
+        "static long long cmpv(Value* a,Value* b){{ if(a->tag==1&&b->tag==1){{ int r=strcmp(a->s,b->s); return r<0?-1:(r>0?1:0); }} long long x=a->i,y=b->i; return x<y?-1:(x>y?1:0); }}",
+        "static void printval(Value* v){{ if(v->tag==0) printf(\"%lld\\n\",(long long)v->i); else if(v->tag==1) printf(\"%s\\n\",v->s); else printf(\"%s\\n\",v->ctor); }}"
+    ]
+    lines.join("\n") + "\n"
+
+## escape a core string literal for embedding in a C "..." literal
+fn cesc(s: str) -> str
+    var out = ""
+    for ch in s.chars()
+        if ch == '"' or ch == '\\'
+            out = out + "\\" + str(ch)
+        else
+            out = out + str(ch)
+    out
+
+## binary operators over Value*
+fn cbin(op: str, a: str, b: str) -> str
+    if op == "+" or op == "-" or op == "*" or op == "/" or op == "%"
+        "mkint(" + a + "->i " + op + " " + b + "->i)"
+    elif op == "=="
+        "mkint(eqv(" + a + ", " + b + "))"
+    elif op == "!="
+        "mkint(!eqv(" + a + ", " + b + "))"
+    elif op == "<" or op == ">" or op == "<=" or op == ">="
+        "mkint(cmpv(" + a + ", " + b + ") " + op + " 0)"
+    elif op == "and"
+        "mkint(truthy(" + a + ") && truthy(" + b + "))"
+    elif op == "or"
+        "mkint(truthy(" + a + ") || truthy(" + b + "))"
+    else
+        "mkint(0)"
+
+## pattern -> boolean C test against the C expression `path`
+fn pat_test(p: Pat, path: str) -> str
+    match p
+        PWild    => "1"
+        PBind(nm) => "1"
+        PInt(n)  => "(" + path + "->tag==0 && " + path + "->i==" + str(n) + ")"
+        PCons(tag, subs) => do
+            var t = "(" + path + "->tag==2 && strcmp(" + path + "->ctor, \"" + tag + "\")==0"
+            var i = 0
+            for sub in subs
+                t = t + " && " + pat_test(sub, path + "->args[" + str(i) + "]")
+                i = i + 1
+            t + ")"
+
+## pattern -> C variable bindings (each a `Value* name = path;`)
+fn pat_binds(p: Pat, path: str) -> str
+    match p
+        PWild    => ""
+        PBind(nm) => "Value* " + nm + " = " + path + "; "
+        PInt(n)  => ""
+        PCons(tag, subs) => do
+            var b = ""
+            var i = 0
+            for sub in subs
+                b = b + pat_binds(sub, path + "->args[" + str(i) + "]")
+                i = i + 1
+            b
+
+fn cexpr(e: DExpr) -> str
+    match e
+        DInt(n)   => "mkint(" + str(n) + ")"
+        DStr(v)   => "mkstr(\"" + cesc(v) + "\")"
+        DVar(nm)  => nm
+        DCons(tag, args) => do
+            if args.len() == 0
+                "mkctor(\"" + tag + "\", 0, 0)"
+            else
+                "mkctor(\"" + tag + "\", " + str(args.len()) + ", (Value*[]){{" + args.map(cexpr).join(", ") + "}})"
+        DCall(nm, args) => nm + "(" + args.map(cexpr).join(", ") + ")"
+        DBin(op, l, r) => cbin(op, cexpr(l), cexpr(r))
+        DIf(c, t, e2)  => "(truthy(" + cexpr(c) + ") ? " + cexpr(t) + " : " + cexpr(e2) + ")"
+        DLetIn(nm, v, body) => "({{ Value* " + nm + " = " + cexpr(v) + "; " + cexpr(body) + "; }})"
+        DMatch(scrut, arms) => cmatch(scrut, arms)
+        DList(xs)    => "__LUME_UNSUPPORTED_list__"
+        DIndex(c, i) => "__LUME_UNSUPPORTED_index__"
+        DRec(fs)     => "__LUME_UNSUPPORTED_record__"
+        DField(o, nm) => "__LUME_UNSUPPORTED_field__"
+
+fn cmatch(scrut: DExpr, arms: [Arm]) -> str
+    var out = "({{ Value* _s = " + cexpr(scrut) + "; Value* _r = 0; "
+    var first = true
+    for arm in arms
+        let test = pat_test(arm.pat, "_s")
+        let binds = pat_binds(arm.pat, "_s")
+        if first
+            out = out + "if (" + test + ") {{ " + binds + "_r = " + cexpr(arm.body) + "; }}"
+            first = false
+        else
+            out = out + " else if (" + test + ") {{ " + binds + "_r = " + cexpr(arm.body) + "; }}"
+    out + " _r; }})"
+
+fn cparams(ps: [str]) -> str
+    if ps.len() == 0
+        "void"
+    else
+        ps.map(|p| "Value* " + p).join(", ")
+
+fn cgen_data(prog: [DStmt]) -> str
+    var protos = ""
+    var defs = ""
+    var body = ""
+    for s in prog
+        match s
+            DFnS(nm, ps, b) => do
+                protos = protos + "Value* " + nm + "(" + cparams(ps) + ");\n"
+                defs = defs + "Value* " + nm + "(" + cparams(ps) + ") {{\n    return " + cexpr(b) + ";\n}}\n"
+            DPrint(v) => do
+                body = body + "    printval(" + cexpr(v) + ");\n"
+            DLet(nm, v) => do
+                body = body + "    Value* " + nm + " = " + cexpr(v) + ";\n"
+    runtime() + protos + defs + "int main(void) {{\n" + body + "    return 0;\n}}\n"
