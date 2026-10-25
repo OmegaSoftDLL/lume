@@ -32,6 +32,9 @@ fn blbp(op: str) -> int
         0
 
 fn bprimary(p: mut P) -> Expr
+    if bcur(p).kind == Op and bcur(p).text == "-"
+        beat(p)
+        return Bin(op: "-", left: Num(value: 0), right: bprimary(p))
     let t = beat(p)
     if t.kind == Int
         Num(value: t.text.parse_int() ?? 0)
