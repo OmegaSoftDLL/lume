@@ -1,0 +1,7 @@
+use std.io
+fn f(x: int) -> int
+    let y = x * 2
+    let g = |n| n + y
+    for i in 0..x
+        io.println("{i}")
+    g(y)

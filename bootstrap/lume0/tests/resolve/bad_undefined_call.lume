@@ -1,0 +1,3 @@
+# expect: R0200
+fn main() -> int
+    frobnicate(3)
