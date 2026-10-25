@@ -132,7 +132,7 @@ fi
 # building these Lume-written programs via the instrumented seed is far too slow/heavy
 # for the runner; they are fully exercised in the normal `make test` on both OSes, and
 # elf.c/asmgen.c stay ASan-covered by the `as/ld` block above.
-if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "$LUME0_ASAN" ]; then
+if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_ASAN:-}" ]; then
     ntmp=$(mktemp -d)
     for prog in nfib ev strtest modtest reclist list calc; do
         case "$prog" in calc) exp=calc_asm;; modtest) exp=modtest_core;; list) exp=list_core_native;; *) exp=${prog}_asm;; esac
