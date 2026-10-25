@@ -1,0 +1,5 @@
+fn m() -> int
+    var x = 1
+    x = x + 1
+    let y = 10
+    x + y
