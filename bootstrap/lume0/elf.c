@@ -236,7 +236,16 @@ static int emit_ins(Ins *in, Buf *out, Syms *syms, uint64_t payload_vaddr, int s
         uint8_t opc[2]={0x0F,0xAF}; return emit_rm(out,8,opc,2,in->b.reg,&in->a,syms,insn_end,strict,err);
     }
     if (!strncmp(m,"mov",3) && (suf=='q'||suf=='l'||suf=='b')) {
-        if (in->a.type==O_IMM){ uint8_t opc[1]={(uint8_t)((opsize==1)?0xC6:0xC7)}; if(emit_rm(out,opsize,opc,1,0,&in->b,syms,insn_end,strict,err))return 1; if(opsize==1)buf_put(out,(uint8_t)(int8_t)in->a.imm);else buf_put32(out,(uint32_t)(int32_t)in->a.imm); return 0; }
+        if (in->a.type==O_IMM){
+            /* a 64-bit immediate to a register that does not fit in a sign-extended
+             * imm32 needs movabs (REX.W B8+r imm64); C7 would truncate it. */
+            if (opsize==8 && in->b.type==O_REG && (in->a.imm < -2147483648LL || in->a.imm > 2147483647LL)) {
+                uint8_t rex=0x48; if(in->b.reg>=8) rex|=0x01; buf_put(out,rex);
+                buf_put(out,(uint8_t)(0xB8+(in->b.reg&7)));
+                buf_put64(out,(uint64_t)in->a.imm);
+                return 0;
+            }
+            uint8_t opc[1]={(uint8_t)((opsize==1)?0xC6:0xC7)}; if(emit_rm(out,opsize,opc,1,0,&in->b,syms,insn_end,strict,err))return 1; if(opsize==1)buf_put(out,(uint8_t)(int8_t)in->a.imm);else buf_put32(out,(uint32_t)(int32_t)in->a.imm); return 0; }
         if (in->a.type==O_REG && in->b.type==O_REG){ uint8_t opc[1]={(uint8_t)((opsize==1)?0x88:0x89)}; return emit_rm(out,opsize,opc,1,in->a.reg,&in->b,syms,insn_end,strict,err); }
         if (in->a.type==O_REG && in->b.type==O_MEM){ uint8_t opc[1]={(uint8_t)((opsize==1)?0x88:0x89)}; return emit_rm(out,opsize,opc,1,in->a.reg,&in->b,syms,insn_end,strict,err); }
         if (in->a.type==O_MEM && in->b.type==O_REG){ uint8_t opc[1]={(uint8_t)((opsize==1)?0x8A:0x8B)}; return emit_rm(out,opsize,opc,1,in->b.reg,&in->a,syms,insn_end,strict,err); }
