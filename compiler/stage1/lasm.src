@@ -1,0 +1,175 @@
+## lasm.src -- an x86-64 assembler + static ELF64 writer written in Lume-Core.
+## It reads AT&T-syntax assembly (as emitted by lumec) from stdin and writes a runnable
+## ELF64 executable to stdout, byte for byte, via the `emit` runtime builtin (NO C, NO as/ld).
+## This is a functional port of bootstrap/lume0/elf.c (same encoding logic and ELF layout):
+##   pass 1 (layout) computes every label address; pass 2 (emit) encodes the instruction bytes.
+## Slice 1 scope: the instruction/directive set that lumec emits for the whole Lume-Core subset
+## (everything in nfib.s, runtime included). See docs for what is out of scope.
+
+## --- list helpers ---
+fn app(xs, ys) = match xs
+    Nil        => ys
+    Cons(h, t) => Cons(h, app(t, ys))
+fn len(xs) = match xs
+    Nil        => 0
+    Cons(h, t) => 1 + len(t)
+fn isnil(xs) = match xs
+    Nil        => 1
+    Cons(h, t) => 0
+
+## --- byte output: emit the whole byte list, one byte at a time, in order ---
+fn emitall(xs) = match xs
+    Nil        => 0
+    Cons(h, t) => emitnext(emit(h), t)
+fn emitnext(z, t) = emitall(t)
+
+## --- little-endian byte encoders (two's complement for 32-bit negatives) ---
+fn lowbyte(v) = let r = v % 256 in if r < 0 then r + 256 else r
+fn b2(v) = Cons(lowbyte(v), Cons(lowbyte(v / 256), Nil))
+fn b4(v) = b4u(if v < 0 then v + 4294967296 else v)
+fn b4u(u) = Cons(u % 256, Cons((u / 256) % 256, Cons((u / 65536) % 256, Cons((u / 16777216) % 256, Nil))))
+fn b8(v) = app(b4(v), b4(v / 4294967296))
+
+## --- character classes ---
+fn isdigit(c) = c >= "0" and c <= "9"
+
+## --- string scanning ---
+fn findc(s, c, i) = if i >= count(s) then count(s) else if at(s, i) == c then i else findc(s, c, i + 1)
+fn nlpos(s, i) = if i >= count(s) then i else if at(s, i) == "\n" then i else nlpos(s, i + 1)
+fn splitlines(s, i) = if i >= count(s) then Nil else let e = nlpos(s, i) in Cons(slice(s, i, e), splitlines(s, if e >= count(s) then e else e + 1))
+fn skipws(s, i) = if i >= count(s) then i else if at(s, i) == " " or at(s, i) == "\t" or at(s, i) == "\r" then skipws(s, i + 1) else i
+fn rtrimend(s, e) = if e <= 0 then 0 else if at(s, e - 1) == " " or at(s, e - 1) == "\t" or at(s, e - 1) == "\r" then rtrimend(s, e - 1) else e
+fn trim(s) = let a = skipws(s, 0) in let b = rtrimend(s, count(s)) in if a >= b then "" else slice(s, a, b)
+fn lastch(s) = if count(s) == 0 then "" else at(s, count(s) - 1)
+fn endscolon(s) = lastch(s) == ":"
+fn startswith(s, p) = count(s) >= count(p) and slice(s, 0, count(p)) == p
+fn commapos(s, i, depth) = if i >= count(s) then count(s) else if at(s, i) == "(" then commapos(s, i + 1, depth + 1) else if at(s, i) == ")" then commapos(s, i + 1, depth - 1) else if at(s, i) == "," and depth == 0 then i else commapos(s, i + 1, depth)
+
+## --- integer parsing (signed decimal) ---
+fn parseint(s) = if count(s) == 0 then 0 else if at(s, 0) == "-" then 0 - toint(slice(s, 1, count(s))) else toint(s)
+
+## --- registers: name -> {rg: number, sz: size}; rg = -1 if unknown ---
+fn regtab(n) = if n == "rax" then {rg: 0, sz: 8} else if n == "rcx" then {rg: 1, sz: 8} else if n == "rdx" then {rg: 2, sz: 8} else if n == "rbx" then {rg: 3, sz: 8} else if n == "rsp" then {rg: 4, sz: 8} else if n == "rbp" then {rg: 5, sz: 8} else if n == "rsi" then {rg: 6, sz: 8} else if n == "rdi" then {rg: 7, sz: 8} else if n == "r8" then {rg: 8, sz: 8} else if n == "r9" then {rg: 9, sz: 8} else if n == "r10" then {rg: 10, sz: 8} else if n == "r11" then {rg: 11, sz: 8} else if n == "r12" then {rg: 12, sz: 8} else if n == "r13" then {rg: 13, sz: 8} else if n == "r14" then {rg: 14, sz: 8} else if n == "r15" then {rg: 15, sz: 8} else if n == "eax" then {rg: 0, sz: 4} else if n == "ecx" then {rg: 1, sz: 4} else if n == "edx" then {rg: 2, sz: 4} else if n == "ebx" then {rg: 3, sz: 4} else if n == "esi" then {rg: 6, sz: 4} else if n == "edi" then {rg: 7, sz: 4} else if n == "al" then {rg: 0, sz: 1} else if n == "cl" then {rg: 1, sz: 1} else if n == "dl" then {rg: 2, sz: 1} else if n == "bl" then {rg: 3, sz: 1} else if n == "sil" then {rg: 6, sz: 1} else if n == "dil" then {rg: 7, sz: 1} else {rg: 0 - 1, sz: 0}
+fn regn(s) = regtab(slice(s, 1, count(s)))
+fn regnum(s) = (regn(s)).rg
+
+## --- operands (records tagged by k: 0 none, 1 reg, 2 imm, 3 mem) ---
+fn opnone() = {k: 0, reg: 0, imm: 0, base: 0, idx: 0, scale: 1, rip: 0, sym: ""}
+fn opreg(r) = {k: 1, reg: r.rg, imm: 0, base: 0, idx: 0, scale: 1, rip: 0, sym: ""}
+fn opimm(v) = {k: 2, reg: 0, imm: v, base: 0, idx: 0, scale: 1, rip: 0, sym: ""}
+fn opmem(sy, im, bs, ix, sc, rp) = {k: 3, reg: 0, imm: im, base: bs, idx: ix, scale: sc, rip: rp, sym: sy}
+fn parseop(s) = if count(s) == 0 then opnone() else if at(s, 0) == "$" then opimm(parseint(slice(s, 1, count(s)))) else if at(s, 0) == "%" then opreg(regn(s)) else parsemem(s)
+fn parsemem(s) = parsememlp(s, findc(s, "(", 0))
+fn parsememlp(s, lp) = if lp >= count(s) then parseheadonly(s) else parsememfull(slice(s, 0, lp), slice(s, lp + 1, findc(s, ")", lp)))
+fn parseheadonly(s) = combinmem(parsehead(s), {base: 0 - 1, idx: 0 - 1, scale: 1, rip: 0})
+fn parsememfull(head, inner) = combinmem(parsehead(head), parseinner(inner))
+fn combinmem(h, inr) = opmem(h.sym, h.imm, inr.base, inr.idx, inr.scale, inr.rip)
+fn parsehead(head) = if count(head) == 0 then {sym: "", imm: 0} else if at(head, 0) == "-" or isdigit(at(head, 0)) then {sym: "", imm: parseint(head)} else parseheadsym(head)
+fn parseheadsym(head) = let p = findc(head, "+", 0) in if p >= count(head) then {sym: head, imm: 0} else {sym: slice(head, 0, p), imm: toint(slice(head, p + 1, count(head)))}
+fn parseinner(inner) = if inner == "%rip" then {base: 0 - 1, idx: 0 - 1, scale: 1, rip: 1} else parseinner2(inner, findc(inner, ",", 0))
+fn parseinner2(inner, c1) = if c1 >= count(inner) then {base: regnum(inner), idx: 0 - 1, scale: 1, rip: 0} else parseinner3(slice(inner, 0, c1), slice(inner, c1 + 1, count(inner)))
+fn parseinner3(basepart, rest) = let c2 = findc(rest, ",", 0) in if c2 >= count(rest) then {base: regnum(basepart), idx: regnum(rest), scale: 1, rip: 0} else {base: regnum(basepart), idx: regnum(slice(rest, 0, c2)), scale: toint(slice(rest, c2 + 1, count(rest))), rip: 0}
+
+## --- instruction line parsing ---
+fn jccop(mn) = if mn == "je" or mn == "jz" then 132 else if mn == "jne" or mn == "jnz" then 133 else if mn == "jl" then 140 else if mn == "jg" then 143 else if mn == "jle" then 142 else if mn == "jge" then 141 else if mn == "js" then 136 else if mn == "jns" then 137 else 0 - 1
+fn isjump(mn) = mn == "jmp" or mn == "call" or jccop(mn) >= 0
+fn alldig(s, i, n) = if i >= n then 1 else if isdigit(at(s, i)) then alldig(s, i + 1, n) else 0
+fn striplocal(tgt) = let n = count(tgt) in if n >= 2 and (lastch(tgt) == "f" or lastch(tgt) == "b") and alldig(tgt, 0, n - 1) == 1 then slice(tgt, 0, n - 1) else tgt
+fn parseins(s) = let sp = findc(s, " ", 0) in if sp >= count(s) then {mn: s, nop: 0, a: opnone(), b: opnone(), tgt: ""} else parseins2(slice(s, 0, sp), trim(slice(s, sp + 1, count(s))))
+fn parseins2(mn, ops) = if isjump(mn) then {mn: mn, nop: 1, a: opnone(), b: opnone(), tgt: striplocal(ops)} else parseins3(mn, ops)
+fn parseins3(mn, ops) = let cp = commapos(ops, 0, 0) in if cp >= count(ops) then {mn: mn, nop: 1, a: parseop(trim(ops)), b: opnone(), tgt: ""} else {mn: mn, nop: 2, a: parseop(trim(slice(ops, 0, cp))), b: parseop(trim(slice(ops, cp + 1, count(ops)))), tgt: ""}
+
+## --- directive parsing ---
+fn parselcomm(s) = let rest = trim(slice(s, 6, count(s))) in parselcomm2(rest, findc(rest, ",", 0))
+fn parselcomm2(rest, c) = BS(trim(slice(rest, 0, c)), toint(trim(slice(rest, c + 1, count(rest)))))
+fn escbyte(c) = if c == "n" then 10 else if c == "t" then 9 else if c == "r" then 13 else if c == "0" then 0 else ord(c)
+fn ascbytes(s, i) = if i >= count(s) then Cons(0, Nil) else if at(s, i) == "\"" then Cons(0, Nil) else if at(s, i) == "\\" then Cons(escbyte(at(s, i + 1)), ascbytes(s, i + 2)) else Cons(ord(at(s, i)), ascbytes(s, i + 1))
+fn parseasciz(s) = ascbytes(s, findc(s, "\"", 0) + 1)
+
+## --- items: TL/RL text/rodata labels, Ins instruction, RO rodata bytes, BS bss reservation, Skip ---
+fn parseitems(lines, sec) = match lines
+    Nil        => Nil
+    Cons(h, t) => parseline(trim(h), t, sec)
+fn parseline(s, t, sec) = if count(s) == 0 then Cons(Skip, parseitems(t, sec)) else if at(s, 0) == "#" then Cons(Skip, parseitems(t, sec)) else if endscolon(s) then parselabel(slice(s, 0, count(s) - 1), t, sec) else if at(s, 0) == "." then parsedir(s, t, sec) else Cons(Ins(parseins(s)), parseitems(t, sec))
+fn parselabel(nm, t, sec) = if sec == 1 then Cons(RL(nm), parseitems(t, sec)) else Cons(TL(nm), parseitems(t, sec))
+fn parsedir(s, t, sec) = if startswith(s, ".section .rodata") then Cons(Skip, parseitems(t, 1)) else if startswith(s, ".section .text") then Cons(Skip, parseitems(t, 0)) else if startswith(s, ".section .bss") then Cons(Skip, parseitems(t, 2)) else if startswith(s, ".globl") then Cons(Skip, parseitems(t, sec)) else if startswith(s, ".lcomm") then Cons(parselcomm(s), parseitems(t, sec)) else if startswith(s, ".asciz") then Cons(RO(parseasciz(s)), parseitems(t, sec)) else Cons(Skip, parseitems(t, sec))
+
+## --- symbol table (association list name -> virtual address) ---
+fn symaddr(syms, nm) = match syms
+    Nil        => 0
+    Cons(h, t) => if h.nm == nm then h.v else symaddr(t, nm)
+fn mapsym(xs, base) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons({nm: h.nm, v: base + h.o}, mapsym(t, base))
+
+## --- encoder: ModRM/SIB/REX + displacement (port of emit_rm) ---
+fn scalebits(x) = if x == 2 then 1 else if x == 4 then 2 else if x == 8 then 3 else 0
+fn hassib(base, index) = if index >= 0 then 1 else if (base % 8) == 4 then 1 else 0
+fn sibbyte(base, index, scale) = if index >= 0 then scalebits(scale) * 64 + (index % 8) * 8 + (base % 8) else 36
+fn modrmrm(base, index) = if index >= 0 then 4 else base % 8
+fn memmod(imm, base) = if imm == 0 and (base % 8) != 5 then 0 else if imm >= 0 - 128 and imm <= 127 then 1 else 2
+fn memdisp(imm, base) = if imm == 0 and (base % 8) != 5 then Nil else if imm >= 0 - 128 and imm <= 127 then Cons(lowbyte(imm), Nil) else b4(imm)
+fn encrm(opsize, opc, rf, rm, iend, syms) = if rm.k == 1 then encrm_reg(opsize, opc, rf, rm) else if rm.rip == 1 then encrm_rip(opsize, opc, rf, rm, iend, syms) else encrm_base(opsize, opc, rf, rm)
+fn encrm_reg(opsize, opc, rf, rm) = let rex = 64 + (if opsize == 8 then 8 else 0) + (if rf >= 8 then 4 else 0) + (if rm.reg >= 8 then 1 else 0) in app(if rex != 64 then Cons(rex, Nil) else Nil, app(opc, Cons(192 + (rf % 8) * 8 + (rm.reg % 8), Nil)))
+fn encrm_rip(opsize, opc, rf, rm, iend, syms) = let rex = 64 + (if opsize == 8 then 8 else 0) + (if rf >= 8 then 4 else 0) in app(if rex != 64 then Cons(rex, Nil) else Nil, app(opc, Cons((rf % 8) * 8 + 5, b4(symaddr(syms, rm.sym) + rm.imm - iend))))
+fn encrm_base(opsize, opc, rf, rm) = encrm_base2(opsize, opc, rf, rm, rm.base, rm.idx)
+fn encrm_base2(opsize, opc, rf, rm, base, index) = let rex = 64 + (if opsize == 8 then 8 else 0) + (if rf >= 8 then 4 else 0) + (if base >= 8 then 1 else 0) + (if index >= 8 then 2 else 0) in let modrm = memmod(rm.imm, base) * 64 + (rf % 8) * 8 + modrmrm(base, index) in let sib = if hassib(base, index) == 1 then Cons(sibbyte(base, index, rm.scale), Nil) else Nil in app(if rex != 64 then Cons(rex, Nil) else Nil, app(opc, app(Cons(modrm, Nil), app(sib, memdisp(rm.imm, base)))))
+
+## --- encoder: whole instruction (port of emit_ins) ---
+fn core(mn) = slice(mn, 0, count(mn) - 1)
+fn suffix(mn) = at(mn, count(mn) - 1)
+fn opsizeof(mn) = let s = suffix(mn) in if s == "q" then 8 else if s == "l" then 4 else if s == "b" then 1 else 8
+fn setccop(mn) = if mn == "sete" then 148 else if mn == "setne" then 149 else if mn == "setl" then 156 else if mn == "setg" then 159 else if mn == "setle" then 158 else if mn == "setge" then 157 else if mn == "sets" then 152 else if mn == "setns" then 153 else 0 - 1
+fn isunary(mn) = mn == "negq" or mn == "notq" or mn == "mulq" or mn == "divq" or mn == "idivq" or mn == "incq" or mn == "decq"
+fn unaryext(mn) = if mn == "negq" then 3 else if mn == "notq" then 2 else if mn == "mulq" then 4 else if mn == "divq" then 6 else 7
+fn ismov(mn) = mn == "movq" or mn == "movl" or mn == "movb"
+fn aluext(c) = if c == "add" then 0 else if c == "or" then 1 else if c == "and" then 4 else if c == "sub" then 5 else if c == "xor" then 6 else if c == "cmp" then 7 else 0 - 1
+fn alustore(c) = if c == "add" then 1 else if c == "or" then 9 else if c == "and" then 33 else if c == "sub" then 41 else if c == "xor" then 49 else if c == "cmp" then 57 else 0 - 1
+fn enc(ins, iend, syms) = encmn(ins.mn, ins, iend, syms)
+fn encmn(mn, ins, iend, syms) = if mn == "syscall" then Cons(15, Cons(5, Nil)) else if mn == "ret" then Cons(195, Nil) else if mn == "cqto" then Cons(72, Cons(153, Nil)) else if mn == "pushq" or mn == "popq" then encpush(mn, ins.a) else if mn == "jmp" or mn == "call" then encjmp(mn, ins.tgt, iend, syms) else if jccop(mn) >= 0 then Cons(15, Cons(jccop(mn), b4(symaddr(syms, ins.tgt) - iend))) else if setccop(mn) >= 0 then encrm(1, Cons(15, Cons(setccop(mn), Nil)), 0, ins.a, iend, syms) else if mn == "movzbq" or mn == "movzbl" then encrm(if mn == "movzbq" then 8 else 4, Cons(15, Cons(182, Nil)), ins.b.reg, ins.a, iend, syms) else if isunary(mn) then encunary(mn, ins.a, iend, syms) else if mn == "imulq" then encimul(ins, iend, syms) else if ismov(mn) then encmov(mn, ins, iend, syms) else if mn == "leaq" then encrm(8, Cons(141, Nil), ins.b.reg, ins.a, iend, syms) else if mn == "testq" or mn == "testb" then encrm(if mn == "testb" then 1 else 8, Cons(if mn == "testb" then 132 else 133, Nil), ins.a.reg, ins.b, iend, syms) else encalu(mn, ins, iend, syms)
+fn encpush(mn, a) = app(if a.reg >= 8 then Cons(65, Nil) else Nil, Cons((if mn == "pushq" then 80 else 88) + a.reg % 8, Nil))
+fn encjmp(mn, tgt, iend, syms) = Cons(if mn == "jmp" then 233 else 232, b4(symaddr(syms, tgt) - iend))
+fn encunary(mn, a, iend, syms) = if mn == "incq" then encrm(8, Cons(255, Nil), 0, a, iend, syms) else if mn == "decq" then encrm(8, Cons(255, Nil), 1, a, iend, syms) else encrm(8, Cons(247, Nil), unaryext(mn), a, iend, syms)
+fn encimul(ins, iend, syms) = if ins.a.k == 2 then app(encrm(8, Cons(105, Nil), ins.b.reg, ins.b, iend, syms), b4(ins.a.imm)) else encrm(8, Cons(15, Cons(175, Nil)), ins.b.reg, ins.a, iend, syms)
+fn encmov(mn, ins, iend, syms) = encmov2(opsizeof(mn), ins.a, ins.b, iend, syms)
+fn encmov2(os, a, b, iend, syms) = if a.k == 2 then app(encrm(os, Cons(if os == 1 then 198 else 199, Nil), 0, b, iend, syms), if os == 1 then Cons(lowbyte(a.imm), Nil) else b4(a.imm)) else if a.k == 1 then encrm(os, Cons(if os == 1 then 136 else 137, Nil), a.reg, b, iend, syms) else encrm(os, Cons(if os == 1 then 138 else 139, Nil), b.reg, a, iend, syms)
+fn encalu(mn, ins, iend, syms) = encalu2(opsizeof(mn), core(mn), ins, iend, syms)
+fn encalu2(os, c, ins, iend, syms) = encalu3(os, aluext(c), alustore(c), ins.a, ins.b, iend, syms)
+fn encalu3(os, ext, sop, a, b, iend, syms) = if ext < 0 then Nil else if a.k == 2 then app(encrm(os, Cons(if os == 1 then 128 else 129, Nil), ext, b, iend, syms), if os == 1 then Cons(lowbyte(a.imm), Nil) else b4(a.imm)) else if a.k == 1 then encrm(os, Cons(if os == 1 then sop - 1 else sop, Nil), a.reg, b, iend, syms) else encrm(os, Cons(if os == 1 then sop + 1 else sop + 2, Nil), b.reg, a, iend, syms)
+
+## --- pass 1: layout (code offsets, rodata bytes, bss, and every label's bucket offset) ---
+fn layout(items, co, roff, boff, tls, ro, rls, bls) = match items
+    Nil        => {co: co, robytes: ro, tls: tls, rls: rls, bls: bls, boff: boff}
+    Cons(h, t) => layoutitem(h, t, co, roff, boff, tls, ro, rls, bls)
+fn layoutitem(h, t, co, roff, boff, tls, ro, rls, bls) = match h
+    Ins(r)     => layout(t, co + len(enc(r, 0, Nil)), roff, boff, tls, ro, rls, bls)
+    TL(nm)     => layout(t, co, roff, boff, Cons({nm: nm, o: co}, tls), ro, rls, bls)
+    RL(nm)     => layout(t, co, roff, boff, tls, ro, Cons({nm: nm, o: roff}, rls), bls)
+    RO(bs)     => layout(t, co, roff + len(bs), boff, tls, app(ro, bs), rls, bls)
+    BS(nm, sz) => layout(t, co, roff, boff + sz, tls, ro, rls, Cons({nm: nm, o: boff}, bls))
+    _          => layout(t, co, roff, boff, tls, ro, rls, bls)
+
+## --- pass 2: emit code bytes with the full symbol table ---
+fn emitcode(items, co, syms) = match items
+    Nil        => Nil
+    Cons(h, t) => emitcodeitem(h, t, co, syms)
+fn emitcodeitem(h, t, co, syms) = match h
+    Ins(r)     => emitcodeins(r, t, co, syms)
+    _          => emitcode(t, co, syms)
+fn emitcodeins(r, t, co, syms) = let ln = len(enc(r, 0, Nil)) in let bs = enc(r, 4194424 + co + ln, syms) in app(bs, emitcode(t, co + ln, syms))
+
+## --- ELF64 container (VBASE 0x400000, 120-byte headers, one RWX PT_LOAD) ---
+fn identbytes() = Cons(127, Cons(69, Cons(76, Cons(70, Cons(2, Cons(1, Cons(1, Cons(0, Cons(0, Cons(0, Cons(0, Cons(0, Cons(0, Cons(0, Cons(0, Cons(0, Nil))))))))))))))))
+fn ehdr(entry) = app(identbytes(), app(b2(2), app(b2(62), app(b4(1), app(b8(entry), app(b8(64), app(b8(0), app(b4(0), app(b2(64), app(b2(56), app(b2(1), app(b2(0), app(b2(0), b2(0))))))))))))))
+fn phdr(filesz, memsz) = app(b4(1), app(b4(7), app(b8(0), app(b8(4194304), app(b8(4194304), app(b8(filesz), app(b8(memsz), b8(4096))))))))
+
+## --- the assembler: read stdin, two passes, emit the ELF to stdout ---
+fn buildsyms(lay, cs, rs) = app(mapsym(lay.tls, 4194424), app(mapsym(lay.rls, 4194424 + cs), mapsym(lay.bls, 4194424 + cs + rs)))
+fn assemble(src) = asm2(parseitems(splitlines(src, 0), 0))
+fn asm2(items) = asm3(items, layout(items, 0, 0, 0, Nil, Nil, Nil, Nil))
+fn asm3(items, lay) = asm4(items, lay, lay.co, len(lay.robytes))
+fn asm4(items, lay, cs, rs) = asm5(items, lay, cs, rs, buildsyms(lay, cs, rs))
+fn asm5(items, lay, cs, rs, syms) = asm6(lay, syms, symaddr(syms, "_start"), 120 + cs + rs, 120 + cs + rs + lay.boff, emitcode(items, 0, syms))
+fn asm6(lay, syms, entry, filesz, memsz, code) = emitall(app(ehdr(entry), app(phdr(filesz, memsz), app(code, lay.robytes))))
+
+print assemble(readall())

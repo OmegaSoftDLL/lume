@@ -199,6 +199,8 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_
     # fixpoint (verbatim): lumec compiles its own unmodified source (comments and blank lines included) to gen1; the resulting lumec2 must reproduce gen1 bit-for-bit
     cp ../../compiler/stage1/lumec.src "$ntmp/fx.src"
     if "$ntmp/lc" <"$ntmp/fx.src" >"$ntmp/gen1.s" 2>/dev/null && $BIN asm "$ntmp/gen1.s" "$ntmp/lc2" >/dev/null 2>&1 && "$ntmp/lc2" <"$ntmp/fx.src" >"$ntmp/gen2.s" 2>/dev/null && [ -s "$ntmp/gen1.s" ] && cmp -s "$ntmp/gen1.s" "$ntmp/gen2.s"; then ok "self-host fixpoint (verbatim): lumec -> lumec2 recompiles its own source bit-identically"; else bad "self-host fixpoint (verbatim): lumec -> lumec2 recompiles its own source bit-identically"; fi
+    # self-host asm: lasm (an x86-64 assembler + ELF64 writer written in Lume-Core) reads a .s on stdin and emits a runnable ELF to stdout -- no C, no as/ld. lumec compiles lasm to native; lasm then assembles the .s lumec emits for nfib, and the resulting ELF must print the expected output.
+    if "$ntmp/lc" <../../compiler/stage1/lasm.src >"$ntmp/lasm.s" 2>/dev/null && $BIN asm "$ntmp/lasm.s" "$ntmp/lasm" >/dev/null 2>&1 && "$ntmp/lc" <../../compiler/stage1/nfib.src >"$ntmp/nfib_for_lasm.s" 2>/dev/null && "$ntmp/lasm" <"$ntmp/nfib_for_lasm.s" >"$ntmp/nfib_lasm.elf" 2>/dev/null && chmod +x "$ntmp/nfib_lasm.elf" && "$ntmp/nfib_lasm.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/nfib_asm.expected - >/dev/null; then ok "self-host asm: lasm (Lume assembler) assembles nfib to a running ELF"; else bad "self-host asm: lasm (Lume assembler) assembles nfib to a running ELF"; fi
     rm -rf "$ntmp"
 else
     ok "no-toolchain ELF pipeline (skipped: not linux/x86_64, or under ASan)"
