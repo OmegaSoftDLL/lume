@@ -1,0 +1,8 @@
+## toplevel_expr.src -- top-level expression statements: each line is a bare expression
+## evaluated for its side effect, the value discarded (no `print`). emit buffers bytes;
+## flush writes them. Exercises ExprS/DExprS in lumec and the data_asmgen oracle. Prints "Hi!".
+emit(72)
+emit(105)
+emit(33)
+emit(10)
+flush()

@@ -2,8 +2,8 @@
 ## x86-64 codegen, written in the functional core (recursion, immutable records, match, let-in, if;
 ## no var/mut/while/for). Compiled to native by data_asm_cc and assembled by lume0 asm, no C anywhere.
 ## The lexer/parser are copied verbatim from lcparse.src (R5); the code generator is the functional port
-## of lcgen.lume (R6a, R6b, R6-match). Scope: fn/print statements over Num/Var/Bin/Call/If/LetIn plus Str/Rec/Field, match and
-## constructors (R6b). `match` is only a whole function/let/print body (see "parser: match"). The top-level print compiles a hardcoded program and prints the resulting asm.
+## of lcgen.lume (R6a, R6b, R6-match). Scope: fn / print / top-level expression statements over Num/Var/Bin/Call/If/LetIn plus Str/Rec/Field, match and
+## constructors (R6b). `match` is only a whole function/let/print/expression-statement body (see "parser: match"). The driver reads the whole program from stdin, compiles it, and prints the resulting asm.
 
 ## --- lexer ---
 fn isdigit(c) = c >= "0" and c <= "9"
@@ -70,14 +70,19 @@ fn parse(s) = (expr(lex(s, 0))).node
 
 ## --- parser: match ---
 ## INVARIANT (relied on by the parser, the frame-slot computation and the codegen): `match` appears ONLY as the
-## ENTIRE body of a function (or of a let-in / print expression), never nested inside a larger expression, and
-## never followed by more expression text. The lexer is layout-blind (no INDENT/DEDENT), so the arms of a match are
-## delimited by the next statement keyword: they end at `fn`, `print` or end of input. A match nested in an arm
-## body would swallow the outer arms (or end early), so such code must be factored into a helper function.
-## The lexer has no `=>` token: it lexes as the two ops "=" then ">", so an arrow is two dropkw calls.
-fn armsend(ts) = headtext(ts) == "fn" or headtext(ts) == "print" or isnil(ts) == 1
+## ENTIRE body of a function (or of a let-in / print / expression-statement body), never nested inside a larger
+## expression. The lexer is layout-blind (no INDENT/DEDENT), so the arms of a match are delimited by LOOKAHEAD:
+## an arm continues if and only if the next tokens form `<pattern> =>`; otherwise the arms have ended and the
+## token stream is left exactly as it was (nothing consumed) for the following statement. This is what lets a
+## top-level expression statement follow a function whose body is a `match`; the old rule ("arms end at `fn`,
+## `print` or end of input") would have swallowed such an expression as a bogus extra arm. A match nested in an
+## arm body would still swallow the outer arms, so such code must be factored into a helper function.
+## The lexer has no `=>` token: it lexes as the two ops "=" then ">", so an arrow is two dropkw calls, and the
+## lookahead `isarrow` likewise checks for "=" then ">".
+fn isarrow(ts) = headtext(ts) == "=" and headtext(droponce(ts)) == ">"
 fn parsematch(t) = let sc = expr(t) in let ar = parsearms(sc.rest) in {node: Match(sc.node, ar.items), rest: ar.rest}
-fn parsearms(ts) = if armsend(ts) then {items: Nil, rest: ts} else armmore(parsepat(ts))
+fn parsearms(ts) = armstart(ts, parsepat(ts))
+fn armstart(ts, p) = if isarrow(p.rest) then armmore(p) else {items: Nil, rest: ts}
 fn armmore(p) = let b = expr(dropkw(dropkw(p.rest, "="), ">")) in let rr = parsearms(b.rest) in {items: Cons({pat: p.node, body: b.node}, rr.items), rest: rr.rest}
 fn parsepat(ts) = match ts
     Nil        => {node: PWild, rest: Nil}
@@ -86,17 +91,21 @@ fn patcons(tag, t) = if headtext(t) == "(" then let a = patlist(droponce(t)) in 
 fn patlist(ts) = if headtext(ts) == ")" then {items: Nil, rest: droponce(ts)} else patmore(parsepat(ts))
 fn patmore(r) = if headtext(r.rest) == "," then let rr = patlist(droponce(r.rest)) in {items: Cons(r.node, rr.items), rest: rr.rest} else {items: Cons(r.node, Nil), rest: skiprp(r.rest)}
 
-## --- parser: programs (fn definitions and print statements) ---
-## A statement starts with `fn` or `print`; expr stops at the next one since neither is an operator.
+## --- parser: programs (fn definitions, print statements, and bare expression statements) ---
+## A statement is `fn ...`, `print <expr>`, or a bare `<expr>` evaluated for its effect (value discarded).
+## `fn`/`print` are dispatched by keyword; anything else begins an expression statement. The program is a
+## sequence of statements up to end of input (the `Nil` arm stops the recursion). Each top-level `<expr>` must
+## consume at least one token (prim always advances on a non-empty stream), so progmore cannot loop forever.
 fn parseparams(ts) = if headtext(ts) == ")" then {items: Nil, rest: droponce(ts)} else parammore(headtext(ts), droponce(ts))
 fn parammore(nm, ts) = if headtext(ts) == "," then let rr = parseparams(droponce(ts)) in {items: Cons(nm, rr.items), rest: rr.rest} else {items: Cons(nm, Nil), rest: skiprp(ts)}
 fn parsefn(t) = let nm = headtext(t) in let ps = parseparams(dropkw(droponce(t), "(")) in let b = expr(dropkw(ps.rest, "=")) in {node: Fn(nm, ps.items, b.node), rest: b.rest}
 fn parseprint(t) = let e = expr(t) in {node: Print(e.node), rest: e.rest}
 fn parsestmt(ts) = if headtext(ts) == "fn" then parsefn(droponce(ts)) else parseprint(droponce(ts))
 fn progmore(r) = Cons(r.node, parseprog(r.rest))
+fn lexprstmt(e) = {node: ExprS(e.node), rest: e.rest}
 fn parseprog(ts) = match ts
     Nil        => Nil
-    Cons(h, t) => if h.text == "fn" or h.text == "print" then progmore(parsestmt(ts)) else Nil
+    Cons(h, t) => if h.text == "fn" or h.text == "print" then progmore(parsestmt(ts)) else progmore(lexprstmt(expr(ts)))
 fn parseprogram(s) = parseprog(lex(s, 0))
 
 ## --- code generator: x86-64 asm for the core (port of lcgen.lume, R6a; strings/records/ctors R6b) ---
@@ -302,12 +311,14 @@ fn lmlocals(prog) = match prog
     Cons(h, t) => app(lmlocalsone(h), lmlocals(t))
 fn lmlocalsone(s) = match s
     Print(v) => lcollect(v)
+    ExprS(v) => lcollect(v)
     _        => Nil
 fn lmdprog(prog) = match prog
     Nil        => 0
     Cons(h, t) => imax(lmdone(h), lmdprog(t))
 fn lmdone(s) = match s
     Print(v) => lmdepth(v)
+    ExprS(v) => lmdepth(v)
     _        => 0
 fn lstmts(prog, mlocals, s) = match prog
     Nil        => {funcs: Nil, mains: Nil, nl: s.nl, ns: s.ns, dt: s.dt}
@@ -315,9 +326,12 @@ fn lstmts(prog, mlocals, s) = match prog
 fn lstmt(s0, t, mlocals, s) = match s0
     Fn(nm, ps, body) => lstmtfn(lafn(nm, ps, body, s), t, mlocals)
     Print(v)         => lstmtprint(laexpr(v, {locals: mlocals, bound: Nil, depth: 0}, s), t, mlocals)
+    ExprS(v)         => lstmtexpr(laexpr(v, {locals: mlocals, bound: Nil, depth: 0}, s), t, mlocals)
     _                => lstmts(t, mlocals, s)
 fn lstmtfn(f, t, mlocals) = let rest = lstmts(t, mlocals, f) in {funcs: Cons(f.code, rest.funcs), mains: rest.mains, nl: rest.nl, ns: rest.ns, dt: rest.dt}
 fn lstmtprint(pr, t, mlocals) = let rest = lstmts(t, mlocals, pr) in {funcs: rest.funcs, mains: Cons(pr.code + "    popq %rdi\n    call printval\n", rest.mains), nl: rest.nl, ns: rest.ns, dt: rest.dt}
+## an expression statement: evaluate `v` for its effect and DISCARD the pushed value (popq %rax, no printval)
+fn lstmtexpr(er, t, mlocals) = let rest = lstmts(t, mlocals, er) in {funcs: rest.funcs, mains: Cons(er.code + "    popq %rax\n", rest.mains), nl: rest.nl, ns: rest.ns, dt: rest.dt}
 
 ## --- the program: bss + rodata (oom_msg + string chunks) + text(funcs, runtime, _start, main) ---
 fn lgen(prog) = let mlocals = app(lmlocals(prog), lsds(0, lmdprog(prog))) in let gs = lstmts(prog, mlocals, {nl: 0, ns: 0, dt: Nil}) in let mframe = lframe(len(mlocals)) in let mprol = "    movq %rsp, %rbp\n" + (if mframe > 0 then "    subq $" + str(mframe) + ", %rsp\n" else "") in let bss = "    .section .bss\n    .lcomm pbuf, 32\n    .lcomm heap_cur, 8\n    .lcomm heap_end, 8\n    .lcomm emit_buf, 8\n    .lcomm emit_len, 8\n    .lcomm emit_cap, 8\n" in let rodata = "    .section .rodata\noom_msg:\n    .asciz \"lume: out of memory (heap exhausted, brk failed)\\n\"\n" in let heapinit = "    movq $12, %rax\n    xorq %rdi, %rdi\n    syscall\n    movq %rax, heap_cur(%rip)\n    leaq 67108864(%rax), %rdi\n    movq %rdi, %rsi\n    movq $12, %rax\n    syscall\n    cmpq %rsi, %rax\n    jne alloc_oom\n    movq %rsi, heap_end(%rip)\n" in joinall(Cons(bss, Cons(rodata, Cons(joinall(rev(gs.dt)), Cons("    .section .text\n", Cons(joinall(gs.funcs), Cons(runtime_tail(), Cons("    .globl _start\n_start:\n", Cons(heapinit, Cons(mprol, Cons(joinall(gs.mains), Cons("    movq $60, %rax\n    xorq %rdi, %rdi\n    syscall\n", Nil))))))))))))

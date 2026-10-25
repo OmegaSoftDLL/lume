@@ -200,11 +200,9 @@ fn asm3(lay, cs, rs) = asm4(lay, cs, rs, buildsyms(lay, cs, rs))
 fn asm4(lay, cs, rs, syms) = asm6(lay, syms, symaddr(syms, "_start"), 120 + cs + rs, 120 + cs + rs + lay.boff, emitcode2(lay.encs, syms))
 fn asm6(lay, syms, entry, filesz, memsz, code) = emitall(app(ehdr(entry), app(phdr(filesz, memsz), app(code, lay.robytes))))
 
-## Entry point. NOTE: lumec's own program parser only accepts `fn` and `print`
-## statements (no top-level `let`), so the driver must be a `print` of a helper —
-## a top-level `let` here is silently dropped when lasm is built by lumec, leaving
-## an empty ELF. `emitelf` runs the assembler for its byte-emitting side effects,
-## flushes the buffered output in one write, and returns "" so `print` adds only a
-## single trailing newline (past the ELF's filesz, ignored by the kernel).
-fn emitelf(src) = let e = assemble(src) in let w = flush() in ""
-print emitelf(readall())
+## Entry point: two top-level expression statements. `assemble` emits every ELF byte into the
+## buffer as a side effect; `flush` then writes the whole buffer to stdout in one syscall. There
+## is no `print`, so stdout is the ELF byte-for-byte with no trailing newline -- byte-identical to
+## the `lume0 asm` oracle (the old `print emitelf(...)` form appended one `\n` past the filesz).
+assemble(readall())
+flush()

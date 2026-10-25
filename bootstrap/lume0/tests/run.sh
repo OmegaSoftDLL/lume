@@ -203,9 +203,31 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_
     if "$ntmp/lc" <../../compiler/stage1/lasm.src >"$ntmp/lasm.s" 2>/dev/null && $BIN asm "$ntmp/lasm.s" "$ntmp/lasm" >/dev/null 2>&1 && "$ntmp/lc" <../../compiler/stage1/nfib.src >"$ntmp/nfib_for_lasm.s" 2>/dev/null && "$ntmp/lasm" <"$ntmp/nfib_for_lasm.s" >"$ntmp/nfib_lasm.elf" 2>/dev/null && chmod +x "$ntmp/nfib_lasm.elf" && "$ntmp/nfib_lasm.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/nfib_asm.expected - >/dev/null; then ok "self-host asm: lasm (Lume assembler) assembles nfib to a running ELF"; else bad "self-host asm: lasm (Lume assembler) assembles nfib to a running ELF"; fi
     # movabs: lumec emits `movq $imm, %reg` with imm64 literals (bigints.src); lasm must encode those as REX.W B8+r imm64 (10 bytes) like the oracle, not truncate them to imm32.
     if "$ntmp/lc" <../../compiler/stage1/bigints.src >"$ntmp/bi_for_lasm.s" 2>/dev/null && "$ntmp/lasm" <"$ntmp/bi_for_lasm.s" >"$ntmp/bi_lasm.elf" 2>/dev/null && chmod +x "$ntmp/bi_lasm.elf" && "$ntmp/bi_lasm.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/bigints_asm.expected - >/dev/null; then ok "self-host asm: lasm assembles bigints (movabs/imm64) to a running ELF"; else bad "self-host asm: lasm assembles bigints (movabs/imm64) to a running ELF"; fi
-    # movabs boundaries: imm32 edges stay C7, anything outside becomes movabs; negatives and r8+ destinations must match the oracle byte for byte (up to its filesz; lasm appends one trailing newline).
+    # byte-PERFECT: lasm no longer appends a trailing newline, so its ELF must equal the lume0 asm
+    # oracle EXACTLY (0 bytes of difference), not merely up to filesz. Checked on nfib, bigints and the
+    # whole compiler (lumec's own ~300KB asm); each ELF is then run to confirm it still behaves.
+    bp=1
+    for pr in nfib:nfib_asm bigints:bigints_asm; do
+        "$ntmp/lc" <"../../compiler/stage1/${pr%%:*}.src" >"$ntmp/bp.s" 2>/dev/null
+        "$ntmp/lasm" <"$ntmp/bp.s" >"$ntmp/bp_l.elf" 2>/dev/null; chmod +x "$ntmp/bp_l.elf"
+        $BIN asm "$ntmp/bp.s" "$ntmp/bp_o.elf" >/dev/null 2>&1
+        if ! ( [ -s "$ntmp/bp_o.elf" ] && cmp -s "$ntmp/bp_l.elf" "$ntmp/bp_o.elf" && "$ntmp/bp_l.elf" 2>/dev/null | diff -u "../../tests/conformance/stage1/${pr##*:}.expected" - >/dev/null ); then bp=0; echo "  byte-perfect mismatch: ${pr%%:*}"; fi
+    done
+    "$ntmp/lc" <../../compiler/stage1/lumec.src >"$ntmp/bp_c.s" 2>/dev/null
+    "$ntmp/lasm" <"$ntmp/bp_c.s" >"$ntmp/bp_c_l.elf" 2>/dev/null
+    $BIN asm "$ntmp/bp_c.s" "$ntmp/bp_c_o.elf" >/dev/null 2>&1
+    if ! ( [ -s "$ntmp/bp_c_o.elf" ] && cmp -s "$ntmp/bp_c_l.elf" "$ntmp/bp_c_o.elf" ); then bp=0; echo "  byte-perfect mismatch: whole compiler"; fi
+    if [ "$bp" = 1 ]; then ok "self-host asm: lasm ELF == lume0 asm oracle byte-for-byte (nfib, bigints, whole compiler; 0 diff)"; else bad "self-host asm: lasm ELF == lume0 asm oracle byte-for-byte (0 diff)"; fi
+    # top-level expression statements (ExprS in lumec / DExprS in the data_asmgen oracle): a program of
+    # bare `emit(...)`/`flush()` statements (each value discarded, no `print`) must compile via BOTH lumec
+    # and the oracle and print "Hi!" -- proving the statements run for effect and are never dropped.
+    te_exp=../../tests/conformance/stage1/toplevel_expr_asm.expected
+    "$ntmp/lc" <../../compiler/stage1/toplevel_expr.src >"$ntmp/te_l.s" 2>/dev/null; "$ntmp/lasm" <"$ntmp/te_l.s" >"$ntmp/te_l.elf" 2>/dev/null; chmod +x "$ntmp/te_l.elf"
+    $BIN run ../../compiler/stage1/data_asm_cc.lume ../../compiler/stage1/toplevel_expr.src "$ntmp/te_o.s" >/dev/null 2>&1; $BIN asm "$ntmp/te_o.s" "$ntmp/te_o.elf" >/dev/null 2>&1; chmod +x "$ntmp/te_o.elf"
+    if [ -x "$ntmp/te_l.elf" ] && "$ntmp/te_l.elf" 2>/dev/null | diff -u "$te_exp" - >/dev/null && [ -x "$ntmp/te_o.elf" ] && "$ntmp/te_o.elf" 2>/dev/null | diff -u "$te_exp" - >/dev/null; then ok "top-level expression statement (emit/flush, value discarded): lumec and data_asmgen oracle both -> native 'Hi!'"; else bad "top-level expression statement (emit/flush): lumec and oracle -> native"; fi
+    # movabs boundaries: imm32 edges stay C7, anything outside becomes movabs; negatives and r8+ destinations must match the oracle byte for byte (whole file now; lasm appends no trailing newline).
     printf '.section .text\n.globl _start\n_start:\n    movq $-2147483649, %%rax\n    movq $2147483648, %%rcx\n    movq $-9223372036854775808, %%r8\n    movq $9223372036854775807, %%r15\n    movq $-4294967296, %%rdx\n    movq $-4294967297, %%rbx\n    movq $-2147483648, %%rsi\n    movq $2147483647, %%rdi\n    movq $4294967295, %%r9\n    movq $-1234567890123456789, %%r11\n    movq $60, %%rax\n    movq $0, %%rdi\n    syscall\n' >"$ntmp/mvabs.s"
-    if "$ntmp/lasm" <"$ntmp/mvabs.s" >"$ntmp/mvabs_l.elf" 2>/dev/null && $BIN asm "$ntmp/mvabs.s" "$ntmp/mvabs_o.elf" >/dev/null 2>&1 && [ -s "$ntmp/mvabs_o.elf" ] && cmp -s -n "$(stat -c%s "$ntmp/mvabs_o.elf")" "$ntmp/mvabs_l.elf" "$ntmp/mvabs_o.elf"; then ok "self-host asm: lasm movabs boundaries/negatives match the oracle byte for byte"; else bad "self-host asm: lasm movabs boundaries/negatives match the oracle byte for byte"; fi
+    if "$ntmp/lasm" <"$ntmp/mvabs.s" >"$ntmp/mvabs_l.elf" 2>/dev/null && $BIN asm "$ntmp/mvabs.s" "$ntmp/mvabs_o.elf" >/dev/null 2>&1 && [ -s "$ntmp/mvabs_o.elf" ] && cmp -s "$ntmp/mvabs_l.elf" "$ntmp/mvabs_o.elf"; then ok "self-host asm: lasm movabs boundaries/negatives match the oracle byte for byte"; else bad "self-host asm: lasm movabs boundaries/negatives match the oracle byte for byte"; fi
     # zero-C loop: after the one-time bootstrap (lasm built via lume0 asm above), the whole pipeline needs NO lume0 asm.
     # lumec compiles its own source to gen.s; LASM (not lume0 asm) assembles gen.s into a working lumecB ELF; lumecB
     # recompiles its own source to gen2.s and must reproduce gen.s bit-for-bit (fixpoint via lasm), and lumecB must

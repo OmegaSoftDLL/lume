@@ -185,9 +185,13 @@ fn dstmt(p: mut DP) -> DStmt
         let name = deat(p).text
         deat(p)                          # =
         DLet(name: name, value: dexpr(p, 0))
-    else
+    elif t.text == "print"
         deat(p)                          # `print`
         DPrint(value: dexpr(p, 0))
+    else
+        # a bare expression statement: evaluate the whole expression for its effect; the
+        # value is discarded. (`print` is not a keyword, so it is matched by text above.)
+        DExprS(value: dexpr(p, 0))
 
 fn parse_data_program(src: str) -> [DStmt]
     var p = DP(toks: lex_layout(src), pos: 0)
