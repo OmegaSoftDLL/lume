@@ -19,7 +19,11 @@ fn dnl(p: mut DP)
 fn is_upper(s: str) -> bool = s.len() > 0 and s[0] >= 'A' and s[0] <= 'Z'
 
 fn dlbp(op: str) -> int
-    if op == "==" or op == "!=" or op == "<" or op == ">" or op == "<=" or op == ">="
+    if op == "or"
+        2
+    elif op == "and"
+        3
+    elif op == "==" or op == "!=" or op == "<" or op == ">" or op == "<=" or op == ">="
         5
     elif op == "+" or op == "-"
         10
@@ -142,7 +146,8 @@ fn dexpr(p: mut DP, min_bp: int) -> DExpr
     var left = dprimary(p)
     while true
         let t = dcur(p)
-        if t.kind != Op
+        let isop = t.kind == Op or (t.kind == Kw and (t.text == "and" or t.text == "or"))
+        if not isop
             break
         let bp = dlbp(t.text)
         if bp == 0 or bp < min_bp
