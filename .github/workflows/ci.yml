@@ -51,3 +51,11 @@ jobs:
           for p in $(grep -oE '\bP[0-9]+\b' docs/03-specification.md | sort -u); do
             grep -q "\*\*$p " docs/02-principles.md || { echo "spec cites $p but principles.md lacks it"; exit 1; }
           done
+
+  bootstrap:
+    name: Self-host bootstrap (stage2 == stage3)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: make bootstrap
+        run: make bootstrap
