@@ -1,0 +1,5 @@
+fn classify(v: int) -> str
+    match v
+        0          => "zero"
+        n if n > 9 => "big"
+        _          => "small"
