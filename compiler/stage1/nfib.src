@@ -1,0 +1,8 @@
+fn fib(n) = if n < 2 then n else fib(n - 1) + fib(n - 2)
+fn fact(n) = if n < 2 then 1 else n * fact(n - 1)
+fn sq(x) = let y = x * x in y
+fn tri(n) = if n == 0 then 0 else n + tri(n - 1)
+print fib(10)
+print fact(6)
+print sq(9)
+print tri(100)
