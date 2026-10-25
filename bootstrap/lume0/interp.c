@@ -580,7 +580,13 @@ static Val *run_user_fn(Interp *ip, Val *fv, Val **args, int nargs, const Node *
     (void)site;
     FnParts fp = fn_parts(fv->cl_params_owner);
     Env *frame = env_new(ip, fv->cl_env);
-    Env *snap  = env_new(ip, fv->cl_env);
+    /* Only snapshot parameters (for `old()` in ensures) when the body actually has an ensures.
+       Deep-copying every parameter on every call is O(size) and makes recursion over lists
+       quadratic; most functions have no ensures, so skip it entirely. */
+    bool want_snap = false;
+    if (fp.body && fp.body->kind == N_BLOCK)
+        for (int i = 0; i < fp.body->nkid; i++) if (fp.body->kids[i]->kind == N_ENSURES) { want_snap = true; break; }
+    Env *snap = want_snap ? env_new(ip, fv->cl_env) : NULL;
     int ai = 0;
     for (int i = 0; i < fp.nparams; i++) {
         const Node *p = fp.params[i];
@@ -590,7 +596,7 @@ static Val *run_user_fn(Interp *ip, Val *fv, Val **args, int nargs, const Node *
         Val *v = ai < nargs ? args[ai] : v_unit(ip); ai++;
         int sc = decimal_scale_of(ptype); if (sc >= 0) v = coerce_decimal(ip, v, sc);
         env_define(ip, frame, pname, plen, v);
-        env_define(ip, snap, pname, plen, deep_copy(ip, v));
+        if (want_snap) env_define(ip, snap, pname, plen, deep_copy(ip, v));
     }
     Val *result = v_unit(ip);
     if (fp.body && fp.body->kind == N_BLOCK) {
