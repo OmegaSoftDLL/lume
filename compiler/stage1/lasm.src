@@ -172,4 +172,7 @@ fn asm4(items, lay, cs, rs) = asm5(items, lay, cs, rs, buildsyms(lay, cs, rs))
 fn asm5(items, lay, cs, rs, syms) = asm6(lay, syms, symaddr(syms, "_start"), 120 + cs + rs, 120 + cs + rs + lay.boff, emitcode(items, 0, syms))
 fn asm6(lay, syms, entry, filesz, memsz, code) = emitall(app(ehdr(entry), app(phdr(filesz, memsz), app(code, lay.robytes))))
 
-print assemble(readall())
+## evaluate the assembler for its byte-emitting side effects, then flush the
+## buffered output in one write (NO trailing print -> output is byte-identical to the oracle).
+let elf = assemble(readall())
+let wrote = flush()
