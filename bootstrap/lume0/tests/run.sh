@@ -46,6 +46,9 @@ if command -v cc >/dev/null 2>&1; then
     if cc -o "$cgtmp/prog" "$cgtmp/out.c" 2>/dev/null && "$cgtmp/prog" 2>/dev/null | diff -u ../../tests/conformance/stage1/codegen_native.expected - >/dev/null; then ok "codegen -> C -> native binary"; else bad "codegen -> C -> native binary"; fi
     $BIN run ../../compiler/stage1/fn_codegen_demo.lume > "$cgtmp/fn.c" 2>/dev/null
     if cc -o "$cgtmp/fnprog" "$cgtmp/fn.c" 2>/dev/null && "$cgtmp/fnprog" 2>/dev/null | diff -u ../../tests/conformance/stage1/fn_codegen_native.expected - >/dev/null; then ok "codegen (functions + if) -> native binary"; else bad "codegen (functions + if) -> native binary"; fi
+    # block language (loops, if) -> C -> native binary
+    $BIN run ../../compiler/stage1/block_codegen_demo.lume > "$cgtmp/blk.c" 2>/dev/null
+    if cc -o "$cgtmp/blk" "$cgtmp/blk.c" 2>/dev/null && "$cgtmp/blk" 2>/dev/null | diff -u ../../tests/conformance/stage1/block_codegen_native.expected - >/dev/null; then ok "block language (loops) -> native binary"; else bad "block language (loops) -> native binary"; fi
     # lumec as a file-driven compiler: read .lume -> write .c -> native binary
     $BIN run ../../compiler/stage1/lumec_main.lume ../../compiler/stage1/sample.lume "$cgtmp/s.c" >/dev/null 2>&1
     if cc -o "$cgtmp/s" "$cgtmp/s.c" 2>/dev/null && "$cgtmp/s" 2>/dev/null | diff -u ../../tests/conformance/stage1/lumec_file_native.expected - >/dev/null; then ok "lumec file -> C -> native binary"; else bad "lumec file -> C -> native binary"; fi
