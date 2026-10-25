@@ -1,0 +1,15 @@
+fn gcd(a, b)
+    while b != 0
+        var t = b
+        b = a % b
+        a = t
+    return a
+fn inrange(x)
+    if x > 0 and x < 100
+        return 1
+    else
+        return 0
+print gcd(48, 36)
+print gcd(1071, 462)
+print inrange(50)
+print inrange(200)
