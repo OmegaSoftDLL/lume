@@ -35,8 +35,12 @@ fn isdigit(c) = c >= "0" and c <= "9"
 
 ## --- string scanning ---
 fn findc(s, c, i) = if i >= count(s) then count(s) else if at(s, i) == c then i else findc(s, c, i + 1)
-fn nlpos(s, i) = if i >= count(s) then i else if at(s, i) == "\n" then i else nlpos(s, i + 1)
-fn splitlines(s, i) = if i >= count(s) then Nil else let e = nlpos(s, i) in Cons(slice(s, i, e), splitlines(s, if e >= count(s) then e else e + 1))
+## nlpos/splitlines scan the whole source (~300 KB): `count(s)` is O(len) in the runtime
+## (strlen), so the original per-character `i >= count(s)` made line splitting O(len^2). Compute
+## the length ONCE and thread it, making the scan O(len).
+fn nlpos(s, n, i) = if i >= n then i else if at(s, i) == "\n" then i else nlpos(s, n, i + 1)
+fn splitlines(s, i) = splitlinesn(s, count(s), i)
+fn splitlinesn(s, n, i) = if i >= n then Nil else let e = nlpos(s, n, i) in Cons(slice(s, i, e), splitlinesn(s, n, if e >= n then e else e + 1))
 fn skipws(s, i) = if i >= count(s) then i else if at(s, i) == " " or at(s, i) == "\t" or at(s, i) == "\r" then skipws(s, i + 1) else i
 fn rtrimend(s, e) = if e <= 0 then 0 else if at(s, e - 1) == " " or at(s, e - 1) == "\t" or at(s, e - 1) == "\r" then rtrimend(s, e - 1) else e
 fn trim(s) = let a = skipws(s, 0) in let b = rtrimend(s, count(s)) in if a >= b then "" else slice(s, a, b)
@@ -137,26 +141,41 @@ fn encalu(mn, ins, iend, syms) = encalu2(opsizeof(mn), core(mn), ins, iend, syms
 fn encalu2(os, c, ins, iend, syms) = encalu3(os, aluext(c), alustore(c), ins.a, ins.b, iend, syms)
 fn encalu3(os, ext, sop, a, b, iend, syms) = if ext < 0 then Nil else if a.k == 2 then app(encrm(os, Cons(if os == 1 then 128 else 129, Nil), ext, b, iend, syms), if os == 1 then Cons(lowbyte(a.imm), Nil) else b4(a.imm)) else if a.k == 1 then encrm(os, Cons(if os == 1 then sop - 1 else sop, Nil), a.reg, b, iend, syms) else encrm(os, Cons(if os == 1 then sop + 1 else sop + 2, Nil), b.reg, a, iend, syms)
 
-## --- pass 1: layout (code offsets, rodata bytes, bss, and every label's bucket offset) ---
-fn layout(items, co, roff, boff, tls, ro, rls, bls) = match items
-    Nil        => {co: co, robytes: ro, tls: tls, rls: rls, bls: bls, boff: boff}
-    Cons(h, t) => layoutitem(h, t, co, roff, boff, tls, ro, rls, bls)
-fn layoutitem(h, t, co, roff, boff, tls, ro, rls, bls) = match h
-    Ins(r)     => layout(t, co + len(enc(r, 0, Nil)), roff, boff, tls, ro, rls, bls)
-    TL(nm)     => layout(t, co, roff, boff, Cons({nm: nm, o: co}, tls), ro, rls, bls)
-    RL(nm)     => layout(t, co, roff, boff, tls, ro, Cons({nm: nm, o: roff}, rls), bls)
-    RO(bs)     => layout(t, co, roff + len(bs), boff, tls, app(ro, bs), rls, bls)
-    BS(nm, sz) => layout(t, co, roff, boff + sz, tls, ro, rls, Cons({nm: nm, o: boff}, bls))
-    _          => layout(t, co, roff, boff, tls, ro, rls, bls)
+## --- relocation predicate: does this instruction's encoding depend on the symbol table? ---
+## Only jumps/calls/jcc (displacement computed from tgt) and %rip-relative memory operands
+## ever consult symaddr; every other instruction encodes identically at any address with any
+## symbol table, so pass 1's bytes are final and pass 2 emits them verbatim.
+fn needsreloc(r) = if isjump(r.mn) then 1 else if r.a.rip == 1 then 1 else if r.b.rip == 1 then 1 else 0
 
-## --- pass 2: emit code bytes with the full symbol table ---
-fn emitcode(items, co, syms) = match items
+## --- pass 1: layout + encode-once. Each instruction is encoded a SINGLE time (at address 0,
+## empty symtab) to obtain both its final length and its bytes; pass 1 records one entry per
+## instruction -- {off, ln, reloc, bytes, ins} -- in source order, alongside the label bucket
+## offsets, rodata bytes (accumulated in O(n)) and bss size. The old code encoded every
+## instruction once here and twice more in pass 2 (three encodes total); now non-reloc
+## instructions are encoded exactly once and reloc ones exactly twice. ---
+fn addins(e, rec) = {encs: Cons(e, rec.encs), co: rec.co, robytes: rec.robytes, tls: rec.tls, rls: rec.rls, bls: rec.bls, boff: rec.boff}
+fn withtl(nm, co, rec) = {encs: rec.encs, co: rec.co, robytes: rec.robytes, tls: Cons({nm: nm, o: co}, rec.tls), rls: rec.rls, bls: rec.bls, boff: rec.boff}
+fn withrl(nm, roff, rec) = {encs: rec.encs, co: rec.co, robytes: rec.robytes, tls: rec.tls, rls: Cons({nm: nm, o: roff}, rec.rls), bls: rec.bls, boff: rec.boff}
+fn withro(bs, rec) = {encs: rec.encs, co: rec.co, robytes: app(bs, rec.robytes), tls: rec.tls, rls: rec.rls, bls: rec.bls, boff: rec.boff}
+fn withbs(nm, boff, rec) = {encs: rec.encs, co: rec.co, robytes: rec.robytes, tls: rec.tls, rls: rec.rls, bls: Cons({nm: nm, o: boff}, rec.bls), boff: rec.boff}
+fn layout(items, co, roff, boff) = match items
+    Nil        => {encs: Nil, co: co, robytes: Nil, tls: Nil, rls: Nil, bls: Nil, boff: boff}
+    Cons(h, t) => layoutitem(h, t, co, roff, boff)
+fn layoutitem(h, t, co, roff, boff) = match h
+    Ins(r)     => layoutins(r, t, co, roff, boff)
+    TL(nm)     => withtl(nm, co, layout(t, co, roff, boff))
+    RL(nm)     => withrl(nm, roff, layout(t, co, roff, boff))
+    RO(bs)     => withro(bs, layout(t, co, roff + len(bs), boff))
+    BS(nm, sz) => withbs(nm, boff, layout(t, co, roff, boff + sz))
+    _          => layout(t, co, roff, boff)
+fn layoutins(r, t, co, roff, boff) = let eb = enc(r, 0, Nil) in let ln = len(eb) in addins({off: co, ln: ln, reloc: needsreloc(r), bytes: eb, ins: r}, layout(t, co + ln, roff, boff))
+
+## --- pass 2: emit code bytes with the full symbol table. Verbatim bytes for the
+## address-independent instructions; re-encode only the reloc ones (jumps/calls/jcc/%rip) now
+## that symaddr can resolve. No second length computation -- pass 1 recorded off and ln. ---
+fn emitcode2(encs, syms) = match encs
     Nil        => Nil
-    Cons(h, t) => emitcodeitem(h, t, co, syms)
-fn emitcodeitem(h, t, co, syms) = match h
-    Ins(r)     => emitcodeins(r, t, co, syms)
-    _          => emitcode(t, co, syms)
-fn emitcodeins(r, t, co, syms) = let ln = len(enc(r, 0, Nil)) in let bs = enc(r, 4194424 + co + ln, syms) in app(bs, emitcode(t, co + ln, syms))
+    Cons(e, t) => app(if e.reloc == 1 then enc(e.ins, 4194424 + e.off + e.ln, syms) else e.bytes, emitcode2(t, syms))
 
 ## --- ELF64 container (VBASE 0x400000, 120-byte headers, one RWX PT_LOAD) ---
 fn identbytes() = Cons(127, Cons(69, Cons(76, Cons(70, Cons(2, Cons(1, Cons(1, Cons(0, Cons(0, Cons(0, Cons(0, Cons(0, Cons(0, Cons(0, Cons(0, Cons(0, Nil))))))))))))))))
@@ -165,11 +184,10 @@ fn phdr(filesz, memsz) = app(b4(1), app(b4(7), app(b8(0), app(b8(4194304), app(b
 
 ## --- the assembler: read stdin, two passes, emit the ELF to stdout ---
 fn buildsyms(lay, cs, rs) = app(mapsym(lay.tls, 4194424), app(mapsym(lay.rls, 4194424 + cs), mapsym(lay.bls, 4194424 + cs + rs)))
-fn assemble(src) = asm2(parseitems(splitlines(src, 0), 0))
-fn asm2(items) = asm3(items, layout(items, 0, 0, 0, Nil, Nil, Nil, Nil))
-fn asm3(items, lay) = asm4(items, lay, lay.co, len(lay.robytes))
-fn asm4(items, lay, cs, rs) = asm5(items, lay, cs, rs, buildsyms(lay, cs, rs))
-fn asm5(items, lay, cs, rs, syms) = asm6(lay, syms, symaddr(syms, "_start"), 120 + cs + rs, 120 + cs + rs + lay.boff, emitcode(items, 0, syms))
+fn assemble(src) = asm2(layout(parseitems(splitlines(src, 0), 0), 0, 0, 0))
+fn asm2(lay) = asm3(lay, lay.co, len(lay.robytes))
+fn asm3(lay, cs, rs) = asm4(lay, cs, rs, buildsyms(lay, cs, rs))
+fn asm4(lay, cs, rs, syms) = asm6(lay, syms, symaddr(syms, "_start"), 120 + cs + rs, 120 + cs + rs + lay.boff, emitcode2(lay.encs, syms))
 fn asm6(lay, syms, entry, filesz, memsz, code) = emitall(app(ehdr(entry), app(phdr(filesz, memsz), app(code, lay.robytes))))
 
 ## Entry point. NOTE: lumec's own program parser only accepts `fn` and `print`
