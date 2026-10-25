@@ -59,8 +59,15 @@ Each of these is a real body of work. The staged, test-first approach here delib
 - [x] `lume0 check` is no longer parse-only: it does static **name resolution** (R0200), basic
       **literal type checking** against annotations (T0001), and **duplicate** parameter/function
       detection (D0001/D0002). `lume0 describe` lists what `check` catches.
+- [x] **Self-hosted `lumec` — triple self-build reached.** The Lume-Core compiler
+      `compiler/stage1/lumec.src` (lexer + program parser + x86-64 codegen, incl. `match`,
+      records, strings, constructors, `##` comments and string escapes) compiles its own
+      **verbatim** source bit-identically and stably: `lumec` → `gen1`, `asm(gen1)` = `lumec2`
+      → `gen2`, `asm(gen2)` = `lumec3` → `gen3`, with `gen1 == gen2 == gen3`. The self-compiled
+      `lumec2` compiles every conformance program correctly, no C in the target pipeline.
 - [ ] Lexical scoping (use-before-def / out-of-scope), fuller type checking (call arity, match
       exhaustiveness, operator types), effects/ownership/contract enforcement.
-- [ ] Unify the front-ends (surface Lume vs ML-core); self-host `lumec`; triple build.
+- [ ] Delete the last C: rewrite the seed assembler + ELF64 writer (`lume0 asm`) in Lume so
+      `lumec` emits the ELF bytes itself, then retire `bootstrap/`.
 
 This file is updated as the inventory grows.
