@@ -109,9 +109,10 @@ int main(int argc, char **argv) {
         arena_free(arena);
     } else if (strcmp(cmd, "check") == 0) {
         Arena *arena = arena_new();
-        (void)lume_parse(&toks, arena, &diags);
+        Node *root = lume_parse(&toks, arena, &diags);
+        if (diags.errors == 0) lume_resolve(root, &diags);
         diag_print(&diags, path, json);
-        if (diags.errors == 0 && !json) fprintf(stderr, "%s: OK (%zu tokens, parsed; type checker not yet implemented)\n", path, toks.len);
+        if (diags.errors == 0 && !json) fprintf(stderr, "%s: OK (%zu tokens, parsed, names resolved)\n", path, toks.len);
         rc = diags.errors == 0 ? 0 : 1;
         arena_free(arena);
     } else if (strcmp(cmd, "run") == 0) {

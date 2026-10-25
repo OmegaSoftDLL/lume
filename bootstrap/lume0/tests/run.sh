@@ -179,10 +179,22 @@ for src in tests/parser/bad_*.lume; do
     if $BIN check "$src" --json 2>/dev/null | grep -q "\"code\":\"$code\""; then ok "$src ($code)"; else bad "$src (expected $code)"; $BIN check "$src" --json; fi
 done
 
+echo "== resolve: undefined names are caught at check time"
+for src in tests/resolve/bad_*.lume; do
+    [ -f "$src" ] || continue
+    code=$(sed -n '1s/^# expect: //p' "$src")
+    if $BIN check "$src" --json 2>/dev/null | grep -q "\"code\":\"$code\""; then ok "$src ($code)"; else bad "$src (expected $code)"; $BIN check "$src" --json; fi
+done
+for src in tests/resolve/ok_*.lume; do
+    [ -f "$src" ] || continue
+    if $BIN check "$src" >/dev/null 2>e.txt; then ok "$src (clean)"; else bad "$src (should resolve clean)"; sed 's/^/      /' e.txt | head -4; fi
+done
+
 echo "== positive parser cases (must parse clean)"
 for src in tests/parser/ok_*.lume; do
     [ -f "$src" ] || continue
-    if $BIN check "$src" >/dev/null 2>e.txt; then ok "$src"; else bad "$src"; sed 's/^/      /' e.txt | head -4; fi
+    # parser ok-tests assert PARSING only (bare free identifiers are expected); use parse, not check
+    if $BIN parse "$src" >/dev/null 2>e.txt; then ok "$src"; else bad "$src"; sed 's/^/      /' e.txt | head -4; fi
 done
 
 rm -f e.txt
