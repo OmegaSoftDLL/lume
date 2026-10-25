@@ -20,6 +20,7 @@ static int usage(void) {
           "  lume0 describe [--json]              emit a machine-readable self-description of the language\n"
           "  lume0 emit <file.lume> <out.lbe>     compile source to the Lume Binary Encoding (AST, no text)\n"
           "  lume0 run    <file.lbe>              load and run an LBE program directly (no re-parse)\n"
+          "  lume0 emit-asm <file.lume> <out.s>   compile to x86-64 assembly directly (no C in the pipeline)\n"
           "  lume0 check  <file.lume> [--json]   lex + parse; report diagnostics only\n"
           "  lume0 run    <file.lume>            run (in progress)\n"
           "  lume0 --version\n", stderr);
@@ -45,6 +46,19 @@ int main(int argc, char **argv) {
         printf("  \"workflow\": \"write .lume -> `lume0 check --json` -> read diagnostics -> fix -> repeat; `lume0 parse --json` returns the AST; `lume0 run` executes\",\n");
         printf("  \"spec\": \"docs/03-specification.md\",\n  \"self_description\": \"docs/08-ai-first.md\"\n}\n");
         return 0;
+    }
+    if (argc >= 4 && strcmp(argv[1], "emit-asm") == 0) {
+        size_t len = 0; char *src = read_file(argv[2], &len);
+        if (!src) { fprintf(stderr, "lume0: cannot read %s\n", argv[2]); return 66; }
+        DiagList d = {0}; TokenList t = {0};
+        lume_lex(src, len, &t, &d);
+        Arena *ar = arena_new();
+        Node *root = lume_parse(&t, ar, &d);
+        int rc0 = 0;
+        if (d.errors) { diag_print(&d, argv[2], false); rc0 = 1; }
+        else { FILE *o = fopen(argv[3], "wb"); if (!o) { fprintf(stderr, "lume0: cannot write %s\n", argv[3]); rc0 = 73; } else { if (asm_emit(root, o) != 0) { fprintf(stderr, "lume0: program uses features the x86-64 backend does not support yet (functions/if/strings)\n"); rc0 = 1; } fclose(o); } }
+        arena_free(ar); tokens_free(&t); diag_free(&d); free(src);
+        return rc0;
     }
     if (argc >= 4 && strcmp(argv[1], "emit") == 0) {
         size_t len = 0; char *src = read_file(argv[2], &len);

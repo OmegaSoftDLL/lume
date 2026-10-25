@@ -78,6 +78,7 @@ Node *lume_parse(const TokenList *toks, Arena *arena, DiagList *diags);
 /* Lume Binary Encoding: structure in, no text re-parse (docs/09-lbe.md) */
 void  lbe_write(const Node *root, FILE *f);
 Node *lbe_read(const unsigned char *buf, size_t n, Arena *a);
+int   asm_emit(const Node *module, FILE *out);  /* direct x86-64 backend (no C) */
 
 /* Tree-walking interpreter (Stage 0). Runs the core subset; evaluates dynamically with runtime
  * contract checks. Returns process exit code; diagnostics for load errors go to `diags`. */

@@ -52,6 +52,16 @@ if command -v cc >/dev/null 2>&1; then
     rm -rf "$cgtmp"
 fi
 
+echo "== direct x86-64 backend: Lume -> assembly -> native binary (NO C in the pipeline)"
+if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && command -v as >/dev/null 2>&1 && command -v ld >/dev/null 2>&1; then
+    atmp=$(mktemp -d)
+    $BIN emit-asm ../../compiler/stage1/arith.lume "$atmp/a.s" 2>/dev/null
+    if as -o "$atmp/a.o" "$atmp/a.s" 2>/dev/null && ld -o "$atmp/a" "$atmp/a.o" 2>/dev/null && "$atmp/a" 2>/dev/null | diff -u ../../tests/conformance/stage1/arith_native.expected - >/dev/null; then ok "x86-64 asm -> native (no C)"; else bad "x86-64 asm -> native (no C)"; fi
+    rm -rf "$atmp"
+else
+    ok "x86-64 asm backend (skipped: not linux/x86_64 or no as/ld)"
+fi
+
 echo "== AI-first: `lume0 describe` emits valid JSON"
 if command -v python3 >/dev/null 2>&1; then
     if $BIN describe | python3 -c 'import json,sys; json.load(sys.stdin)' 2>/dev/null; then ok "describe --json"; else bad "describe --json"; fi

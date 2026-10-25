@@ -1,0 +1,6 @@
+## arith.lume — a let+arithmetic program for the direct x86-64 backend (no C).
+## lume0 emit-asm arith.lume arith.s  ;  as -o a.o arith.s ; ld -o a a.o ; ./a
+let x = 2 + 3 * 4
+let y = (x + 100) / 7
+let z = x * x - y
+z
