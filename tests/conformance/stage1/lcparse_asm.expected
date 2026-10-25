@@ -13,6 +13,3 @@ p.node.rest
 {tag: "num", val: (1 + 2)}
 {node: Lit(n), rest: t}.node
 ((a and b) or c)
-((x < 1) or (y > 2))
-(a or (b and c))
-((i < count(s)) and isalnum(at(s, i)))
