@@ -14,6 +14,7 @@ fn bcexpr(e: Expr) -> str
     match e
         Num(v)        => "{v}"
         Name(id)      => id
+        StrLit(txt)   => txt
         Call(nm, args) => nm + "(" + args.map(bcexpr).join(", ") + ")"
         Bin(op, l, r) => "(" + bcexpr(l) + " " + bcop(op) + " " + bcexpr(r) + ")"
 
@@ -34,6 +35,11 @@ fn collect_vars(stmts: [Stmt], acc: mut map[str, int])
             Fn(nm, ps, b) => do
                 let _ = 0
 
+fn print_c(v: Expr, ind: str) -> str
+    match v
+        StrLit(txt) => ind + "printf(\"%s\\n\", " + txt + ");\n"
+        _ => ind + "printf(\"%lld\\n\", (long long)(" + bcexpr(v) + "));\n"
+
 fn emit_stmts(stmts: [Stmt], ind: str) -> str
     var out = ""
     for s in stmts
@@ -41,7 +47,7 @@ fn emit_stmts(stmts: [Stmt], ind: str) -> str
             Assign(n, v) => do
                 out = out + ind + n + " = " + bcexpr(v) + ";\n"
             Print(v) => do
-                out = out + ind + "printf(\"%lld\\n\", (long long)(" + bcexpr(v) + "));\n"
+                out = out + print_c(v, ind)
             Return(v) => do
                 out = out + ind + "return " + bcexpr(v) + ";\n"
             While(c, body) => do
