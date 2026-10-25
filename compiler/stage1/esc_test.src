@@ -1,0 +1,6 @@
+print "say \"hi\""
+print "tab\there"
+print "back\\slash"
+print "line1\nline2"
+print "end \"q\" \\ done"
+print "plain"

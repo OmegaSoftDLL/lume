@@ -16,5 +16,5 @@ fn parse(s) = expr(scan(s, 0)).node
 fn cgen(e) = match e
     Lit(n) => str(n)
     Bin(op, a, b) => "(" + cgen(a) + " " + op + " " + cgen(b) + ")"
-fn prog(src) = "#include <stdio.h>" + nl() + "int main(void) {" + nl() + "    printf(" + dq() + "%d\n" + dq() + ", " + cgen(parse(src)) + ");" + nl() + "    return 0;" + nl() + "}" + nl()
+fn prog(src) = "#include <stdio.h>" + nl() + "int main(void) {" + nl() + "    printf(" + dq() + "%d\\n" + dq() + ", " + cgen(parse(src)) + ");" + nl() + "    return 0;" + nl() + "}" + nl()
 print prog("2 + 3 * 4 - 1")
