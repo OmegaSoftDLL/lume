@@ -1,3 +1,4 @@
+#define _POSIX_C_SOURCE 200809L   /* for setenv/execv/getrlimit under -std=c11 */
 #include "lume0.h"
 #include "ast.h"
 #include "value.h"
@@ -11,6 +12,30 @@ const char *token_kind_name(TokenKind k);
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#if defined(__linux__)
+#include <sys/resource.h>
+#include <unistd.h>
+#endif
+
+/* Raise the process stack so deep recursion in the parser, the interpreter, and
+ * (soon) the Lume-written compiler running on this seed cannot overflow. The main
+ * thread's stack size is fixed at startup, so we lift RLIMIT_STACK and re-exec once
+ * (guarded by an env var). Any failure falls through and runs with the default
+ * stack — on platforms without /proc/self/exe this is simply a no-op. */
+static void raise_stack_and_reexec(char **argv) {
+#if defined(__linux__)
+    if (getenv("LUME0_STACK_RAISED")) return;
+    struct rlimit rl;
+    if (getrlimit(RLIMIT_STACK, &rl) != 0) return;
+    rlim_t want = (rlim_t)1024 * 1024 * 1024;   /* 1 GiB */
+    rl.rlim_cur = (rl.rlim_max == RLIM_INFINITY || rl.rlim_max >= want) ? want : rl.rlim_max;
+    if (setrlimit(RLIMIT_STACK, &rl) != 0) return;
+    if (setenv("LUME0_STACK_RAISED", "1", 1) != 0) return;
+    execv("/proc/self/exe", argv);   /* if this returns, exec failed; run anyway */
+#else
+    (void)argv;
+#endif
+}
 
 static int usage(void) {
     fputs("lume0 " LUME0_VERSION " — Stage 0 bootstrap interpreter for Lume\n"
@@ -28,6 +53,7 @@ static int usage(void) {
 }
 
 int main(int argc, char **argv) {
+    raise_stack_and_reexec(argv);
     if (argc >= 2 && strcmp(argv[1], "--version") == 0) { puts("lume0 " LUME0_VERSION); return 0; }
     if (argc >= 2 && strcmp(argv[1], "describe") == 0) {
         /* AI-first: a model that has never seen Lume loads this to ground itself before writing code */
