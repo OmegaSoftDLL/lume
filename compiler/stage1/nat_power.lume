@@ -1,0 +1,49 @@
+## nat_power.lume — exponentiation by squaring (iterative and recursive), modular power, bit-length (no C).
+## lume0 emit-asm nat_power.lume w.s ; as -o w.o w.s ; ld -o w w.o ; ./w
+fn pow_iter(b: int, e: int) -> int
+    var result = 1
+    var base = b
+    var k = e
+    while k > 0
+        if k % 2 == 1
+            result = result * base
+        base = base * base
+        k = k / 2
+    result
+
+fn pow_rec(b: int, e: int) -> int
+    if e == 0
+        1
+    else
+        if e % 2 == 0
+            let h = pow_rec(b, e / 2)
+            h * h
+        else
+            b * pow_rec(b, e - 1)
+
+fn pow_mod(b: int, e: int, m: int) -> int
+    var result = 1
+    var base = b % m
+    var k = e
+    while k > 0
+        if k % 2 == 1
+            result = result * base % m
+        base = base * base % m
+        k = k / 2
+    result
+
+fn bitlen(n: int) -> int
+    var c = 0
+    var x = n
+    while x > 0
+        x = x / 2
+        c = c + 1
+    c
+
+pow_iter(2, 10)
+pow_rec(3, 13)
+pow_iter(7, 0)
+pow_mod(2, 100, 1000007)
+pow_mod(3, 200, 13)
+bitlen(1023)
+bitlen(pow_iter(2, 40))
