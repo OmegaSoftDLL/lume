@@ -319,6 +319,37 @@ static void mut_walk(const Node *n, const StrSet *mutable_s, const StrSet *immut
     for (int i = 0; i < n->nkid; i++) mut_walk(n->kids[i], mutable_s, immut_s, d);
 }
 
+/* ---- unreachable match arm after an unguarded catch-all ----
+ * A MATCHARM is [pattern, body] without a guard, or [pattern, guard, body] with one
+ * (the guard is itself a MATCHARM node holding the condition). A bare wildcard `_` or
+ * plain binder with no guard matches everything, so any arm after it is unreachable. */
+static int arm_is_catch_all(const Node *arm) {
+    if (arm->nkid < 2) return 0;
+    NodeKind pk = arm->kids[0]->kind;
+    if (pk != N_PWILD && pk != N_PBIND) return 0;
+    /* guarded if the middle child is a MATCHARM (the parser's guard wrapper) */
+    for (int i = 1; i < arm->nkid - 1; i++) if (arm->kids[i]->kind == N_MATCHARM) return 0;
+    return 1;
+}
+static void match_walk(const Node *n, DiagList *d) {
+    if (!n) return;
+    if (n->kind == N_MATCH) {
+        int seen_catch_all = 0;
+        for (int i = 0; i < n->nkid; i++) {
+            const Node *arm = n->kids[i];
+            if (arm->kind != N_MATCHARM) continue;
+            if (seen_catch_all) {
+                diag_add(d, SEV_ERROR, "U0001", arm->line, arm->col, 1,
+                         "unreachable match arm: an earlier `_`/catch-all already matches everything",
+                         "remove this arm or move it before the catch-all");
+            } else if (arm_is_catch_all(arm)) {
+                seen_catch_all = 1;
+            }
+        }
+    }
+    for (int i = 0; i < n->nkid; i++) match_walk(n->kids[i], d);
+}
+
 /* run name resolution + basic literal type checks + duplicate detection + arity */
 void lume_resolve(const Node *module, DiagList *diags) {
     if (!module) return;
@@ -338,4 +369,5 @@ void lume_resolve(const Node *module, DiagList *diags) {
     mut_collect(module, &mut_s, &immut_s);
     mut_walk(module, &mut_s, &immut_s, diags);
     sset_free(&mut_s); sset_free(&immut_s);
+    match_walk(module, diags);
 }

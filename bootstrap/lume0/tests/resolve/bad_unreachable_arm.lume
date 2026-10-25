@@ -1,0 +1,6 @@
+# expect: U0001
+fn m(v: int) -> str
+    match v
+        0 => "zero"
+        _ => "other"
+        1 => "one"
