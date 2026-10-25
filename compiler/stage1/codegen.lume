@@ -26,16 +26,21 @@ fn cexpr(e: Expr) -> str
             elif c == "sum"
                 "(" + args.map(cexpr).join(" + ") + ")"
             else
-                "0"
+                c + "(" + args.map(cexpr).join(", ") + ")"
+        If(c, t, e)   => "((" + cexpr(c) + ") ? (" + cexpr(t) + ") : (" + cexpr(e) + "))"
+
+fn cparams(params: [str]) -> str = params.map(|p| "long long " + p).join(", ")
 
 fn cgen(prog: [Stmt]) -> str
-    var out = "#include <stdio.h>\nint main(void) {{\n"
+    var funcs = ""
+    var body = "int main(void) {{\n"
     for s in prog
         match s
+            Fn(name, params, b) => do
+                funcs = funcs + "long long " + name + "(" + cparams(params) + ") {{ return " + cexpr(b) + "; }}\n"
             Let(name, v) => do
-                out = out + "    long long " + name + " = " + cexpr(v) + ";\n"
-                out = out + "    printf(\"" + name + " = %lld\\n\", " + name + ");\n"
+                body = body + "    long long " + name + " = " + cexpr(v) + ";\n"
+                body = body + "    printf(\"" + name + " = %lld\\n\", " + name + ");\n"
             Eval(v) => do
-                out = out + "    printf(\"%lld\\n\", (long long)(" + cexpr(v) + "));\n"
-    out = out + "    return 0;\n}}\n"
-    out
+                body = body + "    printf(\"%lld\\n\", (long long)(" + cexpr(v) + "));\n"
+    "#include <stdio.h>\n" + funcs + body + "    return 0;\n}}\n"

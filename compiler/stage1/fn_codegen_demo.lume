@@ -1,0 +1,12 @@
+## fn_codegen_demo.lume — compile a Lume program with user functions and `if` to C (run by lume0).
+## The Lume-written compiler now handles function definitions and conditionals.
+use token
+use lexer
+use ast
+use parser
+use codegen
+use std.io
+
+fn main()
+    let program = "fn square(x) = x * x\nfn big(a, b) = if a > b then a else b\nlet s = square(7)\nlet m = big(s, 40)\nm + square(3)"
+    io.print(cgen(parse_program(lex(program))))

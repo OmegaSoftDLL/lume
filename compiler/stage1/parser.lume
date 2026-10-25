@@ -28,6 +28,14 @@ fn lbp(op: str) -> int
         0
 
 fn parse_primary(p: mut P) -> Expr
+    if cur(p).kind == Kw and cur(p).text == "if"
+        eat(p)                          # if
+        let cond = parse_expr(p, 0)
+        eat(p)                          # then
+        let then_val = parse_expr(p, 0)
+        eat(p)                          # else
+        let else_val = parse_expr(p, 0)
+        return If(cond: cond, then_val: then_val, else_val: else_val)
     let t = eat(p)
     if t.kind == Int
         Num(value: t.text.parse_int() ?? 0)
@@ -68,6 +76,18 @@ fn parse_expr(p: mut P, min_bp: int) -> Expr
 
 fn parse_stmt(p: mut P) -> Stmt
     let t = cur(p)
+    if t.kind == Kw and t.text == "fn"
+        eat(p)                          # fn
+        let name = eat(p).text          # name
+        eat(p)                          # (
+        var params = []
+        while not (cur(p).kind == Op and cur(p).text == ")") and cur(p).kind != End
+            params.push(eat(p).text)
+            if cur(p).kind == Op and cur(p).text == ","
+                eat(p)
+        eat(p)                          # )
+        eat(p)                          # =
+        return Fn(name: name, params: params, body: parse_expr(p, 0))
     if t.kind == Kw and t.text == "let"
         eat(p)                          # let
         let name = eat(p).text          # name
