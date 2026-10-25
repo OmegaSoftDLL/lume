@@ -43,7 +43,7 @@ int main(int argc, char **argv) {
         printf("],\n  \"ast_node_kinds\": [");
         for (int i = 0; i < lume_node_kind_count(); i++) printf("%s\"%s\"", i ? ", " : "", lume_node_kind_at(i));
         printf("],\n  \"diagnostics_protocol\": \"lume0 parse|check|run --json emits one JSON diagnostic per line: {severity,code,file,line,col,len,message,help,doc}\",\n");
-        printf("  \"check_catches\": [\"L* lexical\", \"P* parse\", \"R0200 undefined name\", \"T0001 literal type mismatch vs annotation\", \"D0001 duplicate parameter\", \"D0002 duplicate top-level function\"],\n");
+        printf("  \"check_catches\": [\"L* lexical\", \"P* parse\", \"R0200 undefined name\", \"T0001 literal type mismatch vs annotation\", \"D0001 duplicate parameter\", \"D0002 duplicate top-level function\", \"A0001 too many arguments\", \"A0002 too few arguments\", \"C0001 break/continue outside a loop\", \"C0002 return outside a function\", \"M0001 assignment to an immutable binding\"],\n");
         printf("  \"workflow\": \"write .lume -> `lume0 check --json` -> read diagnostics -> fix -> repeat; check does lex+parse+name-resolution+basic-type+duplicate checks; `lume0 parse --json` returns the AST; `lume0 run` executes; `lume0 emit-asm`/`lume0 asm` lower to a native ELF with no C and no as/ld\",\n");
         printf("  \"spec\": \"docs/03-specification.md\",\n  \"self_description\": \"docs/08-ai-first.md\"\n}\n");
         return 0;
