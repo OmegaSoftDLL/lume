@@ -282,6 +282,43 @@ static void ctx_walk(const Node *n, int fn_depth, int loop_depth, DiagList *d) {
     }
 }
 
+/* ---- immutability: assigning to a let/const binding is an error (use var) ----
+ * Conservative and flat: a name introduced anywhere as var/mut/param/loop var is
+ * treated as mutable; a name introduced only as let/const is immutable. Assigning to
+ * a bare identifier that is immutable and never mutable anywhere is M0001. Field and
+ * index assignments are not touched. Zero false positives by construction. */
+static void add_pbinds(const Node *pat, StrSet *s) {
+    if (!pat) return;
+    if (pat->kind == N_PBIND && pat->text) sset_add(s, pat->text, pat->text_len);
+    for (int i = 0; i < pat->nkid; i++) add_pbinds(pat->kids[i], s);
+}
+static void mut_collect(const Node *n, StrSet *mutable_s, StrSet *immut_s) {
+    if (!n) return;
+    if (n->kind == N_VAR || n->kind == N_FOR) {
+        if (n->nkid) add_pbinds(n->kids[0], mutable_s);
+    } else if (n->kind == N_PARAM || n->kind == N_CLOSPARAM) {
+        const Node *nm = name_node(n);
+        if (nm && nm->text) sset_add(mutable_s, nm->text, nm->text_len);
+        if (n->text) sset_add(mutable_s, n->text, n->text_len);
+        add_pbinds(n, mutable_s);
+    } else if (n->kind == N_LET || n->kind == N_CONST) {
+        if (n->nkid) add_pbinds(n->kids[0], immut_s);
+    }
+    for (int i = 0; i < n->nkid; i++) mut_collect(n->kids[i], mutable_s, immut_s);
+}
+static void mut_walk(const Node *n, const StrSet *mutable_s, const StrSet *immut_s, DiagList *d) {
+    if (!n) return;
+    if (n->kind == N_ASSIGN && n->nkid >= 1 && n->kids[0]->kind == N_IDENT) {
+        const Node *t = n->kids[0];
+        if (t->text && sset_has(immut_s, t->text, t->text_len) && !sset_has(mutable_s, t->text, t->text_len)) {
+            char b[48]; int L = t->text_len > 47 ? 47 : t->text_len; memcpy(b, t->text, (size_t)L); b[L] = 0;
+            char msg[180]; snprintf(msg, sizeof msg, "cannot assign to `%s`: it is an immutable binding", b);
+            diag_add(d, SEV_ERROR, "M0001", t->line, t->col, t->text_len, msg, "declare it with `var` instead of `let` to allow reassignment");
+        }
+    }
+    for (int i = 0; i < n->nkid; i++) mut_walk(n->kids[i], mutable_s, immut_s, d);
+}
+
 /* run name resolution + basic literal type checks + duplicate detection + arity */
 void lume_resolve(const Node *module, DiagList *diags) {
     if (!module) return;
@@ -297,4 +334,8 @@ void lume_resolve(const Node *module, DiagList *diags) {
     arity_walk(module, &sigs, diags);
     free(sigs.v);
     ctx_walk(module, 0, 0, diags);
+    StrSet mut_s = {0}, immut_s = {0};
+    mut_collect(module, &mut_s, &immut_s);
+    mut_walk(module, &mut_s, &immut_s, diags);
+    sset_free(&mut_s); sset_free(&immut_s);
 }
