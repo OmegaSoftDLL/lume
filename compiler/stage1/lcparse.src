@@ -1,0 +1,50 @@
+## lcparse.src — an expression parser for the Lume core, written in the Lume core
+## (functional subset). Self-hosting rewrite (docs/11, R5), brick 1: the precedence
+## engine over the token stream from the core lexer. Grammar here: integers, variables,
+## parentheses, and binary operators (* / %, + -, comparisons) with precedence. Parser
+## state is threaded immutably as {node, rest} over the token list, exactly like calc.src.
+## Calls, let/if/match and records come in the next R5 bricks.
+
+## --- lexer (same functional style as lclex.src) ---
+fn isdigit(c) = c >= "0" and c <= "9"
+fn isalpha(c) = (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or c == "_"
+fn isalnum(c) = isdigit(c) or isalpha(c)
+fn idend(s, i) = if i < count(s) and isalnum(at(s, i)) then idend(s, i + 1) else i
+fn numend(s, i) = if i < count(s) and isdigit(at(s, i)) then numend(s, i + 1) else i
+fn two(s, i) = slice(s, i, if i + 2 > count(s) then count(s) else i + 2)
+fn istwo(t) = t == "==" or t == "!=" or t == "<=" or t == ">="
+fn lex(s, i) = if i >= count(s) then Nil else let c = at(s, i) in if c == " " or c == "\t" or c == "\n" or c == "\r" then lex(s, i + 1) else if isdigit(c) then Cons({kind: "int", text: slice(s, i, numend(s, i))}, lex(s, numend(s, i))) else if isalpha(c) then Cons({kind: "id", text: slice(s, i, idend(s, i))}, lex(s, idend(s, i))) else if istwo(two(s, i)) then Cons({kind: "op", text: two(s, i)}, lex(s, i + 2)) else Cons({kind: "op", text: at(s, i)}, lex(s, i + 1))
+
+## --- parser: returns {node, rest}; AST uses constructors Num/Var/Bin ---
+fn skiprp(ts) = match ts
+    Nil        => Nil
+    Cons(h, t) => if h.text == ")" then t else ts
+fn prim(ts) = match ts
+    Nil        => {node: Num(0), rest: Nil}
+    Cons(h, t) => if h.kind == "int" then {node: Num(toint(h.text)), rest: t} else if h.kind == "id" then {node: Var(h.text), rest: t} else if h.text == "(" then let r = expr(t) in {node: r.node, rest: skiprp(r.rest)} else {node: Num(0), rest: t}
+fn mulloop(r) = match r.rest
+    Nil        => r
+    Cons(h, t) => if h.text == "*" or h.text == "/" or h.text == "%" then let r2 = prim(t) in mulloop({node: Bin(h.text, r.node, r2.node), rest: r2.rest}) else r
+fn mul(ts) = mulloop(prim(ts))
+fn addloop(r) = match r.rest
+    Nil        => r
+    Cons(h, t) => if h.text == "+" or h.text == "-" then let r2 = mul(t) in addloop({node: Bin(h.text, r.node, r2.node), rest: r2.rest}) else r
+fn add(ts) = addloop(mul(ts))
+fn cmploop(r) = match r.rest
+    Nil        => r
+    Cons(h, t) => if h.text == "==" or h.text == "!=" or h.text == "<" or h.text == ">" or h.text == "<=" or h.text == ">=" then let r2 = add(t) in cmploop({node: Bin(h.text, r.node, r2.node), rest: r2.rest}) else r
+fn cmp(ts) = cmploop(add(ts))
+fn expr(ts) = cmp(ts)
+fn parse(s) = (expr(lex(s, 0))).node
+
+## --- dump the AST as a fully-parenthesised expression ---
+fn show(e) = match e
+    Num(n)       => str(n)
+    Var(x)       => x
+    Bin(op, a, b) => "(" + show(a) + " " + op + " " + show(b) + ")"
+
+print show(parse("2 + 3 * 4"))
+print show(parse("a + b * c - d"))
+print show(parse("(1 + 2) * 3"))
+print show(parse("x <= 10 == y"))
+print show(parse("n % 2 + 1"))
