@@ -29,6 +29,8 @@ fn collect_vars(stmts: [Stmt], acc: mut map[str, int])
             If(c, t, e) => do
                 collect_vars(t, acc)
                 collect_vars(e, acc)
+            Block(b) => do
+                collect_vars(b, acc)
             Print(v) => do
                 let _ = 0
             Return(v) => do
@@ -50,6 +52,8 @@ fn collect_arrays(stmts: [Stmt], acc: mut map[str, str])
             If(c, t, e) => do
                 collect_arrays(t, acc)
                 collect_arrays(e, acc)
+            Block(b) => do
+                collect_arrays(b, acc)
             Assign(n, v) => do
                 let _ = 0
             AssignIdx(n, ix, v) => do
@@ -86,6 +90,8 @@ fn emit_stmts(stmts: [Stmt], ind: str) -> str
                 out = out + ind + "while (" + bcexpr(c) + ") {{\n" + emit_stmts(body, ind + "    ") + ind + "}}\n"
             If(c, t, e) => do
                 out = out + ind + "if (" + bcexpr(c) + ") {{\n" + emit_stmts(t, ind + "    ") + ind + "}} else {{\n" + emit_stmts(e, ind + "    ") + ind + "}}\n"
+            Block(b) => do
+                out = out + emit_stmts(b, ind)
             ArrDecl(nm, sz) => do
                 let _ = 0
             AssignIdx(nm, ix, v) => do
@@ -127,6 +133,8 @@ fn cgen_block(prog: [Stmt]) -> str
             While(c, b) => do
                 tops.push(s)
             If(c, a, b) => do
+                tops.push(s)
+            Block(b) => do
                 tops.push(s)
             Return(v) => do
                 tops.push(s)
