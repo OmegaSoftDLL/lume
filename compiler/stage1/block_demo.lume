@@ -1,0 +1,10 @@
+## block_demo.lume — parse and run a block-structured program (loops, if/else) written in Lume.
+use block_ast
+use block_parser
+use block_eval
+use std.io
+
+fn main()
+    let program = "var n = 5\nvar fact = 1\nvar i = 1\nwhile i <= n\n    fact = fact * i\n    i = i + 1\nprint fact\nvar x = 10\nif x > 5\n    print 1\nelse\n    print 0\nvar sum = 0\nvar k = 1\nwhile k <= 10\n    sum = sum + k\n    k = k + 1\nprint sum\n"
+    var env = {}
+    bexec(parse_block_program(program), env)

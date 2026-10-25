@@ -1,0 +1,107 @@
+## block_parser.lume — a layout-aware parser (uses INDENT/DEDENT) written in Lume.
+## Parses a block-structured language: var/assignment, print, while, if/else, with nested blocks.
+use token
+use layout
+use block_ast
+
+type P = record
+    toks: [Token]
+    pos:  int
+
+fn bcur(p: P) -> Token = p.toks[p.pos]
+fn beat(p: mut P) -> Token
+    let t = p.toks[p.pos]
+    p.pos += 1
+    t
+fn bskip_nl(p: mut P)
+    while bcur(p).kind == Newline
+        beat(p)
+
+fn blbp(op: str) -> int
+    if op == "==" or op == "!=" or op == "<" or op == ">" or op == "<=" or op == ">="
+        5
+    elif op == "+" or op == "-"
+        10
+    elif op == "*" or op == "/" or op == "%"
+        20
+    else
+        0
+
+fn bprimary(p: mut P) -> Expr
+    let t = beat(p)
+    if t.kind == Int
+        Num(value: t.text.parse_int() ?? 0)
+    elif t.kind == Ident
+        Name(id: t.text)
+    elif t.kind == Op and t.text == "("
+        let e = bexpr(p, 0)
+        beat(p)
+        e
+    else
+        Num(value: 0)
+
+fn bexpr(p: mut P, min_bp: int) -> Expr
+    var left = bprimary(p)
+    while true
+        let t = bcur(p)
+        if t.kind != Op
+            break
+        let bp = blbp(t.text)
+        if bp == 0 or bp < min_bp
+            break
+        beat(p)
+        left = Bin(op: t.text, left: left, right: bexpr(p, bp + 1))
+    left
+
+fn bblock(p: mut P) -> [Stmt]
+    bskip_nl(p)
+    var body = []
+    if bcur(p).kind != Indent
+        return body
+    beat(p)
+    bskip_nl(p)
+    while bcur(p).kind != Dedent and bcur(p).kind != End
+        body.push(bstmt(p))
+        bskip_nl(p)
+    if bcur(p).kind == Dedent
+        beat(p)
+    body
+
+fn bstmt(p: mut P) -> Stmt
+    let t = bcur(p)
+    if t.kind == Kw and t.text == "var"
+        beat(p)
+        let name = beat(p).text
+        beat(p)                       # =
+        Assign(name: name, value: bexpr(p, 0))
+    elif t.kind == Kw and t.text == "while"
+        beat(p)
+        let cond = bexpr(p, 0)
+        While(cond: cond, body: bblock(p))
+    elif t.kind == Kw and t.text == "if"
+        beat(p)
+        let cond = bexpr(p, 0)
+        let then_body = bblock(p)
+        bskip_nl(p)
+        if bcur(p).kind == Kw and bcur(p).text == "else"
+            beat(p)
+            If(cond: cond, then_body: then_body, else_body: bblock(p))
+        else
+            If(cond: cond, then_body: then_body, else_body: [])
+    elif t.kind == Ident and t.text == "print"
+        beat(p)
+        Print(value: bexpr(p, 0))
+    else
+        # assignment: name = expr
+        let name = beat(p).text
+        beat(p)                       # =
+        Assign(name: name, value: bexpr(p, 0))
+
+fn parse_block_program(src: str) -> [Stmt]
+    var p = P(toks: lex_layout(src), pos: 0)
+    var prog = []
+    bskip_nl(p)
+    while bcur(p).kind != End
+        prog.push(bstmt(p))
+        bskip_nl(p)
+    prog
