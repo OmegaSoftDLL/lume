@@ -35,8 +35,12 @@ fn isdigit(c) = c >= "0" and c <= "9"
 
 ## --- string scanning ---
 fn findc(s, c, i) = if i >= count(s) then count(s) else if at(s, i) == c then i else findc(s, c, i + 1)
-fn nlpos(s, i) = if i >= count(s) then i else if at(s, i) == "\n" then i else nlpos(s, i + 1)
-fn splitlines(s, i) = if i >= count(s) then Nil else let e = nlpos(s, i) in Cons(slice(s, i, e), splitlines(s, if e >= count(s) then e else e + 1))
+## nlpos/splitlines scan the whole source (~300 KB): `count(s)` is O(len) in the runtime
+## (strlen), so the original per-character `i >= count(s)` made line splitting O(len^2). Compute
+## the length ONCE and thread it, making the scan O(len).
+fn nlpos(s, n, i) = if i >= n then i else if at(s, i) == "\n" then i else nlpos(s, n, i + 1)
+fn splitlines(s, i) = splitlinesn(s, count(s), i)
+fn splitlinesn(s, n, i) = if i >= n then Nil else let e = nlpos(s, n, i) in Cons(slice(s, i, e), splitlinesn(s, n, if e >= n then e else e + 1))
 fn skipws(s, i) = if i >= count(s) then i else if at(s, i) == " " or at(s, i) == "\t" or at(s, i) == "\r" then skipws(s, i + 1) else i
 fn rtrimend(s, e) = if e <= 0 then 0 else if at(s, e - 1) == " " or at(s, e - 1) == "\t" or at(s, e - 1) == "\r" then rtrimend(s, e - 1) else e
 fn trim(s) = let a = skipws(s, 0) in let b = rtrimend(s, count(s)) in if a >= b then "" else slice(s, a, b)
