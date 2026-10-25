@@ -83,7 +83,17 @@ fn dprimary(p: mut DP) -> DExpr
             deat(p)
         DCons(tag: t.text, args: args)
     elif t.kind == Ident
-        DVar(name: t.text)
+        if dcur(p).kind == Op and dcur(p).text == "("
+            deat(p)
+            var cargs = []
+            while not (dcur(p).kind == Op and dcur(p).text == ")") and dcur(p).kind != End
+                cargs.push(dexpr(p, 0))
+                if dcur(p).kind == Op and dcur(p).text == ","
+                    deat(p)
+            deat(p)
+            DCall(name: t.text, args: cargs)
+        else
+            DVar(name: t.text)
     else
         DInt(n: 0)
 
@@ -102,6 +112,18 @@ fn dexpr(p: mut DP, min_bp: int) -> DExpr
 
 fn dstmt(p: mut DP) -> DStmt
     let t = dcur(p)
+    if t.kind == Kw and t.text == "fn"
+        deat(p)
+        let fname = deat(p).text
+        deat(p)                          # (
+        var params = []
+        while not (dcur(p).kind == Op and dcur(p).text == ")") and dcur(p).kind != End
+            params.push(deat(p).text)
+            if dcur(p).kind == Op and dcur(p).text == ","
+                deat(p)
+        deat(p)                          # )
+        deat(p)                          # =
+        return DFnS(name: fname, params: params, body: dexpr(p, 0))
     if t.kind == Kw and t.text == "let"
         deat(p)
         let name = deat(p).text

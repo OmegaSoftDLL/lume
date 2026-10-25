@@ -9,6 +9,7 @@ type DExpr = enum
     DInt(n: int)
     DVar(name: str)
     DCons(tag: str, args: [DExpr])
+    DCall(name: str, args: [DExpr])
     DBin(op: str, l: DExpr, r: DExpr)
     DMatch(scrut: DExpr, arms: [Arm])
 
@@ -19,3 +20,4 @@ type Arm = record
 type DStmt = enum
     DLet(name: str, value: DExpr)
     DPrint(value: DExpr)
+    DFnS(name: str, params: [str], body: DExpr)
