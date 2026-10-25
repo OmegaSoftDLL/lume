@@ -1,0 +1,7 @@
+fn m() -> int
+    let a: int = 7
+    let b: str = "hi"
+    let c: bool = true
+    let d: f64 = 3.14
+    let e = a + 1
+    a

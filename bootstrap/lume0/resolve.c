@@ -94,11 +94,63 @@ static void resolve_walk(const Node *n, const StrSet *def, DiagList *d) {
     for (int i = 0; i < n->nkid; i++) resolve_walk(n->kids[i], def, d);
 }
 
-/* run name resolution over a parsed module, adding diagnostics */
+/* ---- basic literal type checking against an explicit annotation ----
+ * Only the clearest, zero-false-positive case: a let/var/const with an explicit
+ * scalar type annotation AND a literal initializer of an obviously different
+ * kind (e.g. `let x: int = "abc"`). Unknown/compound types and non-literal
+ * initializers are left to the later full type checker. */
+static int type_is(const char *t, int tl, const char *name) {
+    return tl == (int)strlen(name) && memcmp(t, name, (size_t)tl) == 0;
+}
+static const char *lit_kind_name(NodeKind k) {
+    return k == N_INT ? "integer" : k == N_STR ? "string" : k == N_BOOL ? "boolean" : k == N_FLOAT ? "float" : NULL;
+}
+/* 1 ok, 0 mismatch, -1 unknown (skip) */
+static int lit_matches_type(const char *t, int tl, NodeKind lk) {
+    int isint = type_is(t,tl,"int")||type_is(t,tl,"i8")||type_is(t,tl,"i16")||type_is(t,tl,"i32")||type_is(t,tl,"i64")||
+                type_is(t,tl,"u8")||type_is(t,tl,"u16")||type_is(t,tl,"u32")||type_is(t,tl,"u64")||type_is(t,tl,"usize")||type_is(t,tl,"isize")||type_is(t,tl,"byte");
+    int isstr = type_is(t,tl,"str")||type_is(t,tl,"string");
+    int isbool= type_is(t,tl,"bool");
+    int isflt = type_is(t,tl,"f32")||type_is(t,tl,"f64")||type_is(t,tl,"float")||type_is(t,tl,"decimal");
+    if (isint) return lk == N_INT ? 1 : 0;
+    if (isstr) return lk == N_STR ? 1 : 0;
+    if (isbool) return lk == N_BOOL ? 1 : 0;
+    if (isflt) return (lk == N_FLOAT || lk == N_INT) ? 1 : 0;
+    return -1;
+}
+static int is_type_node(NodeKind k) { return k >= N_TYNAME && k <= N_TYHOLE; }
+
+static void typecheck_walk(const Node *n, DiagList *d) {
+    if (!n) return;
+    if (n->kind == N_LET || n->kind == N_VAR || n->kind == N_CONST) {
+        const Node *ty = NULL, *val = NULL;
+        for (int i = 1; i < n->nkid; i++) {
+            if (is_type_node(n->kids[i]->kind)) ty = n->kids[i];
+            else val = n->kids[i];
+        }
+        if (ty && ty->kind == N_TYNAME && ty->text && val) {
+            const char *lkname = lit_kind_name(val->kind);
+            if (lkname) {
+                int ok = lit_matches_type(ty->text, ty->text_len, val->kind);
+                if (ok == 0) {
+                    char tn[48]; int tl = ty->text_len > 47 ? 47 : ty->text_len;
+                    memcpy(tn, ty->text, (size_t)tl); tn[tl] = 0;
+                    char msg[200]; snprintf(msg, sizeof msg, "type mismatch: annotated `%s` but initialized with a %s literal", tn, lkname);
+                    diag_add(d, SEV_ERROR, "T0001", val->line, val->col, val->text_len, msg,
+                             "make the value match the type, or change the annotation");
+                }
+            }
+        }
+    }
+    for (int i = 0; i < n->nkid; i++) typecheck_walk(n->kids[i], d);
+}
+
+/* run name resolution + basic literal type checks over a parsed module */
 void lume_resolve(const Node *module, DiagList *diags) {
     if (!module) return;
     StrSet def = {0};
     collect(module, &def);
     resolve_walk(module, &def, diags);
     sset_free(&def);
+    typecheck_walk(module, diags);
 }
