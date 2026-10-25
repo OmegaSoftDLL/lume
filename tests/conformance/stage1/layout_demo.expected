@@ -1,0 +1,31 @@
+tokens with layout:
+  KW fn
+  IDENT add
+  OP (
+  IDENT a
+  OP ,
+  IDENT b
+  OP )
+  NEWLINE
+  INDENT
+  KW let
+  IDENT r
+  OP =
+  IDENT a
+  OP +
+  IDENT b
+  NEWLINE
+  KW if
+  IDENT r
+  OP >
+  INT 10
+  NEWLINE
+  INDENT
+  KW return
+  IDENT r
+  NEWLINE
+  DEDENT
+  IDENT r
+  NEWLINE
+  DEDENT
+  EOF

@@ -1,0 +1,19 @@
+## layout_demo.lume — show the layout-aware lexer emitting INDENT/DEDENT (run by lume0).
+use token
+use layout
+use std.io
+
+fn main()
+    let program = "fn add(a, b)\n    let r = a + b\n    if r > 10\n        return r\n    r\n"
+    io.println("tokens with layout:")
+    for t in lex_layout(program)
+        if t.kind == Indent
+            io.println("  INDENT")
+        elif t.kind == Dedent
+            io.println("  DEDENT")
+        elif t.kind == Newline
+            io.println("  NEWLINE")
+        elif t.kind == End
+            io.println("  EOF")
+        else
+            io.println("  {kind_name(t.kind)} {t.text}")
