@@ -1,9 +1,11 @@
-## data_demo.lume — ADTs + match + recursion + strings + lists: the ML core, interpreted in Lume.
+## data_demo.lume — the ML core in Lume: ADTs, match, recursion, functions, strings, lists, records.
+## Note: record braces in the embedded program text are written {{ }} because a lone { would start
+## string interpolation in this (outer) Lume source.
 use data_ast
 use data_parser
 use data_eval
 use std.io
 
 fn main()
-    let program = "fn area(s) = match s\n    Circle(r) => r * r * 3\n    Rect(w, h) => w * h\n    Empty => 0\nfn sumlist(xs) = match xs\n    Nil => 0\n    Cons(h, t) => h + sumlist(t)\nlet c = Circle(5)\nprint area(c)\nlet xs = Cons(10, Cons(20, Cons(30, Nil)))\nprint sumlist(xs)\nlet ys = [11, 22, 33, 44]\nprint ys\nprint ys[2]\nprint count(ys)\nprint \"len of hello is \" + \"5\"\n"
+    let program = "fn area(s) = match s\n    Circle(r) => r * r * 3\n    Rect(w, h) => w * h\n    Empty => 0\nfn sumlist(xs) = match xs\n    Nil => 0\n    Cons(h, t) => h + sumlist(t)\nprint area(Circle(5))\nlet xs = Cons(10, Cons(20, Cons(30, Nil)))\nprint sumlist(xs)\nlet ys = [11, 22, 33]\nprint ys[1]\nprint count(ys)\nlet p = {{x: 3, y: 4}}\nprint p.x + p.y\nlet q = {{name: \"Ana\", age: 30}}\nprint q.name\nprint q\n"
     run_data(parse_data_program(program))

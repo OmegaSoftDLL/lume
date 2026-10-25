@@ -13,12 +13,18 @@ type DExpr = enum
     DCall(name: str, args: [DExpr])
     DList(elems: [DExpr])
     DIndex(coll: DExpr, idx: DExpr)
+    DRec(fields: [RecField])
+    DField(obj: DExpr, name: str)
     DBin(op: str, l: DExpr, r: DExpr)
     DMatch(scrut: DExpr, arms: [Arm])
 
 type Arm = record
     pat:  Pat
     body: DExpr
+
+type RecField = record
+    name:  str
+    value: DExpr
 
 type DStmt = enum
     DLet(name: str, value: DExpr)

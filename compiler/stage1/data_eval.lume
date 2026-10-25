@@ -6,6 +6,7 @@ type RV = enum
     VInt(n: int)
     VStr(s: str)
     VList(items: [RV])
+    VRec(fields: map[str, RV])
     VObj(tag: str, fields: [RV])
 
 fn rv_int(v: RV) -> int
@@ -13,6 +14,7 @@ fn rv_int(v: RV) -> int
         VInt(n)     => n
         VStr(s)     => 0
         VList(xs)   => 0
+        VRec(m)     => 0
         VObj(t, fs) => 0
 
 fn rv_is_str(v: RV) -> bool
@@ -31,6 +33,11 @@ fn rv_show(v: RV) -> str
         VInt(n)     => "{n}"
         VStr(s)     => s
         VList(xs)   => "[" + xs.map(rv_show).join(", ") + "]"
+        VRec(m)     => do
+            var parts = []
+            for e in m.entries()
+                parts.push(e[0] + ": " + rv_show(e[1]))
+            "{{" + parts.join(", ") + "}}"
         VObj(t, fs) => do
             if fs.len() == 0
                 t
@@ -47,11 +54,15 @@ fn match_pat(p: Pat, v: RV, env: mut map[str, RV]) -> bool
             match v
                 VInt(m)     => m == k
                 VStr(s)     => false
+                VList(xs)   => false
+                VRec(mm)    => false
                 VObj(t, fs) => false
         PCons(tag, subs) => do
             match v
                 VInt(m) => false
                 VStr(s) => false
+                VList(xs) => false
+                VRec(mm) => false
                 VObj(vtag, fields) => do
                     if vtag != tag
                         return false
@@ -96,6 +107,16 @@ fn deval(e: DExpr, env: map[str, RV], fns: [DStmt]) -> RV
             result
         DStr(sv)      => VStr(s: sv)
         DList(elems)  => VList(items: elems.map(|a| deval(a, env, fns)))
+        DRec(fields)  => do
+            var m = {}
+            for f in fields
+                m[f.name] = deval(f.value, env, fns)
+            VRec(fields: m)
+        DField(obj, name) => do
+            let ov = deval(obj, env, fns)
+            match ov
+                VRec(m) => m.get(name) ?? VInt(n: 0)
+                _       => VInt(n: 0)
         DIndex(coll, idx) => do
             let cv = deval(coll, env, fns)
             let iv = rv_int(deval(idx, env, fns))

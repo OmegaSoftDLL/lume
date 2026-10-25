@@ -82,6 +82,16 @@ fn datom(p: mut DP) -> DExpr
                 deat(p)
         deat(p)
         DList(elems: elems)
+    elif t.kind == Op and t.text == "{{"
+        var fields = []
+        while not (dcur(p).kind == Op and dcur(p).text == "}}") and dcur(p).kind != End
+            let fname = deat(p).text
+            deat(p)                      # :
+            fields.push(RecField(name: fname, value: dexpr(p, 0)))
+            if dcur(p).kind == Op and dcur(p).text == ","
+                deat(p)
+        deat(p)
+        DRec(fields: fields)
     elif t.kind == Ident and is_upper(t.text)
         var args = []
         if dcur(p).kind == Op and dcur(p).text == "("
@@ -109,11 +119,15 @@ fn datom(p: mut DP) -> DExpr
 
 fn dprimary(p: mut DP) -> DExpr
     var e = datom(p)
-    while dcur(p).kind == Op and dcur(p).text == "["
-        deat(p)
-        let idx = dexpr(p, 0)
-        deat(p)
-        e = DIndex(coll: e, idx: idx)
+    while dcur(p).kind == Op and (dcur(p).text == "[" or dcur(p).text == ".")
+        if dcur(p).text == "["
+            deat(p)
+            let idx = dexpr(p, 0)
+            deat(p)
+            e = DIndex(coll: e, idx: idx)
+        else
+            deat(p)                      # .
+            e = DField(obj: e, name: deat(p).text)
     e
 
 fn dexpr(p: mut DP, min_bp: int) -> DExpr
