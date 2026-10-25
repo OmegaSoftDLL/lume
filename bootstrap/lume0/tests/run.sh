@@ -126,6 +126,21 @@ else
     ok "x86-64 asm backend (skipped: not linux/x86_64 or no as/ld)"
 fi
 
+# FULL no-toolchain pipeline: Lume-written codegen -> lume0 asm (our own ELF
+# writer, NO as/ld/cc) -> native. Gated only on Linux x86_64 (to run the ELF).
+if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ]; then
+    ntmp=$(mktemp -d)
+    for prog in nfib ev strtest modtest reclist list calc; do
+        case "$prog" in calc) exp=calc_asm;; modtest) exp=modtest_core;; list) exp=list_core_native;; *) exp=${prog}_asm;; esac
+        $BIN run ../../compiler/stage1/data_asm_cc.lume ../../compiler/stage1/$prog.src "$ntmp/$prog.s" >/dev/null 2>&1
+        $BIN asm "$ntmp/$prog.s" "$ntmp/$prog" >/dev/null 2>&1
+        if [ -x "$ntmp/$prog" ] && "$ntmp/$prog" 2>/dev/null | diff -u ../../tests/conformance/stage1/$exp.expected - >/dev/null; then ok "no-toolchain: $prog.src -> lume0 asm -> native (NO as/ld/cc)"; else bad "no-toolchain: $prog.src -> lume0 asm -> native"; fi
+    done
+    rm -rf "$ntmp"
+else
+    ok "no-toolchain ELF pipeline (skipped: not linux/x86_64)"
+fi
+
 echo "== AI-first: `lume0 describe` emits valid JSON"
 if command -v python3 >/dev/null 2>&1; then
     if $BIN describe | python3 -c 'import json,sys; json.load(sys.stdin)' 2>/dev/null; then ok "describe --json"; else bad "describe --json"; fi
