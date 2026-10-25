@@ -111,6 +111,8 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && command -v as 
     # a code generator WRITTEN IN LUME (data_asmgen) emits x86-64 -> native, NO C anywhere
     $BIN run ../../compiler/stage1/data_asm_cc.lume ../../compiler/stage1/nfib.src "$atmp/nf.s" >/dev/null 2>&1
     if as -o "$atmp/nf.o" "$atmp/nf.s" 2>/dev/null && ld -o "$atmp/nf" "$atmp/nf.o" 2>/dev/null && "$atmp/nf" 2>/dev/null | diff -u ../../tests/conformance/stage1/nfib_asm.expected - >/dev/null; then ok "ML-core -> x86-64 asm (Lume-written codegen) -> native, no C"; else bad "ML-core -> x86-64 asm (Lume-written codegen) -> native, no C"; fi
+    $BIN run ../../compiler/stage1/data_asm_cc.lume ../../compiler/stage1/strtest.src "$atmp/st.s" >/dev/null 2>&1
+    if as -o "$atmp/st.o" "$atmp/st.s" 2>/dev/null && ld -o "$atmp/st" "$atmp/st.o" 2>/dev/null && "$atmp/st" 2>/dev/null | diff -u ../../tests/conformance/stage1/strtest_asm.expected - >/dev/null; then ok "ML-core native: strings (literals, ==, print) + ints, no C"; else bad "ML-core native: strings, no C"; fi
     rm -rf "$atmp"
 else
     ok "x86-64 asm backend (skipped: not linux/x86_64 or no as/ld)"

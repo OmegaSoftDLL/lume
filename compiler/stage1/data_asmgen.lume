@@ -78,6 +78,18 @@ fn abin(op: str) -> str
 type AC = record
     locals: [str]
     nlabel: int
+    data:   str
+    nstr:   int
+
+## escape a string for a .asciz directive (quote + backslash)
+fn sesc(s: str) -> str
+    var out = ""
+    for ch in s.chars()
+        if ch == '"' or ch == '\\'
+            out = out + "\\" + str(ch)
+        else
+            out = out + str(ch)
+    out
 
 fn areg(i: int) -> str
     let regs = ["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"]
@@ -87,13 +99,23 @@ fn areg(i: int) -> str
 fn aexpr(e: DExpr, c: mut AC) -> str
     match e
         DInt(n) => "    movq $" + str(n) + ", %rdi\n    call mkint\n    pushq %rax\n"
+        DStr(v) => do
+            let lab = ".Ls" + str(c.nstr)
+            c.nstr = c.nstr + 1
+            c.data = c.data + lab + ":\n    .asciz \"" + sesc(v) + "\"\n"
+            "    leaq " + lab + "(%rip), %rdi\n    call mkstr\n    pushq %rax\n"
         DVar(nm) => do
             let k = idx_of(c.locals, nm)
             "    movq " + str(0 - 8 * (k + 1)) + "(%rbp), %rax\n    pushq %rax\n"
         DBin(op, l, r) => do
             let a = aexpr(l, c)
             let b = aexpr(r, c)
-            a + b + "    popq %rcx\n    popq %rax\n    movq 8(%rax), %rax\n    movq 8(%rcx), %rcx\n" + abin(op) + "    movq %rax, %rdi\n    call mkint\n    pushq %rax\n"
+            if op == "=="
+                a + b + "    popq %rsi\n    popq %rdi\n    call eqv\n    movq %rax, %rdi\n    call mkint\n    pushq %rax\n"
+            elif op == "!="
+                a + b + "    popq %rsi\n    popq %rdi\n    call eqv\n    xorq $1, %rax\n    movq %rax, %rdi\n    call mkint\n    pushq %rax\n"
+            else
+                a + b + "    popq %rcx\n    popq %rax\n    movq 8(%rax), %rax\n    movq 8(%rcx), %rcx\n" + abin(op) + "    movq %rax, %rdi\n    call mkint\n    pushq %rax\n"
         DIf(cond, t, e2) => do
             let lab = c.nlabel
             c.nlabel = c.nlabel + 1
@@ -137,10 +159,10 @@ fn afn(nm: str, params: [str], body: DExpr, c: mut AC) -> str
     out + "    popq %rax\n    movq %rbp, %rsp\n    popq %rbp\n    ret\n"
 
 fn runtime_tail() -> str
-    "alloc:\n    movq heap_cur(%rip), %rax\n    movq %rax, %r10\n    addq %rdi, %r10\n    movq %r10, heap_cur(%rip)\n    ret\nmkint:\n    movq %rdi, %r11\n    movq $16, %rdi\n    call alloc\n    movq $0, (%rax)\n    movq %r11, 8(%rax)\n    ret\nprint_int:\n    movq %rdi, %rax\n    xorq %r9, %r9\n    testq %rax, %rax\n    jge 1f\n    negq %rax\n    movq $1, %r9\n1:\n    leaq pbuf+31(%rip), %rsi\n    movb $10, (%rsi)\n    movq $1, %rcx\n    movq $10, %rbx\n2:\n    decq %rsi\n    xorq %rdx, %rdx\n    divq %rbx\n    addb $48, %dl\n    movb %dl, (%rsi)\n    incq %rcx\n    testq %rax, %rax\n    jnz 2b\n    testq %r9, %r9\n    je 3f\n    decq %rsi\n    movb $45, (%rsi)\n    incq %rcx\n3:\n    movq $1, %rax\n    movq $1, %rdi\n    movq %rcx, %rdx\n    syscall\n    ret\n"
+    "alloc:\n    movq heap_cur(%rip), %rax\n    movq %rax, %r10\n    addq %rdi, %r10\n    movq %r10, heap_cur(%rip)\n    ret\nmkint:\n    movq %rdi, %r11\n    movq $24, %rdi\n    call alloc\n    movq $0, (%rax)\n    movq %r11, 8(%rax)\n    ret\nmkstr:\n    movq %rdi, %r11\n    movq $24, %rdi\n    call alloc\n    movq $1, (%rax)\n    movq %r11, 16(%rax)\n    ret\nstrlen:\n    xorq %rax, %rax\nsl0:\n    cmpb $0, (%rdi,%rax)\n    je sl1\n    incq %rax\n    jmp sl0\nsl1:\n    ret\nstreq:\nse0:\n    movb (%rdi), %al\n    movb (%rsi), %cl\n    cmpb %al, %cl\n    jne se2\n    testb %al, %al\n    je se1\n    incq %rdi\n    incq %rsi\n    jmp se0\nse1:\n    movq $1, %rax\n    ret\nse2:\n    xorq %rax, %rax\n    ret\neqv:\n    movq (%rdi), %rax\n    movq (%rsi), %rcx\n    cmpq %rax, %rcx\n    jne eqv0\n    cmpq $0, %rax\n    je eqvi\n    cmpq $1, %rax\n    je eqvs\n    cmpq $2, %rax\n    je eqvc\n    jmp eqv0\neqvi:\n    movq 8(%rdi), %rax\n    cmpq 8(%rsi), %rax\n    sete %al\n    movzbq %al, %rax\n    ret\neqvs:\n    movq 16(%rdi), %rdi\n    movq 16(%rsi), %rsi\n    call streq\n    ret\neqvc:\n    movq 16(%rdi), %rdi\n    movq 16(%rsi), %rsi\n    call streq\n    ret\neqv0:\n    xorq %rax, %rax\n    ret\nprintval:\n    movq (%rdi), %rax\n    testq %rax, %rax\n    jne pv1\n    movq 8(%rdi), %rdi\n    call print_int\n    ret\npv1:\n    cmpq $1, %rax\n    jne pv2\n    movq 16(%rdi), %rdi\n    movq %rdi, %r12\n    call strlen\n    movq %rax, %rdx\n    movq %r12, %rsi\n    movq $1, %rax\n    movq $1, %rdi\n    syscall\n    movb $10, pbuf(%rip)\n    movq $1, %rax\n    movq $1, %rdi\n    leaq pbuf(%rip), %rsi\n    movq $1, %rdx\n    syscall\n    ret\npv2:\n    movq 16(%rdi), %rdi\n    movq %rdi, %r12\n    call strlen\n    movq %rax, %rdx\n    movq %r12, %rsi\n    movq $1, %rax\n    movq $1, %rdi\n    syscall\n    movb $10, pbuf(%rip)\n    movq $1, %rax\n    movq $1, %rdi\n    leaq pbuf(%rip), %rsi\n    movq $1, %rdx\n    syscall\n    ret\nprint_int:\n    movq %rdi, %rax\n    xorq %r9, %r9\n    testq %rax, %rax\n    jge 1f\n    negq %rax\n    movq $1, %r9\n1:\n    leaq pbuf+31(%rip), %rsi\n    movb $10, (%rsi)\n    movq $1, %rcx\n    movq $10, %rbx\n2:\n    decq %rsi\n    xorq %rdx, %rdx\n    divq %rbx\n    addb $48, %dl\n    movb %dl, (%rsi)\n    incq %rcx\n    testq %rax, %rax\n    jnz 2b\n    testq %r9, %r9\n    je 3f\n    decq %rsi\n    movb $45, (%rsi)\n    incq %rcx\n3:\n    movq $1, %rax\n    movq $1, %rdi\n    movq %rcx, %rdx\n    syscall\n    ret\n"
 
 fn agen(prog: [DStmt]) -> str
-    var c = AC(locals: [], nlabel: 0)
+    var c = AC(locals: [], nlabel: 0, data: "", nstr: 0)
     var funcs = ""
     var main = ""
     for s in prog
@@ -149,9 +171,10 @@ fn agen(prog: [DStmt]) -> str
                 funcs = funcs + afn(nm, ps, body, c)
             DPrint(v) => do
                 c.locals = []
-                main = main + aexpr(v, c) + "    popq %rdi\n    movq 8(%rdi), %rdi\n    call print_int\n"
+                main = main + aexpr(v, c) + "    popq %rdi\n    call printval\n"
             DLet(nm, v) => do
                 let _ = 0
-    let bss = "    .section .bss\n    .lcomm pbuf, 32\n    .lcomm heap_cur, 8\n    .section .text\n"
+    let bss = "    .section .bss\n    .lcomm pbuf, 32\n    .lcomm heap_cur, 8\n"
+    let rodata = "    .section .rodata\n" + c.data
     let heap_init = "    movq $12, %rax\n    xorq %rdi, %rdi\n    syscall\n    movq %rax, heap_cur(%rip)\n    leaq 67108864(%rax), %rdi\n    movq $12, %rax\n    syscall\n"
-    bss + funcs + runtime_tail() + "    .globl _start\n_start:\n" + heap_init + main + "    movq $60, %rax\n    xorq %rdi, %rdi\n    syscall\n"
+    bss + rodata + "    .section .text\n" + funcs + runtime_tail() + "    .globl _start\n_start:\n" + heap_init + main + "    movq $60, %rax\n    xorq %rdi, %rdi\n    syscall\n"
