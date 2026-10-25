@@ -35,6 +35,8 @@ fn bprimary(p: mut P) -> Expr
     let t = beat(p)
     if t.kind == Int
         Num(value: t.text.parse_int() ?? 0)
+    elif t.kind == Str
+        StrLit(text: t.text)
     elif t.kind == Ident
         if bcur(p).kind == Op and bcur(p).text == "("
             beat(p)
