@@ -182,9 +182,12 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_
     $BIN run ../../compiler/stage1/data_asm_cc.lume ../../compiler/stage1/lcparse.src "$ntmp/pp.s" >/dev/null 2>&1
     if $BIN asm "$ntmp/pp.s" "$ntmp/pp" >/dev/null 2>&1 && "$ntmp/pp" 2>/dev/null | diff -u ../../tests/conformance/stage1/lcparse_asm.expected - >/dev/null; then ok "self-host R5: core expression parser (in Lume-Core) -> native"; else bad "self-host R5: core expression parser -> native"; fi
     $BIN run ../../compiler/stage1/data_asm_cc.lume ../../compiler/stage1/lumec.src "$ntmp/lc.s" >/dev/null 2>&1
-    if $BIN asm "$ntmp/lc.s" "$ntmp/lc" >/dev/null 2>&1 && "$ntmp/lc" >"$ntmp/lcout.s" 2>/dev/null && $BIN asm "$ntmp/lcout.s" "$ntmp/lcout" >/dev/null 2>&1 && "$ntmp/lcout" 2>/dev/null | head -n 4 | diff -u ../../tests/conformance/stage1/nfib_asm.expected - >/dev/null; then ok "self-host R6: lumec (native) compiles nfib to native, no C"; else bad "self-host R6: lumec (native) compiles nfib to native, no C"; fi
-    if $BIN asm "$ntmp/lc.s" "$ntmp/lc" >/dev/null 2>&1 && "$ntmp/lc" >"$ntmp/lcout.s" 2>/dev/null && $BIN asm "$ntmp/lcout.s" "$ntmp/lcout" >/dev/null 2>&1 && "$ntmp/lcout" 2>/dev/null | head -n 20 | diff -u ../../tests/conformance/stage1/lumec_r6b.expected - >/dev/null; then ok "self-host R6b: lumec (native) str/record/ctor -> native, no C"; else bad "self-host R6b: lumec (native) str/record/ctor -> native, no C"; fi
-    if $BIN asm "$ntmp/lc.s" "$ntmp/lc" >/dev/null 2>&1 && "$ntmp/lc" >"$ntmp/lcout.s" 2>/dev/null && $BIN asm "$ntmp/lcout.s" "$ntmp/lcout" >/dev/null 2>&1 && "$ntmp/lcout" 2>/dev/null | diff -u ../../tests/conformance/stage1/lumec_r6match.expected - >/dev/null; then ok "self-host R6-match: lumec (native) match -> native, no C"; else bad "self-host R6-match: lumec (native) match -> native, no C"; fi
+    # lumec reads the source from stdin: compile it once, then use it as a real compiler on several programs
+    c6=1
+    for pr in nfib:nfib_asm ev:ev_asm strtest:strtest_asm modtest:modtest_core bigints:bigints_asm; do
+        if ! ( $BIN asm "$ntmp/lc.s" "$ntmp/lc" >/dev/null 2>&1 && cat "../../compiler/stage1/${pr%%:*}.src" | "$ntmp/lc" >"$ntmp/lcout.s" 2>/dev/null && $BIN asm "$ntmp/lcout.s" "$ntmp/lcout" >/dev/null 2>&1 && "$ntmp/lcout" 2>/dev/null | diff -u "../../tests/conformance/stage1/${pr##*:}.expected" - >/dev/null ); then c6=0; echo "  R6c mismatch: ${pr%%:*}"; fi
+    done
+    if [ "$c6" = 1 ]; then ok "self-host R6c: lumec (native) reads stdin, compiles {nfib,ev,strtest,modtest,bigints} to native, no C"; else bad "self-host R6c: lumec (native) reads stdin, compiles {nfib,ev,strtest,modtest,bigints} to native, no C"; fi
     rm -rf "$ntmp"
 else
     ok "no-toolchain ELF pipeline (skipped: not linux/x86_64, or under ASan)"
