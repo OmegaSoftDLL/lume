@@ -1,0 +1,23 @@
+# bubble sort of a fixed array, printing the sorted values
+var a[6]
+a[0] = 5
+a[1] = -2
+a[2] = 9
+a[3] = 1
+a[4] = -7
+a[5] = 3
+var n = 6
+var i = 0
+while i < n
+    var j = 0
+    while j < n - 1 - i
+        if a[j] > a[j + 1]
+            var t = a[j]
+            a[j] = a[j + 1]
+            a[j + 1] = t
+        j = j + 1
+    i = i + 1
+var k = 0
+while k < n
+    print a[k]
+    k = k + 1
