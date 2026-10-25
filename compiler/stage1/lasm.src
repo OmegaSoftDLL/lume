@@ -83,9 +83,8 @@ fn parseinner3(basepart, rest) = let c2 = findc(rest, ",", 0) in if c2 >= count(
 fn jccop(mn) = if mn == "je" or mn == "jz" then 132 else if mn == "jne" or mn == "jnz" then 133 else if mn == "jl" then 140 else if mn == "jg" then 143 else if mn == "jle" then 142 else if mn == "jge" then 141 else if mn == "js" then 136 else if mn == "jns" then 137 else 0 - 1
 fn isjump(mn) = mn == "jmp" or mn == "call" or jccop(mn) >= 0
 fn alldig(s, i, n) = if i >= n then 1 else if isdigit(at(s, i)) then alldig(s, i + 1, n) else 0
-fn striplocal(tgt) = let n = count(tgt) in if n >= 2 and (lastch(tgt) == "f" or lastch(tgt) == "b") and alldig(tgt, 0, n - 1) == 1 then slice(tgt, 0, n - 1) else tgt
 fn parseins(s) = let sp = findc(s, " ", 0) in if sp >= count(s) then {mn: s, nop: 0, a: opnone(), b: opnone(), tgt: ""} else parseins2(slice(s, 0, sp), trim(slice(s, sp + 1, count(s))))
-fn parseins2(mn, ops) = if isjump(mn) then {mn: mn, nop: 1, a: opnone(), b: opnone(), tgt: striplocal(ops)} else parseins3(mn, ops)
+fn parseins2(mn, ops) = if isjump(mn) then {mn: mn, nop: 1, a: opnone(), b: opnone(), tgt: ops} else parseins3(mn, ops)
 fn parseins3(mn, ops) = let cp = commapos(ops, 0, 0) in if cp >= count(ops) then {mn: mn, nop: 1, a: parseop(trim(ops)), b: opnone(), tgt: ""} else {mn: mn, nop: 2, a: parseop(trim(slice(ops, 0, cp))), b: parseop(trim(slice(ops, cp + 1, count(ops)))), tgt: ""}
 
 ## --- directive parsing ---
@@ -102,6 +101,35 @@ fn parseitems(lines, sec) = match lines
 fn parseline(s, t, sec) = if count(s) == 0 then Cons(Skip, parseitems(t, sec)) else if at(s, 0) == "#" then Cons(Skip, parseitems(t, sec)) else if endscolon(s) then parselabel(slice(s, 0, count(s) - 1), t, sec) else if at(s, 0) == "." then parsedir(s, t, sec) else Cons(Ins(parseins(s)), parseitems(t, sec))
 fn parselabel(nm, t, sec) = if sec == 1 then Cons(RL(nm), parseitems(t, sec)) else Cons(TL(nm), parseitems(t, sec))
 fn parsedir(s, t, sec) = if startswith(s, ".section .rodata") then Cons(Skip, parseitems(t, 1)) else if startswith(s, ".section .text") then Cons(Skip, parseitems(t, 0)) else if startswith(s, ".section .bss") then Cons(Skip, parseitems(t, 2)) else if startswith(s, ".globl") then Cons(Skip, parseitems(t, sec)) else if startswith(s, ".lcomm") then Cons(parselcomm(s), parseitems(t, sec)) else if startswith(s, ".asciz") then Cons(RO(parseasciz(s)), parseitems(t, sec)) else Cons(Skip, parseitems(t, sec))
+
+## --- GAS numeric local labels (`N:` defines, `Nf` = nearest N: AHEAD, `Nb` = nearest N: BEHIND) ---
+## A number may be (re)defined many times. Items are in source order, so a left-to-right fold with a
+## per-number definition counter resolves every reference exactly: the k-th definition of N (0-based)
+## is renamed to the unique name "N#k" ("#" never occurs in a real label); at a reference, `cnt` =
+## number of N: seen so far, so `Nf` is the NEXT definition (index cnt) and `Nb` the most recent one
+## (index cnt-1; a label directly before the instruction counts as behind). Named labels untouched.
+fn isnumlbl(s) = count(s) >= 1 and alldig(s, 0, count(s)) == 1
+fn islocref(t) = let n = count(t) in n >= 2 and (lastch(t) == "f" or lastch(t) == "b") and alldig(t, 0, n - 1) == 1
+fn locname(nm, k) = nm + "#" + str(k)
+fn cntget(cs, nm) = match cs
+    Nil        => 0
+    Cons(h, t) => if h.nm == nm then h.c else cntget(t, nm)
+fn cntinc(cs, nm) = match cs
+    Nil        => Cons({nm: nm, c: 1}, Nil)
+    Cons(h, t) => if h.nm == nm then Cons({nm: nm, c: h.c + 1}, t) else Cons(h, cntinc(t, nm))
+fn locref(t, cs) = locref2(slice(t, 0, count(t) - 1), lastch(t), cs)
+fn locref2(nm, dir, cs) = if dir == "f" then locname(nm, cntget(cs, nm)) else locname(nm, cntget(cs, nm) - 1)
+fn rewtgt(r, cs) = if islocref(r.tgt) then {mn: r.mn, nop: r.nop, a: r.a, b: r.b, tgt: locref(r.tgt, cs)} else r
+fn reslocals(items, cs) = match items
+    Nil        => Nil
+    Cons(h, t) => resitem(h, t, cs)
+fn resitem(h, t, cs) = match h
+    Ins(r)     => Cons(Ins(rewtgt(r, cs)), reslocals(t, cs))
+    TL(nm)     => resdef(nm, 0, t, cs)
+    RL(nm)     => resdef(nm, 1, t, cs)
+    _          => Cons(h, reslocals(t, cs))
+fn resdef(nm, ro, t, cs) = if isnumlbl(nm) then Cons(mklabel(ro, locname(nm, cntget(cs, nm))), reslocals(t, cntinc(cs, nm))) else Cons(mklabel(ro, nm), reslocals(t, cs))
+fn mklabel(ro, nm) = if ro == 1 then RL(nm) else TL(nm)
 
 ## --- symbol table (association list name -> virtual address) ---
 fn symaddr(syms, nm) = match syms
@@ -194,7 +222,7 @@ fn phdr(filesz, memsz) = app(b4(1), app(b4(7), app(b8(0), app(b8(4194304), app(b
 
 ## --- the assembler: read stdin, two passes, emit the ELF to stdout ---
 fn buildsyms(lay, cs, rs) = app(mapsym(lay.tls, 4194424), app(mapsym(lay.rls, 4194424 + cs), mapsym(lay.bls, 4194424 + cs + rs)))
-fn assemble(src) = asm2(layout(parseitems(splitlines(src, 0), 0), 0, 0, 0))
+fn assemble(src) = asm2(layout(reslocals(parseitems(splitlines(src, 0), 0), Nil), 0, 0, 0))
 fn asm2(lay) = asm3(lay, lay.co, len(lay.robytes))
 fn asm3(lay, cs, rs) = asm4(lay, cs, rs, buildsyms(lay, cs, rs))
 fn asm4(lay, cs, rs, syms) = asm6(lay, syms, symaddr(syms, "_start"), 120 + cs + rs, 120 + cs + rs + lay.boff, emitcode2(lay.encs, syms))
