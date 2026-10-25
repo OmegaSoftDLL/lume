@@ -1,0 +1,20 @@
+## check_demo.lume — the checker in action: a valid program and a broken one, run by lume0.
+use token
+use lexer
+use ast
+use parser
+use check
+use std.io
+
+fn report(label: str, src: str)
+    io.println("=== {label} ===")
+    let diags = check_program(parse_program(lex(src)))
+    if diags.len() == 0
+        io.println("  ok: no problems found")
+    else
+        for d in diags
+            io.println("  error: {d.msg}")
+
+fn main()
+    report("valid", "fn square(x) = x * x\nlet a = square(5)\nlet b = max(a, 10)\na + b")
+    report("broken", "fn square(x) = x * x\nlet a = square(5, 9)\nlet b = maxx(a, zzz)\na + \"oops\"")

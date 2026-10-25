@@ -1,0 +1,71 @@
+## check.lume — a static checker written in Lume (library module).
+## Catches the mistakes an AI author makes most: undefined names, wrong arity, type misuse.
+## This is the AI-first thesis in miniature: the compiler, written in Lume, reviews the program.
+use ast
+
+type Diag = record
+    msg: str
+
+fn is_str(e: Expr) -> bool
+    match e
+        Str(_) => true
+        _      => false
+
+fn check_expr(e: Expr, vars: map[str, int], funcs: map[str, int], diags: mut [Diag])
+    match e
+        Num(_)  => do
+            let _ = 0
+        Str(_)  => do
+            let _ = 0
+        Name(id) => do
+            if not vars.has(id)
+                diags.push(Diag(msg: "undefined variable: " + id))
+        Bin(op, l, r) => do
+            check_expr(l, vars, funcs, diags)
+            check_expr(r, vars, funcs, diags)
+            if is_str(l) or is_str(r)
+                diags.push(Diag(msg: "operator '" + op + "' needs numbers, but got a string"))
+        If(c, t, e2) => do
+            check_expr(c, vars, funcs, diags)
+            check_expr(t, vars, funcs, diags)
+            check_expr(e2, vars, funcs, diags)
+        Call(c, args) => do
+            for a in args
+                check_expr(a, vars, funcs, diags)
+            if c == "max" or c == "min"
+                if args.len() != 2
+                    diags.push(Diag(msg: c + " expects 2 arguments, got " + str(args.len())))
+            elif c == "sum"
+                let _ = 0
+            elif funcs.has(c)
+                let want = funcs.get(c) ?? 0
+                if args.len() != want
+                    diags.push(Diag(msg: c + " expects " + str(want) + " arguments, got " + str(args.len())))
+            else
+                diags.push(Diag(msg: "undefined function: " + c))
+
+fn check_program(prog: [Stmt]) -> [Diag]
+    var diags = []
+    var funcs = {}
+    for s in prog
+        match s
+            Fn(name, ps, b) => do
+                funcs[name] = ps.len()
+            Let(n, v) => do
+                let _ = 0
+            Eval(v) => do
+                let _ = 0
+    var vars = {}
+    for s in prog
+        match s
+            Fn(name, ps, body) => do
+                var fscope = {}
+                for p in ps
+                    fscope[p] = 1
+                check_expr(body, fscope, funcs, diags)
+            Let(name, v) => do
+                check_expr(v, vars, funcs, diags)
+                vars[name] = 1
+            Eval(v) => do
+                check_expr(v, vars, funcs, diags)
+    diags
