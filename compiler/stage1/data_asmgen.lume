@@ -245,6 +245,44 @@ fn aexpr(e: DExpr, c: mut AC) -> str
             out = out + ".Lm" + str(lab) + "_" + str(i) + ":\n    movq $0, %rdi\n    call mkint\n    pushq %rax\n" + endl + ":\n"
             c.depth = dep
             out
+        DRec(fields) => do
+            let n = fields.len()
+            if n == 0
+                "    movq $0, %rdi\n    movq $0, %rsi\n    movq $0, %rdx\n    call mkrec\n    pushq %rax\n"
+            else
+                var out = ""
+                for f in fields
+                    out = out + aexpr(f.value, c)
+                out = out + "    movq $" + str(n * 8) + ", %rdi\n    call alloc\n    movq %rax, %rcx\n"
+                var k = n - 1
+                while k >= 0
+                    out = out + "    popq %rax\n    movq %rax, " + str(k * 8) + "(%rcx)\n"
+                    k = k - 1
+                out = out + "    movq $" + str(n * 8) + ", %rdi\n    call alloc\n    movq %rax, %rdx\n"
+                var j = 0
+                for f in fields
+                    let nl = strlabel(f.name, c)
+                    out = out + "    leaq " + nl + "(%rip), %rax\n    movq %rax, " + str(j * 8) + "(%rdx)\n"
+                    j = j + 1
+                out + "    movq %rdx, %rdi\n    movq %rcx, %rsi\n    movq $" + str(n) + ", %rdx\n    call mkrec\n    pushq %rax\n"
+        DField(o, nm) => do
+            let nl = strlabel(nm, c)
+            aexpr(o, c) + "    popq %rdi\n    leaq " + nl + "(%rip), %rsi\n    call recget\n    pushq %rax\n"
+        DList(xs) => do
+            let n = xs.len()
+            if n == 0
+                "    movq $0, %rdi\n    movq $0, %rsi\n    call mklist\n    pushq %rax\n"
+            else
+                var out = ""
+                for x in xs
+                    out = out + aexpr(x, c)
+                out = out + "    movq $" + str(n * 8) + ", %rdi\n    call alloc\n    movq %rax, %rcx\n"
+                var k = n - 1
+                while k >= 0
+                    out = out + "    popq %rax\n    movq %rax, " + str(k * 8) + "(%rcx)\n"
+                    k = k - 1
+                out + "    movq $" + str(n) + ", %rdi\n    movq %rcx, %rsi\n    call mklist\n    pushq %rax\n"
+        DIndex(coll, ix) => aexpr(coll, c) + aexpr(ix, c) + "    popq %rsi\n    popq %rdi\n    call lidx\n    pushq %rax\n"
         _ => "    movq $0, %rax\n    pushq %rax\n    # unsupported expr\n"
 
 fn afn(nm: str, params: [str], body: DExpr, c: mut AC) -> str
@@ -273,7 +311,7 @@ fn afn(nm: str, params: [str], body: DExpr, c: mut AC) -> str
     out + "    popq %rax\n    movq %rbp, %rsp\n    popq %rbp\n    ret\n"
 
 fn runtime_tail() -> str
-    "alloc:\n    movq heap_cur(%rip), %rax\n    movq %rax, %r10\n    addq %rdi, %r10\n    movq %r10, heap_cur(%rip)\n    ret\nmkint:\n    movq %rdi, %r11\n    movq $24, %rdi\n    call alloc\n    movq $0, (%rax)\n    movq %r11, 8(%rax)\n    ret\nmkstr:\n    movq %rdi, %r11\n    movq $24, %rdi\n    call alloc\n    movq $1, (%rax)\n    movq %r11, 16(%rax)\n    ret\nmkctor:\n    movq %rdi, %r11\n    movq %rsi, %r13\n    movq %rdx, %r14\n    movq $40, %rdi\n    call alloc\n    movq $2, (%rax)\n    movq %r13, 8(%rax)\n    movq %r11, 16(%rax)\n    movq %r14, 24(%rax)\n    ret\nstrlen:\n    xorq %rax, %rax\nsl0:\n    cmpb $0, (%rdi,%rax)\n    je sl1\n    incq %rax\n    jmp sl0\nsl1:\n    ret\nstreq:\nse0:\n    movb (%rdi), %al\n    movb (%rsi), %cl\n    cmpb %al, %cl\n    jne se2\n    testb %al, %al\n    je se1\n    incq %rdi\n    incq %rsi\n    jmp se0\nse1:\n    movq $1, %rax\n    ret\nse2:\n    xorq %rax, %rax\n    ret\neqv:\n    movq (%rdi), %rax\n    movq (%rsi), %rcx\n    cmpq %rax, %rcx\n    jne eqv0\n    cmpq $0, %rax\n    je eqvi\n    cmpq $1, %rax\n    je eqvs\n    cmpq $2, %rax\n    je eqvc\n    jmp eqv0\neqvi:\n    movq 8(%rdi), %rax\n    cmpq 8(%rsi), %rax\n    sete %al\n    movzbq %al, %rax\n    ret\neqvs:\n    movq 16(%rdi), %rdi\n    movq 16(%rsi), %rsi\n    call streq\n    ret\neqvc:\n    movq 16(%rdi), %rdi\n    movq 16(%rsi), %rsi\n    call streq\n    ret\neqv0:\n    xorq %rax, %rax\n    ret\nprintval:\n    movq (%rdi), %rax\n    testq %rax, %rax\n    jne pv1\n    movq 8(%rdi), %rdi\n    call print_int\n    ret\npv1:\n    cmpq $1, %rax\n    jne pv2\n    movq 16(%rdi), %rdi\n    movq %rdi, %r12\n    call strlen\n    movq %rax, %rdx\n    movq %r12, %rsi\n    movq $1, %rax\n    movq $1, %rdi\n    syscall\n    movb $10, pbuf(%rip)\n    movq $1, %rax\n    movq $1, %rdi\n    leaq pbuf(%rip), %rsi\n    movq $1, %rdx\n    syscall\n    ret\npv2:\n    movq 16(%rdi), %rdi\n    movq %rdi, %r12\n    call strlen\n    movq %rax, %rdx\n    movq %r12, %rsi\n    movq $1, %rax\n    movq $1, %rdi\n    syscall\n    movb $10, pbuf(%rip)\n    movq $1, %rax\n    movq $1, %rdi\n    leaq pbuf(%rip), %rsi\n    movq $1, %rdx\n    syscall\n    ret\nprint_int:\n    movq %rdi, %rax\n    xorq %r9, %r9\n    testq %rax, %rax\n    jge 1f\n    negq %rax\n    movq $1, %r9\n1:\n    leaq pbuf+31(%rip), %rsi\n    movb $10, (%rsi)\n    movq $1, %rcx\n    movq $10, %rbx\n2:\n    decq %rsi\n    xorq %rdx, %rdx\n    divq %rbx\n    addb $48, %dl\n    movb %dl, (%rsi)\n    incq %rcx\n    testq %rax, %rax\n    jnz 2b\n    testq %r9, %r9\n    je 3f\n    decq %rsi\n    movb $45, (%rsi)\n    incq %rcx\n3:\n    movq $1, %rax\n    movq $1, %rdi\n    movq %rcx, %rdx\n    syscall\n    ret\n"
+    "alloc:\n    movq heap_cur(%rip), %rax\n    movq %rax, %r10\n    addq %rdi, %r10\n    movq %r10, heap_cur(%rip)\n    ret\nmkint:\n    movq %rdi, %r11\n    movq $24, %rdi\n    call alloc\n    movq $0, (%rax)\n    movq %r11, 8(%rax)\n    ret\nmkstr:\n    movq %rdi, %r11\n    movq $24, %rdi\n    call alloc\n    movq $1, (%rax)\n    movq %r11, 16(%rax)\n    ret\nmkctor:\n    movq %rdi, %r11\n    movq %rsi, %r13\n    movq %rdx, %r14\n    movq $40, %rdi\n    call alloc\n    movq $2, (%rax)\n    movq %r13, 8(%rax)\n    movq %r11, 16(%rax)\n    movq %r14, 24(%rax)\n    ret\nmkrec:\n    movq %rdi, %r11\n    movq %rsi, %r13\n    movq %rdx, %r14\n    movq $40, %rdi\n    call alloc\n    movq $3, (%rax)\n    movq %r14, 8(%rax)\n    movq %r11, 16(%rax)\n    movq %r13, 24(%rax)\n    ret\nmklist:\n    movq %rdi, %r11\n    movq %rsi, %r13\n    movq $40, %rdi\n    call alloc\n    movq $4, (%rax)\n    movq %r11, 8(%rax)\n    movq %r13, 24(%rax)\n    ret\nrecget:\n    pushq %r12\n    pushq %r13\n    pushq %r14\n    movq %rdi, %r12\n    movq %rsi, %r13\n    xorq %r14, %r14\nrg0:\n    cmpq 8(%r12), %r14\n    jge rgmiss\n    movq 16(%r12), %rax\n    movq (%rax,%r14,8), %rdi\n    movq %r13, %rsi\n    call streq\n    testq %rax, %rax\n    jnz rghit\n    incq %r14\n    jmp rg0\nrghit:\n    movq 24(%r12), %rax\n    movq (%rax,%r14,8), %rax\n    jmp rgdone\nrgmiss:\n    movq $0, %rdi\n    call mkint\nrgdone:\n    popq %r14\n    popq %r13\n    popq %r12\n    ret\nlidx:\n    movq 8(%rsi), %rsi\n    cmpq $4, (%rdi)\n    jne lix0\n    testq %rsi, %rsi\n    js lix0\n    cmpq 8(%rdi), %rsi\n    jge lix0\n    movq 24(%rdi), %rax\n    movq (%rax,%rsi,8), %rax\n    ret\nlix0:\n    movq $0, %rdi\n    call mkint\n    ret\nstrlen:\n    xorq %rax, %rax\nsl0:\n    cmpb $0, (%rdi,%rax)\n    je sl1\n    incq %rax\n    jmp sl0\nsl1:\n    ret\nstreq:\nse0:\n    movb (%rdi), %al\n    movb (%rsi), %cl\n    cmpb %al, %cl\n    jne se2\n    testb %al, %al\n    je se1\n    incq %rdi\n    incq %rsi\n    jmp se0\nse1:\n    movq $1, %rax\n    ret\nse2:\n    xorq %rax, %rax\n    ret\neqv:\n    movq (%rdi), %rax\n    movq (%rsi), %rcx\n    cmpq %rax, %rcx\n    jne eqv0\n    cmpq $0, %rax\n    je eqvi\n    cmpq $1, %rax\n    je eqvs\n    cmpq $2, %rax\n    je eqvc\n    jmp eqv0\neqvi:\n    movq 8(%rdi), %rax\n    cmpq 8(%rsi), %rax\n    sete %al\n    movzbq %al, %rax\n    ret\neqvs:\n    movq 16(%rdi), %rdi\n    movq 16(%rsi), %rsi\n    call streq\n    ret\neqvc:\n    movq 16(%rdi), %rdi\n    movq 16(%rsi), %rsi\n    call streq\n    ret\neqv0:\n    xorq %rax, %rax\n    ret\nprintval:\n    movq (%rdi), %rax\n    testq %rax, %rax\n    jne pv1\n    movq 8(%rdi), %rdi\n    call print_int\n    ret\npv1:\n    cmpq $1, %rax\n    jne pv2\n    movq 16(%rdi), %rdi\n    movq %rdi, %r12\n    call strlen\n    movq %rax, %rdx\n    movq %r12, %rsi\n    movq $1, %rax\n    movq $1, %rdi\n    syscall\n    movb $10, pbuf(%rip)\n    movq $1, %rax\n    movq $1, %rdi\n    leaq pbuf(%rip), %rsi\n    movq $1, %rdx\n    syscall\n    ret\npv2:\n    movq 16(%rdi), %rdi\n    movq %rdi, %r12\n    call strlen\n    movq %rax, %rdx\n    movq %r12, %rsi\n    movq $1, %rax\n    movq $1, %rdi\n    syscall\n    movb $10, pbuf(%rip)\n    movq $1, %rax\n    movq $1, %rdi\n    leaq pbuf(%rip), %rsi\n    movq $1, %rdx\n    syscall\n    ret\nprint_int:\n    movq %rdi, %rax\n    xorq %r9, %r9\n    testq %rax, %rax\n    jge 1f\n    negq %rax\n    movq $1, %r9\n1:\n    leaq pbuf+31(%rip), %rsi\n    movb $10, (%rsi)\n    movq $1, %rcx\n    movq $10, %rbx\n2:\n    decq %rsi\n    xorq %rdx, %rdx\n    divq %rbx\n    addb $48, %dl\n    movb %dl, (%rsi)\n    incq %rcx\n    testq %rax, %rax\n    jnz 2b\n    testq %r9, %r9\n    je 3f\n    decq %rsi\n    movb $45, (%rsi)\n    incq %rcx\n3:\n    movq $1, %rax\n    movq $1, %rdi\n    movq %rcx, %rdx\n    syscall\n    ret\n"
 
 fn agen(prog: [DStmt]) -> str
     var c = AC(locals: [], nlabel: 0, data: "", nstr: 0, depth: 0)
