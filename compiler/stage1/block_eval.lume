@@ -1,0 +1,40 @@
+## block_eval.lume — evaluator for the block-structured language (library module).
+use block_ast
+use std.io
+
+fn beval(e: Expr, env: map[str, int]) -> int
+    match e
+        Num(v)        => v
+        Name(id)      => env.get(id) ?? 0
+        Bin(op, l, r) => do
+            let a = beval(l, env)
+            let b = beval(r, env)
+            match op
+                "+"  => a + b
+                "-"  => a - b
+                "*"  => a * b
+                "/"  => if b == 0 then 0 else a / b
+                "%"  => if b == 0 then 0 else a % b
+                "==" => if a == b then 1 else 0
+                "!=" => if a != b then 1 else 0
+                "<"  => if a < b then 1 else 0
+                ">"  => if a > b then 1 else 0
+                "<=" => if a <= b then 1 else 0
+                ">=" => if a >= b then 1 else 0
+                _    => 0
+
+fn bexec(stmts: [Stmt], env: mut map[str, int])
+    for s in stmts
+        match s
+            Assign(name, v) => do
+                env[name] = beval(v, env)
+            Print(v) => do
+                io.println("{beval(v, env)}")
+            While(c, body) => do
+                while beval(c, env) != 0
+                    bexec(body, env)
+            If(c, t, e) => do
+                if beval(c, env) != 0
+                    bexec(t, env)
+                else
+                    bexec(e, env)
