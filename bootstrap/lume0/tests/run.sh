@@ -97,6 +97,8 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && command -v as 
     if as -o "$atmp/m.o" "$atmp/m.s" 2>/dev/null && ld -o "$atmp/m" "$atmp/m.o" 2>/dev/null && "$atmp/m" 2>/dev/null | diff -u ../../tests/conformance/stage1/nat_mutual_asm.expected - >/dev/null; then ok "x86-64 asm -> native (mutual recursion, Hofstadter F/M, global var/let, no C)"; else bad "x86-64 asm -> native (mutual recursion, Hofstadter F/M, global var/let, no C)"; fi
     $BIN emit-asm ../../compiler/stage1/nat_nested.lume "$atmp/n.s" 2>/dev/null
     if as -o "$atmp/n.o" "$atmp/n.s" 2>/dev/null && ld -o "$atmp/n" "$atmp/n.o" 2>/dev/null && "$atmp/n" 2>/dev/null | diff -u ../../tests/conformance/stage1/nat_nested_asm.expected - >/dev/null; then ok "x86-64 asm -> native (nested for/while, fact/fib, comparisons, signed div/mod, no C)"; else bad "x86-64 asm -> native (nested for/while, fact/fib, comparisons, signed div/mod, no C)"; fi
+    $BIN emit-asm ../../compiler/stage1/nat_elif.lume "$atmp/e.s" 2>/dev/null
+    if as -o "$atmp/e.o" "$atmp/e.s" 2>/dev/null && ld -o "$atmp/e" "$atmp/e.o" 2>/dev/null && "$atmp/e" 2>/dev/null | diff -u ../../tests/conformance/stage1/nat_elif_asm.expected - >/dev/null; then ok "x86-64 asm -> native (if/elif/else value + top-level assign, no C)"; else bad "x86-64 asm -> native (if/elif/else value + top-level assign, no C)"; fi
     rm -rf "$atmp"
 else
     ok "x86-64 asm backend (skipped: not linux/x86_64 or no as/ld)"

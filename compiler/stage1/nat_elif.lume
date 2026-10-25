@@ -1,0 +1,35 @@
+## nat_elif.lume — if/elif/else in value position + top-level assignment, native (no C).
+## Regression guard for the flat-elif lowering and global reassignment at top level.
+## lume0 emit-asm nat_elif.lume e.s ; as -o e.o e.s ; ld -o e e.o ; ./e
+fn grade(x: int) -> int
+    if x >= 90
+        4
+    elif x >= 80
+        3
+    elif x >= 70
+        2
+    elif x >= 60
+        1
+    else
+        0
+
+fn sign(x: int) -> int
+    if x > 0
+        1
+    elif x < 0
+        0 - 1
+    else
+        0
+
+grade(95)
+grade(83)
+grade(71)
+grade(60)
+grade(40)
+sign(7)
+sign(0)
+sign(0 - 5)
+var acc = 0
+acc = acc + grade(95)
+acc = acc + sign(0 - 5)
+acc * 10
