@@ -1,0 +1,7 @@
+=== valid ===
+  ok: no problems found
+=== broken ===
+  error: square expects 1 arguments, got 2
+  error: undefined variable: zzz
+  error: undefined function: maxx
+  error: operator '+' needs numbers, but got a string

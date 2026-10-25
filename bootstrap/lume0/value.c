@@ -75,7 +75,8 @@ void env_define(Interp *ip, Env *e, const char *name, int len, Val *v) {
         e->ent = ne; e->cap = nc;
     }
     char *key = lume_rt_alloc(ip, (size_t)len + 1);
-    memcpy(key, name, (size_t)len); key[len] = 0;
+    if (len > 0 && name) memcpy(key, name, (size_t)len);
+    key[len] = 0;
     e->ent[e->n].key = key; e->ent[e->n].klen = len; e->ent[e->n].val = v;
     e->n++;
 }
