@@ -1,9 +1,9 @@
-## data_demo.lume — enums with payloads + match over a user-defined type, interpreted in Lume.
+## data_demo.lume — ADTs + match + recursive functions, a small ML core interpreted in Lume.
 use data_ast
 use data_parser
 use data_eval
 use std.io
 
 fn main()
-    let program = "let s = Circle(5)\nlet area = match s\n    Circle(r) => r * r * 3\n    Rect(w, h) => w * h\n    Empty => 0\nprint area\nlet t = Rect(4, 6)\nprint match t\n    Circle(r) => r * r * 3\n    Rect(w, h) => w * h\n    Empty => 0\nlet shapes = Pair(Circle(2), Rect(3, 3))\nprint shapes\nprint match shapes\n    Pair(Circle(r), Rect(w, h)) => r + w + h\n    _ => -1\n"
+    let program = "fn area(s) = match s\n    Circle(r) => r * r * 3\n    Rect(w, h) => w * h\n    Empty => 0\nfn sumlist(xs) = match xs\n    Nil => 0\n    Cons(h, t) => h + sumlist(t)\nfn len(xs) = match xs\n    Nil => 0\n    Cons(h, t) => 1 + len(t)\nlet c = Circle(5)\nprint area(c)\nprint area(Rect(4, 6))\nlet xs = Cons(10, Cons(20, Cons(30, Nil)))\nprint sumlist(xs)\nprint len(xs)\n"
     run_data(parse_data_program(program))
