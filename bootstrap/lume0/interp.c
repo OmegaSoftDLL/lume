@@ -283,6 +283,23 @@ static Val *to_iter_list(Interp *ip, Val *v) {
     return out;
 }
 
+/* UTF-8 helpers for O(1)-allocation string indexing. `to_iter_list` on a V_STR
+   rebuilds a whole codepoint list, so indexing a string char by char (as the
+   Lume-written lexer does while scanning source) was O(len) allocation per
+   access -> O(len^2) memory with no freeing. These walk the bytes instead. */
+static int utf8_seq_len(unsigned char c) { return c < 0x80 ? 1 : c < 0xE0 ? 2 : c < 0xF0 ? 3 : 4; }
+static long long str_ncp(const Val *v) {
+    long long ncp = 0;
+    for (int bi = 0; bi < v->slen;) { bi += utf8_seq_len((unsigned char)v->s[bi]); ncp++; }
+    return ncp;
+}
+/* byte offset of the cpidx-th codepoint (cpidx in [0, ncp]) */
+static int str_cp_byteoff(const Val *v, long long cpidx) {
+    int bi = 0; long long k = 0;
+    while (k < cpidx && bi < v->slen) { bi += utf8_seq_len((unsigned char)v->s[bi]); k++; }
+    return bi;
+}
+
 /* ======================================================================
  *  Registry build + lookups
  * ====================================================================== */
@@ -919,8 +936,24 @@ static Val *eval(Interp *ip, const Node *n, Env *env) {
         Val *coll = eval(ip, n->kids[0], env); if (ip->flow != FL_NORMAL) return coll;
         const Node *idxn = n->kids[1];
         if (idxn->kind == N_RANGE) {
-            Val *lst = to_iter_list(ip, coll); long long lo = 0, hi = lst->n; bool inc = (idxn->flags & F_INCLUSIVE) != 0;
+            bool inc = (idxn->flags & F_INCLUSIVE) != 0;
             int kids = idxn->nkid;
+            if (coll->kind == V_STR) {                        /* slicing a string yields a string (no full char-list) */
+                long long ncp = str_ncp(coll);
+                long long lo = 0, hi = ncp;
+                if (kids == 2) { lo = eval(ip, idxn->kids[0], env)->i; hi = eval(ip, idxn->kids[1], env)->i; }
+                else if (kids == 1) { Val *b0 = eval(ip, idxn->kids[0], env); hi = b0->i; }  /* ..b */
+                if (lo < 0) lo += ncp;
+                if (hi < 0) hi += ncp;
+                if (inc) hi += 1;
+                if (lo < 0) lo = 0;
+                if (hi > ncp) hi = ncp;
+                if (hi < lo) hi = lo;
+                int blo = str_cp_byteoff(coll, lo); int bhi = str_cp_byteoff(coll, hi);
+                int bl = bhi - blo; char *buf = lume_rt_alloc(ip, (size_t)bl + 1);
+                memcpy(buf, coll->s + blo, (size_t)bl); buf[bl] = 0; return v_str_owned(ip, buf, bl);
+            }
+            Val *lst = to_iter_list(ip, coll); long long lo = 0, hi = lst->n;
             if (kids == 2) { lo = eval(ip, idxn->kids[0], env)->i; hi = eval(ip, idxn->kids[1], env)->i; }
             else if (kids == 1) { Val *b0 = eval(ip, idxn->kids[0], env); hi = b0->i; }  /* ..b */
             if (lo < 0) lo += lst->n;
@@ -928,16 +961,17 @@ static Val *eval(Interp *ip, const Node *n, Env *env) {
             if (inc) hi += 1;
             if (lo < 0) lo = 0;
             if (hi > lst->n) hi = lst->n;
-            if (coll->kind == V_STR) {                        /* slicing a string yields a string */
-                int bl = 0; for (long long i = lo; i < hi; i++) bl += lst->items[i]->kind == V_CHAR ? 4 : 1;
-                char *buf = lume_rt_alloc(ip, (size_t)bl + 1); int w = 0;
-                for (long long i = lo; i < hi; i++) { int cl; char *cs = val_to_cstr(ip, lst->items[i], &cl); memcpy(buf + w, cs, (size_t)cl); w += cl; }
-                buf[w] = 0; return v_str_owned(ip, buf, w);
-            }
             Val *out = v_list(ip); for (long long i = lo; i < hi; i++) v_push(ip, out, lst->items[i]); return out;
         }
         Val *idx = eval(ip, idxn, env); if (ip->flow != FL_NORMAL) return idx;
         if (coll->kind == V_MAP) { int kl; char *ks = val_to_cstr(ip, idx, &kl); Entry *e = NULL; for (int i = 0; i < coll->nent; i++) if (coll->ent[i].klen == kl && memcmp(coll->ent[i].key, ks, (size_t)kl) == 0) e = &coll->ent[i]; return e ? e->val : v_unit(ip); }
+        if (coll->kind == V_STR) {                            /* scalar string index -> one codepoint, no full char-list */
+            long long ncp = str_ncp(coll); long long i = idx->i; if (i < 0) i += ncp;
+            if (i < 0 || i >= ncp) { rerror(ip, n, "index out of bounds"); return v_unit(ip); }
+            int bo = str_cp_byteoff(coll, i); unsigned char c0 = (unsigned char)coll->s[bo]; int len = utf8_seq_len(c0); unsigned cp = 0;
+            if (len == 1) cp = c0; else { cp = c0 & (0x7Fu >> len); for (int k = 1; k < len; k++) cp = (cp << 6) | ((unsigned char)coll->s[bo + k] & 0x3F); }
+            return v_char(ip, cp);
+        }
         Val *lst = to_iter_list(ip, coll); long long i = idx->i; if (i < 0) i += lst->n; if (i < 0 || i >= lst->n) { rerror(ip, n, "index out of bounds"); return v_unit(ip); } return lst->items[i]; }
     case N_FIELD_GET: {
         const Node *recvn = n->kids[0];
