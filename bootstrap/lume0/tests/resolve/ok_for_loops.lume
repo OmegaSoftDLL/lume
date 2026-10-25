@@ -1,0 +1,9 @@
+fn m() -> int
+    var total = 0
+    for i in 0..5
+        total = total + i
+    for (i, c) in ["a", "b"].enumerate()
+        total = total + i
+    for j in 0..=3
+        total += j
+    total

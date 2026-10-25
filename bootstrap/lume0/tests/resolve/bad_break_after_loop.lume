@@ -1,0 +1,6 @@
+# expect: C0001
+fn m() -> int
+    for i in 0..3
+        let k = i
+    break
+    1

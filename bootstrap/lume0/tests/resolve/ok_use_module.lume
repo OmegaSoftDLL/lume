@@ -1,0 +1,6 @@
+use std.io
+use std.math
+
+fn m() -> int
+    io.println("hello")
+    1

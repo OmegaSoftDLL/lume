@@ -1,0 +1,10 @@
+type Point = record
+    x: int
+    y: int = 0
+
+fn norm(p: Point) -> int
+    p.x + p.y
+
+fn m() -> int
+    let p = Point(x: 1, y: 2)
+    p.x + p.y + norm(p)

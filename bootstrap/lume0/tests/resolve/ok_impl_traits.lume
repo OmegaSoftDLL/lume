@@ -1,0 +1,19 @@
+trait Shape
+    fn area(self) -> f64
+
+type Circle = record
+    r: f64
+
+type Square = record
+    s: f64
+
+impl Shape for Circle
+    fn area(self) -> f64
+        3.14159 * self.r ** 2
+
+impl Shape for Square
+    fn area(self) -> f64
+        self.s * self.s
+
+fn total(a: Circle, b: Square) -> f64
+    a.area() + b.area()

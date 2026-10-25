@@ -1,0 +1,8 @@
+fn z() -> int
+    0
+fn two(a: int, b: int) -> int
+    a + b
+fn tri(a: int, b: int, c: int) -> int
+    a + b + c
+fn m() -> int
+    z() + two(1, 2) + tri(1, 2, 3) + two(two(1, 2), tri(1, 2, 3))

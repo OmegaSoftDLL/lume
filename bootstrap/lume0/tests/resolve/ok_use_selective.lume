@@ -1,0 +1,6 @@
+use std.sh (run, lines)
+
+fn m() -> int
+    let out = run("echo", "hi")
+    let ls = lines(out)
+    1

@@ -1,0 +1,6 @@
+# expect: R0200
+fn m() -> int
+    var s = 0
+    for i in 0..3
+        s = s + phantom
+    s

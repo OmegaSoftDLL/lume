@@ -1,0 +1,5 @@
+# expect: A0001
+fn z() -> int
+    0
+fn m() -> int
+    z(1)

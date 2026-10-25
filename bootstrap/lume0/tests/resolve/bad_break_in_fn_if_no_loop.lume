@@ -1,0 +1,5 @@
+# expect: C0001
+fn m(a: int) -> int
+    if a > 0
+        break
+    a

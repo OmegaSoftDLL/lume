@@ -1,0 +1,3 @@
+# expect: T0001
+fn m()
+    let b: bool = 1

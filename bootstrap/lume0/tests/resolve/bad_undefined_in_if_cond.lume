@@ -1,0 +1,5 @@
+# expect: R0200
+fn m(a: int) -> int
+    if ghost > a
+        return 1
+    2

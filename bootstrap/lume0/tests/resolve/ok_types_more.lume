@@ -1,0 +1,9 @@
+fn m() -> int
+    let a: int = -7
+    let b: str = ""
+    let c: bool = false
+    let d: f64 = 1.0
+    let e: f64 = 2
+    let f: int? = none
+    let g: [int] = [1, 2]
+    a

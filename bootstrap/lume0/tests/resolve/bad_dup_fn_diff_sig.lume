@@ -1,0 +1,5 @@
+# expect: D0002
+fn p(a: int) -> int
+    a
+fn p(a: int, b: int) -> int
+    a + b

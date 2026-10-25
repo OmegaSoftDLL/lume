@@ -1,0 +1,5 @@
+# expect: R0200
+fn id(x: int) -> int
+    x
+fn m() -> int
+    id(nope + 1)

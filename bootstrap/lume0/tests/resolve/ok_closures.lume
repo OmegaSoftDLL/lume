@@ -1,0 +1,6 @@
+fn m() -> int
+    let k = 3
+    let add = |x| x + k
+    let mul = |a, b| a * b
+    let nested = |x| |y| x + y
+    add(1) + mul(2, 3)

@@ -1,0 +1,4 @@
+# expect: R0200
+fn m() -> int
+    let g = |n| n + unknown_var
+    g(1)

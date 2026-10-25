@@ -1,0 +1,5 @@
+# expect: R0200
+fn m(v: int) -> int
+    match v
+        0 => absent
+        _ => 1

@@ -1,0 +1,7 @@
+# expect: D0002
+fn h() -> int
+    1
+fn k() -> int
+    2
+fn h() -> int
+    3

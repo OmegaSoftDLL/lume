@@ -1,0 +1,3 @@
+fn m(names: [str]) -> str
+    let a = names.first()?.upper() ?? "none"
+    a

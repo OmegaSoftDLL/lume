@@ -1,0 +1,13 @@
+type DivError = error ByZero | Overflow
+
+fn divide(a: int, b: int) -> int ! DivError
+    if b == 0
+        fail DivError.ByZero
+    a / b
+
+fn safe(a: int, b: int) -> int ! DivError
+    let q = divide(a, b)?
+    q * 2
+
+fn main() -> int
+    safe(10, 2) catch 0

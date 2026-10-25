@@ -1,0 +1,8 @@
+fn m(a: int) -> int
+    requires a >= 0
+    ensures result >= 0
+    defer cleanup()
+    a
+
+fn cleanup()
+    let x = 1

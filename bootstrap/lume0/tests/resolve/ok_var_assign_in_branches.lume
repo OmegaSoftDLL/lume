@@ -1,0 +1,9 @@
+fn m(a: int) -> int
+    var r = 0
+    if a > 0
+        r = 1
+    elif a < 0
+        r = -1
+    else
+        r = 0
+    r
