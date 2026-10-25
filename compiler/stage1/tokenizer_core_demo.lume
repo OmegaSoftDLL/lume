@@ -1,0 +1,11 @@
+## tokenizer_core_demo.lume — a real tokenizer written in the ML-core language (run via the core).
+## Produces a list of Tok(kind, text) over an arithmetic expression: numbers and symbols, skipping
+## spaces, by functional recursion. A lexer written in Lume's own core language.
+use data_ast
+use data_parser
+use data_eval
+use std.io
+
+fn main()
+    let program = "fn isdigit(c) = c >= \"0\" and c <= \"9\"\nfn numend(s, i) = if i < count(s) and isdigit(at(s, i)) then numend(s, i + 1) else i\nfn scan(s, i) = if i >= count(s) then Nil else if at(s, i) == \" \" then scan(s, i + 1) else if isdigit(at(s, i)) then Cons(Tok(\"num\", slice(s, i, numend(s, i))), scan(s, numend(s, i))) else Cons(Tok(\"sym\", at(s, i)), scan(s, i + 1))\nfn ntoks(xs) = match xs\n    Nil => 0\n    Cons(h, t) => 1 + ntoks(t)\nlet toks = scan(\"12 + 34 * 5\", 0)\nprint toks\nprint ntoks(toks)\n"
+    run_data(parse_data_program(program))
