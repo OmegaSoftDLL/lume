@@ -40,6 +40,7 @@ fn collect_lets(e: DExpr, acc: mut [str])
         DMatch(scrut, arms) => do
             collect_lets(scrut, acc)
             for arm in arms
+                collect_pat_binds(arm.pat, acc)
                 collect_lets(arm.body, acc)
         _ => do
             let _ = 0
@@ -80,6 +81,7 @@ type AC = record
     nlabel: int
     data:   str
     nstr:   int
+    depth:  int
 
 ## escape a string for a .asciz directive (quote + backslash)
 fn sesc(s: str) -> str
@@ -91,6 +93,81 @@ fn sesc(s: str) -> str
             out = out + str(ch)
     out
 
+## maximum match-nesting depth in an expression (for scrutinee frame slots)
+fn imax(a: int, b: int) -> int = if a > b then a else b
+
+fn match_depth(e: DExpr) -> int
+    match e
+        DMatch(scrut, arms) => do
+            var m = match_depth(scrut)
+            for arm in arms
+                m = imax(m, match_depth(arm.body))
+            m + 1
+        DIf(cc, t, e2) => imax(match_depth(cc), imax(match_depth(t), match_depth(e2)))
+        DBin(op, l, r) => imax(match_depth(l), match_depth(r))
+        DLetIn(nm, v, b) => imax(match_depth(v), match_depth(b))
+        DCall(nm, args) => do
+            var m = 0
+            for a in args
+                m = imax(m, match_depth(a))
+            m
+        DCons(tag, args) => do
+            var m = 0
+            for a in args
+                m = imax(m, match_depth(a))
+            m
+        _ => 0
+
+## collect the PBind names in a pattern (they become frame slots)
+fn collect_pat_binds(p: Pat, acc: mut [str])
+    match p
+        PBind(nm) => acc.push(nm)
+        PCons(tag, subs) => do
+            for s in subs
+                collect_pat_binds(s, acc)
+        _ => do
+            let _ = 0
+
+## emit a .rodata string literal, returning its label
+fn strlabel(s: str, c: mut AC) -> str
+    let lab = ".Ls" + str(c.nstr)
+    c.nstr = c.nstr + 1
+    c.data = c.data + lab + ":\n    .asciz \"" + sesc(s) + "\"\n"
+    lab
+
+## `acc` is asm that loads a value pointer into %rax. Emit a test that jumps to
+## `fail` when pattern `p` does not match that value; otherwise falls through.
+fn atest(p: Pat, acc: str, flbl: str, c: mut AC) -> str
+    match p
+        PWild    => ""
+        PBind(nm) => ""
+        PInt(n)  => acc + "    cmpq $0, (%rax)\n    jne " + flbl + "\n    cmpq $" + str(n) + ", 8(%rax)\n    jne " + flbl + "\n"
+        PCons(tag, subs) => do
+            let nlab = strlabel(tag, c)
+            var out = acc + "    cmpq $2, (%rax)\n    jne " + flbl + "\n    movq 16(%rax), %rdi\n    leaq " + nlab + "(%rip), %rsi\n    call streq\n    testq %rax, %rax\n    jz " + flbl + "\n"
+            var k = 0
+            for s in subs
+                let acck = acc + "    movq 24(%rax), %rax\n    movq " + str(k * 8) + "(%rax), %rax\n"
+                out = out + atest(s, acck, flbl, c)
+                k = k + 1
+            out
+
+## emit the variable bindings a pattern introduces (store value ptrs to slots)
+fn abind(p: Pat, acc: str, c: mut AC) -> str
+    match p
+        PBind(nm) => do
+            let k = idx_of(c.locals, nm)
+            acc + "    movq %rax, " + str(0 - 8 * (k + 1)) + "(%rbp)\n"
+        PCons(tag, subs) => do
+            var out = ""
+            var k = 0
+            for s in subs
+                let acck = acc + "    movq 24(%rax), %rax\n    movq " + str(k * 8) + "(%rax), %rax\n"
+                out = out + abind(s, acck, c)
+                k = k + 1
+            out
+        _ => ""
+
 fn areg(i: int) -> str
     let regs = ["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"]
     regs[i]
@@ -100,9 +177,7 @@ fn aexpr(e: DExpr, c: mut AC) -> str
     match e
         DInt(n) => "    movq $" + str(n) + ", %rdi\n    call mkint\n    pushq %rax\n"
         DStr(v) => do
-            let lab = ".Ls" + str(c.nstr)
-            c.nstr = c.nstr + 1
-            c.data = c.data + lab + ":\n    .asciz \"" + sesc(v) + "\"\n"
+            let lab = strlabel(v, c)
             "    leaq " + lab + "(%rip), %rdi\n    call mkstr\n    pushq %rax\n"
         DVar(nm) => do
             let k = idx_of(c.locals, nm)
@@ -137,6 +212,39 @@ fn aexpr(e: DExpr, c: mut AC) -> str
                 out = out + "    popq " + areg(i) + "\n"
                 i = i - 1
             out + "    call " + nm + "\n    pushq %rax\n"
+        DCons(tag, args) => do
+            let nlab = strlabel(tag, c)
+            let n = args.len()
+            if n == 0
+                "    leaq " + nlab + "(%rip), %rdi\n    movq $0, %rsi\n    movq $0, %rdx\n    call mkctor\n    pushq %rax\n"
+            else
+                var out = ""
+                for a in args
+                    out = out + aexpr(a, c)
+                out = out + "    movq $" + str(n * 8) + ", %rdi\n    call alloc\n    movq %rax, %rcx\n"
+                var k = n - 1
+                while k >= 0
+                    out = out + "    popq %rax\n    movq %rax, " + str(k * 8) + "(%rcx)\n"
+                    k = k - 1
+                out + "    leaq " + nlab + "(%rip), %rdi\n    movq $" + str(n) + ", %rsi\n    movq %rcx, %rdx\n    call mkctor\n    pushq %rax\n"
+        DMatch(scrut, arms) => do
+            let lab = c.nlabel
+            c.nlabel = c.nlabel + 1
+            let dep = c.depth
+            c.depth = c.depth + 1
+            let slotk = idx_of(c.locals, "_sd" + str(dep))
+            let soff = str(0 - 8 * (slotk + 1))
+            let acc = "    movq " + soff + "(%rbp), %rax\n"
+            let endl = ".Lm" + str(lab) + "_end"
+            var out = aexpr(scrut, c) + "    popq %rax\n    movq %rax, " + soff + "(%rbp)\n"
+            var i = 0
+            for arm in arms
+                let faill = ".Lm" + str(lab) + "_" + str(i + 1)
+                out = out + ".Lm" + str(lab) + "_" + str(i) + ":\n" + atest(arm.pat, acc, faill, c) + abind(arm.pat, acc, c) + aexpr(arm.body, c) + "    jmp " + endl + "\n"
+                i = i + 1
+            out = out + ".Lm" + str(lab) + "_" + str(i) + ":\n    movq $0, %rdi\n    call mkint\n    pushq %rax\n" + endl + ":\n"
+            c.depth = dep
+            out
         _ => "    movq $0, %rax\n    pushq %rax\n    # unsupported expr\n"
 
 fn afn(nm: str, params: [str], body: DExpr, c: mut AC) -> str
@@ -144,7 +252,13 @@ fn afn(nm: str, params: [str], body: DExpr, c: mut AC) -> str
     for p in params
         locals.push(p)
     collect_lets(body, locals)
+    let md = match_depth(body)
+    var di = 0
+    while di < md
+        locals.push("_sd" + str(di))
+        di = di + 1
     c.locals = locals
+    c.depth = 0
     var frame = locals.len() * 8
     if frame % 16 != 0
         frame = frame + 8
@@ -159,10 +273,10 @@ fn afn(nm: str, params: [str], body: DExpr, c: mut AC) -> str
     out + "    popq %rax\n    movq %rbp, %rsp\n    popq %rbp\n    ret\n"
 
 fn runtime_tail() -> str
-    "alloc:\n    movq heap_cur(%rip), %rax\n    movq %rax, %r10\n    addq %rdi, %r10\n    movq %r10, heap_cur(%rip)\n    ret\nmkint:\n    movq %rdi, %r11\n    movq $24, %rdi\n    call alloc\n    movq $0, (%rax)\n    movq %r11, 8(%rax)\n    ret\nmkstr:\n    movq %rdi, %r11\n    movq $24, %rdi\n    call alloc\n    movq $1, (%rax)\n    movq %r11, 16(%rax)\n    ret\nstrlen:\n    xorq %rax, %rax\nsl0:\n    cmpb $0, (%rdi,%rax)\n    je sl1\n    incq %rax\n    jmp sl0\nsl1:\n    ret\nstreq:\nse0:\n    movb (%rdi), %al\n    movb (%rsi), %cl\n    cmpb %al, %cl\n    jne se2\n    testb %al, %al\n    je se1\n    incq %rdi\n    incq %rsi\n    jmp se0\nse1:\n    movq $1, %rax\n    ret\nse2:\n    xorq %rax, %rax\n    ret\neqv:\n    movq (%rdi), %rax\n    movq (%rsi), %rcx\n    cmpq %rax, %rcx\n    jne eqv0\n    cmpq $0, %rax\n    je eqvi\n    cmpq $1, %rax\n    je eqvs\n    cmpq $2, %rax\n    je eqvc\n    jmp eqv0\neqvi:\n    movq 8(%rdi), %rax\n    cmpq 8(%rsi), %rax\n    sete %al\n    movzbq %al, %rax\n    ret\neqvs:\n    movq 16(%rdi), %rdi\n    movq 16(%rsi), %rsi\n    call streq\n    ret\neqvc:\n    movq 16(%rdi), %rdi\n    movq 16(%rsi), %rsi\n    call streq\n    ret\neqv0:\n    xorq %rax, %rax\n    ret\nprintval:\n    movq (%rdi), %rax\n    testq %rax, %rax\n    jne pv1\n    movq 8(%rdi), %rdi\n    call print_int\n    ret\npv1:\n    cmpq $1, %rax\n    jne pv2\n    movq 16(%rdi), %rdi\n    movq %rdi, %r12\n    call strlen\n    movq %rax, %rdx\n    movq %r12, %rsi\n    movq $1, %rax\n    movq $1, %rdi\n    syscall\n    movb $10, pbuf(%rip)\n    movq $1, %rax\n    movq $1, %rdi\n    leaq pbuf(%rip), %rsi\n    movq $1, %rdx\n    syscall\n    ret\npv2:\n    movq 16(%rdi), %rdi\n    movq %rdi, %r12\n    call strlen\n    movq %rax, %rdx\n    movq %r12, %rsi\n    movq $1, %rax\n    movq $1, %rdi\n    syscall\n    movb $10, pbuf(%rip)\n    movq $1, %rax\n    movq $1, %rdi\n    leaq pbuf(%rip), %rsi\n    movq $1, %rdx\n    syscall\n    ret\nprint_int:\n    movq %rdi, %rax\n    xorq %r9, %r9\n    testq %rax, %rax\n    jge 1f\n    negq %rax\n    movq $1, %r9\n1:\n    leaq pbuf+31(%rip), %rsi\n    movb $10, (%rsi)\n    movq $1, %rcx\n    movq $10, %rbx\n2:\n    decq %rsi\n    xorq %rdx, %rdx\n    divq %rbx\n    addb $48, %dl\n    movb %dl, (%rsi)\n    incq %rcx\n    testq %rax, %rax\n    jnz 2b\n    testq %r9, %r9\n    je 3f\n    decq %rsi\n    movb $45, (%rsi)\n    incq %rcx\n3:\n    movq $1, %rax\n    movq $1, %rdi\n    movq %rcx, %rdx\n    syscall\n    ret\n"
+    "alloc:\n    movq heap_cur(%rip), %rax\n    movq %rax, %r10\n    addq %rdi, %r10\n    movq %r10, heap_cur(%rip)\n    ret\nmkint:\n    movq %rdi, %r11\n    movq $24, %rdi\n    call alloc\n    movq $0, (%rax)\n    movq %r11, 8(%rax)\n    ret\nmkstr:\n    movq %rdi, %r11\n    movq $24, %rdi\n    call alloc\n    movq $1, (%rax)\n    movq %r11, 16(%rax)\n    ret\nmkctor:\n    movq %rdi, %r11\n    movq %rsi, %r13\n    movq %rdx, %r14\n    movq $40, %rdi\n    call alloc\n    movq $2, (%rax)\n    movq %r13, 8(%rax)\n    movq %r11, 16(%rax)\n    movq %r14, 24(%rax)\n    ret\nstrlen:\n    xorq %rax, %rax\nsl0:\n    cmpb $0, (%rdi,%rax)\n    je sl1\n    incq %rax\n    jmp sl0\nsl1:\n    ret\nstreq:\nse0:\n    movb (%rdi), %al\n    movb (%rsi), %cl\n    cmpb %al, %cl\n    jne se2\n    testb %al, %al\n    je se1\n    incq %rdi\n    incq %rsi\n    jmp se0\nse1:\n    movq $1, %rax\n    ret\nse2:\n    xorq %rax, %rax\n    ret\neqv:\n    movq (%rdi), %rax\n    movq (%rsi), %rcx\n    cmpq %rax, %rcx\n    jne eqv0\n    cmpq $0, %rax\n    je eqvi\n    cmpq $1, %rax\n    je eqvs\n    cmpq $2, %rax\n    je eqvc\n    jmp eqv0\neqvi:\n    movq 8(%rdi), %rax\n    cmpq 8(%rsi), %rax\n    sete %al\n    movzbq %al, %rax\n    ret\neqvs:\n    movq 16(%rdi), %rdi\n    movq 16(%rsi), %rsi\n    call streq\n    ret\neqvc:\n    movq 16(%rdi), %rdi\n    movq 16(%rsi), %rsi\n    call streq\n    ret\neqv0:\n    xorq %rax, %rax\n    ret\nprintval:\n    movq (%rdi), %rax\n    testq %rax, %rax\n    jne pv1\n    movq 8(%rdi), %rdi\n    call print_int\n    ret\npv1:\n    cmpq $1, %rax\n    jne pv2\n    movq 16(%rdi), %rdi\n    movq %rdi, %r12\n    call strlen\n    movq %rax, %rdx\n    movq %r12, %rsi\n    movq $1, %rax\n    movq $1, %rdi\n    syscall\n    movb $10, pbuf(%rip)\n    movq $1, %rax\n    movq $1, %rdi\n    leaq pbuf(%rip), %rsi\n    movq $1, %rdx\n    syscall\n    ret\npv2:\n    movq 16(%rdi), %rdi\n    movq %rdi, %r12\n    call strlen\n    movq %rax, %rdx\n    movq %r12, %rsi\n    movq $1, %rax\n    movq $1, %rdi\n    syscall\n    movb $10, pbuf(%rip)\n    movq $1, %rax\n    movq $1, %rdi\n    leaq pbuf(%rip), %rsi\n    movq $1, %rdx\n    syscall\n    ret\nprint_int:\n    movq %rdi, %rax\n    xorq %r9, %r9\n    testq %rax, %rax\n    jge 1f\n    negq %rax\n    movq $1, %r9\n1:\n    leaq pbuf+31(%rip), %rsi\n    movb $10, (%rsi)\n    movq $1, %rcx\n    movq $10, %rbx\n2:\n    decq %rsi\n    xorq %rdx, %rdx\n    divq %rbx\n    addb $48, %dl\n    movb %dl, (%rsi)\n    incq %rcx\n    testq %rax, %rax\n    jnz 2b\n    testq %r9, %r9\n    je 3f\n    decq %rsi\n    movb $45, (%rsi)\n    incq %rcx\n3:\n    movq $1, %rax\n    movq $1, %rdi\n    movq %rcx, %rdx\n    syscall\n    ret\n"
 
 fn agen(prog: [DStmt]) -> str
-    var c = AC(locals: [], nlabel: 0, data: "", nstr: 0)
+    var c = AC(locals: [], nlabel: 0, data: "", nstr: 0, depth: 0)
     var funcs = ""
     var main = ""
     for s in prog
