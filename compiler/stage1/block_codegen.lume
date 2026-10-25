@@ -1,11 +1,12 @@
 ## block_codegen.lume — generate C from the block language (library module).
-## while/if/assignment/print -> C; loops compile to native code via the system C compiler.
+## Compiles functions, while/if/assignment/print/return/calls to C -> native.
 use block_ast
 
 fn bcexpr(e: Expr) -> str
     match e
         Num(v)        => "{v}"
         Name(id)      => id
+        Call(nm, args) => nm + "(" + args.map(bcexpr).join(", ") + ")"
         Bin(op, l, r) => "(" + bcexpr(l) + " " + op + " " + bcexpr(r) + ")"
 
 fn collect_vars(stmts: [Stmt], acc: mut map[str, int])
@@ -20,6 +21,10 @@ fn collect_vars(stmts: [Stmt], acc: mut map[str, int])
                 collect_vars(e, acc)
             Print(v) => do
                 let _ = 0
+            Return(v) => do
+                let _ = 0
+            Fn(nm, ps, b) => do
+                let _ = 0
 
 fn emit_stmts(stmts: [Stmt], ind: str) -> str
     var out = ""
@@ -29,16 +34,53 @@ fn emit_stmts(stmts: [Stmt], ind: str) -> str
                 out = out + ind + n + " = " + bcexpr(v) + ";\n"
             Print(v) => do
                 out = out + ind + "printf(\"%lld\\n\", (long long)(" + bcexpr(v) + "));\n"
+            Return(v) => do
+                out = out + ind + "return " + bcexpr(v) + ";\n"
             While(c, body) => do
                 out = out + ind + "while (" + bcexpr(c) + ") {{\n" + emit_stmts(body, ind + "    ") + ind + "}}\n"
             If(c, t, e) => do
                 out = out + ind + "if (" + bcexpr(c) + ") {{\n" + emit_stmts(t, ind + "    ") + ind + "}} else {{\n" + emit_stmts(e, ind + "    ") + ind + "}}\n"
+            Fn(nm, ps, b) => do
+                let _ = 0
     out
 
-fn cgen_block(prog: [Stmt]) -> str
+fn param_has(params: [str], k: str) -> bool
+    for p in params
+        if p == k
+            return true
+    false
+
+fn cparams(params: [str]) -> str = params.map(|p| "long long " + p).join(", ")
+
+fn cfun(nm: str, params: [str], body: [Stmt]) -> str
     var vars = {}
-    collect_vars(prog, vars)
+    collect_vars(body, vars)
+    var decls = ""
+    for k in vars.keys().sorted()
+        if not param_has(params, k)
+            decls = decls + "    long long " + k + " = 0;\n"
+    "long long " + nm + "(" + cparams(params) + ") {{\n" + decls + emit_stmts(body, "    ") + "    return 0;\n}}\n"
+
+fn cgen_block(prog: [Stmt]) -> str
+    var funcs = ""
+    var tops = []
+    for s in prog
+        match s
+            Fn(nm, ps, b) => do
+                funcs = funcs + cfun(nm, ps, b)
+            Assign(n, v) => do
+                tops.push(s)
+            Print(v) => do
+                tops.push(s)
+            While(c, b) => do
+                tops.push(s)
+            If(c, a, b) => do
+                tops.push(s)
+            Return(v) => do
+                tops.push(s)
+    var vars = {}
+    collect_vars(tops, vars)
     var decls = ""
     for k in vars.keys().sorted()
         decls = decls + "    long long " + k + " = 0;\n"
-    "#include <stdio.h>\nint main(void) {{\n" + decls + emit_stmts(prog, "    ") + "    return 0;\n}}\n"
+    "#include <stdio.h>\n" + funcs + "int main(void) {{\n" + decls + emit_stmts(tops, "    ") + "    return 0;\n}}\n"

@@ -49,6 +49,9 @@ if command -v cc >/dev/null 2>&1; then
     # block language (loops, if) -> C -> native binary
     $BIN run ../../compiler/stage1/block_codegen_demo.lume > "$cgtmp/blk.c" 2>/dev/null
     if cc -o "$cgtmp/blk" "$cgtmp/blk.c" 2>/dev/null && "$cgtmp/blk" 2>/dev/null | diff -u ../../tests/conformance/stage1/block_codegen_native.expected - >/dev/null; then ok "block language (loops) -> native binary"; else bad "block language (loops) -> native binary"; fi
+    # block language with FUNCTIONS + recursion -> C -> native binary
+    $BIN run ../../compiler/stage1/block_fn_demo.lume > "$cgtmp/bf.c" 2>/dev/null
+    if cc -o "$cgtmp/bf" "$cgtmp/bf.c" 2>/dev/null && "$cgtmp/bf" 2>/dev/null | diff -u ../../tests/conformance/stage1/block_fn_native.expected - >/dev/null; then ok "block language (functions+recursion) -> native binary"; else bad "block language (functions) -> native binary"; fi
     # a full calculator compiler WRITTEN IN the ML core, reading its source from a file
     if $BIN run ../../compiler/stage1/compiler_in_core.lume ../../compiler/stage1/calc.src 2>/dev/null | diff -u ../../tests/conformance/stage1/core_compiler.expected - >/dev/null; then ok "compiler written in the ML core (lex+parse+eval)"; else bad "compiler written in the ML core"; fi
     # close the loop: the core-written compiler emits a full C program -> cc -> native binary

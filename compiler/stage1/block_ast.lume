@@ -2,6 +2,7 @@
 type Expr = enum
     Num(value: int)
     Name(id: str)
+    Call(name: str, args: [Expr])
     Bin(op: str, left: Expr, right: Expr)
 
 type Stmt = enum
@@ -9,3 +10,5 @@ type Stmt = enum
     Print(value: Expr)
     While(cond: Expr, body: [Stmt])
     If(cond: Expr, then_body: [Stmt], else_body: [Stmt])
+    Fn(name: str, params: [str], body: [Stmt])
+    Return(value: Expr)
