@@ -249,6 +249,39 @@ static void arity_walk(const Node *n, const FnSigs *sigs, DiagList *d) {
     for (int i = 0; i < n->nkid; i++) arity_walk(n->kids[i], sigs, d);
 }
 
+/* ---- control-flow context: break/continue only in a loop, return only in a fn ----
+ * A function or closure boundary resets the loop context (break cannot cross it). */
+static void ctx_walk(const Node *n, int fn_depth, int loop_depth, DiagList *d) {
+    if (!n) return;
+    switch (n->kind) {
+    case N_BREAK:
+    case N_CONTINUE:
+        if (loop_depth == 0)
+            diag_add(d, SEV_ERROR, "C0001", n->line, n->col, n->text_len ? n->text_len : 1,
+                     n->kind == N_BREAK ? "`break` outside a loop" : "`continue` outside a loop",
+                     "break/continue may only appear inside while/for/loop");
+        return;
+    case N_RETURN:
+        if (fn_depth == 0)
+            diag_add(d, SEV_ERROR, "C0002", n->line, n->col, n->text_len ? n->text_len : 1,
+                     "`return` outside a function", "return may only appear inside a function body");
+        for (int i = 0; i < n->nkid; i++) ctx_walk(n->kids[i], fn_depth, loop_depth, d);
+        return;
+    case N_FN:
+    case N_CLOSURE:
+        for (int i = 0; i < n->nkid; i++) ctx_walk(n->kids[i], fn_depth + 1, 0, d);
+        return;
+    case N_WHILE:
+    case N_FOR:
+    case N_LOOP:
+        for (int i = 0; i < n->nkid; i++) ctx_walk(n->kids[i], fn_depth, loop_depth + 1, d);
+        return;
+    default:
+        for (int i = 0; i < n->nkid; i++) ctx_walk(n->kids[i], fn_depth, loop_depth, d);
+        return;
+    }
+}
+
 /* run name resolution + basic literal type checks + duplicate detection + arity */
 void lume_resolve(const Node *module, DiagList *diags) {
     if (!module) return;
@@ -263,4 +296,5 @@ void lume_resolve(const Node *module, DiagList *diags) {
     sigs_build(module, &sigs);
     arity_walk(module, &sigs, diags);
     free(sigs.v);
+    ctx_walk(module, 0, 0, diags);
 }
