@@ -1,0 +1,5 @@
+fn echo(tag) = tag + "[" + read() + "]"
+print read()
+print echo("second")
+print read() + "|" + read()
+print count(read())

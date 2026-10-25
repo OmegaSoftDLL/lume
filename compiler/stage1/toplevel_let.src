@@ -1,0 +1,29 @@
+let g = 2 + 3
+let name = "lume"
+fn addg(x) = x + g
+fn usesg() = g * 2
+fn shadow(g) = g + 1
+fn viaop() = addg(1) + usesg()
+fn greet(s) = name + ":" + s
+fn inner(n) = let g = n * 10 in g + 1
+fn after(n) = g + n
+let h = addg(10)
+print g
+print addg(1)
+print usesg()
+print shadow(100)
+print viaop()
+print h
+print greet("hi")
+print inner(4)
+print after(0)
+print let g = 7 in g + addg(0)
+print g
+print late
+let late = 9
+print late
+let g = g + 1
+print addg(0)
+print match 3
+    3 => g
+    _ => 0

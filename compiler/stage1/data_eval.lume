@@ -74,6 +74,13 @@ fn match_pat(p: Pat, v: RV, env: mut map[str, RV]) -> bool
                             ok = false
                     ok
 
+## a real copy: `var b = a` aliases a map, so a let-in / match binding would leak into the outer scope
+fn env_copy(env: map[str, RV]) -> map[str, RV]
+    var out = {}
+    for e in env.entries()
+        out[e[0]] = e[1]
+    out
+
 fn deval(e: DExpr, env: map[str, RV], fns: [DStmt]) -> RV
     match e
         DInt(n)       => VInt(n: n)
@@ -86,7 +93,15 @@ fn deval(e: DExpr, env: map[str, RV], fns: [DStmt]) -> RV
                 match f
                     DFnS(fname, params, body) => do
                         if not found and fname == name
+                            ## top-level lets are visible inside functions (the "$g" snapshot)
                             var env2 = {}
+                            match env.get("$g") ?? VInt(n: 0)
+                                VRec(gm) => do
+                                    for e in gm.entries()
+                                        env2[e[0]] = e[1]
+                                    env2["$g"] = VRec(fields: gm)
+                                _ => do
+                                    let _ = 0
                             for i in 0..params.len()
                                 env2[params[i]] = deval(args[i], env, fns)
                             result = deval(body, env2, fns)
@@ -120,6 +135,14 @@ fn deval(e: DExpr, env: map[str, RV], fns: [DStmt]) -> RV
                 result = VInt(n: rv_str(deval(args[0], env, fns)).parse_int() ?? 0)
             if not found and name == "str"
                 result = VStr(s: rv_str(deval(args[0], env, fns)))
+            if not found and name == "read"
+                ## one line of stdin (up to \n or EOF); lume0 has no stdin builtin, so this
+                ## reads /dev/stdin (works for `< file`, not pipes) and only ever sees the first line
+                let rin = io.read_file("/dev/stdin")
+                var rk = 0
+                while rk < rin.len() and rin[rk..rk + 1] != "\n"
+                    rk = rk + 1
+                result = VStr(s: rin[0..rk])
             if not found and name == "nl"
                 result = VStr(s: "\n")
             if not found and name == "dq"
@@ -183,7 +206,7 @@ fn deval(e: DExpr, env: map[str, RV], fns: [DStmt]) -> RV
                 "!=" => VInt(n: if a != b then 1 else 0)
                 _    => VInt(n: 0)
         DLetIn(name, value, body) => do
-            var env2 = env
+            var env2 = env_copy(env)
             env2[name] = deval(value, env2, fns)
             deval(body, env2, fns)
         DIf(c, a, b) => do
@@ -197,7 +220,7 @@ fn deval(e: DExpr, env: map[str, RV], fns: [DStmt]) -> RV
             var done = false
             for arm in arms
                 if not done
-                    var local = env
+                    var local = env_copy(env)
                     if match_pat(arm.pat, v, local)
                         result = deval(arm.body, local, fns)
                         done = true
@@ -217,7 +240,16 @@ fn run_data(prog: [DStmt])
     for s in prog
         match s
             DLet(name, v) => do
-                env[name] = deval(v, env, fns)
+                let gv = deval(v, env, fns)
+                env[name] = gv
+                var gm = {}
+                match env.get("$g") ?? VInt(n: 0)
+                    VRec(old) => do
+                        gm = old
+                    _ => do
+                        let _ = 0
+                gm[name] = gv
+                env["$g"] = VRec(fields: gm)
             DPrint(v) => do
                 io.println(rv_show(deval(v, env, fns)))
             DFnS(n, p, b) => do

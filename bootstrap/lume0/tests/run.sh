@@ -155,6 +155,25 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ]; then
     if $BIN asm "$ntmp/bi.s" "$ntmp/bi" >/dev/null 2>&1 && "$ntmp/bi" 2>/dev/null | diff -u ../../tests/conformance/stage1/bigints_asm.expected - >/dev/null; then ok "no-toolchain: 64-bit integer literals (movabs) -> native"; else bad "no-toolchain: 64-bit integer literals"; fi
     $BIN run ../../compiler/stage1/data_asm_cc.lume ../../compiler/stage1/esc_native.src "$ntmp/en.s" >/dev/null 2>&1
     if $BIN asm "$ntmp/en.s" "$ntmp/en" >/dev/null 2>&1 && "$ntmp/en" 2>/dev/null | diff -u ../../tests/conformance/stage1/esc_native_asm.expected - >/dev/null; then ok "no-toolchain: string escapes (\\n \\t \\\" \\\\) -> native"; else bad "no-toolchain: string escapes -> native"; fi
+    # top-level `let` -> globals (visible to fns and prints, shadowed by params / let-in / pattern binds); native must equal the pinned expected AND the interpreter
+    $BIN run ../../compiler/stage1/data_asm_cc.lume ../../compiler/stage1/toplevel_let.src "$ntmp/tl.s" >/dev/null 2>&1
+    if $BIN asm "$ntmp/tl.s" "$ntmp/tl" >/dev/null 2>&1 && "$ntmp/tl" 2>/dev/null | diff -u ../../tests/conformance/stage1/toplevel_let_asm.expected - >/dev/null; then ok "no-toolchain: top-level let (globals) -> native"; else bad "no-toolchain: top-level let (globals) -> native"; fi
+    if $BIN run ../../compiler/stage1/compiler_in_core.lume ../../compiler/stage1/toplevel_let.src 2>/dev/null | diff -u ../../tests/conformance/stage1/toplevel_let_asm.expected - >/dev/null; then ok "interpreter: top-level let (globals) == native expected"; else bad "interpreter: top-level let (globals) == native expected"; fi
+    # read(): one line of stdin. native is fed via a PIPE and via a file; the interpreter (lume0 has no stdin builtin; it reads /dev/stdin) only supports a redirected file and the first line
+    printf 'hello\nworld\n' >"$ntmp/in1.txt"
+    $BIN run ../../compiler/stage1/data_asm_cc.lume ../../compiler/stage1/read_line.src "$ntmp/rl.s" >/dev/null 2>&1
+    if $BIN asm "$ntmp/rl.s" "$ntmp/rl" >/dev/null 2>&1 && cat "$ntmp/in1.txt" | "$ntmp/rl" 2>/dev/null | diff -u ../../tests/conformance/stage1/read_line_asm.expected - >/dev/null && "$ntmp/rl" <"$ntmp/in1.txt" 2>/dev/null | diff -u ../../tests/conformance/stage1/read_line_asm.expected - >/dev/null; then ok "no-toolchain: read() one line of stdin (pipe + file) -> native"; else bad "no-toolchain: read() one line of stdin -> native"; fi
+    if $BIN run ../../compiler/stage1/compiler_in_core.lume ../../compiler/stage1/read_line.src <"$ntmp/in1.txt" 2>/dev/null | diff -u ../../tests/conformance/stage1/read_line_asm.expected - >/dev/null; then ok "interpreter: read() == native expected (same stdin)"; else bad "interpreter: read() == native expected"; fi
+    # EOF without trailing newline, empty stdin, and an empty first line: native must equal the interpreter on each
+    for inp in 'no newline' '' '\nafter' 'a\r\nb'; do
+        printf "$inp" >"$ntmp/in2.txt"
+        $BIN run ../../compiler/stage1/compiler_in_core.lume ../../compiler/stage1/read_line.src <"$ntmp/in2.txt" >"$ntmp/o_i.txt" 2>/dev/null
+        cat "$ntmp/in2.txt" | "$ntmp/rl" >"$ntmp/o_n.txt" 2>/dev/null
+        if [ -s "$ntmp/o_n.txt" ] && diff -u "$ntmp/o_i.txt" "$ntmp/o_n.txt" >/dev/null; then ok "read() edge input native == interpreter"; else bad "read() edge input native == interpreter"; fi
+    done
+    # several read() calls consume successive lines (native only: pinned by hand, the interpreter cannot keep a stdin cursor)
+    $BIN run ../../compiler/stage1/data_asm_cc.lume ../../compiler/stage1/read_lines.src "$ntmp/rls.s" >/dev/null 2>&1
+    if $BIN asm "$ntmp/rls.s" "$ntmp/rls" >/dev/null 2>&1 && printf 'one\ntwo\nthree\nfour' | "$ntmp/rls" 2>/dev/null | diff -u ../../tests/conformance/stage1/read_lines_asm.expected - >/dev/null; then ok "no-toolchain: successive read() calls -> native (pinned)"; else bad "no-toolchain: successive read() calls -> native"; fi
     rm -rf "$ntmp"
 else
     ok "no-toolchain ELF pipeline (skipped: not linux/x86_64)"
