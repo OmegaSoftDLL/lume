@@ -1,0 +1,5 @@
+fn ev(e) = match e
+    Lit(n) => n
+    Bin(op, a, b) => if op == "+" then ev(a) + ev(b) else if op == "-" then ev(a) - ev(b) else if op == "*" then ev(a) * ev(b) else ev(a) / ev(b)
+print ev(Bin("+", Lit(2), Bin("*", Lit(3), Lit(4))))
+print ev(Bin("-", Bin("*", Lit(10), Lit(5)), Lit(8)))
