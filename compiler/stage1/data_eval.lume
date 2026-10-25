@@ -116,6 +116,8 @@ fn deval(e: DExpr, env: map[str, RV], fns: [DStmt]) -> RV
                 let sa = rv_int(deval(args[1], env, fns))
                 let sb = rv_int(deval(args[2], env, fns))
                 result = VStr(s: ssv[sa..sb])
+            if not found and name == "toint"
+                result = VInt(n: rv_str(deval(args[0], env, fns)).parse_int() ?? 0)
             result
         DStr(sv)      => VStr(s: sv)
         DList(elems)  => VList(items: elems.map(|a| deval(a, env, fns)))
@@ -173,6 +175,10 @@ fn deval(e: DExpr, env: map[str, RV], fns: [DStmt]) -> RV
                 "==" => VInt(n: if a == b then 1 else 0)
                 "!=" => VInt(n: if a != b then 1 else 0)
                 _    => VInt(n: 0)
+        DLetIn(name, value, body) => do
+            var env2 = env
+            env2[name] = deval(value, env2, fns)
+            deval(body, env2, fns)
         DIf(c, a, b) => do
             if rv_int(deval(c, env, fns)) != 0
                 deval(a, env, fns)

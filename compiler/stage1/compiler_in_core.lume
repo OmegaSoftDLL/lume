@@ -1,0 +1,11 @@
+## compiler_in_core.lume — runs a complete calculator COMPILER written in the ML-core language,
+## read from a source file (calc.src): tokenizer + precedence parser + evaluator, all in Lume's
+## own core. Usage: lume0 run compiler_in_core.lume compiler/stage1/calc.src
+use data_ast
+use data_parser
+use data_eval
+use std.io
+
+fn main()
+    let src = io.read_file(env.args()[0])
+    run_data(parse_data_program(src))

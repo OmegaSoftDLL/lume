@@ -17,6 +17,7 @@ type DExpr = enum
     DField(obj: DExpr, name: str)
     DBin(op: str, l: DExpr, r: DExpr)
     DIf(cond: DExpr, then_val: DExpr, else_val: DExpr)
+    DLetIn(name: str, value: DExpr, body: DExpr)
     DMatch(scrut: DExpr, arms: [Arm])
 
 type Arm = record
