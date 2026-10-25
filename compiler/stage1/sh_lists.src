@@ -1,0 +1,53 @@
+fn range(a, b) = if a >= b then Nil else Cons(a, range(a + 1, b))
+fn map_sq(xs) = match xs
+    Nil => Nil
+    Cons(h, t) => Cons(h * h, map_sq(t))
+fn keep_even(xs) = match xs
+    Nil => Nil
+    Cons(h, t) => if h % 2 == 0 then Cons(h, keep_even(t)) else keep_even(t)
+fn sum(xs) = match xs
+    Nil => 0
+    Cons(h, t) => h + sum(t)
+fn len(xs) = match xs
+    Nil => 0
+    Cons(h, t) => 1 + len(t)
+fn append(a, b) = match a
+    Nil => b
+    Cons(h, t) => Cons(h, append(t, b))
+fn rev(xs, acc) = match xs
+    Nil => acc
+    Cons(h, t) => rev(t, Cons(h, acc))
+fn ins(x, xs) = match xs
+    Nil => Cons(x, Nil)
+    Cons(h, t) => if x <= h then Cons(x, xs) else Cons(h, ins(x, t))
+fn isort(xs) = match xs
+    Nil => Nil
+    Cons(h, t) => ins(h, isort(t))
+fn show(xs) = match xs
+    Nil => "."
+    Cons(h, t) => str(h) + " " + show(t)
+fn zip2(x, xt, b) = match b
+    Nil => Nil
+    Cons(y, yt) => Cons({l: x, r: y}, zip(xt, yt))
+fn zip(a, b) = match a
+    Nil => Nil
+    Cons(x, xt) => zip2(x, xt, b)
+fn dots(ps) = match ps
+    Nil => 0
+    Cons(p, t) => p.l * p.r + dots(t)
+fn take(n, xs) = if n == 0 then Nil else match xs
+    Nil => Nil
+    Cons(h, t) => Cons(h, take(n - 1, t))
+fn zsum(ps) = match ps
+    Nil => Nil
+    Cons(p, t) => Cons(p.l + p.r, zsum(t))
+print show(range(0, 10))
+print show(map_sq(range(1, 8)))
+print show(keep_even(map_sq(range(1, 12))))
+print sum(map_sq(range(1, 101)))
+print len(append(range(0, 7), range(0, 5)))
+print show(rev(range(0, 6), Nil))
+print show(isort(Cons(5, Cons(2, Cons(9, Cons(1, Cons(5, Cons(6, Cons(0, Cons(3, Nil))))))))))
+print show(zsum(zip(range(1, 4), range(10, 20))))
+print dots(zip(range(1, 5), range(5, 9)))
+print show(take(3, range(100, 200)))

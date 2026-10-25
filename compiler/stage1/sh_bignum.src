@@ -1,0 +1,28 @@
+fn rev(xs, acc) = match xs
+    Nil => acc
+    Cons(h, t) => rev(t, Cons(h, acc))
+fn digits(n) = if n < 10 then Cons(n, Nil) else Cons(n % 10, digits(n / 10))
+fn addb(x, xt, b, c) = match b
+    Nil => let s = x + c in Cons(s % 10, addl(xt, Nil, s / 10))
+    Cons(y, yt) => let s = x + y + c in Cons(s % 10, addl(xt, yt, s / 10))
+fn addn(b, c) = match b
+    Nil => if c == 0 then Nil else Cons(c, Nil)
+    Cons(y, yt) => let s = y + c in Cons(s % 10, addl(Nil, yt, s / 10))
+fn addl(a, b, c) = match a
+    Nil => addn(b, c)
+    Cons(x, xt) => addb(x, xt, b, c)
+fn mul1(a, k, c) = match a
+    Nil => if c == 0 then Nil else Cons(c % 10, mul1(Nil, k, c / 10))
+    Cons(x, xt) => let p = x * k + c in Cons(p % 10, mul1(xt, k, p / 10))
+fn fact(n) = if n < 2 then Cons(1, Nil) else mul1(fact(n - 1), n, 0)
+fn fibn(n, a, b) = if n == 0 then a else fibn(n - 1, b, addl(a, b, 0))
+fn show(xs) = match xs
+    Nil => ""
+    Cons(h, t) => str(h) + show(t)
+fn showbig(xs) = show(rev(xs, Nil))
+print showbig(addl(digits(99999), digits(1), 0))
+print showbig(addl(digits(123456789), digits(987654321), 0))
+print showbig(fact(20))
+print showbig(fact(30))
+print showbig(fibn(90, Cons(0, Nil), Cons(1, Nil)))
+print showbig(fibn(150, Cons(0, Nil), Cons(1, Nil)))

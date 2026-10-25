@@ -1,0 +1,47 @@
+fn insert(t, k) = match t
+    Leaf => Node(Leaf, k, Leaf)
+    Node(l, v, r) => if k < v then Node(insert(l, k), v, r) else if k > v then Node(l, v, insert(r, k)) else t
+fn build(xs, t) = match xs
+    Nil => t
+    Cons(h, rest) => build(rest, insert(t, h))
+fn sum(t) = match t
+    Leaf => 0
+    Node(l, v, r) => sum(l) + v + sum(r)
+fn size(t) = match t
+    Leaf => 0
+    Node(l, v, r) => size(l) + 1 + size(r)
+fn max2(a, b) = if a > b then a else b
+fn depth(t) = match t
+    Leaf => 0
+    Node(l, v, r) => 1 + max2(depth(l), depth(r))
+fn member(t, k) = match t
+    Leaf => 0
+    Node(l, v, r) => if k == v then 1 else if k < v then member(l, k) else member(r, k)
+fn inorder(t, acc) = match t
+    Leaf => acc
+    Node(l, v, r) => inorder(l, Cons(v, inorder(r, acc)))
+fn join2(h, rest) = match rest
+    Nil => str(h)
+    Cons(h2, t2) => str(h) + "," + join2(h2, t2)
+fn join(xs) = match xs
+    Nil => ""
+    Cons(h, rest) => join2(h, rest)
+fn mirror(t) = match t
+    Leaf => Leaf
+    Node(l, v, r) => Node(mirror(r), v, mirror(l))
+fn minv2(l, v) = match l
+    Leaf => v
+    Node(a, b, c) => minv2(a, b)
+fn minv(t) = match t
+    Leaf => 0 - 1
+    Node(l, v, r) => minv2(l, v)
+fn data() = Cons(50, Cons(30, Cons(70, Cons(20, Cons(40, Cons(60, Cons(80, Cons(30, Cons(65, Cons(10, Nil))))))))))
+print sum(build(data(), Leaf))
+print size(build(data(), Leaf))
+print depth(build(data(), Leaf))
+print member(build(data(), Leaf), 65)
+print member(build(data(), Leaf), 66)
+print join(inorder(build(data(), Leaf), Nil))
+print join(inorder(mirror(build(data(), Leaf)), Nil))
+print minv(build(data(), Leaf))
+print depth(build(Cons(1, Cons(2, Cons(3, Cons(4, Cons(5, Cons(6, Cons(7, Cons(8, Nil)))))))), Leaf))

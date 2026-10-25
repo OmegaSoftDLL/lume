@@ -1,0 +1,33 @@
+fn nth(xs, i) = match xs
+    Nil => Halt
+    Cons(h, t) => if i == 0 then h else nth(t, i - 1)
+fn pop2b(b, r) = match r
+    Cons(a, r2) => {a: a, b: b, rest: r2}
+    Nil => {a: 0, b: 0, rest: Nil}
+fn pop2(st) = match st
+    Cons(b, r) => pop2b(b, r)
+    Nil => {a: 0, b: 0, rest: Nil}
+fn headof(st) = match st
+    Cons(h, t) => h
+    Nil => 0
+fn tailof(st) = match st
+    Cons(h, t) => t
+    Nil => Nil
+fn exec(prog, pc, st, out, fuel) = if fuel == 0 then out + "|fuel" else match nth(prog, pc)
+    Halt => out
+    Push(n) => exec(prog, pc + 1, Cons(n, st), out, fuel - 1)
+    Add => let p = pop2(st) in exec(prog, pc + 1, Cons(p.a + p.b, p.rest), out, fuel - 1)
+    Sub => let p = pop2(st) in exec(prog, pc + 1, Cons(p.a - p.b, p.rest), out, fuel - 1)
+    Mul => let p = pop2(st) in exec(prog, pc + 1, Cons(p.a * p.b, p.rest), out, fuel - 1)
+    Dup => exec(prog, pc + 1, Cons(headof(st), st), out, fuel - 1)
+    Out => exec(prog, pc + 1, tailof(st), out + str(headof(st)) + ";", fuel - 1)
+    Jnz(addr) => if headof(st) != 0 then exec(prog, addr, st, out, fuel - 1) else exec(prog, pc + 1, st, out, fuel - 1)
+    Jmp(addr) => exec(prog, addr, st, out, fuel - 1)
+fn p1() = Cons(Push(6), Cons(Push(7), Cons(Mul, Cons(Out, Cons(Halt, Nil)))))
+fn p2() = Cons(Push(5), Cons(Dup, Cons(Out, Cons(Push(1), Cons(Sub, Cons(Dup, Cons(Jnz(1), Cons(Halt, Nil))))))))
+fn p3() = Cons(Push(1), Cons(Jmp(0), Nil))
+fn p4() = Cons(Push(2), Cons(Push(3), Cons(Add, Cons(Dup, Cons(Mul, Cons(Out, Nil))))))
+print exec(p1(), 0, Nil, "", 100)
+print exec(p2(), 0, Nil, "", 100)
+print exec(p3(), 0, Nil, "", 50)
+print exec(p4(), 0, Nil, "", 100)
