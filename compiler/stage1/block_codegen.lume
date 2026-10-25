@@ -15,6 +15,7 @@ fn bcexpr(e: Expr) -> str
         Num(v)        => "{v}"
         Name(id)      => id
         StrLit(txt)   => txt
+        Index(nm, ix) => nm + "[" + bcexpr(ix) + "]"
         Call(nm, args) => nm + "(" + args.map(bcexpr).join(", ") + ")"
         Bin(op, l, r) => "(" + bcexpr(l) + " " + bcop(op) + " " + bcexpr(r) + ")"
 
@@ -32,8 +33,39 @@ fn collect_vars(stmts: [Stmt], acc: mut map[str, int])
                 let _ = 0
             Return(v) => do
                 let _ = 0
+            ArrDecl(nm, sz) => do
+                let _ = 0
+            AssignIdx(nm, ix, v) => do
+                let _ = 0
             Fn(nm, ps, b) => do
                 let _ = 0
+
+fn collect_arrays(stmts: [Stmt], acc: mut map[str, str])
+    for s in stmts
+        match s
+            ArrDecl(nm, sz) => do
+                acc[nm] = bcexpr(sz)
+            While(c, body) => do
+                collect_arrays(body, acc)
+            If(c, t, e) => do
+                collect_arrays(t, acc)
+                collect_arrays(e, acc)
+            Assign(n, v) => do
+                let _ = 0
+            AssignIdx(n, ix, v) => do
+                let _ = 0
+            Print(v) => do
+                let _ = 0
+            Return(v) => do
+                let _ = 0
+            Fn(nm, ps, b) => do
+                let _ = 0
+
+fn arr_decls(acc: map[str, str]) -> str
+    var out = ""
+    for k in acc.keys().sorted()
+        out = out + "    long long " + k + "[" + acc[k] + "] = {{0}};\n"
+    out
 
 fn print_c(v: Expr, ind: str) -> str
     match v
@@ -54,6 +86,10 @@ fn emit_stmts(stmts: [Stmt], ind: str) -> str
                 out = out + ind + "while (" + bcexpr(c) + ") {{\n" + emit_stmts(body, ind + "    ") + ind + "}}\n"
             If(c, t, e) => do
                 out = out + ind + "if (" + bcexpr(c) + ") {{\n" + emit_stmts(t, ind + "    ") + ind + "}} else {{\n" + emit_stmts(e, ind + "    ") + ind + "}}\n"
+            ArrDecl(nm, sz) => do
+                let _ = 0
+            AssignIdx(nm, ix, v) => do
+                out = out + ind + nm + "[" + bcexpr(ix) + "] = " + bcexpr(v) + ";\n"
             Fn(nm, ps, b) => do
                 let _ = 0
     out
@@ -69,11 +105,13 @@ fn cparams(params: [str]) -> str = params.map(|p| "long long " + p).join(", ")
 fn cfun(nm: str, params: [str], body: [Stmt]) -> str
     var vars = {}
     collect_vars(body, vars)
+    var arrs = {}
+    collect_arrays(body, arrs)
     var decls = ""
     for k in vars.keys().sorted()
         if not param_has(params, k)
             decls = decls + "    long long " + k + " = 0;\n"
-    "long long " + nm + "(" + cparams(params) + ") {{\n" + decls + emit_stmts(body, "    ") + "    return 0;\n}}\n"
+    "long long " + nm + "(" + cparams(params) + ") {{\n" + decls + arr_decls(arrs) + emit_stmts(body, "    ") + "    return 0;\n}}\n"
 
 fn cgen_block(prog: [Stmt]) -> str
     var funcs = ""
@@ -92,9 +130,15 @@ fn cgen_block(prog: [Stmt]) -> str
                 tops.push(s)
             Return(v) => do
                 tops.push(s)
+            ArrDecl(nm, sz) => do
+                tops.push(s)
+            AssignIdx(nm, ix, v) => do
+                tops.push(s)
     var vars = {}
     collect_vars(tops, vars)
+    var arrs = {}
+    collect_arrays(tops, arrs)
     var decls = ""
     for k in vars.keys().sorted()
         decls = decls + "    long long " + k + " = 0;\n"
-    "#include <stdio.h>\n" + funcs + "int main(void) {{\n" + decls + emit_stmts(tops, "    ") + "    return 0;\n}}\n"
+    "#include <stdio.h>\n" + funcs + "int main(void) {{\n" + decls + arr_decls(arrs) + emit_stmts(tops, "    ") + "    return 0;\n}}\n"
