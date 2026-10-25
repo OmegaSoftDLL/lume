@@ -1,0 +1,31 @@
+## loop_native.lume — iterative algorithms through the direct x86-64 backend (no C).
+## var + while + reassignment compile straight to machine code via syscalls.
+## lume0 emit-asm loop_native.lume l.s ; as -o l.o l.s ; ld -o l l.o ; ./l
+fn sumto(n: int) -> int
+    var acc = 0
+    var i = 1
+    while i <= n
+        acc = acc + i
+        i = i + 1
+    acc
+
+fn fact(n: int) -> int
+    var p = 1
+    var k = 2
+    while k <= n
+        p = p * k
+        k = k + 1
+    p
+
+fn gcd(a: int, b: int) -> int
+    var x = a
+    var y = b
+    while y > 0
+        var t = y
+        y = x % y
+        x = t
+    x
+
+sumto(100)
+fact(6)
+gcd(1071, 462)

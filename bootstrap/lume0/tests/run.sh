@@ -83,6 +83,8 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && command -v as 
     if as -o "$atmp/a.o" "$atmp/a.s" 2>/dev/null && ld -o "$atmp/a" "$atmp/a.o" 2>/dev/null && "$atmp/a" 2>/dev/null | diff -u ../../tests/conformance/stage1/arith_native.expected - >/dev/null; then ok "x86-64 asm -> native (arithmetic, no C)"; else bad "x86-64 asm -> native (arithmetic, no C)"; fi
     $BIN emit-asm ../../compiler/stage1/fib_sample.lume "$atmp/f.s" 2>/dev/null
     if as -o "$atmp/f.o" "$atmp/f.s" 2>/dev/null && ld -o "$atmp/f" "$atmp/f.o" 2>/dev/null && "$atmp/f" 2>/dev/null | diff -u ../../tests/conformance/stage1/fib_native.expected - >/dev/null; then ok "x86-64 asm -> native (recursion + if, no C)"; else bad "x86-64 asm -> native (recursion + if, no C)"; fi
+    $BIN emit-asm ../../compiler/stage1/loop_native.lume "$atmp/l.s" 2>/dev/null
+    if as -o "$atmp/l.o" "$atmp/l.s" 2>/dev/null && ld -o "$atmp/l" "$atmp/l.o" 2>/dev/null && "$atmp/l" 2>/dev/null | diff -u ../../tests/conformance/stage1/loop_native_asm.expected - >/dev/null; then ok "x86-64 asm -> native (var + while + assignment, no C)"; else bad "x86-64 asm -> native (var + while + assignment, no C)"; fi
     rm -rf "$atmp"
 else
     ok "x86-64 asm backend (skipped: not linux/x86_64 or no as/ld)"

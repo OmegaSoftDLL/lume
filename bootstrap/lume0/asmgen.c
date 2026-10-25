@@ -31,6 +31,19 @@ static long long pint(const char *s, int len) {
 }
 
 static void gen_expr(Asm *a, const Node *n);
+static void gen_stmt(Asm *a, const Node *n);
+static void gen_block_value(Asm *a, const Node *n);
+
+/* collect local binding names (var/let) reachable in a function body, so the
+ * frame reserves a slot for each. Params are added separately, before this. */
+static void collect_locals(const Node *n, Names *v) {
+    if (!n) return;
+    if (n->kind == N_VAR || n->kind == N_LET) {
+        const Node *pat = n->nkid ? n->kids[0] : NULL;
+        if (pat && pat->text) names_add(v, pat->text, (int)pat->text_len);
+    }
+    for (int i = 0; i < n->nkid; i++) collect_locals(n->kids[i], v);
+}
 
 static void gen_bin(Asm *a, const char *op, int oplen) {
     fprintf(a->out, "    popq %%rcx\n    popq %%rax\n");
@@ -87,8 +100,89 @@ static void gen_expr(Asm *a, const Node *n) {
         fprintf(a->out, "    call %.*s\n    pushq %%rax\n", callee->text_len, callee->text);
         break;
     }
+    case N_BLOCK: case N_DOBLOCK: gen_block_value(a, n); break;
     default: a->ok = 0; break;
     }
+}
+
+/* slot for an identifier being assigned/bound: a local frame slot if known,
+ * otherwise a global .bss slot. Sets *islocal. */
+static int slot_of(Asm *a, const Node *id, int *islocal) {
+    int li = a->locals ? names_find(a->locals, id->text, (int)id->text_len) : -1;
+    if (li >= 0) { *islocal = 1; return li; }
+    *islocal = 0; return names_add(&a->globals, id->text, (int)id->text_len);
+}
+static void store_top(Asm *a, int slot, int islocal) {
+    if (islocal) fprintf(a->out, "    popq %%rax\n    movq %%rax, %d(%%rbp)\n", -8*(slot+1));
+    else fprintf(a->out, "    popq %%rax\n    movq %%rax, v%d(%%rip)\n", slot);
+}
+
+/* a statement: leaves nothing on the value stack. */
+static void gen_stmt(Asm *a, const Node *n) {
+    switch (n->kind) {
+    case N_VAR: case N_LET: {
+        const Node *pat = n->kids[0]; const Node *expr = NULL;
+        for (int i = 1; i < n->nkid; i++) if (!(n->kids[i]->kind >= N_TYNAME && n->kids[i]->kind <= N_TYHOLE)) expr = n->kids[i];
+        if (!expr) { a->ok = 0; break; }
+        gen_expr(a, expr);
+        if (pat->text) { int il; int s = slot_of(a, pat, &il); store_top(a, s, il); }
+        else fprintf(a->out, "    addq $8, %%rsp\n");
+        break;
+    }
+    case N_ASSIGN: {
+        const Node *tgt = n->kids[0];
+        if (tgt->kind != N_IDENT) { a->ok = 0; break; }
+        gen_expr(a, n->kids[1]);
+        int il; int s = slot_of(a, tgt, &il); store_top(a, s, il);
+        break;
+    }
+    case N_WHILE: {
+        int L = a->label++;
+        fprintf(a->out, ".Lw%d:\n", L);
+        gen_expr(a, n->kids[0]);
+        fprintf(a->out, "    popq %%rax\n    testq %%rax, %%rax\n    jz .Lwe%d\n", L);
+        gen_stmt(a, n->kids[1]);
+        fprintf(a->out, "    jmp .Lw%d\n.Lwe%d:\n", L, L);
+        break;
+    }
+    case N_IF: {
+        int L = a->label++;
+        gen_expr(a, n->kids[0]);
+        fprintf(a->out, "    popq %%rax\n    testq %%rax, %%rax\n    jz .Lse%d\n", L);
+        gen_stmt(a, n->kids[1]);
+        fprintf(a->out, "    jmp .Lsx%d\n.Lse%d:\n", L, L);
+        if (n->nkid >= 3) gen_stmt(a, n->kids[2]);
+        fprintf(a->out, ".Lsx%d:\n", L);
+        break;
+    }
+    case N_BLOCK: case N_DOBLOCK:
+        for (int i = 0; i < n->nkid; i++) gen_stmt(a, n->kids[i]);
+        break;
+    case N_RETURN:
+        if (n->nkid >= 1) gen_expr(a, n->kids[0]); else fprintf(a->out, "    pushq $0\n");
+        fprintf(a->out, "    popq %%rax\n    movq %%rbp, %%rsp\n    popq %%rbp\n    ret\n");
+        break;
+    case N_EXPRSTMT:
+        gen_expr(a, n->kids[0]);
+        if (a->ok) fprintf(a->out, "    addq $8, %%rsp\n");
+        break;
+    default:
+        gen_expr(a, n);
+        if (a->ok) fprintf(a->out, "    addq $8, %%rsp\n");
+        break;
+    }
+}
+
+/* a block in value position: statements for effect, last one yields the value. */
+static void gen_block_value(Asm *a, const Node *n) {
+    int m = n->nkid;
+    if (m == 0) { fprintf(a->out, "    pushq $0\n"); return; }
+    for (int i = 0; i < m - 1; i++) gen_stmt(a, n->kids[i]);
+    const Node *last = n->kids[m-1];
+    if (last->kind == N_EXPRSTMT) gen_expr(a, last->kids[0]);
+    else if (last->kind == N_BLOCK || last->kind == N_DOBLOCK) gen_block_value(a, last);
+    else if (last->kind == N_RETURN) gen_stmt(a, last);
+    else { gen_stmt(a, last); fprintf(a->out, "    pushq $0\n"); }
 }
 
 static const Node *fn_body_of(const Node *fn, Names *params) {
@@ -105,19 +199,23 @@ static const Node *fn_body_of(const Node *fn, Names *params) {
 }
 
 static void gen_function(Asm *a, const Node *fn) {
-    Names params = {0};
-    const Node *body = fn_body_of(fn, &params);
+    Names locals = {0};
+    const Node *body = fn_body_of(fn, &locals);   /* params first */
+    int nparams = locals.n;
+    collect_locals(body, &locals);                /* then var/let slots */
     const char *name = NULL; int namelen = 0;
     for (int i = 0; i < fn->nkid; i++) if (fn->kids[i]->kind == N_IDENT) { name = fn->kids[i]->text; namelen = fn->kids[i]->text_len; break; }
-    int frame = ((params.n * 8) + 15) & ~15;
+    int frame = ((locals.n * 8) + 15) & ~15;
     fprintf(a->out, "%.*s:\n    pushq %%rbp\n    movq %%rsp, %%rbp\n", namelen, name);
     if (frame) fprintf(a->out, "    subq $%d, %%rsp\n", frame);
-    for (int i = 0; i < params.n; i++) fprintf(a->out, "    movq %s, %d(%%rbp)\n", ARGREG[i], -8*(i+1));
-    const Names *saved = a->locals; a->locals = &params;
-    if (body) gen_expr(a, body); else fprintf(a->out, "    pushq $0\n");
+    for (int i = 0; i < nparams; i++) fprintf(a->out, "    movq %s, %d(%%rbp)\n", ARGREG[i], -8*(i+1));
+    const Names *saved = a->locals; a->locals = &locals;
+    if (body && (body->kind == N_BLOCK || body->kind == N_DOBLOCK)) gen_block_value(a, body);
+    else if (body) gen_expr(a, body);
+    else fprintf(a->out, "    pushq $0\n");
     a->locals = saved;
     fprintf(a->out, "    popq %%rax\n    movq %%rbp, %%rsp\n    popq %%rbp\n    ret\n");
-    names_free(&params);
+    names_free(&locals);
 }
 
 static void gen_toplevel_stmt(Asm *a, const Node *n) {
