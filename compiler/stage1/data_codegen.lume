@@ -16,14 +16,22 @@ fn runtime() -> str
         "#include <stdlib.h>",
         "#include <string.h>",
         "typedef struct Value Value;",
-        "struct Value {{ int tag; long long i; const char* s; const char* ctor; int argc; Value** args; }};",
-        "static Value* mkint(long long n){{ Value* v=(Value*)malloc(sizeof(Value)); v->tag=0; v->i=n; return v; }}",
-        "static Value* mkstr(const char* s){{ Value* v=(Value*)malloc(sizeof(Value)); v->tag=1; v->s=s; return v; }}",
-        "static Value* mkctor(const char* c,int n,Value** a){{ Value* v=(Value*)malloc(sizeof(Value)); v->tag=2; v->ctor=c; v->argc=n; if(n){{ v->args=(Value**)malloc(sizeof(Value*)*n); for(int k=0;k<n;k++) v->args[k]=a[k]; }} else v->args=0; return v; }}",
+        "struct Value {{ int tag; long long i; const char* s; const char* ctor; int argc; Value** args; int nf; const char** fnames; Value** fvals; }};",
+        "static Value* mkint(long long n){{ Value* v=(Value*)calloc(1,sizeof(Value)); v->tag=0; v->i=n; return v; }}",
+        "static Value* mkstr(const char* s){{ Value* v=(Value*)calloc(1,sizeof(Value)); v->tag=1; v->s=s; return v; }}",
+        "static Value* mkctor(const char* c,int n,Value** a){{ Value* v=(Value*)calloc(1,sizeof(Value)); v->tag=2; v->ctor=c; v->argc=n; if(n){{ v->args=(Value**)malloc(sizeof(Value*)*n); for(int k=0;k<n;k++) v->args[k]=a[k]; }} return v; }}",
+        "static Value* mkrec(int n,const char** names,Value** vals){{ Value* v=(Value*)calloc(1,sizeof(Value)); v->tag=3; v->nf=n; if(n){{ v->fnames=(const char**)malloc(sizeof(char*)*n); v->fvals=(Value**)malloc(sizeof(Value*)*n); for(int k=0;k<n;k++){{ v->fnames[k]=names[k]; v->fvals[k]=vals[k]; }} }} return v; }}",
+        "static Value* recget(Value* r,const char* nm){{ for(int k=0;k<r->nf;k++) if(strcmp(r->fnames[k],nm)==0) return r->fvals[k]; return mkint(0); }}",
         "static int truthy(Value* v){{ return v->tag==0 ? (v->i!=0) : 1; }}",
+        "static Value* addv(Value* a,Value* b){{ if(a->tag==1||b->tag==1){{ const char* x=a->tag==1?a->s:\"\"; const char* y=b->tag==1?b->s:\"\"; size_t la=strlen(x),lb=strlen(y); char* r=(char*)malloc(la+lb+1); memcpy(r,x,la); memcpy(r+la,y,lb); r[la+lb]=0; return mkstr(r); }} return mkint(a->i+b->i); }}",
         "static long long eqv(Value* a,Value* b){{ if(a->tag==0&&b->tag==0) return a->i==b->i; if(a->tag==1&&b->tag==1) return strcmp(a->s,b->s)==0; if(a->tag==2&&b->tag==2) return strcmp(a->ctor,b->ctor)==0; return 0; }}",
         "static long long cmpv(Value* a,Value* b){{ if(a->tag==1&&b->tag==1){{ int r=strcmp(a->s,b->s); return r<0?-1:(r>0?1:0); }} long long x=a->i,y=b->i; return x<y?-1:(x>y?1:0); }}",
-        "static void printval(Value* v){{ if(v->tag==0) printf(\"%lld\\n\",(long long)v->i); else if(v->tag==1) printf(\"%s\\n\",v->s); else printf(\"%s\\n\",v->ctor); }}"
+        "static Value* count(Value* s){{ return mkint((long long)strlen(s->s)); }}",
+        "static Value* at(Value* s,Value* i){{ long long k=i->i; char* b=(char*)malloc(2); b[0]=s->s[k]; b[1]=0; return mkstr(b); }}",
+        "static Value* slice(Value* s,Value* a,Value* b){{ long long i=a->i,j=b->i,L=(long long)strlen(s->s); if(i<0)i=0; if(j>L)j=L; long long n=j-i; if(n<0)n=0; char* r=(char*)malloc(n+1); memcpy(r,s->s+i,n); r[n]=0; return mkstr(r); }}",
+        "static Value* toint(Value* s){{ return mkint(atoll(s->s)); }}",
+        "static Value* str(Value* v){{ if(v->tag==1) return v; char* b=(char*)malloc(32); if(v->tag==0) snprintf(b,32,\"%lld\",(long long)v->i); else snprintf(b,32,\"%s\",v->ctor?v->ctor:\"?\"); return mkstr(b); }}",
+        "static void printval(Value* v){{ if(v->tag==0) printf(\"%lld\\n\",(long long)v->i); else if(v->tag==1) printf(\"%s\\n\",v->s); else if(v->tag==2) printf(\"%s\\n\",v->ctor); else printf(\"<record>\\n\"); }}"
     ]
     lines.join("\n") + "\n"
 
@@ -39,7 +47,9 @@ fn cesc(s: str) -> str
 
 ## binary operators over Value*
 fn cbin(op: str, a: str, b: str) -> str
-    if op == "+" or op == "-" or op == "*" or op == "/" or op == "%"
+    if op == "+"
+        "addv(" + a + ", " + b + ")"
+    elif op == "-" or op == "*" or op == "/" or op == "%"
         "mkint(" + a + "->i " + op + " " + b + "->i)"
     elif op == "=="
         "mkint(eqv(" + a + ", " + b + "))"
@@ -97,10 +107,16 @@ fn cexpr(e: DExpr) -> str
         DIf(c, t, e2)  => "(truthy(" + cexpr(c) + ") ? " + cexpr(t) + " : " + cexpr(e2) + ")"
         DLetIn(nm, v, body) => "({{ Value* " + nm + " = " + cexpr(v) + "; " + cexpr(body) + "; }})"
         DMatch(scrut, arms) => cmatch(scrut, arms)
+        DRec(fields) => do
+            if fields.len() == 0
+                "mkrec(0, 0, 0)"
+            else
+                let names = fields.map(|f| "\"" + f.name + "\"").join(", ")
+                let vals = fields.map(|f| cexpr(f.value)).join(", ")
+                "mkrec(" + str(fields.len()) + ", (const char*[]){{" + names + "}}, (Value*[]){{" + vals + "}})"
+        DField(o, nm) => "recget(" + cexpr(o) + ", \"" + nm + "\")"
         DList(xs)    => "__LUME_UNSUPPORTED_list__"
         DIndex(c, i) => "__LUME_UNSUPPORTED_index__"
-        DRec(fs)     => "__LUME_UNSUPPORTED_record__"
-        DField(o, nm) => "__LUME_UNSUPPORTED_field__"
 
 fn cmatch(scrut: DExpr, arms: [Arm]) -> str
     var out = "({{ Value* _s = " + cexpr(scrut) + "; Value* _r = 0; "
