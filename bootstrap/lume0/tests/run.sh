@@ -192,9 +192,13 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_
     printf 'fn f() = "a\\nb"\nprint f()' >"$ntmp/esc.src"
     $BIN run ../../compiler/stage1/data_asm_cc.lume "$ntmp/esc.src" "$ntmp/esc_o.s" >/dev/null 2>&1
     if $BIN asm "$ntmp/esc_o.s" "$ntmp/esc_o" >/dev/null 2>&1 && "$ntmp/lc" <"$ntmp/esc.src" >"$ntmp/esc_l.s" 2>/dev/null && $BIN asm "$ntmp/esc_l.s" "$ntmp/esc_l" >/dev/null 2>&1 && "$ntmp/esc_o" >"$ntmp/esc_o.out" 2>/dev/null && "$ntmp/esc_l" >"$ntmp/esc_l.out" 2>/dev/null && [ -s "$ntmp/esc_o.out" ] && cmp -s "$ntmp/esc_o.out" "$ntmp/esc_l.out"; then ok "self-host: lumec decodes string escapes like the oracle"; else bad "self-host: lumec decodes string escapes like the oracle"; fi
-    # fixpoint: lumec compiles its own (comment-free) source to gen1; the resulting lumec2 must reproduce gen1 bit-for-bit
-    grep -vE '^[[:space:]]*$|^[[:space:]]*##' ../../compiler/stage1/lumec.src >"$ntmp/fx.src"
-    if "$ntmp/lc" <"$ntmp/fx.src" >"$ntmp/gen1.s" 2>/dev/null && $BIN asm "$ntmp/gen1.s" "$ntmp/lc2" >/dev/null 2>&1 && "$ntmp/lc2" <"$ntmp/fx.src" >"$ntmp/gen2.s" 2>/dev/null && [ -s "$ntmp/gen1.s" ] && cmp -s "$ntmp/gen1.s" "$ntmp/gen2.s"; then ok "self-host fixpoint: lumec -> lumec2 recompiles itself bit-identically"; else bad "self-host fixpoint: lumec -> lumec2 recompiles itself bit-identically"; fi
+    # lexer skips `##` comments (whole-line, trailing, at EOF without newline) and readall keeps blank lines: output must equal the comment-free source
+    printf 'fn f(x) = x + 1\nprint f(41)\n' >"$ntmp/cm_a.src"
+    printf '## header\n\nfn f(x) = x + 1 ## trailing\n\n\n  ## indented\nprint f(41) ## last' >"$ntmp/cm_b.src"
+    if "$ntmp/lc" <"$ntmp/cm_a.src" >"$ntmp/cm_a.s" 2>/dev/null && "$ntmp/lc" <"$ntmp/cm_b.src" >"$ntmp/cm_b.s" 2>/dev/null && [ -s "$ntmp/cm_a.s" ] && cmp -s "$ntmp/cm_a.s" "$ntmp/cm_b.s"; then ok "self-host: lumec lexer skips ## comments and reads blank lines (readall)"; else bad "self-host: lumec lexer skips ## comments and reads blank lines (readall)"; fi
+    # fixpoint (verbatim): lumec compiles its own unmodified source (comments and blank lines included) to gen1; the resulting lumec2 must reproduce gen1 bit-for-bit
+    cp ../../compiler/stage1/lumec.src "$ntmp/fx.src"
+    if "$ntmp/lc" <"$ntmp/fx.src" >"$ntmp/gen1.s" 2>/dev/null && $BIN asm "$ntmp/gen1.s" "$ntmp/lc2" >/dev/null 2>&1 && "$ntmp/lc2" <"$ntmp/fx.src" >"$ntmp/gen2.s" 2>/dev/null && [ -s "$ntmp/gen1.s" ] && cmp -s "$ntmp/gen1.s" "$ntmp/gen2.s"; then ok "self-host fixpoint (verbatim): lumec -> lumec2 recompiles its own source bit-identically"; else bad "self-host fixpoint (verbatim): lumec -> lumec2 recompiles its own source bit-identically"; fi
     rm -rf "$ntmp"
 else
     ok "no-toolchain ELF pipeline (skipped: not linux/x86_64, or under ASan)"
