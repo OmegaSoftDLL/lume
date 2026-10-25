@@ -77,6 +77,11 @@ static void resolve_walk(const Node *n, const StrSet *def, DiagList *d) {
         if (n->nkid > 0) resolve_walk(n->kids[0], def, d);
         return;
     }
+    if (n->kind == N_MAPENTRY) {    /* {key: value} : an identifier key is a label, not a value ref */
+        for (int i = 1; i < n->nkid; i++) resolve_walk(n->kids[i], def, d);
+        if (n->nkid > 0 && n->kids[0]->kind != N_IDENT) resolve_walk(n->kids[0], def, d);
+        return;
+    }
     if (n->kind == N_IDENT) {
         if (n->text && n->text_len > 0) {
             char c0 = n->text[0];
@@ -374,6 +379,30 @@ static void dead_walk(const Node *n, DiagList *d) {
     for (int i = 0; i < n->nkid; i++) dead_walk(n->kids[i], d);
 }
 
+/* ---- duplicate key in a record/map literal ----
+ * `{a: 1, a: 2}` is almost always a mistake and the interpreter silently keeps
+ * the last one; report it (D0003). Keys are the first child of each MAPENTRY
+ * (an identifier for records, a literal for maps); compared by their text. */
+static void mapdup_walk(const Node *n, DiagList *d) {
+    if (!n) return;
+    if (n->kind == N_MAP) {
+        StrSet seen = {0};
+        for (int i = 0; i < n->nkid; i++) {
+            const Node *e = n->kids[i];
+            if (e->kind != N_MAPENTRY || e->nkid < 1) continue;
+            const Node *k = e->kids[0];
+            if (!k->text || k->text_len <= 0) continue;
+            if (sset_has(&seen, k->text, k->text_len)) {
+                char b[48]; int L = k->text_len > 47 ? 47 : k->text_len; memcpy(b, k->text, (size_t)L); b[L] = 0;
+                char msg[160]; snprintf(msg, sizeof msg, "duplicate key `%s` in a record/map literal", b);
+                diag_add(d, SEV_ERROR, "D0003", k->line, k->col, k->text_len, msg, "each key must appear once");
+            } else sset_add(&seen, k->text, k->text_len);
+        }
+        sset_free(&seen);
+    }
+    for (int i = 0; i < n->nkid; i++) mapdup_walk(n->kids[i], d);
+}
+
 /* run name resolution + basic literal type checks + duplicate detection + arity */
 void lume_resolve(const Node *module, DiagList *diags) {
     if (!module) return;
@@ -395,4 +424,5 @@ void lume_resolve(const Node *module, DiagList *diags) {
     sset_free(&mut_s); sset_free(&immut_s);
     match_walk(module, diags);
     dead_walk(module, diags);
+    mapdup_walk(module, diags);
 }
