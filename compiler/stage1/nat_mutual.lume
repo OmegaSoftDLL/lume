@@ -1,0 +1,47 @@
+## nat_mutual.lume — mutual recursion (is_even/is_odd, Hofstadter F/M) and global var/let (no C).
+## lume0 emit-asm nat_mutual.lume m.s ; as -o m.o m.s ; ld -o m m.o ; ./m
+let LIMIT = 20
+var calls = 0
+
+fn is_even(n: int) -> int
+    if n == 0
+        1
+    else
+        is_odd(n - 1)
+
+fn is_odd(n: int) -> int
+    if n == 0
+        0
+    else
+        is_even(n - 1)
+
+fn hf(n: int) -> int
+    if n == 0
+        1
+    else
+        n - hm(hf(n - 1))
+
+fn hm(n: int) -> int
+    if n == 0
+        0
+    else
+        n - hf(hm(n - 1))
+
+fn bump(k: int) -> int
+    calls = calls + k
+    calls
+
+fn count_even(hi: int) -> int
+    var c = 0
+    for i in 0..=hi
+        c = c + is_even(i)
+    c
+
+is_even(10)
+is_odd(10)
+is_even(7)
+count_even(LIMIT)
+hf(10)
+hm(10)
+bump(5)
+bump(7)

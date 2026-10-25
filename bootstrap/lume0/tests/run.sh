@@ -85,6 +85,18 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && command -v as 
     if as -o "$atmp/f.o" "$atmp/f.s" 2>/dev/null && ld -o "$atmp/f" "$atmp/f.o" 2>/dev/null && "$atmp/f" 2>/dev/null | diff -u ../../tests/conformance/stage1/fib_native.expected - >/dev/null; then ok "x86-64 asm -> native (recursion + if, no C)"; else bad "x86-64 asm -> native (recursion + if, no C)"; fi
     $BIN emit-asm ../../compiler/stage1/loop_native.lume "$atmp/l.s" 2>/dev/null
     if as -o "$atmp/l.o" "$atmp/l.s" 2>/dev/null && ld -o "$atmp/l" "$atmp/l.o" 2>/dev/null && "$atmp/l" 2>/dev/null | diff -u ../../tests/conformance/stage1/loop_native_asm.expected - >/dev/null; then ok "x86-64 asm -> native (var + while + assignment, no C)"; else bad "x86-64 asm -> native (var + while + assignment, no C)"; fi
+    $BIN emit-asm ../../compiler/stage1/nat_collatz.lume "$atmp/c.s" 2>/dev/null
+    if as -o "$atmp/c.o" "$atmp/c.s" 2>/dev/null && ld -o "$atmp/c" "$atmp/c.o" 2>/dev/null && "$atmp/c" 2>/dev/null | diff -u ../../tests/conformance/stage1/nat_collatz_asm.expected - >/dev/null; then ok "x86-64 asm -> native (Collatz step counts and longest chain (while, if-value, %, /), no C)"; else bad "x86-64 asm -> native (Collatz step counts and longest chain (while, if-value, %, /), no C)"; fi
+    $BIN emit-asm ../../compiler/stage1/nat_primes.lume "$atmp/p.s" 2>/dev/null
+    if as -o "$atmp/p.o" "$atmp/p.s" 2>/dev/null && ld -o "$atmp/p" "$atmp/p.o" 2>/dev/null && "$atmp/p" 2>/dev/null | diff -u ../../tests/conformance/stage1/nat_primes_asm.expected - >/dev/null; then ok "x86-64 asm -> native (trial-division primes, twin primes (nested loops, and/or/not), no C)"; else bad "x86-64 asm -> native (trial-division primes, twin primes (nested loops, and/or/not), no C)"; fi
+    $BIN emit-asm ../../compiler/stage1/nat_ackermann.lume "$atmp/a.s" 2>/dev/null
+    if as -o "$atmp/a.o" "$atmp/a.s" 2>/dev/null && ld -o "$atmp/a" "$atmp/a.o" 2>/dev/null && "$atmp/a" 2>/dev/null | diff -u ../../tests/conformance/stage1/nat_ackermann_asm.expected - >/dev/null; then ok "x86-64 asm -> native (Ackermann small values (deep recursion, nested if/else values), no C)"; else bad "x86-64 asm -> native (Ackermann small values (deep recursion, nested if/else values), no C)"; fi
+    $BIN emit-asm ../../compiler/stage1/nat_power.lume "$atmp/w.s" 2>/dev/null
+    if as -o "$atmp/w.o" "$atmp/w.s" 2>/dev/null && ld -o "$atmp/w" "$atmp/w.o" 2>/dev/null && "$atmp/w" 2>/dev/null | diff -u ../../tests/conformance/stage1/nat_power_asm.expected - >/dev/null; then ok "x86-64 asm -> native (exponentiation by squaring, modular power, bit-length, no C)"; else bad "x86-64 asm -> native (exponentiation by squaring, modular power, bit-length, no C)"; fi
+    $BIN emit-asm ../../compiler/stage1/nat_mutual.lume "$atmp/m.s" 2>/dev/null
+    if as -o "$atmp/m.o" "$atmp/m.s" 2>/dev/null && ld -o "$atmp/m" "$atmp/m.o" 2>/dev/null && "$atmp/m" 2>/dev/null | diff -u ../../tests/conformance/stage1/nat_mutual_asm.expected - >/dev/null; then ok "x86-64 asm -> native (mutual recursion, Hofstadter F/M, global var/let, no C)"; else bad "x86-64 asm -> native (mutual recursion, Hofstadter F/M, global var/let, no C)"; fi
+    $BIN emit-asm ../../compiler/stage1/nat_nested.lume "$atmp/n.s" 2>/dev/null
+    if as -o "$atmp/n.o" "$atmp/n.s" 2>/dev/null && ld -o "$atmp/n" "$atmp/n.o" 2>/dev/null && "$atmp/n" 2>/dev/null | diff -u ../../tests/conformance/stage1/nat_nested_asm.expected - >/dev/null; then ok "x86-64 asm -> native (nested for/while, fact/fib, comparisons, signed div/mod, no C)"; else bad "x86-64 asm -> native (nested for/while, fact/fib, comparisons, signed div/mod, no C)"; fi
     rm -rf "$atmp"
 else
     ok "x86-64 asm backend (skipped: not linux/x86_64 or no as/ld)"

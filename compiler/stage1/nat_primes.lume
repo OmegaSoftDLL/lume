@@ -1,0 +1,41 @@
+## nat_primes.lume — trial-division primality and prime counting with nested loops, and/or/not (no C).
+## lume0 emit-asm nat_primes.lume p.s ; as -o p.o p.s ; ld -o p p.o ; ./p
+fn is_prime(n: int) -> int
+    if n < 2
+        0
+    else
+        var d = 2
+        var ok = 1
+        while d * d <= n and ok == 1
+            if n % d == 0
+                ok = 0
+            d = d + 1
+        ok
+
+fn count_primes(hi: int) -> int
+    var c = 0
+    for n in 2..=hi
+        if is_prime(n) == 1
+            c = c + 1
+    c
+
+fn twin_pairs(hi: int) -> int
+    var c = 0
+    for n in 3..hi
+        if is_prime(n) == 1 and is_prime(n + 2) == 1
+            c = c + 1
+    c
+
+fn odd_non_prime(hi: int) -> int
+    var c = 0
+    for n in 3..=hi
+        if n % 2 == 1 and not (is_prime(n) == 1)
+            c = c + 1
+    c
+
+is_prime(1)
+is_prime(97)
+is_prime(91)
+count_primes(100)
+twin_pairs(100)
+odd_non_prime(50)

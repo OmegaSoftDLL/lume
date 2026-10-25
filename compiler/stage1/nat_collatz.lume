@@ -1,0 +1,28 @@
+## nat_collatz.lume — Collatz step counts via while, %, /, if/else in value position (no C).
+## lume0 emit-asm nat_collatz.lume c.s ; as -o c.o c.s ; ld -o c c.o ; ./c
+fn steps(n: int) -> int
+    var x = n
+    var c = 0
+    while x != 1
+        x = if x % 2 == 0
+            x / 2
+        else
+            3 * x + 1
+        c = c + 1
+    c
+
+fn longest(limit: int) -> int
+    var best = 1
+    var bestlen = 0
+    for i in 1..=limit
+        let s = steps(i)
+        if s > bestlen
+            bestlen = s
+            best = i
+    best
+
+steps(1)
+steps(6)
+steps(27)
+longest(30)
+longest(100)

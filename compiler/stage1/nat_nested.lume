@@ -1,0 +1,67 @@
+## nat_nested.lume — nested for/while loops, exclusive vs inclusive ranges, fact/fib, comparisons, not (no C).
+## lume0 emit-asm nat_nested.lume n.s ; as -o n.o n.s ; ld -o n n.o ; ./n
+fn fact(n: int) -> int
+    if n <= 1
+        1
+    else
+        n * fact(n - 1)
+
+fn fib(n: int) -> int
+    if n < 2
+        n
+    else
+        fib(n - 1) + fib(n - 2)
+
+fn tri_sum(n: int) -> int
+    var s = 0
+    for i in 0..n
+        for j in 0..=i
+            s = s + 1
+    s
+
+fn mult_table(n: int) -> int
+    var s = 0
+    for i in 1..=n
+        for j in 1..=n
+            s = s + i * j
+    s
+
+fn pythag(limit: int) -> int
+    var c = 0
+    for a in 1..=limit
+        for b in a..=limit
+            var cc = b + 1
+            while cc <= limit
+                if a * a + b * b == cc * cc
+                    c = c + 1
+                cc = cc + 1
+    c
+
+fn cmp_mask(a: int, b: int) -> int
+    var m = 0
+    if a == b
+        m = m + 1
+    if a != b
+        m = m + 2
+    if a < b
+        m = m + 4
+    if a > b
+        m = m + 8
+    if a <= b
+        m = m + 16
+    if a >= b
+        m = m + 32
+    if not (a < b) or -a > b
+        m = m + 64
+    m
+
+fact(10)
+fib(20)
+tri_sum(10)
+mult_table(9)
+pythag(20)
+cmp_mask(3, 5)
+cmp_mask(5, 5)
+cmp_mask(9, 2)
+-7 / 2
+-7 % 3
