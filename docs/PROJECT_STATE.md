@@ -155,6 +155,17 @@ subset; the triple self-build is not reached.
 - Lume methods supported by the interp: chars/concat/contains/entries/enumerate/join/keys/
   len/map/push/repeat/sorted/split/str (no `.slice` method — use the `slice(s,i,j)` builtin
   in the ML-core, or `.chars()` to iterate).
+- **Memory is the scaling wall — build strings in O(n), and index strings in O(1).** The seed
+  interpreter and the native runtime (`alloc` in `data_asmgen`) have **no GC**: nothing is freed,
+  so peak memory is the TOTAL allocated. Two consequences, both already hit and fixed: (1) never
+  accumulate output with `s = s + piece` in a loop (O(n^2) copies that all stay live) — gather
+  chunks in a `[str]` and `join("")` once, as `data_asmgen` now does for funcs/main/rodata and
+  inside `aexpr`; (2) indexing a string `s[i]` / `s[i..j]` must NOT rebuild a per-codepoint list
+  each time — the seed now walks UTF-8 bytes (`str_cp_byteoff` in `interp.c`), O(1) alloc per
+  access. Both were the reason a ~100-line core file needed gigabytes to compile. **When the
+  lexer/compiler are rewritten native (self-hosting), index source by byte offset, not by
+  materialising `chars()`, and plan real memory management for the native runtime** — a bump
+  allocator that never frees will not survive compiling the whole compiler.
 - `elf.c` and everything else must build under `-Werror -Wconversion -Wpedantic -Wshadow`:
   no `strdup` (C11; provide your own), one statement per line after an `if`/`for`
   (misleading-indentation), explicit casts for byte/size math.
