@@ -63,7 +63,10 @@ already here: **reparse-free, structurally valid by construction.**
 ## Roadmap placement
 
 - Stage 0 (done): `emit`/`run .lbe`, the round-trip proof.
-- Stage 1: the native backend makes "lower structure to machine bits" literal. **Done in miniature:**
+- Stage 1: the native backend makes "lower structure to machine bits" literal. **Done two ways in
+  miniature:** (a) `lume0 emit-asm` is a **direct x86-64 backend in the bootstrap** that lowers the
+  AST to assembly — no C in the pipeline — assembled with `as`/`ld` into a native binary that prints
+  via raw Linux syscalls (conformance `x86-64 asm -> native (no C)`, let+arithmetic subset); and (b)
   `compiler/stage1/codegen.lume` is a code generator *written in Lume* that lowers the AST to C; the
   Lume-written lexer → parser → codegen pipeline emits C that the system compiler turns into a native
   binary with correct output (conformance: `codegen -> C -> native binary`). Structure in, bits out,
