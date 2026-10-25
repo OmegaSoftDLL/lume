@@ -153,6 +153,8 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ]; then
     if [ "$(cat "$ntmp/oom.code" 2>/dev/null)" = "12" ] && diff -u ../../tests/conformance/stage1/sh_oom_asm.expected "$ntmp/oom.out" >/dev/null && grep -q "out of memory" "$ntmp/oom.err"; then ok "no-toolchain: heap exhaustion -> clear error + exit 12 (no segfault)"; else bad "no-toolchain: heap exhaustion -> clear error + exit 12"; fi
     $BIN run ../../compiler/stage1/data_asm_cc.lume ../../compiler/stage1/bigints.src "$ntmp/bi.s" >/dev/null 2>&1
     if $BIN asm "$ntmp/bi.s" "$ntmp/bi" >/dev/null 2>&1 && "$ntmp/bi" 2>/dev/null | diff -u ../../tests/conformance/stage1/bigints_asm.expected - >/dev/null; then ok "no-toolchain: 64-bit integer literals (movabs) -> native"; else bad "no-toolchain: 64-bit integer literals"; fi
+    $BIN run ../../compiler/stage1/data_asm_cc.lume ../../compiler/stage1/esc_native.src "$ntmp/en.s" >/dev/null 2>&1
+    if $BIN asm "$ntmp/en.s" "$ntmp/en" >/dev/null 2>&1 && "$ntmp/en" 2>/dev/null | diff -u ../../tests/conformance/stage1/esc_native_asm.expected - >/dev/null; then ok "no-toolchain: string escapes (\\n \\t \\\" \\\\) -> native"; else bad "no-toolchain: string escapes -> native"; fi
     rm -rf "$ntmp"
 else
     ok "no-toolchain ELF pipeline (skipped: not linux/x86_64)"
