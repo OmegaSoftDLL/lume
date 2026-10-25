@@ -16,3 +16,4 @@ type Stmt = enum
     If(cond: Expr, then_body: [Stmt], else_body: [Stmt])
     Fn(name: str, params: [str], body: [Stmt])
     Return(value: Expr)
+    Block(body: [Stmt])

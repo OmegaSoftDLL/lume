@@ -63,6 +63,8 @@ if command -v cc >/dev/null 2>&1; then
     if cc -o "$cgtmp/sv" "$cgtmp/sv.c" 2>/dev/null && "$cgtmp/sv" 2>/dev/null | diff -u ../../tests/conformance/stage1/block_sieve_native.expected - >/dev/null; then ok "block_cc Sieve (arrays+nested loops) -> native binary"; else bad "block_cc Sieve -> native binary"; fi
     $BIN run ../../compiler/stage1/block_cc.lume ../../compiler/stage1/sort.blk "$cgtmp/sort.c" >/dev/null 2>&1
     if cc -o "$cgtmp/sort" "$cgtmp/sort.c" 2>/dev/null && "$cgtmp/sort" 2>/dev/null | diff -u ../../tests/conformance/stage1/block_sort_native.expected - >/dev/null; then ok "block_cc bubble sort (arrays+negatives) -> native binary"; else bad "block_cc bubble sort -> native binary"; fi
+    $BIN run ../../compiler/stage1/block_cc.lume ../../compiler/stage1/forloop.blk "$cgtmp/fl.c" >/dev/null 2>&1
+    if cc -o "$cgtmp/fl" "$cgtmp/fl.c" 2>/dev/null && "$cgtmp/fl" 2>/dev/null | diff -u ../../tests/conformance/stage1/block_for_native.expected - >/dev/null; then ok "block_cc for-loops (range desugar + nested) -> native binary"; else bad "block_cc for-loops -> native binary"; fi
     # a full calculator compiler WRITTEN IN the ML core, reading its source from a file
     if $BIN run ../../compiler/stage1/compiler_in_core.lume ../../compiler/stage1/calc.src 2>/dev/null | diff -u ../../tests/conformance/stage1/core_compiler.expected - >/dev/null; then ok "compiler written in the ML core (lex+parse+eval)"; else bad "compiler written in the ML core"; fi
     # close the loop: the core-written compiler emits a full C program -> cc -> native binary

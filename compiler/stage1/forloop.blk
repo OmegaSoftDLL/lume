@@ -1,0 +1,20 @@
+# for-loop demo: squares, triangular sums, and a nested multiplication row
+fn square(n)
+    return n * n
+
+fn tri(n)
+    var acc = 0
+    for i in 1..n
+        acc = acc + i
+    return acc
+
+for k in 1..6
+    print square(k)
+
+print tri(11)
+
+var row = 0
+for a in 1..4
+    for b in 1..4
+        row = row + a * b
+print row

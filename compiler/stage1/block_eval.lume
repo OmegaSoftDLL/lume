@@ -42,6 +42,8 @@ fn bexec(stmts: [Stmt], env: mut map[str, int])
                     bexec(t, env)
                 else
                     bexec(e, env)
+            Block(b) => do
+                bexec(b, env)
             ArrDecl(nm, sz) => do
                 let _ = 0
             AssignIdx(nm, ix, v) => do

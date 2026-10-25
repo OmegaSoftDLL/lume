@@ -141,6 +141,18 @@ fn bstmt(p: mut P) -> Stmt
         let cond = bexpr(p, 0)
         let then_body = bblock(p)
         If(cond: cond, then_body: then_body, else_body: if_tail(p))
+    elif t.kind == Kw and t.text == "for"
+        beat(p)                       # for
+        let fv = beat(p).text         # loop variable
+        beat(p)                       # in
+        let lo = bexpr(p, 0)
+        beat(p)                       # ..
+        let hi = bexpr(p, 0)
+        let body = bblock(p)
+        var lbody = body
+        lbody.push(Assign(name: fv, value: Bin(op: "+", left: Name(id: fv), right: Num(value: 1))))
+        let lp = While(cond: Bin(op: "<", left: Name(id: fv), right: hi), body: lbody)
+        Block(body: [Assign(name: fv, value: lo), lp])
     elif t.kind == Ident and t.text == "print"
         beat(p)
         Print(value: bexpr(p, 0))
