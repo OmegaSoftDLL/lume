@@ -1,0 +1,3 @@
+# Code owners for Lume. The owner reviews every change.
+# External contributors open PRs from forks; only the owner's account merges to main.
+*       @OmegaSoftDLL
