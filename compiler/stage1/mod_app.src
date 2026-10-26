@@ -1,0 +1,6 @@
+## mod_app.src -- diamond multi-module entry importing both mod_math and mod_base (Track T, brick T3).
+use mod_math
+use mod_base
+
+print hypot_sq(3, 4)
+print quad(3) + cube(2)

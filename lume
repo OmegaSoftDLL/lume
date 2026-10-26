@@ -7,6 +7,7 @@
 #   lume test  <file.src|file.lume>...        discover and run unit tests (fn test_*() and contracts)
 #   lume doc   [--json] <file.src|file.lume>  extract module/item docs and contracts (Markdown or JSON)
 #   lume fmt   [--check] <file.src|file.lume> format source to canonical layout (or check with --check)
+#   lume pkg   <init|check|lock|verify|tree>  package manager: lume.toml manifest, capabilities & SHA-256 lume.lock
 #   lume check [--json] <file.lume|file.src>  static lexical, parse, name, type and contract checks
 #   lume describe [--json]                    emit machine-readable language self-description (AI-first)
 #   lume --version | --help
@@ -30,6 +31,7 @@ usage:
   lume test  <file.src|file.lume>...        discover and run unit tests (`fn test_*()` and runtime contracts)
   lume doc   [--json] <file.src|file.lume>  render module & item documentation + contracts (Markdown or JSON)
   lume fmt   [--check] <file>               format a Lume source file in place (or verify with --check)
+  lume pkg   <init|check|lock|verify|tree>  manage lume.toml manifest, capabilities & SHA-256 lume.lock
   lume check [--json] <file.lume|file.src>  run static semantic checks
   lume describe [--json]                    emit machine-readable language self-description for AI agents
   lume --version                            print version
@@ -105,6 +107,90 @@ run_core_tool() {
     fi
 }
 
+sha256_file() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$1" | awk '{print $1}'
+    elif command -v openssl >/dev/null 2>&1; then
+        openssl dgst -sha256 "$1" | awk '{print $NF}'
+    else
+        cksum "$1" | awk '{print $1}'
+    fi
+}
+
+# Recursively collect reachable `use <mod>` .src modules in $_mdir into $_modin.
+collect_reachable_mods() {
+    _mdir=$1
+    _mfile=$2
+    _modin=$3
+    _uses=$(awk '/^[ \t]*use[ \t]+/{sub(/^[ \t]*use[ \t]+/,""); sub(/[ \t\r]+$/,""); sub(/^std\./,""); print $1}' "$_mfile")
+    for _u in $_uses; do
+        case " $_MOD_SEEN " in
+            *" $_u "*) continue ;;
+        esac
+        _MOD_SEEN="$_MOD_SEEN $_u"
+        _ucand=""
+        if [ -f "$_mdir/$_u.src" ]; then
+            _ucand="$_mdir/$_u.src"
+        elif [ -f "$_mdir/src/$_u.src" ]; then
+            _ucand="$_mdir/src/$_u.src"
+        elif [ -f "$_mdir/deps/$_u.src" ]; then
+            _ucand="$_mdir/deps/$_u.src"
+        fi
+        if [ -n "$_ucand" ]; then
+            printf '@module %s\n' "$_u" >> "$_modin"
+            cat "$_ucand" >> "$_modin"
+            printf '\n@end\n' >> "$_modin"
+            collect_reachable_mods "$_mdir" "$_ucand" "$_modin"
+        fi
+    done
+}
+
+# Resolve `use <mod>` imports and verify lume.toml capability grants via native lmod.src.
+bundle_src_if_needed() {
+    _bsrc=$1
+    _bout=$2
+    if ! grep -Eq '^[ \t]*use[ \t]+' "$_bsrc"; then
+        cp "$_bsrc" "$_bout"
+        return 0
+    fi
+    _bdir=$(dirname -- "$_bsrc")
+    _modin=$(mktemp)
+    _grant="io"
+    _toml=""
+    if [ -f "$_bdir/lume.toml" ]; then
+        _toml="$_bdir/lume.toml"
+    elif [ -f "$_bdir/../lume.toml" ]; then
+        _toml="$_bdir/../lume.toml"
+    fi
+    if [ -n "$_toml" ]; then
+        _mtmp=$(mktemp)
+        printf '@manifest\n' > "$_mtmp"
+        cat "$_toml" >> "$_mtmp"
+        if ! _mjson=$(run_core_tool lmod "$_mtmp"); then
+            rm -f "$_mtmp" "$_modin"
+            return 1
+        fi
+        rm -f "$_mtmp"
+        case "$_mjson" in
+            *'"capabilities":"pure"'*) _grant="pure" ;;
+        esac
+    fi
+    printf '@grant %s\n' "$_grant" > "$_modin"
+    _ebase=$(basename -- "$_bsrc" .src)
+    _MOD_SEEN="$_ebase"
+    collect_reachable_mods "$_bdir" "$_bsrc" "$_modin"
+    printf '@entry %s\n' "$_ebase" >> "$_modin"
+    cat "$_bsrc" >> "$_modin"
+    printf '\n@end\n' >> "$_modin"
+    if ! run_core_tool lmod "$_modin" > "$_bout"; then
+        rm -f "$_modin" "$_bout"
+        return 1
+    fi
+    rm -f "$_modin"
+}
+
 cmd_build() {
     _src=""
     _out=""
@@ -136,15 +222,20 @@ cmd_build() {
             _out="$_src.out"
         fi
     fi
+    _bundled=$(mktemp)
+    if ! bundle_src_if_needed "$_src" "$_bundled"; then
+        rm -f "$_bundled" "$_out"
+        exit 1
+    fi
     ensure_native_toolchain
     _tmps=$(mktemp)
-    if ! "$LUMEC" < "$_src" > "$_tmps"; then
-        rm -f "$_tmps" "$_out"
+    if ! "$LUMEC" < "$_bundled" > "$_tmps"; then
+        rm -f "$_bundled" "$_tmps" "$_out"
         exit 1
     fi
     "$LASM" < "$_tmps" > "$_out"
     chmod +x "$_out"
-    rm -f "$_tmps"
+    rm -f "$_bundled" "$_tmps"
 }
 
 cmd_run() {
@@ -165,8 +256,16 @@ cmd_run() {
                 rm -f "$_tmpbin"
                 return $_rc
             else
+                _bundled=$(mktemp)
+                if ! bundle_src_if_needed "$_file" "$_bundled"; then
+                    rm -f "$_bundled"
+                    exit 1
+                fi
                 ensure_seed
-                "$L0" run "$SRC_DIR/compiler_in_core.lume" "$_file" "$@"
+                _rc=0
+                "$L0" run "$SRC_DIR/compiler_in_core.lume" "$_bundled" "$@" || _rc=$?
+                rm -f "$_bundled"
+                return $_rc
             fi
             ;;
         *)
@@ -212,12 +311,18 @@ cmd_test() {
         fi
         case "$_file" in
             *.src)
+                _bundled=$(mktemp "${TMPDIR:-/tmp}/lume_tb_XXXXXX.src")
+                if ! bundle_src_if_needed "$_file" "$_bundled"; then
+                    rm -f "$_bundled"
+                    _overall=1
+                    continue
+                fi
                 _tmpsrc=$(mktemp "${TMPDIR:-/tmp}/lume_test_XXXXXX.src")
-                run_core_tool ltest "$_file" > "$_tmpsrc"
+                run_core_tool ltest "$_bundled" > "$_tmpsrc"
                 if ! cmd_run "$_tmpsrc"; then
                     _overall=1
                 fi
-                rm -f "$_tmpsrc"
+                rm -f "$_bundled" "$_tmpsrc"
                 ;;
             *)
                 ensure_seed
@@ -300,15 +405,22 @@ cmd_check() {
     fi
     case "$_file" in
         *.src)
+            _bundled=$(mktemp)
+            if ! bundle_src_if_needed "$_file" "$_bundled"; then
+                rm -f "$_bundled"
+                exit 1
+            fi
             if is_linux_x86_64 && [ -z "${LUME0_ASAN:-}" ]; then
                 ensure_native_toolchain
-                "$LUMEC" < "$_file" > /dev/null
+                "$LUMEC" < "$_bundled" > /dev/null
+                rm -f "$_bundled"
                 if [ -z "$_json" ]; then
                     echo "$_file: OK (Lume-Core parsed and checked)" >&2
                 fi
             else
                 ensure_seed
-                "$L0" run "$SRC_DIR/data_asm_cc.lume" "$_file" /dev/null >/dev/null
+                "$L0" run "$SRC_DIR/data_asm_cc.lume" "$_bundled" /dev/null >/dev/null
+                rm -f "$_bundled"
                 if [ -z "$_json" ]; then
                     echo "$_file: OK (Lume-Core parsed and checked)" >&2
                 fi
@@ -321,6 +433,130 @@ cmd_check() {
             else
                 "$L0" check "$_file"
             fi
+            ;;
+    esac
+}
+
+gen_lockfile() {
+    _pdir=$1
+    _mjson=$2
+    printf '# lume.lock — deterministic content-addressed lockfile (P26, P32)\n'
+    printf 'version = 1\n'
+    printf 'manifest = %s\n' "$_mjson"
+    printf 'manifest_sha256 = "%s"\n' "$(sha256_file "$_pdir/lume.toml")"
+    for _sf in $(find "$_pdir" -maxdepth 2 \( -name '*.src' -o -name '*.lume' \) | LC_ALL=C sort); do
+        _rel=${_sf#"$_pdir/"}
+        printf 'module "%s" sha256 = "%s"\n' "$_rel" "$(sha256_file "$_sf")"
+    done
+}
+
+cmd_pkg() {
+    [ $# -ge 1 ] || usage
+    _action=$1
+    shift
+    _pdir="${1:-.}"
+    case "$_action" in
+        init)
+            mkdir -p "$_pdir"
+            _pkgname=$(basename -- "$(cd "$_pdir" && pwd)")
+            if [ ! -f "$_pdir/lume.toml" ]; then
+                cat > "$_pdir/lume.toml" <<EOF
+[package]
+name = "$_pkgname"
+version = "0.1.0"
+edition = "2026"
+
+[capabilities]
+allow = ["io"]
+
+[dependencies]
+EOF
+            fi
+            if [ ! -f "$_pdir/main.src" ]; then
+                printf '## %s — entry module\nfn main_val() -> int = 42\nprint main_val()\n' "$_pkgname" > "$_pdir/main.src"
+            fi
+            echo "lume pkg: initialized $_pkgname in $_pdir/lume.toml"
+            ;;
+        check|manifest)
+            if [ ! -f "$_pdir/lume.toml" ]; then
+                echo "lume pkg: missing $_pdir/lume.toml" >&2
+                exit 66
+            fi
+            _mtmp=$(mktemp)
+            printf '@manifest\n' > "$_mtmp"
+            cat "$_pdir/lume.toml" >> "$_mtmp"
+            if ! _mjson=$(run_core_tool lmod "$_mtmp"); then
+                rm -f "$_mtmp"
+                exit 1
+            fi
+            rm -f "$_mtmp"
+            echo "$_mjson"
+            ;;
+        lock)
+            if [ ! -f "$_pdir/lume.toml" ]; then
+                echo "lume pkg: missing $_pdir/lume.toml" >&2
+                exit 66
+            fi
+            _mtmp=$(mktemp)
+            printf '@manifest\n' > "$_mtmp"
+            cat "$_pdir/lume.toml" >> "$_mtmp"
+            if ! _mjson=$(run_core_tool lmod "$_mtmp"); then
+                rm -f "$_mtmp"
+                exit 1
+            fi
+            rm -f "$_mtmp"
+            gen_lockfile "$_pdir" "$_mjson" > "$_pdir/lume.lock"
+            echo "lume pkg: wrote $_pdir/lume.lock"
+            ;;
+        verify)
+            if [ ! -f "$_pdir/lume.toml" ] || [ ! -f "$_pdir/lume.lock" ]; then
+                echo "lume pkg: missing lume.toml or lume.lock in $_pdir" >&2
+                exit 66
+            fi
+            _mtmp=$(mktemp)
+            printf '@manifest\n' > "$_mtmp"
+            cat "$_pdir/lume.toml" >> "$_mtmp"
+            if ! _mjson=$(run_core_tool lmod "$_mtmp"); then
+                rm -f "$_mtmp"
+                exit 1
+            fi
+            rm -f "$_mtmp"
+            _ltmp=$(mktemp)
+            gen_lockfile "$_pdir" "$_mjson" > "$_ltmp"
+            if ! cmp -s "$_pdir/lume.lock" "$_ltmp"; then
+                rm -f "$_ltmp"
+                echo "lume pkg: lockfile verification failed (source or manifest drift detected)" >&2
+                exit 1
+            fi
+            rm -f "$_ltmp"
+            echo "lume pkg: verified $_pdir/lume.lock (all SHA-256 digests match)"
+            ;;
+        tree)
+            if [ ! -f "$_pdir/lume.toml" ]; then
+                echo "lume pkg: missing $_pdir/lume.toml" >&2
+                exit 66
+            fi
+            _mtmp=$(mktemp)
+            printf '@manifest\n' > "$_mtmp"
+            cat "$_pdir/lume.toml" >> "$_mtmp"
+            if ! _mjson=$(run_core_tool lmod "$_mtmp"); then
+                rm -f "$_mtmp"
+                exit 1
+            fi
+            rm -f "$_mtmp"
+            echo "$_mjson"
+            for _sf in $(find "$_pdir" -maxdepth 2 -name '*.src' | LC_ALL=C sort); do
+                _rel=${_sf#"$_pdir/"}
+                _uses=$(awk '/^[ \t]*use[ \t]+/{sub(/^[ \t]*use[ \t]+/,""); sub(/[ \t\r]+$/,""); printf "%s ", $1}' "$_sf")
+                if [ -n "$_uses" ]; then
+                    printf '  |-- %s -> %s\n' "$_rel" "$_uses"
+                else
+                    printf '  |-- %s\n' "$_rel"
+                fi
+            done
+            ;;
+        *)
+            usage
             ;;
     esac
 }
@@ -350,6 +586,9 @@ case "$_sub" in
         ;;
     fmt)
         cmd_fmt "$@"
+        ;;
+    pkg)
+        cmd_pkg "$@"
         ;;
     check)
         cmd_check "$@"

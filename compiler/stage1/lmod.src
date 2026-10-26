@@ -1,0 +1,136 @@
+## lmod.src -- Lume-Core module resolver, topological bundler, capability auditor, and
+## lume.toml manifest validator (Track T, brick T3; Principles P26, P28, P32).
+## Compiled to a standalone native ELF by `lumec` + `lasm` with zero C in the loop.
+##
+## Modes:
+##   1. Module graph bundling & capability audit (default):
+##      Reads optional `@grant <cap>` plus `@module <name> ... @end` and `@entry <name> ... @end`
+##      blocks from stdin, resolves `use <mod>` dependencies in topological order, deduplicates
+##      diamond imports, rejects missing modules or circular `use` chains via `ctfail`, enforces
+##      capability grants (rejecting I/O calls `read`/`readall`/`emit`/`flush` inside imported
+##      modules when `@grant pure` is active), and emits the self-contained Lume-Core bundle.
+##   2. Manifest validation (`@manifest` on line 1 of stdin):
+##      Parses `lume.toml`, validates required `[package]` fields (`name`, `version`, `edition`),
+##      and prints machine-readable JSON metadata (or aborts via `ctfail` on invalid manifests).
+
+## --- hot character & string helpers ---
+fn isws(c) = c == " " or c == "\t" or c == "\r"
+fn isdigit(c) = c >= "0" and c <= "9"
+fn isalpha(c) = c >= "a" and c <= "z" or c >= "A" and c <= "Z" or c == "_"
+fn isalnum(c) = isdigit(c) or isalpha(c)
+
+fn nlpos(s, n, i) = if i >= n then i else if at(s, i) == "\n" then i else nlpos(s, n, i + 1)
+fn skipws(s, i, n) = if i >= n then i else if isws(at(s, i)) then skipws(s, i + 1, n) else i
+fn rtrimend(s, e) = if e <= 0 then 0 else if isws(at(s, e - 1)) then rtrimend(s, e - 1) else e
+fn rtrim(s) = let n = count(s) in slicen(s, n, 0, rtrimend(s, n))
+fn rtrimnl(s, e) = if e <= 0 then 0 else if at(s, e - 1) == "\n" or isws(at(s, e - 1)) then rtrimnl(s, e - 1) else e
+fn chomp(s) = slice(s, 0, rtrimnl(s, count(s)))
+fn ltrim(s) = let n = count(s) in let a = skipws(s, 0, n) in if a >= n then "" else slicen(s, n, a, n)
+fn trim(s) = ltrim(rtrim(s))
+fn startswith(s, p) = if count(s) < count(p) then 0 else slice(s, 0, count(p)) == p
+fn isindented(raw) = if count(raw) == 0 then 0 else isws(at(raw, 0))
+
+## --- list & string helpers ---
+fn app(xs, ys) = match xs
+    Nil        => ys
+    Cons(h, t) => Cons(h, app(t, ys))
+fn isnil(xs) = match xs
+    Nil        => 1
+    Cons(h, t) => 0
+fn revacc(xs, acc) = match xs
+    Nil        => acc
+    Cons(h, t) => revacc(t, Cons(h, acc))
+fn rev(xs) = revacc(xs, Nil)
+fn pairs(xs) = match xs
+    Nil        => Nil
+    Cons(a, t) => pairs2(a, t)
+fn pairs2(a, t) = match t
+    Nil        => Cons(a, Nil)
+    Cons(b, r) => Cons(a + b, pairs(r))
+fn joinall(xs) = match xs
+    Nil        => ""
+    Cons(a, t) => if isnil(t) == 1 then a else joinall(pairs(xs))
+fn joinsep(xs, sep) = match xs
+    Nil        => ""
+    Cons(h, t) => if isnil(t) == 1 then h else h + sep + joinsep(t, sep)
+
+fn splitlinesn(s, n, i) = if i >= n then Nil else let e = nlpos(s, n, i) in Cons(slicen(s, n, i, e), splitlinesn(s, n, if e >= n then e else e + 1))
+fn splitlines(s) = splitlinesn(s, count(s), 0)
+
+fn contains(xs, x) = match xs
+    Nil        => 0
+    Cons(h, t) => if h == x then 1 else contains(t, x)
+
+## --- extract `use <mod>` dependencies & body lines from a module's lines ---
+fn modname_clean(s) = let t = trim(s) in if startswith(t, "std.") then slice(t, 4, count(t)) else t
+fn extractuses(lines) = match lines
+    Nil        => Nil
+    Cons(h, t) => let tr = trim(h) in if startswith(tr, "use ") then Cons(modname_clean(slice(tr, 4, count(tr))), extractuses(t)) else extractuses(t)
+
+## For imported library modules, strip `use ...` lines and top-level `print ...` demo lines.
+fn liblines(lines) = match lines
+    Nil        => Nil
+    Cons(h, t) => let raw = rtrim(h) in let tr = ltrim(raw) in if startswith(tr, "use ") or (isindented(raw) == 0 and startswith(tr, "print ")) then liblines(t) else Cons(raw, liblines(t))
+
+## For the root entry module, strip only `use ...` lines (keep all `fn`, `type`, `print`, exprs).
+fn entrylines(lines) = match lines
+    Nil        => Nil
+    Cons(h, t) => let raw = rtrim(h) in let tr = ltrim(raw) in if startswith(tr, "use ") then entrylines(t) else Cons(raw, entrylines(t))
+
+## --- capability scanner: detect I/O calls (`read(`, `readall(`, `emit(`, `flush(`) in module text ---
+fn isidch(c) = isalnum(c)
+fn prev_boundary(s, i) = if i <= 0 then 1 else isidch(at(s, i - 1)) == 0
+fn matchkwat(s, n, i, kw) = let kl = count(kw) in if i + kl > n then 0 else if prev_boundary(s, i) == 0 then 0 else slicen(s, n, i, i + kl) == kw
+fn iocapat(s, n, i) = if matchkwat(s, n, i, "read(") then "read" else if matchkwat(s, n, i, "readall(") then "readall" else if matchkwat(s, n, i, "emit(") then "emit" else if matchkwat(s, n, i, "flush(") then "flush" else ""
+fn scanioline(s, n, i) = if i >= n then "" else let c = at(s, i) in if c == "#" then "" else if c == "\"" then scanioline(s, n, strend(s, i + 1, n)) else let cap = iocapat(s, n, i) in if cap != "" then cap else scanioline(s, n, i + 1)
+fn strend(s, i, n) = if i >= n then i else if at(s, i) == "\"" then i + 1 else if at(s, i) == "\\" then strend(s, i + 2, n) else strend(s, i + 1, n)
+fn findiocap(lines) = match lines
+    Nil        => ""
+    Cons(h, t) => let c = scanioline(h, count(h), 0) in if c != "" then c else findiocap(t)
+
+fn checkcap(nm, lines, grant) = if grant != "pure" then 0 else let cap = findiocap(lines) in if cap == "" then 0 else ctfail("lume: capability error: module '" + nm + "' uses I/O capability '" + cap + "' not granted by lume.toml (allow = [\"pure\"])\n")
+
+## --- parse framed stream (`@grant`, `@module <name> ... @end`, `@entry <name> ... @end`) ---
+fn takeuntilend(lines) = match lines
+    Nil        => {body: Nil, rest: Nil}
+    Cons(h, t) => if trim(h) == "@end" then {body: Nil, rest: t} else let r = takeuntilend(t) in {body: Cons(h, r.body), rest: r.rest}
+
+fn parseblocks(lines, grant, mods, entry) = match lines
+    Nil        => {grant: grant, mods: rev(mods), entry: entry}
+    Cons(h, t) => parseblock1(trim(h), h, t, grant, mods, entry)
+fn parseblock1(tr, h, t, grant, mods, entry) = if tr == "" then parseblocks(t, grant, mods, entry) else if startswith(tr, "@grant ") then parseblocks(t, trim(slice(tr, 7, count(tr))), mods, entry) else if startswith(tr, "@module ") then let nm = trim(slice(tr, 8, count(tr))) in let b = takeuntilend(t) in parseblocks(b.rest, grant, Cons({name: nm, uses: extractuses(b.body), lines: b.body}, mods), entry) else if startswith(tr, "@entry ") then let nm = trim(slice(tr, 7, count(tr))) in let b = takeuntilend(t) in parseblocks(b.rest, grant, mods, {name: nm, uses: extractuses(b.body), lines: b.body}) else {grant: grant, mods: Nil, entry: {name: "main", uses: extractuses(Cons(h, t)), lines: Cons(h, t)}}
+
+fn findmod(mods, nm) = match mods
+    Nil        => {found: 0, m: {name: "", uses: Nil, lines: Nil}}
+    Cons(h, t) => if h.name == nm then {found: 1, m: h} else findmod(t, nm)
+
+## --- topological DFS resolver with cycle detection & diamond deduplication ---
+fn resolve_list(uses, mods, grant, visiting, visited, chunks) = match uses
+    Nil        => {visited: visited, chunks: chunks}
+    Cons(u, t) => let r1 = resolve_one(u, mods, grant, visiting, visited, chunks) in resolve_list(t, mods, grant, visiting, r1.visited, r1.chunks)
+
+fn resolve_one(nm, mods, grant, visiting, visited, chunks) = if contains(visited, nm) == 1 then {visited: visited, chunks: chunks} else if contains(visiting, nm) == 1 then ctfail("lume: module error: circular module dependency involving '" + nm + "'\n") else let lk = findmod(mods, nm) in if lk.found == 0 then ctfail("lume: module error: module '" + nm + "' not found\n") else resolve_mod(lk.m, mods, grant, Cons(nm, visiting), visited, chunks)
+
+fn resolve_mod(m, mods, grant, visiting, visited, chunks) = let chk = checkcap(m.name, m.lines, grant) in let r = resolve_list(m.uses, mods, grant, visiting, visited, chunks) in {visited: Cons(m.name, r.visited), chunks: app(r.chunks, Cons("## --- module " + m.name + " ---\n" + joinsep(liblines(m.lines), "\n"), Nil))}
+
+fn bundle(lines) = let st = parseblocks(lines, "io", Nil, {name: "main", uses: Nil, lines: Nil}) in let r = resolve_list(st.entry.uses, st.mods, st.grant, Cons(st.entry.name, Nil), Nil, Nil) in let ebody = joinsep(entrylines(st.entry.lines), "\n") in joinsep(app(r.chunks, Cons(ebody, Nil)), "\n\n")
+
+## --- `@manifest` mode: parse & validate `lume.toml` in Lume-Core ---
+fn unquote(s) = let t = trim(s) in let n = count(t) in if n < 2 then t else if at(t, 0) == "\"" and at(t, n - 1) == "\"" then slicen(t, n, 1, n - 1) else t
+fn parse_kv(tr) = let eq = findeq(tr, 0, count(tr)) in if eq >= count(tr) then {k: "", v: ""} else {k: trim(slice(tr, 0, eq)), v: trim(slice(tr, eq + 1, count(tr)))}
+fn findeq(s, i, n) = if i >= n then n else if at(s, i) == "=" then i else findeq(s, i + 1, n)
+
+fn parse_cap_val(v) = if contains_sub(v, "\"pure\"", 0, count(v)) == 1 then "pure" else "io"
+fn contains_sub(s, sub, i, n) = let m = count(sub) in if i + m > n then 0 else if slicen(s, n, i, i + m) == sub then 1 else contains_sub(s, sub, i + 1, n)
+
+fn scanmanifest(lines, nm, ver, ed, cap) = match lines
+    Nil        => {name: nm, version: ver, edition: ed, cap: cap}
+    Cons(h, t) => let tr = trim(h) in if tr == "" or startswith(tr, "#") or startswith(tr, "[") then scanmanifest(t, nm, ver, ed, cap) else let kv = parse_kv(tr) in if kv.k == "name" then scanmanifest(t, unquote(kv.v), ver, ed, cap) else if kv.k == "version" then scanmanifest(t, nm, unquote(kv.v), ed, cap) else if kv.k == "edition" then scanmanifest(t, nm, ver, unquote(kv.v), cap) else if kv.k == "allow" or kv.k == "capabilities" then scanmanifest(t, nm, ver, ed, parse_cap_val(kv.v)) else scanmanifest(t, nm, ver, ed, cap)
+
+fn checkmanifest(m) = if m.name == "" then ctfail("lume: manifest error: missing 'name' in lume.toml\n") else if m.version == "" then ctfail("lume: manifest error: missing 'version' in lume.toml\n") else if m.edition != "" and m.edition != "2026" then ctfail("lume: manifest error: unsupported edition '" + m.edition + "' in lume.toml (expected \"2026\")\n") else "{\"name\":\"" + m.name + "\",\"version\":\"" + m.version + "\",\"edition\":\"" + (if m.edition == "" then "2026" else m.edition) + "\",\"capabilities\":\"" + m.cap + "\"}"
+
+fn run_lmod(lines) = match lines
+    Nil        => ""
+    Cons(h, t) => if trim(h) == "@manifest" then checkmanifest(scanmanifest(t, "", "", "", "io")) else bundle(lines)
+
+print chomp(run_lmod(splitlines(readall())))

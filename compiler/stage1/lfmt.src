@@ -81,6 +81,7 @@ fn parsetypelist(ts) = if headtext(ts) == ")" then {items: Nil, rest: droponce(t
 fn parsevariants(ts) = let tag = headtext(ts) in let t1 = droponce(ts) in let vp = if headtext(t1) == "(" then let a = parsetypelist(droponce(t1)) in {v: tag + "(" + joinsep(a.items, ", ") + ")", rest: a.rest} else {v: tag, rest: t1} in if headtext(vp.rest) == "|" then let rr = parsevariants(droponce(vp.rest)) in {items: Cons(vp.v, rr.items), rest: rr.rest} else {items: Cons(vp.v, Nil), rest: vp.rest}
 fn parsefields(ts) = let fnm = headtext(ts) in let r = parsetype1(dropkw(droponce(ts), ":")) in let fstr = fnm + ": " + r.ty in if headtext(r.rest) == "," then let rr = parsefields(droponce(r.rest)) in {items: Cons(fstr, rr.items), rest: rr.rest} else {items: Cons(fstr, Nil), rest: r.rest}
 fn parsetypedecl(t) = let nm = headtext(t) in let b = dropkw(droponce(t), "=") in if headtext(b) == "record" then let fs = parsefields(droponce(b)) in TypeD("type " + nm + " = record " + joinsep(fs.items, ", ")) else let vs = parsevariants(dropkw(b, "enum")) in TypeD("type " + nm + " = enum " + joinsep(vs.items, " | "))
+fn parseuse(t) = UseD("use " + headtext(t))
 
 fn recentries(ts) = if headtext(ts) == "}" then {items: Nil, rest: droponce(ts)} else recmore(headtext(ts), expr(dropkw(droponce(ts), ":")))
 fn recmore(k, rv) = if headtext(rv.rest) == "," then let rr = recentries(droponce(rv.rest)) in {items: Cons({key: k, val: rv.node}, rr.items), rest: rr.rest} else {items: Cons({key: k, val: rv.node}, Nil), rest: skiprb(rv.rest)}
@@ -127,7 +128,7 @@ fn parammore(nm, ts) = if headtext(ts) == "," then let rr = parseparams(droponce
 fn parseret(ts) = if headtext(ts) == "-" and headtext(droponce(ts)) == ">" then let r = parsetype1(droponce(droponce(ts))) in {ret: " -> " + r.ty, rest: r.rest} else {ret: "", rest: ts}
 fn parsefn(t) = let nm = headtext(t) in let ps = parseparams(dropkw(droponce(t), "(")) in let rt = parseret(ps.rest) in let b = expr(dropkw(rt.rest, "=")) in Fn(nm, ps.items, rt.ret, b.node)
 fn parseprint(t) = let e = expr(t) in Print(e.node)
-fn parseone(ts) = if headtext(ts) == "fn" then parsefn(droponce(ts)) else if headtext(ts) == "type" then parsetypedecl(droponce(ts)) else if headtext(ts) == "print" then parseprint(droponce(ts)) else ExprS((expr(ts)).node)
+fn parseone(ts) = if headtext(ts) == "fn" then parsefn(droponce(ts)) else if headtext(ts) == "type" then parsetypedecl(droponce(ts)) else if headtext(ts) == "use" then parseuse(droponce(ts)) else if headtext(ts) == "print" then parseprint(droponce(ts)) else ExprS((expr(ts)).node)
 
 ## --- canonical pretty-printer (precedence-aware minimal parens + aligned match arms) ---
 fn opprec(op) = if op == "or" then 1 else if op == "and" then 2 else if op == "==" or op == "!=" or op == "<" or op == ">" or op == "<=" or op == ">=" then 3 else if op == "+" or op == "-" then 4 else if op == "*" or op == "/" or op == "%" then 5 else 6
@@ -189,13 +190,14 @@ fn fmte(e) = match e
 fn fmtstmt(s) = match s
     Fn(nm, ps, rt, body) => "fn " + nm + "(" + joinsep(ps, ", ") + ")" + rt + " = " + fmte(body)
     TypeD(line)          => line
+    UseD(line)           => line
     Print(v)             => "print " + fmte(v)
     ExprS(v)             => fmte(v)
     _                    => ""
 fn fmtchunk(src) = fmtstmt(parseone(lexall(src)))
 
 ## --- line grouping: group continuation lines (indented lines or unindented match arms) with statement ---
-fn isarmline(tr) = if tr == "" or startswith(tr, "#") or startswith(tr, "fn ") or startswith(tr, "type ") or startswith(tr, "print ") then 0 else isarrow((parsepat(lexall(tr))).rest)
+fn isarmline(tr) = if tr == "" or startswith(tr, "#") or startswith(tr, "fn ") or startswith(tr, "type ") or startswith(tr, "use ") or startswith(tr, "print ") then 0 else isarrow((parsepat(lexall(tr))).rest)
 fn iscont(raw, tr) = if tr == "" or startswith(tr, "#") then 0 else if isindented(raw) then 1 else isarmline(tr)
 
 fn takecont(lines) = match lines

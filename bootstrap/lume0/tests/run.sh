@@ -348,6 +348,27 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_
     "$ntmp/lc" <../../compiler/stage1/fmt_sample.src >"$ntmp/fs_orig.s" 2>/dev/null
     "$ntmp/lc" <"$ntmp/fmt1.src" >"$ntmp/fs_fmt.s" 2>/dev/null
     if diff -u ../../tests/conformance/stage1/lfmt_asm.expected "$ntmp/fmt1.src" >/dev/null && cmp -s "$ntmp/fmt1.src" "$ntmp/fmt2.src" && LUME_BIN_DIR="$ntmp" ../../lume fmt --check ../../compiler/stage1/lfmt.src >/dev/null 2>&1 && cmp -s "$ntmp/fs_orig.s" "$ntmp/fs_fmt.s"; then ok "phase-2 T2: native lfmt.src canonical AST formatter (idempotent, self-canonical & codegen-invariant)"; else bad "phase-2 T2: native lfmt.src canonical AST formatter"; fi
+    # phase-2 T3: modules (`use <mod>` topological bundler in Lume-Core `compiler/stage1/lmod.src`) + package manager (`lume pkg`: lume.toml, SHA-256 lume.lock, P26 capability audit).
+    if LUME_BIN_DIR="$ntmp" ../../lume run ../../compiler/stage1/mod_app.src 2>/dev/null | diff -u ../../tests/conformance/stage1/lmod_app_asm.expected - >/dev/null; then ok "phase-2 T3: native lmod.src resolves diamond 'use' module graph and runs natively"; else bad "phase-2 T3: native lmod.src resolves diamond 'use' module graph"; fi
+    mkdir -p "$ntmp/merr"
+    printf 'use cyc_b\nfn fa(x) = x\nprint fa(1)\n' >"$ntmp/merr/cyc_a.src"
+    printf 'use cyc_a\nfn fb(x) = x\n' >"$ntmp/merr/cyc_b.src"
+    printf 'use no_such_mod\nprint 1\n' >"$ntmp/merr/miss.src"
+    LUME_BIN_DIR="$ntmp" ../../lume build "$ntmp/merr/cyc_a.src" -o "$ntmp/merr/cyc.elf" 2>"$ntmp/merr/cyc.err"; cyc_rc=$?
+    LUME_BIN_DIR="$ntmp" ../../lume build "$ntmp/merr/miss.src" -o "$ntmp/merr/miss.elf" 2>"$ntmp/merr/miss.err"; miss_rc=$?
+    if [ "$cyc_rc" != 0 ] && grep -q "circular module dependency" "$ntmp/merr/cyc.err" && [ "$miss_rc" != 0 ] && grep -q "module 'no_such_mod' not found" "$ntmp/merr/miss.err"; then ok "phase-2 T3: native lmod.src rejects circular 'use' chains and missing modules"; else bad "phase-2 T3: native lmod.src cycle & missing-module errors"; fi
+    LUME_BIN_DIR="$ntmp" ../../lume pkg init "$ntmp/pkgdemo" >/dev/null 2>&1
+    LUME_BIN_DIR="$ntmp" ../../lume pkg lock "$ntmp/pkgdemo" >/dev/null 2>&1
+    pkg_ok=1
+    LUME_BIN_DIR="$ntmp" ../../lume pkg verify "$ntmp/pkgdemo" >/dev/null 2>&1 || pkg_ok=0
+    printf '\n## tampered\n' >>"$ntmp/pkgdemo/main.src"
+    LUME_BIN_DIR="$ntmp" ../../lume pkg verify "$ntmp/pkgdemo" >/dev/null 2>&1 && pkg_ok=0
+    sed -i 's/allow = \["io"\]/allow = ["pure"]/' "$ntmp/pkgdemo/lume.toml"
+    printf 'fn steal() = read()\n' >"$ntmp/pkgdemo/sneaky.src"
+    printf 'use sneaky\nprint steal()\n' >"$ntmp/pkgdemo/main.src"
+    LUME_BIN_DIR="$ntmp" ../../lume build "$ntmp/pkgdemo/main.src" -o "$ntmp/pkgdemo/main.elf" 2>"$ntmp/pkgdemo/cap.err" && pkg_ok=0
+    grep -q "capability error: module 'sneaky' uses I/O capability 'read' not granted by lume.toml" "$ntmp/pkgdemo/cap.err" || pkg_ok=0
+    if [ "$pkg_ok" = 1 ]; then ok "phase-2 T3: lume pkg (lume.toml, SHA-256 lume.lock drift detection & P26 capability audit)"; else bad "phase-2 T3: lume pkg lockfile & capability audit"; fi
     rm -rf "$ntmp"
 else
     ok "no-toolchain ELF pipeline (skipped: not linux/x86_64, or under ASan)"
