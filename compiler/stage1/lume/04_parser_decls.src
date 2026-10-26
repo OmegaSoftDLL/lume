@@ -13,21 +13,26 @@
 ## items == all names => exactly the pre-C3 AST, so the self-host fixpoint is untouched); the comptime params are
 ## recorded in a separate `GSig` statement (like F2's `Sig`), never in `Fn`, so codegen never sees an erased param.
 fn parseparams(ts) = if headtext(ts) == ")" then {items: Nil, tys: Nil, plist: Nil, rest: droponce(ts)} else parseparamk(ts)
-fn parseparamk(ts) = if headtext(ts) == "comptime" then parseparam(headtext(droponce(ts)), 1, droponce(droponce(ts))) else parseparam(headtext(ts), 0, droponce(ts))
+fn parseparamk(ts) = if headtext(ts) == "comptime" then parseparam(headtext(droponce(ts)), 1, droponce(droponce(ts))) else if headtext(ts) == "own" then parseparam(headtext(droponce(ts)), 2, droponce(droponce(ts))) else if headtext(ts) == "mut" then parseparam(headtext(droponce(ts)), 3, droponce(droponce(ts))) else parseparam(headtext(ts), 0, droponce(ts))
 fn parseparam(nm, ct, ts) = if headtext(ts) == ":" then parseparamt(nm, ct, parsetype1(droponce(ts))) else parammore(nm, TyAny, ct, ts)
 fn parseparamt(nm, ct, r) = parammore(nm, r.node, ct, r.rest)
 fn parammore(nm, ty, ct, ts) = if headtext(ts) == "," then parammcons(nm, ty, ct, parseparams(droponce(ts))) else parammend(nm, ty, ct, skiprp(ts))
 fn parammcons(nm, ty, ct, rr) = {items: gaddrt(nm, ct, rr.items), tys: Cons(ty, rr.tys), plist: Cons({cf: ct, pn: nm, pt: ty}, rr.plist), rest: rr.rest}
 fn parammend(nm, ty, ct, rest) = {items: gaddrt(nm, ct, Nil), tys: Cons(ty, Nil), plist: Cons({cf: ct, pn: nm, pt: ty}, Nil), rest: rest}
-fn gaddrt(nm, ct, rest) = if ct == 0 then Cons(nm, rest) else rest
-fn parseret(ts) = if headtext(ts) == "-" and headtext(droponce(ts)) == ">" then parseret2(parsetype1(droponce(droponce(ts)))) else {ty: TyAny, rest: ts}
-fn parseret2(r) = {ty: r.node, rest: r.rest}
+fn gaddrt(nm, ct, rest) = if ct != 1 then Cons(nm, rest) else rest
+fn parseret(ts) = if headtext(ts) == "-" and headtext(droponce(ts)) == ">" then parseret2(parsetype1(droponce(droponce(ts)))) else {ty: TyAny, fromp: "", rest: ts}
+fn parseret2(r) = if headtext(r.rest) == "from" then {ty: r.node, fromp: headtext(droponce(r.rest)), rest: droponce(droponce(r.rest))} else {ty: r.node, fromp: "", rest: r.rest}
 ## `sg` is the annotation record of the function: `Nil` when nothing is annotated (the AST is then exactly the
 ## pre-F2 one), else a `Sig(name, paramnames, paramtypes, rettype)` that parseprog places just before the `Fn`.
-fn parsefn(t) = parsefn2(headtext(t), parseparams(dropkw(droponce(t), "(")))
-fn parsefn2(nm, ps) = parsefn3(nm, ps, parseret(ps.rest))
-fn parsefn3(nm, ps, rt) = parsefn4(nm, ps, rt, expr(dropkw(rt.rest, "=")))
-fn parsefn4(nm, ps, rt, b) = {node: Fn(nm, ps.items, b.node), sg: mksig(nm, ps, rt.ty), rest: b.rest}
+fn anyownp(pl) = match pl
+    Nil        => 0
+    Cons(p, r) => if p.cf >= 2 then 1 else anyownp(r)
+fn mkosig(nm, pubf, freef, pl, rty, fromp) = if pubf == 1 or freef == 1 or anyownp(pl) == 1 or fromp != "" then OSig(nm, pubf, freef, pl, rty, fromp) else Nil
+fn parsefnp(t, pubf, freef) = parsefn2(headtext(t), pubf, freef, parseparams(dropkw(droponce(t), "(")))
+fn parsefn2(nm, pubf, freef, ps) = parsefn3(nm, pubf, freef, ps, parseret(ps.rest))
+fn parsefn3(nm, pubf, freef, ps, rt) = parsefn4(nm, pubf, freef, ps, rt, expr(dropkw(rt.rest, "=")))
+fn parsefn4(nm, pubf, freef, ps, rt, b) = {node: Fn(nm, ps.items, b.node), sg: mksig(nm, ps, rt.ty), osg: mkosig(nm, pubf, freef, ps.plist, rt.ty, rt.fromp), rest: b.rest}
+fn parsefn(t) = parsefnp(t, 0, 0)
 fn isany(t) = match t
     TyAny => 1
     _     => 0
@@ -45,14 +50,20 @@ fn ganyct(pl) = match pl
 fn parseprint(t) = let e = expr(t) in {node: Print(e.node), rest: e.rest}
 fn parsestmt(ts) = if headtext(ts) == "fn" then parsefn(droponce(ts)) else if headtext(ts) == "type" then parsetype(droponce(ts)) else parseprint(droponce(ts))
 fn progmore(r) = Cons(r.node, parseprog(r.rest))
-fn progfn(r) = progsig(r.sg, Cons(r.node, parseprog(r.rest)))
+fn progfn(r) = progsig(r.osg, progsig(r.sg, Cons(r.node, parseprog(r.rest))))
 fn progsig(sg, rest) = match sg
     Nil => rest
     _   => Cons(sg, rest)
+fn tdeclname(nd) = match nd
+    TypeS(nm, k, items) => nm
+    _                   => ""
+fn progtyped(kind, r) = Cons(OType(tdeclname(r.node), kind), Cons(r.node, parseprog(r.rest)))
+fn progfree(ts) = if headtext(ts) == "pub" then progfn(parsefnp(droponce(droponce(ts)), 1, 1)) else progfn(parsefnp(droponce(ts), 0, 1))
+fn progat(t) = if headtext(t) == "freestanding" then progfree(droponce(t)) else if headtext(t) == "gc" then progtyped("gc", parsetype(droponce(droponce(t)))) else parseprog(droponce(t))
 fn lexprstmt(e) = {node: ExprS(e.node), rest: e.rest}
 fn parseprog(ts) = match ts
     Nil        => Nil
-    Cons(h, t) => if h.text == "fn" then progfn(parsefn(droponce(ts))) else if h.text == "print" or h.text == "type" then progmore(parsestmt(ts)) else progmore(lexprstmt(expr(ts)))
+    Cons(h, t) => if h.text == "fn" then progfn(parsefn(droponce(ts))) else if h.text == "pub" and headtext(t) == "fn" then progfn(parsefnp(droponce(t), 1, 0)) else if h.text == "@" then progat(t) else if h.text == "resource" and headtext(t) == "type" then progtyped("resource", parsetype(droponce(t))) else if h.text == "print" or h.text == "type" then progmore(parsestmt(ts)) else progmore(lexprstmt(expr(ts)))
 fn parseprogram(s) = parseprog(lex(s, 0))
 
 ## --- parser: named type declarations (F1) -----------------------------------------------------------------
@@ -96,10 +107,11 @@ fn parsefieldcons(fname, fty, rr) = {items: Cons({fname: fname, fty: fty}, rr.it
 fn parsetypelist(ts) = if headtext(ts) == ")" then {items: Nil, rest: droponce(ts)} else parsetypemore(parsetype1(ts))
 fn parsetypemore(r) = if headtext(r.rest) == "," then parsetypecons(r.node, parsetypelist(droponce(r.rest))) else {items: Cons(r.node, Nil), rest: skiprp(r.rest)}
 fn parsetypecons(n, rr) = {items: Cons(n, rr.items), rest: rr.rest}
-fn parsetype1(ts) = if headtext(ts) == "[" then parsetypelistof(parsetype1(droponce(ts))) else if headtext(ts) == "decimal" and headtext(droponce(ts)) == "(" then parsetypedecimal(droponce(droponce(ts))) else if headtext(ts) == "table" and headtext(droponce(ts)) == "[" then parsetypetable(droponce(droponce(ts))) else {node: TyName(headtext(ts)), rest: droponce(ts)}
+fn istyapp1(nm) = nm == "table" or nm == "rc" or nm == "arc" or nm == "weak" or nm == "cell" or nm == "chan" or nm == "Ref" or nm == "View"
+fn parsetype1(ts) = if headtext(ts) == "[" then parsetypelistof(parsetype1(droponce(ts))) else if headtext(ts) == "decimal" and headtext(droponce(ts)) == "(" then parsetypedecimal(droponce(droponce(ts))) else if istyapp1(headtext(ts)) and headtext(droponce(ts)) == "[" then parsetypeapp(headtext(ts), droponce(droponce(ts))) else {node: TyName(headtext(ts)), rest: droponce(ts)}
 fn parsetypelistof(r) = {node: TyList(r.node), rest: skiprk(r.rest)}
-fn parsetypetable(ts) = parsetypetable2(parsetype1(ts))
-fn parsetypetable2(r) = {node: TyApply("table", r.node), rest: skiprk(r.rest)}
+fn parsetypeapp(kind, ts) = parsetypeapp2(kind, parsetype1(ts))
+fn parsetypeapp2(kind, r) = {node: TyApply(kind, r.node), rest: skiprk(r.rest)}
 fn parsetypedecimal(ts) = let p = toint(headtext(ts)) in let s = toint(headtext(droponce(droponce(ts)))) in let rest = skiprp(droponce(droponce(droponce(ts)))) in parsetypedecimal2(p, s, rest)
 fn parsetypedecimal2(p, s, rest) = if p < 1 or p > 18 or s < 0 or s > p then ctfail("lume: type error: decimal annotation requires 1 <= precision <= 18 and 0 <= scale <= precision\n") else {node: TyDecimal(p, s), rest: rest}
 fn skiprk(ts) = if headtext(ts) == "]" then droponce(ts) else ts

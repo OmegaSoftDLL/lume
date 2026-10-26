@@ -518,7 +518,7 @@ fn tcompatl(e, k) = match k
 fn tcompatapply(n, e, k) = match k
     TyAny => 1
     TyApply(n2, e2) => if n == n2 then tcompat(e, e2) else 0
-    _ => 0
+    _ => if n == "Ref" or n == "View" then tcompat(e, k) else 0
 fn tcompatdecimal(p, s, known) = match known
     TyAny => 1
     TyDecimal(p2, s2) => if p == p2 and s == s2 then 1 else 0

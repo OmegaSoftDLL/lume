@@ -1,7 +1,7 @@
 ## --- driver & callable pipeline API (E1): lex, parse, check, expand, and compile source strings ---
 fn lumec_lex(src) = lex(src, 0)
 fn lumec_parse(src) = parseprogram(src)
-fn lumec_check(src) = tcheck(parseprogram(src))
-fn lumec_expand(src) = cfold(gerase(tcheck(parseprogram(src))))
+fn lumec_check(src) = tcheck(ocheck(parseprogram(src)))
+fn lumec_expand(src) = cfold(gerase(tcheck(ocheck(parseprogram(src)))))
 fn lumec_compile(src) = lgen(lumec_expand(src))
 print lumec_compile(readall())
