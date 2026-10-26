@@ -515,6 +515,13 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_
     "$ntmp/lc" <"$ntmp/c4bad1.src" >"$ntmp/c4bad1.s" 2>"$ntmp/c4bad1.err"; c4b1=$?
     "$ntmp/lc" <"$ntmp/c4bad2.src" >"$ntmp/c4bad2.s" 2>"$ntmp/c4bad2.err"; c4b2=$?
     if [ "$c4b1" = 3 ] && [ ! -s "$ntmp/c4bad1.s" ] && grep -q "comptime assertion failed" "$ntmp/c4bad1.err" && [ "$c4b2" = 3 ] && [ ! -s "$ntmp/c4bad2.s" ] && grep -q "comptime assertion failed: three is not greater than nine" "$ntmp/c4bad2.err"; then ok "phase-2 C4: a false comptime assert fails the build (exit 3, no asm) with a clear message"; else bad "phase-2 C4: false comptime assert fails at compile time"; fi
+    # phase-2 C4b: comptime precomputes a lookup TABLE -- the generating function is folded away at build time.
+    "$ntmp/lc" <../../compiler/stage1/comptime_table.src >"$ntmp/ctab.s" 2>"$ntmp/ctab.err"; "$ntmp/lasm" <"$ntmp/ctab.s" >"$ntmp/ctab.elf" 2>/dev/null; chmod +x "$ntmp/ctab.elf"
+    ctab_ok=1
+    { [ -x "$ntmp/ctab.elf" ] && "$ntmp/ctab.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/comptime_table_asm.expected - >/dev/null; } || ctab_ok=0
+    # PROOF the table was precomputed: `squares` is never called at runtime (comptime folded the whole list).
+    [ "$(grep -c 'call squares' "$ntmp/ctab.s")" = 0 ] || ctab_ok=0
+    if [ "$ctab_ok" = 1 ]; then ok "phase-2 C4b: comptime precomputes a table (generating fn folded, not called at runtime)"; else bad "phase-2 C4b: comptime precomputed table"; cat "$ntmp/ctab.err"; fi
     # phase-2 F3a: local return-type inference from parameters, `let` bindings, and operator/`if` result types.
     "$ntmp/lc" <../../compiler/stage1/infer_ok.src >"$ntmp/if.s" 2>"$ntmp/if.err"; "$ntmp/lasm" <"$ntmp/if.s" >"$ntmp/if.elf" 2>/dev/null; chmod +x "$ntmp/if.elf"
     if [ -x "$ntmp/if.elf" ] && "$ntmp/if.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/infer_ok_asm.expected - >/dev/null; then ok "phase-2 F3a: return type inferred from params/lets/operators type-checks and runs"; else bad "phase-2 F3a: return-type inference (passing)"; cat "$ntmp/if.err"; fi

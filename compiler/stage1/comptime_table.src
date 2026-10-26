@@ -1,0 +1,9 @@
+## C4b: a precomputed table. `squares()` is a pure function returning a list; `comptime(squares())`
+## folds the WHOLE list at compile time -- every element is computed during the build -- so the
+## generating function is never called at runtime, only the constant table survives. nth picks the
+## 4th element (index 3) = 4*4 = 16.
+fn squares() = Cons(1 * 1, Cons(2 * 2, Cons(3 * 3, Cons(4 * 4, Nil))))
+fn nth(xs, i) = match xs
+    Nil        => 0
+    Cons(h, t) => if i <= 0 then h else nth(t, i - 1)
+print nth(comptime(squares()), 3)
