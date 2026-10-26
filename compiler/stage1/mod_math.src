@@ -1,0 +1,5 @@
+## mod_math.src -- intermediate module importing mod_base (Track T, brick T3).
+use mod_base
+
+fn hypot_sq(a: int, b: int) -> int = sq(a) + sq(b)
+fn quad(x: int) -> int = sq(sq(x))

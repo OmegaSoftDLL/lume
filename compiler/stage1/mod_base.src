@@ -1,0 +1,4 @@
+## mod_base.src -- shared foundational module for multi-module diamond test (Track T, brick T3).
+fn sq(x: int) -> int = x * x
+fn cube(x: int) -> int = x * sq(x)
+print sq(999)
