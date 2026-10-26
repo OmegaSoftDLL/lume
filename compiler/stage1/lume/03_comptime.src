@@ -231,6 +231,24 @@ fn cfoldstmt(s0, ft) = match s0
     ExprS(v)         => ExprS(chygiene(cfolde(v, ft)))
     _                => s0
 fn cfoldct(r) = ctnode(r.v)
+## C4: `comptime assert(cond)` / `comptime assert(cond, "msg")` — evaluate `cond` at COMPILE TIME and abort
+## compilation (exit 3, no asm) if it is false, with a legible message; if true it folds to the constant 0 (a
+## compile-time check, not runtime code). `assert` is recognised only when no user `fn assert` shadows it, and
+## only as the head of a `comptime` (CT) node, so a CT-free program -- lumec.src included -- is rebuilt unchanged
+## and the self-host fixpoint stays bit-identical. Superior to C's runtime `assert`: the condition is evaluated
+## entirely at compile time and leaves NO check in the binary (a passing assert folds to a constant), the failure
+## is deterministic, and the error message is one an AI can read.
+fn cfoldctdispatch(inner, ft) = match inner
+    Call(nm, args) => cfoldctcall(nm, args, ft)
+    _              => cfoldct(ceval(inner, Nil, ft, cbudget(), 0))
+fn cfoldctcall(nm, args, ft) = if nm == "assert" and isnil(lookupfn(nm, ft)) == 1 then cfoldassert(args, ft) else cfoldct(ceval(Call(nm, args), Nil, ft, cbudget(), 0))
+fn astsecond(xs) = match xs
+    Nil        => Num(0)
+    Cons(h, t) => asthead(t)
+fn cfoldassert(args, ft) = if len(args) < 1 or len(args) > 2 then ctfail("lume: comptime error: 'comptime assert' expects assert(cond) or assert(cond, \"message\")\n") else cfoldassert2(args, ceval(asthead(args), Nil, ft, cbudget(), 0), ft)
+fn cfoldassert2(args, rc, ft) = if (rc.v).kind != "int" then ctfail("lume: comptime error: 'comptime assert' condition is not an integer at compile time\n") else if (rc.v).i != 0 then Num(0) else cfoldassertfail(args, ft)
+fn cfoldassertfail(args, ft) = if len(args) == 2 then cfoldassertmsg(ceval(astsecond(args), Nil, ft, cbudget(), 0)) else ctfail("lume: comptime error: comptime assertion failed\n")
+fn cfoldassertmsg(rm) = if (rm.v).kind == "str" then ctfail("lume: comptime error: comptime assertion failed: " + (rm.v).s + "\n") else ctfail("lume: comptime error: 'comptime assert' message is not a string at compile time\n")
 fn cquotenode(e, qenv, ft) = match e
     Num(n)          => Call("Num", Cons(Num(n), Nil))
     Str(v)          => Call("Str", Cons(Str(v), Nil))
@@ -244,7 +262,7 @@ fn cquotelist(xs, qenv, ft) = match xs
     Nil        => Var("Nil")
     Cons(h, t) => Call("Cons", Cons(cquotenode(h, qenv, ft), Cons(cquotelist(t, qenv, ft), Nil)))
 fn cfolde(e, ft) = match e
-    CT(inner)       => cfoldct(ceval(inner, Nil, ft, cbudget(), 0))
+    CT(inner)       => cfoldctdispatch(inner, ft)
     Quote(inner)    => cquotenode(inner, Nil, ft)
     Splice(inner)   => cfolde(cunreify((ceval(inner, Nil, ft, cbudget(), 0)).v), ft)
     Bin(op, a, b)   => Bin(op, cfolde(a, ft), cfolde(b, ft))
