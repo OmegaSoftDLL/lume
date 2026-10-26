@@ -538,6 +538,12 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_
     "$ntmp/lc" <"$ntmp/f3bb1.src" >"$ntmp/f3bb1.s" 2>"$ntmp/f3bb1.err"; f3bb1=$?
     "$ntmp/lc" <"$ntmp/f3bb2.src" >"$ntmp/f3bb2.s" 2>"$ntmp/f3bb2.err"; f3bb2=$?
     if [ "$f3bb1" = 3 ] && [ ! -s "$ntmp/f3bb1.s" ] && grep -q "argument 1 of 'greet' has type int but parameter 'name' expects str" "$ntmp/f3bb1.err" && [ "$f3bb2" = 3 ] && [ ! -s "$ntmp/f3bb2.s" ] && grep -q "argument 1 of 'wants' has type int but parameter 's' expects str" "$ntmp/f3bb2.err"; then ok "phase-2 F3b: an inferred int argument passed to a str parameter fails at compile time (exit 3, no asm)"; else bad "phase-2 F3b: inferred argument mismatch fails"; fi
+    # phase-2 F3 (let inference): a let-bound variable that infers to int/str is tracked and checked as an argument.
+    "$ntmp/lc" <../../compiler/stage1/let_infer_ok.src >"$ntmp/li.s" 2>"$ntmp/li.err"; "$ntmp/lasm" <"$ntmp/li.s" >"$ntmp/li.elf" 2>/dev/null; chmod +x "$ntmp/li.elf"
+    if [ -x "$ntmp/li.elf" ] && "$ntmp/li.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/let_infer_ok_asm.expected - >/dev/null; then ok "phase-2 F3: let-bound int/str variables are inferred and checked as arguments"; else bad "phase-2 F3: let-bound variable inference (passing)"; cat "$ntmp/li.err"; fi
+    printf 'fn wants_str(s: str) -> str = s\nfn bad(n: int) -> str = let y = n * 2 in wants_str(y)\nprint 0\n' >"$ntmp/f3let.src"
+    "$ntmp/lc" <"$ntmp/f3let.src" >"$ntmp/f3let.s" 2>"$ntmp/f3let.err"; f3let=$?
+    if [ "$f3let" = 3 ] && [ ! -s "$ntmp/f3let.s" ] && grep -q "argument 1 of 'wants_str' has type int but parameter 's' expects str" "$ntmp/f3let.err"; then ok "phase-2 F3: a let-bound int passed to a str parameter fails at compile time (exit 3, no asm)"; else bad "phase-2 F3: let-bound inferred argument mismatch fails"; fi
     rm -rf "$ntmp"
 else
     ok "no-toolchain ELF pipeline (skipped: not linux/x86_64, or under ASan)"

@@ -1,0 +1,6 @@
+## F3 (let inference): a `let`-bound variable whose value infers to int/str is tracked in the
+## local type env, so it is checked when passed as an argument. y = n + 1 infers int and is
+## passed to wants_int's int parameter -- ok. f(10) = wants_int(11) = 11.
+fn wants_int(x: int) -> int = x
+fn f(n: int) -> int = let y = n + 1 in wants_int(y)
+print f(10)
