@@ -364,8 +364,10 @@ fn parsefieldcons(fname, fty, rr) = {items: Cons({fname: fname, fty: fty}, rr.it
 fn parsetypelist(ts) = if headtext(ts) == ")" then {items: Nil, rest: droponce(ts)} else parsetypemore(parsetype1(ts))
 fn parsetypemore(r) = if headtext(r.rest) == "," then parsetypecons(r.node, parsetypelist(droponce(r.rest))) else {items: Cons(r.node, Nil), rest: skiprp(r.rest)}
 fn parsetypecons(n, rr) = {items: Cons(n, rr.items), rest: rr.rest}
-fn parsetype1(ts) = if headtext(ts) == "[" then parsetypelistof(parsetype1(droponce(ts))) else if headtext(ts) == "decimal" and headtext(droponce(ts)) == "(" then parsetypedecimal(droponce(droponce(ts))) else {node: TyName(headtext(ts)), rest: droponce(ts)}
+fn parsetype1(ts) = if headtext(ts) == "[" then parsetypelistof(parsetype1(droponce(ts))) else if headtext(ts) == "decimal" and headtext(droponce(ts)) == "(" then parsetypedecimal(droponce(droponce(ts))) else if headtext(ts) == "table" and headtext(droponce(ts)) == "[" then parsetypetable(droponce(droponce(ts))) else {node: TyName(headtext(ts)), rest: droponce(ts)}
 fn parsetypelistof(r) = {node: TyList(r.node), rest: skiprk(r.rest)}
+fn parsetypetable(ts) = parsetypetable2(parsetype1(ts))
+fn parsetypetable2(r) = {node: TyApply("table", r.node), rest: skiprk(r.rest)}
 fn parsetypedecimal(ts) = let p = toint(headtext(ts)) in let s = toint(headtext(droponce(droponce(ts)))) in let rest = skiprp(droponce(droponce(droponce(ts)))) in parsetypedecimal2(p, s, rest)
 fn parsetypedecimal2(p, s, rest) = if p < 1 or p > 18 or s < 0 or s > p then ctfail("lume: type error: decimal annotation requires 1 <= precision <= 18 and 0 <= scale <= precision\n") else {node: TyDecimal(p, s), rest: rest}
 fn skiprk(ts) = if headtext(ts) == "]" then droponce(ts) else ts
@@ -836,7 +838,18 @@ fn tknown(e, tt) = match e
     Rec(items)    => tknown_decimal_record(items)
     RecT(tn, its) => tknownrec(tn, trecptypelookup(tn, tt.recs))
     _             => TyAny
-fn tknowncall(nm, xs, tt) = if nm == "decimal" then tknown_decimal_call(xs) else if nm == "decimal_cast" then tknown_decimal_cast(xs) else tknownctor(nm, tt)
+fn tknowncall(nm, xs, tt) = if nm == "decimal" then tknown_decimal_call(xs) else if nm == "decimal_cast" then tknown_decimal_cast(xs) else tknown_call_result(nm, xs, tt)
+fn tknown_call_result(nm, xs, tt) = match tglookup(nm, tt.gsigs)
+    Cons(g, rest) => tsubst(g.rt, tknown_gbind(xs, g.params, Nil), tpset(g.params))
+    Nil => tknown_simple_result(tsiglookup(nm, tt.sigs), tknownctor(nm, tt))
+fn tknown_simple_result(signature, fallback) = match signature
+    Nil => fallback
+    Cons(sg, rest) => sg.rt
+fn tknown_gbind(args, params, env) = match params
+    Nil => env
+    Cons(param, rest_params) => match args
+        Nil => env
+        Cons(arg, rest_args) => if param.cf == 1 then tknown_gbind(rest_args, rest_params, gbind(param.pn, arg, env)) else tknown_gbind(rest_args, rest_params, env)
 fn tknown_decimal_call(xs) = match xs
     Cons(Num(p), Cons(Num(s), rest)) => TyDecimal(p, s)
     _ => TyAny
@@ -862,6 +875,7 @@ fn tknownrec(tn, m) = match m
 fn tystr(t) = match t
     TyName(n) => n
     TyList(e) => "[" + tystr(e) + "]"
+    TyApply(n, e) => n + "[" + tystr(e) + "]"
     TyDecimal(p, s) => "decimal(" + str(p) + ", " + str(s) + ")"
     TyDecimalLiteral(c, s) => "decimal literal"
     _         => "?"
@@ -870,6 +884,7 @@ fn tcompat(ex, k) = match ex
     TyAny     => 1
     TyName(n) => tcompatn(n, k)
     TyList(e) => tcompatl(e, k)
+    TyApply(n, e) => tcompatapply(n, e, k)
     TyDecimal(p, s) => tcompatdecimal(p, s, k)
 fn tcompatn(n, k) = match k
     TyAny     => 1
@@ -883,6 +898,10 @@ fn tcompatl(e, k) = match k
     TyList(e2) => tcompat(e, e2)
     TyDecimal(p, s) => 0
     TyDecimalLiteral(c, s) => 0
+fn tcompatapply(n, e, k) = match k
+    TyAny => 1
+    TyApply(n2, e2) => if n == n2 then tcompat(e, e2) else 0
+    _ => 0
 fn tcompatdecimal(p, s, known) = match known
     TyAny => 1
     TyDecimal(p2, s2) => if p == p2 and s == s2 then 1 else 0
@@ -950,6 +969,7 @@ fn gtypeval(a) = match a
 fn tsubst(ty, env, tps) = match ty
     TyName(n) => tsubstn(n, env, tps)
     TyList(e) => TyList(tsubst(e, env, tps))
+    TyApply(n, e) => TyApply(n, tsubst(e, env, tps))
     _         => ty
 fn tsubstn(n, env, tps) = if tmem(n, tps) == 1 then tlookupty(n, env) else TyName(n)
 fn tlookupty(n, env) = match env

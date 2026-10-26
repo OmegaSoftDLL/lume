@@ -440,6 +440,12 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_
         "$ntmp/lc" <../../compiler/stage1/$prog.src >"$ntmp/c3_$prog.s" 2>/dev/null; "$ntmp/lasm" <"$ntmp/c3_$prog.s" >"$ntmp/c3_$prog.elf" 2>/dev/null; chmod +x "$ntmp/c3_$prog.elf"
         if [ -x "$ntmp/c3_$prog.elf" ] && "$ntmp/c3_$prog.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/${prog}_asm.expected - >/dev/null; then ok "phase-2 C3: backward-compat -- comptime-free $prog.src unchanged"; else bad "phase-2 C3: backward-compat -- comptime-free $prog.src unchanged"; fi
     done
+    # D2 generic row types: `table[T]` survives generic return substitution and rejects a mismatched row type.
+    "$ntmp/lc" <../../compiler/stage1/table_generic.src >"$ntmp/tg.s" 2>"$ntmp/tg.err"
+    "$ntmp/lasm" <"$ntmp/tg.s" >"$ntmp/tg.elf" 2>/dev/null; chmod +x "$ntmp/tg.elf"
+    if [ -x "$ntmp/tg.elf" ] && "$ntmp/tg.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/table_generic_asm.expected - >/dev/null; then ok "phase-2 D2: table[T] annotations type-check generic function results"; else bad "phase-2 D2: table[T] annotations type-check generic function results"; cat "$ntmp/tg.err"; fi
+    "$ntmp/lc" <../../compiler/stage1/table_generic_bad.src >"$ntmp/tgbad.s" 2>"$ntmp/tgbad.err"; tgbad=$?
+    if [ "$tgbad" = 3 ] && [ ! -s "$ntmp/tgbad.s" ] && grep -q "has type table\[str\] but parameter 'table' expects table\[int\]" "$ntmp/tgbad.err"; then ok "phase-2 D2: table[T] rejects a mismatched generic row type"; else bad "phase-2 D2: table[T] rejects a mismatched generic row type"; fi
     rm -rf "$ntmp"
 else
     ok "no-toolchain ELF pipeline (skipped: not linux/x86_64, or under ASan)"
