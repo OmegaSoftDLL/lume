@@ -62,11 +62,16 @@ concrete counterexamples (`[V0001]`). Also dogfoods a `QF_LIA`-proven contract (
 `compiler/stage1/lume/05_codegen.src`, mirrored in `compiler/stage1/data_parser.lume`) whose runtime
 guard is elided in `lumec`'s own assembly while Stage A's `runtime_checked` contracts remain guarded.
 
-## Stage C — Effects in the compiler (only after #167 is closed)
+## Stage C — Effects in the compiler (✅ Done)
 
-Model the one place the compiler does I/O — the driver (`07_driver`) / CLI boundary — as an effect.
-Keep the footprint minimal: the pure passes are pure; **leave them pure**. Smallest effect surface,
-highest signal that effects hold under self-hosting.
+Model the one place the compiler does I/O — the driver (`compiler/stage1/lume/07_driver.src`) / CLI
+boundary — as an algebraic effect (`effect CompilerIO { fn read_source() -> str }`,
+`fn lumec_drive() / {CompilerIO} = lumec_compile(read_source())`, and
+`print with handler CompilerIO { fn read_source() -> str = readall() } in lumec_drive()`), mirrored
+in `compiler/stage1/data_parser.lume`, while marking all five core compiler pipeline passes
+(`lumec_lex`, `lumec_parse`, `lumec_check`, `lumec_expand`, `lumec_compile`) explicitly `/ pure` so
+any accidental effect leak in a pure pass is rejected at compile time with `[E0200]`. Covered by
+`compiler/stage1/compiler_effects_ok.src`.
 
 ## Stage D — Ownership / Perceus in the compiler (later; after A–C are stable)
 

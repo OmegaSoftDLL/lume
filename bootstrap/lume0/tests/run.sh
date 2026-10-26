@@ -839,6 +839,15 @@ PY
     { cat "$ntmp/cc_base.src"; printf 'print len(hbind(0 - 1, TyAny, Nil))\n'; } >"$ntmp/cc_bad9.src"
     "$ntmp/lc" <"$ntmp/cc_bad9.src" >"$ntmp/cc_bad9.s" 2>/dev/null; "$ntmp/lasm" <"$ntmp/cc_bad9.s" >"$ntmp/cc_bad9.elf" 2>/dev/null; chmod +x "$ntmp/cc_bad9.elf"; "$ntmp/cc_bad9.elf" >/dev/null 2>"$ntmp/cc_bad9.err"; ccb9=$?
     if [ "$ccb1" = 3 ] && grep -q "\[V0001\]" "$ntmp/cc_bad1.err" && [ "$ccb2" = 3 ] && grep -q "\[V0001\]" "$ntmp/cc_bad2.err" && [ "$ccb3" = 3 ] && grep -q "\[V0001\]" "$ntmp/cc_bad3.err" && [ "$ccb4" = 3 ] && grep -q "\[V0001\]" "$ntmp/cc_bad4.err" && [ "$ccb5" = 3 ] && grep -q "runtime contract violation (requires) in 'parsevariantend'" "$ntmp/cc_bad5.err" && [ "$ccb6" = 3 ] && grep -q "runtime contract violation (requires) in 'parsetypedecimal2'" "$ntmp/cc_bad6.err" && [ "$ccb7" = 3 ] && grep -q "runtime contract violation (requires) in 'tifn3'" "$ntmp/cc_bad7.err" && [ "$ccb8" = 3 ] && grep -q "runtime contract violation (requires) in 'henv0'" "$ntmp/cc_bad8.err" && [ "$ccb9" = 3 ] && grep -q "runtime contract violation (requires) in 'hbind'" "$ntmp/cc_bad9.err"; then ok "inflection Stage A: all 9 per-contract regression tests catch violations (Lexer/Parser/Typecheck, exit 3)"; else bad "inflection Stage A: per-contract regression tests"; cat "$ntmp/cc_bad1.err" "$ntmp/cc_bad2.err" "$ntmp/cc_bad3.err" "$ntmp/cc_bad4.err" "$ntmp/cc_bad5.err" "$ntmp/cc_bad6.err" "$ntmp/cc_bad7.err" "$ntmp/cc_bad8.err" "$ntmp/cc_bad9.err" 2>/dev/null; fi
+    # Inflection Stage C (docs/21-inflection-plan.md): driver I/O boundary (`07_driver.src`) modeled as
+    # `effect CompilerIO { fn read_source() -> str }` with `lumec_drive() / {CompilerIO}` handled at the CLI
+    # entry point while keeping all 5 core passes (`lumec_lex`, `lumec_parse`, `lumec_check`, `lumec_expand`,
+    # `lumec_compile`) explicitly `/ pure`:
+    "$ntmp/lc" <../../compiler/stage1/compiler_effects_ok.src >"$ntmp/ce_ok.s" 2>"$ntmp/ce_ok.err"
+    if [ -s "$ntmp/ce_ok.s" ]; then "$ntmp/lasm" <"$ntmp/ce_ok.s" >"$ntmp/ce_ok.elf" 2>/dev/null; chmod +x "$ntmp/ce_ok.elf"; fi
+    printf 'effect CompilerIO { fn read_source() -> str }\nfn lumec_lex_bad(src: str) -> int / pure = count(read_source()) + count(src)\nprint lumec_lex_bad("hi")\n' >"$ntmp/ce_bad.src"
+    "$ntmp/lc" <"$ntmp/ce_bad.src" >"$ntmp/ce_bad.s" 2>"$ntmp/ce_bad.err"; cebadc=$?
+    if [ -x "$ntmp/ce_ok.elf" ] && "$ntmp/ce_ok.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/compiler_effects_ok_asm.expected - >/dev/null && grep -q "^read_source:" "$ntmp/bp_c.s" && grep -q "^lumec_drive:" "$ntmp/bp_c.s" && [ "$cebadc" = 3 ] && [ ! -s "$ntmp/ce_bad.s" ] && grep -q "\[E0200\]" "$ntmp/ce_bad.err"; then ok "inflection Stage C: 07_driver CompilerIO effect boundary + / pure compiler passes compile, run, and reject impure pass leaks with [E0200]"; else bad "inflection Stage C: 07_driver CompilerIO effect boundary"; cat "$ntmp/ce_ok.err" "$ntmp/ce_bad.err" 2>/dev/null; fi
     rm -rf "$ntmp"
 else
     ok "no-toolchain ELF pipeline (skipped: not linux/x86_64, or under ASan)"
@@ -850,6 +859,8 @@ _k2x_tmp=$(mktemp)
 printf 'effect Clock { fn now_tick() -> int }\npub fn step(c: int) -> int / {Clock} = now_tick() + c\npub fn run(c: int) -> int / pure = with handler Clock { fn now_tick() -> int = 100 } in step(c) + step(c)\nprint run(5)\n' >"$_k2x_tmp"
 if ../../lume agent eval "$_k2x_tmp" 2>/dev/null | grep -q '"result":"210"'; then ok "phase-3 K2 (#167): cross-platform inter-procedural effect handler dispatch (step(c) + step(c) == 210)"; else bad "phase-3 K2 (#167): cross-platform inter-procedural effect handler dispatch"; fi
 rm -f "$_k2x_tmp"
+
+if ../../lume agent eval ../../compiler/stage1/compiler_effects_ok.src 2>/dev/null | grep -q '"result":"108\\n219"'; then ok "inflection Stage C: cross-platform CompilerIO driver effect & / pure pipeline passes"; else bad "inflection Stage C: cross-platform CompilerIO driver effect & / pure pipeline passes"; fi
 
 _sb1_tmp=$(mktemp)
 _sb2_tmp=$(mktemp)
