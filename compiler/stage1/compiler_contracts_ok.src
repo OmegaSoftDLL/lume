@@ -1,0 +1,31 @@
+fn len(xs) = match xs
+    Nil        => 0
+    Cons(h, t) => 1 + len(t)
+fn isnil(xs) = match xs
+    Nil        => 1
+    Cons(h, t) => 0
+fn isdigit(c) = c >= "0" and c <= "9"
+fn numend(s, i) requires i >= 0 ensures result >= i = if i < count(s) and isdigit(at(s, i)) then numend(s, i + 1) else i
+fn decimalend(s, i) requires i >= 0 ensures result >= i = let j = numend(s, i) in if j + 1 < count(s) and at(s, j) == "." and isdigit(at(s, j + 1)) then numend(s, j + 1) else j
+fn decscan(s, i, coefficient, scale, past, digits) requires i >= 0 requires scale >= 0 requires digits >= 0 ensures result.scale >= scale = if i >= count(s) then {coefficient: coefficient, scale: scale} else if at(s, i) == "." then decscan(s, i + 1, coefficient, scale, 1, digits) else decscan(s, i + 1, coefficient * 10 + toint(at(s, i)), scale + past, past, digits + 1)
+fn findcloseb(s, j) requires j >= 0 ensures result < 0 or result >= j = if j >= count(s) then 0 - 1 else if at(s, j) == "}" then j else findcloseb(s, j + 1)
+fn headtext(ts) = match ts
+    Nil        => ""
+    Cons(h, t) => h.text
+fn parsevariantend(tag, ar, ts) requires ar >= 0 ensures isnil(result.items) == 0 = if headtext(ts) == "|" then {items: Cons({tag: tag, ar: ar}, Nil), rest: ts} else {items: Cons({tag: tag, ar: ar}, Nil), rest: ts}
+fn parsetypedecimal2(p, s, rest) requires p >= 0 requires s >= 0 = if p < 1 or p > 18 or s < 0 or s > p then ctfail("lume: type error\n") else {node: TyDecimal(p, s), rest: rest}
+fn tiptypes(env, subst) = match env
+    Nil        => Nil
+    Cons(h, t) => Cons(TyAny, tiptypes(t, subst))
+fn tifn3(fnnode, ps, env, ri) requires len(env) == len(ps) ensures len(result.iptypes) == len(ps) = {fnode: fnnode, pn: ps, iptypes: tiptypes(env, ri.subst)}
+fn henv0(ps, i) requires i >= 0 ensures len(result) == len(ps) = match ps
+    Nil        => Nil
+    Cons(p, r) => Cons({k: p, v: TyVar(i)}, henv0(r, i + 1))
+fn hbind(n, ty, subst) requires n >= 0 ensures isnil(result) == 0 = Cons({tv: n, ty: ty}, subst)
+print numend("1234x", 0)
+print decimalend("12.34x", 0)
+print (decscan("12.34", 0, 0, 0, 0, 0)).scale
+print findcloseb("xy}b", 0)
+print len((parsevariantend("Leaf", 1, Nil)).items)
+print isnil((parsetypedecimal2(10, 2, Nil)).rest)
+print let ps0 = Cons("a", Cons("b", Nil)) in let env0 = henv0(ps0, 0) in let sb0 = hbind(0, TyName("int"), Nil) in let inf0 = tifn3(Num(0), ps0, env0, {subst: sb0}) in len(env0) + len(inf0.iptypes) + len(sb0)

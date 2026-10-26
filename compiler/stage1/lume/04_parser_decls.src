@@ -107,7 +107,7 @@ fn parsevpfield(ts) = if headtext(droponce(ts)) == ":" then parsetype1(droponce(
 fn parsevpmore(r) = if headtext(r.rest) == "," then parsevpcons(r.node, parsevpayload(droponce(r.rest))) else {items: Cons(r.node, Nil), rest: skiprp(r.rest)}
 fn parsevpcons(n, rr) = {items: Cons(n, rr.items), rest: rr.rest}
 fn parsevariantp(tag, a) = parsevariantend(tag, len(a.items), a.rest)
-fn parsevariantend(tag, ar, ts) = if headtext(ts) == "|" then parsevariantcons(tag, ar, parsevariants(droponce(ts))) else {items: Cons({tag: tag, ar: ar}, Nil), rest: ts}
+fn parsevariantend(tag, ar, ts) requires ar >= 0 ensures isnil(result.items) == 0 = if headtext(ts) == "|" then parsevariantcons(tag, ar, parsevariants(droponce(ts))) else {items: Cons({tag: tag, ar: ar}, Nil), rest: ts}
 fn parsevariantcons(tag, ar, rr) = {items: Cons({tag: tag, ar: ar}, rr.items), rest: rr.rest}
 fn parserecordty(nm, t) = let hb = if headtext(t) == "{" then 1 else 0 in parserecordty2(nm, hb, parsefields(dropkw(t, "{")))
 fn parserecordty2(nm, hb, fs) = let rest1 = if hb == 1 then skiprb(fs.rest) else fs.rest in if headtext(rest1) == "invariant" then let inv = expr(droponce(rest1)) in {node: TypeS(nm, "record", fs.items), inv: VTypeInvariant(nm, fs.items, inv.node), rest: inv.rest} else {node: TypeS(nm, "record", fs.items), inv: Nil, rest: rest1}
@@ -126,6 +126,6 @@ fn parsetypelistof(r) = {node: TyList(r.node), rest: skiprk(r.rest)}
 fn parsetypeapp(kind, ts) = parsetypeapp2(kind, parsetype1(ts))
 fn parsetypeapp2(kind, r) = {node: TyApply(kind, r.node), rest: skiprk(r.rest)}
 fn parsetypedecimal(ts) = let p = toint(headtext(ts)) in let s = toint(headtext(droponce(droponce(ts)))) in let rest = skiprp(droponce(droponce(droponce(ts)))) in parsetypedecimal2(p, s, rest)
-fn parsetypedecimal2(p, s, rest) = if p < 1 or p > 18 or s < 0 or s > p then ctfail("lume: type error: decimal annotation requires 1 <= precision <= 18 and 0 <= scale <= precision\n") else {node: TyDecimal(p, s), rest: rest}
+fn parsetypedecimal2(p, s, rest) requires p >= 0 requires s >= 0 = if p < 1 or p > 18 or s < 0 or s > p then ctfail("lume: type error: decimal annotation requires 1 <= precision <= 18 and 0 <= scale <= precision\n") else {node: TyDecimal(p, s), rest: rest}
 fn skiprk(ts) = if headtext(ts) == "]" then droponce(ts) else ts
 

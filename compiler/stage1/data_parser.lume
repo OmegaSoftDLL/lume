@@ -239,6 +239,21 @@ fn dexpr(p: mut DP, min_bp: int) -> DExpr
             left = DBin(op: t.text, l: left, r: right)
     left
 
+fn dconj_conds(cs: [DExpr], idx: int) -> DExpr
+    if idx >= cs.len()
+        DInt(n: 1)
+    elif idx + 1 == cs.len()
+        cs[idx]
+    else
+        DBin(op: "and", l: cs[idx], r: dconj_conds(cs, idx + 1))
+
+fn dwrap_contract(fname: str, low_body: DExpr, reqs: [DExpr], enss: [DExpr]) -> DExpr
+    let post = if enss.len() == 0 then low_body else DLetIn(name: "result", value: low_body, body: DLetIn(name: "ret", value: DVar(name: "result"), body: DLetIn(name: "_vens_ok", value: DIf(cond: dconj_conds(enss, 0), then_val: DInt(n: 1), else_val: DCall(name: "ctfail", args: [DStr(value: "lume: runtime contract violation (ensures) in '" + fname + "'\n")])), body: DVar(name: "result"))))
+    if reqs.len() == 0
+        post
+    else
+        DLetIn(name: "_vreq_ok", value: DIf(cond: dconj_conds(reqs, 0), then_val: DInt(n: 1), else_val: DCall(name: "ctfail", args: [DStr(value: "lume: runtime contract violation (requires) in '" + fname + "'\n")])), body: post)
+
 fn dstmt(p: mut DP) -> DStmt
     let t = dcur(p)
     if t.kind == Kw and t.text == "fn"
@@ -251,8 +266,16 @@ fn dstmt(p: mut DP) -> DStmt
             if dcur(p).kind == Op and dcur(p).text == ","
                 deat(p)
         deat(p)                          # )
+        var reqs = []
+        var enss = []
+        while dcur(p).text == "requires" or dcur(p).text == "ensures"
+            let kw = deat(p).text
+            if kw == "requires"
+                reqs.push(dexpr(p, 0))
+            else
+                enss.push(dexpr(p, 0))
         deat(p)                          # =
-        return DFnS(name: fname, params: params, body: dexpr(p, 0))
+        return DFnS(name: fname, params: params, body: dwrap_contract(fname, dexpr(p, 0), reqs, enss))
     if t.kind == Kw and t.text == "let"
         deat(p)
         let name = deat(p).text
