@@ -127,7 +127,7 @@ fn tchke(e, tt) = match e
     Bin(op, a, b)   => tchke(a, tt) + tchke(b, tt)
     If(c, t, e2)    => tchke(c, tt) + tchke(t, tt) + tchke(e2, tt)
     LetIn(nm, v, b) => tchke(v, tt) + tchke(b, tt)
-    Call(nm, args)  => tchkcall(nm, args, tt) + tchkeargsc(nm, args, tglookup(nm, tt.gsigs), tt)
+    Call(nm, args)  => tchkquerycall(nm, args, tt) + tchkcall(nm, args, tt) + tchkeargsc(nm, args, tglookup(nm, tt.gsigs), tt)
     Var(nm)         => tchkvar(nm, tt)
     Rec(items)      => tchkerec(items, tt)
     RecT(tn, items) => tchkrect(tn, items, tt) + tchkerec(items, tt)
@@ -155,6 +155,39 @@ fn tchkpatl(xs, tt) = match xs
 ## a capitalised name is a constructor use; check it is declared and its arity matches
 fn tchkvar(nm, tt) = if isctor(nm) then tchkctor(nm, 0, tt) else 0
 fn tchkcall(nm, args, tt) = if isctor(nm) then tchkctor(nm, len(args), tt) else tchkcallg(nm, args, tglookup(nm, tt.gsigs), tt)
+## D3 compile-time row types make query column references checkable against nominal records.
+fn tchkquerycall(nm, args, tt) = if nm == "query_where" then tqwhere(args, tt) else if nm == "query_order" then tqorder(args, tt) else if nm == "query_join" then tqjoin(args, tt) else if nm == "query_group" then tqgroup(args, tt) else 0
+fn tqwhere(args, tt) = tqwhere2(args, tt)
+fn tqwhere2(args, tt) = match args
+    Cons(Var(row), Cons(table, Cons(Str(field), Cons(Str(op), Cons(value, Nil))))) => tqfield("query_where", row, field, value, op, tt)
+    _ => ctfail("lume: type error: query_where expects (Row, table, column, operator, value)\n")
+fn tqorder(args, tt) = match args
+    Cons(Var(row), Cons(table, Cons(Str(field), Cons(Str(direction), Nil)))) => tqfield("query_order", row, field, Num(0), direction, tt)
+    _ => ctfail("lume: type error: query_order expects (Row, table, column, direction)\n")
+fn tqgroup(args, tt) = match args
+    Cons(Var(row), Cons(Var(out), Cons(table, Cons(Str(key), Cons(Str(sum), Nil))))) => tqgroupfields(row, out, key, sum, tt)
+    _ => ctfail("lume: type error: query_group expects (Row, Out, table, key, sum)\n")
+fn tqjoin(args, tt) = match args
+    Cons(Var(left), Cons(Var(right), Cons(Var(out), Cons(lt, Cons(rt, Cons(Str(lp), Cons(Str(rp), Cons(Str(lk), Cons(Str(rk), Nil))))))))) => tqjoinfields(left, right, out, lp, rp, lk, rk, tt)
+    _ => ctfail("lume: type error: query_join expects (Left, Right, Out, left, right, prefixes, keys)\n")
+fn tqfield(fnname, row, field, value, op, tt) = if tfieldhas(tqfields(row, tt), field) == 0 then ctfail("lume: type error: query on '" + row + "' has no field '" + field + "'\n") else if tqvaluecompat(tqfieldtype(row, field, tt), tknown(value, tt), op) == 1 then 1 else ctfail("lume: type error: query value for '" + field + "' has incompatible type\n")
+fn tqfields(row, tt) = match trecptypelookup(row, tt.recs)
+    Nil => if tt.decl == 1 then ctfail("lume: type error: query row type '" + row + "' is not a declared record\n") else Nil
+    Cons(rd, rest) => rd.fields
+fn tqfieldtype(row, field, tt) = tqfieldtype2(tqfields(row, tt), field)
+fn tqfieldtype2(fields, field) = match fields
+    Nil => TyAny
+    Cons(f, rest) => if f.fname == field then f.fty else tqfieldtype2(rest, field)
+fn tqvaluecompat(fieldty, valty, op) = if op == "asc" or op == "desc" then 1 else if op != "==" and op != "!=" and op != "<" and op != "<=" and op != ">" and op != ">=" then 0 else tcompat(fieldty, valty)
+fn tqgroupfields(row, out, key, sum, tt) = if tfieldhas(tqfields(row, tt), key) == 0 then ctfail("lume: type error: query_group has no key field '" + key + "'\n") else if tfieldhas(tqfields(row, tt), sum) == 0 then ctfail("lume: type error: query_group has no sum field '" + sum + "'\n") else if tqfieldtype(row, sum, tt) == TyName("int") or tqisdecimal(tqfieldtype(row, sum, tt)) then tqgroupout(row, out, key, sum, tt) else ctfail("lume: type error: query_group sum field must be int or decimal\n")
+fn tqgroupout(row, out, key, sum, tt) = if trecptypelookup(out, tt.recs) == Nil then ctfail("lume: type error: query_group output type '" + out + "' is not a declared record\n") else if tfieldhas(tqfields(out, tt), key) == 0 or tfieldhas(tqfields(out, tt), "count") == 0 or tfieldhas(tqfields(out, tt), "sum") == 0 then ctfail("lume: type error: query_group output requires key, count, and sum fields\n") else if tcompat(tqfieldtype(out, key, tt), tqfieldtype(row, key, tt)) == 1 and tcompat(tqfieldtype(out, "count", tt), TyName("int")) == 1 and tcompat(tqfieldtype(out, "sum", tt), tqfieldtype(row, sum, tt)) == 1 then 1 else ctfail("lume: type error: query_group output field types do not match its key/count/sum\n")
+fn tqisdecimal(ty) = match ty
+    TyDecimal(p, s) => 1
+    _ => 0
+fn tqjoinfields(left, right, out, lp, rp, lk, rk, tt) = if lp == "" or rp == "" or lp == rp then ctfail("lume: type error: query_join prefixes must be non-empty and distinct\n") else if tfieldhas(tqfields(left, tt), lk) == 0 then ctfail("lume: type error: query_join left row has no field '" + lk + "'\n") else if tfieldhas(tqfields(right, tt), rk) == 0 then ctfail("lume: type error: query_join right row has no field '" + rk + "'\n") else if tcompat(tqfieldtype(left, lk, tt), tqfieldtype(right, rk, tt)) == 0 then ctfail("lume: type error: query_join key fields have different types\n") else if trecptypelookup(out, tt.recs) == Nil then ctfail("lume: type error: query_join output type '" + out + "' is not a declared record\n") else if tqjoinoutfields(tqfields(left, tt), lp, out, tt) + tqjoinoutfields(tqfields(right, tt), rp, out, tt) == len(tqfields(out, tt)) then 1 else ctfail("lume: type error: query_join output fields must be prefix_field with matching source types\n")
+fn tqjoinoutfields(fields, prefix, out, tt) = match fields
+    Nil => 0
+    Cons(field, rest) => if tfieldhas(tqfields(out, tt), prefix + "_" + field.fname) == 1 and tcompat(tqfieldtype(out, prefix + "_" + field.fname, tt), field.fty) == 1 then 1 + tqjoinoutfields(rest, prefix, out, tt) else 0 - 999999
 ## a generic function (has a GSig) is checked with the generic rule (bind type params, then check runtime args);
 ## everything else keeps F2's ordinary signature check.
 fn tchkcallg(nm, args, g, tt) = match g
@@ -200,7 +233,15 @@ fn tknown(e, tt) = match e
     Rec(items)    => tknown_decimal_record(items)
     RecT(tn, its) => tknownrec(tn, trecptypelookup(tn, tt.recs))
     _             => TyAny
-fn tknowncall(nm, xs, tt) = if nm == "decimal" then tknown_decimal_call(xs) else if nm == "decimal_cast" then tknown_decimal_cast(xs) else tknown_call_result(nm, xs, tt)
+fn tknowncall(nm, xs, tt) = if nm == "decimal" then tknown_decimal_call(xs) else if nm == "decimal_cast" then tknown_decimal_cast(xs) else if tqname(nm) then tknownquery(nm, xs) else tknown_call_result(nm, xs, tt)
+fn tqname(nm) = nm == "query_where" or nm == "query_order" or nm == "query_join" or nm == "query_group"
+fn tknownquery(nm, xs) = if nm == "query_join" then tknownqueryout(xs, 2) else if nm == "query_group" then tknownqueryout(xs, 1) else tknownqueryout(xs, 0)
+fn tknownqueryout(xs, index) = match xs
+    Nil => TyAny
+    Cons(arg, rest) => if index <= 0 then tknownquerytypearg(arg) else tknownqueryout(rest, index - 1)
+fn tknownquerytypearg(arg) = match arg
+    Var(nm) => TyApply("table", TyName(nm))
+    _ => TyAny
 fn tknown_call_result(nm, xs, tt) = match tglookup(nm, tt.gsigs)
     Cons(g, rest) => tsubst(g.rt, tknown_gbind(xs, g.params, Nil), tpset(g.params))
     Nil => tknown_simple_result(tsiglookup(nm, tt.sigs), tknownctor(nm, tt))
@@ -343,7 +384,7 @@ fn tmem(n, xs) = match xs
 ## recursive argument check of a Call: for a generic call, skip the comptime (type-name) arguments -- they are types,
 ## not value expressions, so they must not go through the ordinary `tchke` (which would, for a declared-type name,
 ## wrongly treat it as a constructor use). For any non-generic call, check every argument as before.
-fn tchkeargsc(nm, args, g, tt) = match g
+fn tchkeargsc(nm, args, g, tt) = if nm == "query_where" then tchkeargs(gdrop(args, 1), tt) else if nm == "query_order" then tchkeargs(gdrop(args, 1), tt) else if nm == "query_join" then tchkeargs(gdrop(args, 3), tt) else if nm == "query_group" then tchkeargs(gdrop(args, 2), tt) else match g
     Nil         => tchkeargs(args, tt)
     Cons(gg, r) => tchkeargs(gfilterrt(args, gg.params), tt)
 fn gfilterrt(args, ps) = match ps
@@ -352,4 +393,7 @@ fn gfilterrt(args, ps) = match ps
 fn gfilterrt2(args, p, pr) = match args
     Nil         => Nil
     Cons(a, ar) => if p.cf == 1 then gfilterrt(ar, pr) else Cons(a, gfilterrt(ar, pr))
+fn gdrop(args, n) = if n <= 0 then args else match args
+    Nil => Nil
+    Cons(h, t) => gdrop(t, n - 1)
 

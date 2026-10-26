@@ -182,11 +182,12 @@ fn cfoldearms(xs, ft) = match xs
 ## (which needs the type args present to bind the type parameters).
 fn gerase(prog) = gestmts(prog, gcoll(prog))
 fn gcoll(prog) = match prog
-    Nil        => Nil
+    Nil        => gqueryspecs()
     Cons(h, t) => gcoll2(h, t)
 fn gcoll2(h, t) = match h
     GSig(nm, pl, rt) => Cons({fname: nm, cfs: gcfs(pl)}, gcoll(t))
     _                => gcoll(t)
+fn gqueryspecs() = Cons({fname: "query_where", cfs: Cons(1, Cons(0, Cons(0, Cons(0, Cons(0, Nil)))))}, Cons({fname: "query_order", cfs: Cons(1, Cons(0, Cons(0, Cons(0, Nil))))}, Cons({fname: "query_join", cfs: Cons(1, Cons(1, Cons(1, Cons(0, Cons(0, Cons(0, Cons(0, Cons(0, Cons(0, Nil)))))))))}, Cons({fname: "query_group", cfs: Cons(1, Cons(1, Cons(0, Cons(0, Cons(0, Nil)))))}, Nil))))
 fn gcfs(pl) = match pl
     Nil        => Nil
     Cons(p, r) => Cons(p.cf, gcfs(r))
