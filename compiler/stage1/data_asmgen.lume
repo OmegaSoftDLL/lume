@@ -196,6 +196,14 @@ fn areg(i: int) -> str
 ## asm symbol of a top-level `let` global (an 8-byte .bss cell holding a value pointer)
 fn gsym(nm: str) -> str = "__g_" + nm
 
+fn decimal_expr(e: DExpr) -> bool
+    match e
+        DDecimal(coefficient, scale) => true
+        DCall(name, args) => name == "decimal_make" or name == "decimal_parse" or name == "decimal_cast" or name == "decimal_div_exact" or name == "decimal_add" or name == "decimal_sub" or name == "decimal_mul" or name == "decimal_div"
+        DIf(cond, then_value, else_value) => decimal_expr(then_value) and decimal_expr(else_value)
+        DLetIn(name, value, body) => decimal_expr(body)
+        _ => false
+
 ## emit asm that computes `e` and leaves its value pushed on the stack. The asm
 ## is PUSHED, chunk by chunk, into `c.out` in evaluation order (the caller joins
 ## once). Pushing instead of returning `a + b + "..."` per node is what keeps the
@@ -225,7 +233,24 @@ fn aexpr(e: DExpr, c: mut AC)
         DBin(op, l, r) => do
             aexpr(l, c)
             aexpr(r, c)
-            if op == "=="
+            if decimal_expr(l) and decimal_expr(r) and (op == "+" or op == "-" or op == "*" or op == "/" or op == "==" or op == "!=" or op == "<" or op == ">" or op == "<=" or op == ">=")
+                if op == "+" or op == "-" or op == "*" or op == "/"
+                    let callee = if op == "+" then "decimal_add" else if op == "-" then "decimal_sub" else if op == "*" then "decimal_mul" else "decimal_div"
+                    c.out.push("    popq %rsi\n    popq %rdi\n    call " + callee + "\n    pushq %rax\n")
+                else
+                    var setc = "    setl %al\n"
+                    if op == "=="
+                        setc = "    sete %al\n"
+                    elif op == "!="
+                        setc = "    setne %al\n"
+                    elif op == ">"
+                        setc = "    setg %al\n"
+                    elif op == "<="
+                        setc = "    setle %al\n"
+                    elif op == ">="
+                        setc = "    setge %al\n"
+                    c.out.push("    popq %rsi\n    popq %rdi\n    call decimal_compare\n    movq 8(%rax), %rax\n    cmpq $0, %rax\n" + setc + "    movzbq %al, %rax\n    movq %rax, %rdi\n    call mkint\n    pushq %rax\n")
+            elif op == "=="
                 c.out.push("    popq %rsi\n    popq %rdi\n    call eqv\n    movq %rax, %rdi\n    call mkint\n    pushq %rax\n")
             elif op == "!="
                 c.out.push("    popq %rsi\n    popq %rdi\n    call eqv\n    xorq $1, %rax\n    movq %rax, %rdi\n    call mkint\n    pushq %rax\n")

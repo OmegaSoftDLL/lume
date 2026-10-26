@@ -76,6 +76,27 @@ fn cbin(op: str, a: str, b: str) -> str
     else
         "mkint(0)"
 
+fn decimal_expr(e: DExpr) -> bool
+    match e
+        DDecimal(coefficient, scale) => true
+        DCall(name, args) => name == "decimal_make" or name == "decimal_parse" or name == "decimal_cast" or name == "decimal_div_exact" or name == "decimal_add" or name == "decimal_sub" or name == "decimal_mul" or name == "decimal_div"
+        DIf(cond, then_value, else_value) => decimal_expr(then_value) and decimal_expr(else_value)
+        DLetIn(name, value, body) => decimal_expr(body)
+        _ => false
+
+fn cdecimal_bin(op: str, left: str, right: str) -> str
+    if op == "+" then "decimal_add(" + left + ", " + right + ")"
+    elif op == "-" then "decimal_sub(" + left + ", " + right + ")"
+    elif op == "*" then "decimal_mul(" + left + ", " + right + ")"
+    elif op == "/" then "decimal_div(" + left + ", " + right + ")"
+    elif op == "==" then "mkint(decimal_compare(" + left + ", " + right + ")->i == 0)"
+    elif op == "!=" then "mkint(decimal_compare(" + left + ", " + right + ")->i != 0)"
+    elif op == "<" then "mkint(decimal_compare(" + left + ", " + right + ")->i < 0)"
+    elif op == ">" then "mkint(decimal_compare(" + left + ", " + right + ")->i > 0)"
+    elif op == "<=" then "mkint(decimal_compare(" + left + ", " + right + ")->i <= 0)"
+    elif op == ">=" then "mkint(decimal_compare(" + left + ", " + right + ")->i >= 0)"
+    else "mkint(0)"
+
 ## pattern -> boolean C test against the C expression `path`
 fn pat_test(p: Pat, path: str) -> str
     match p
@@ -116,7 +137,7 @@ fn cexpr(e: DExpr) -> str
             else
                 "mkctor(\"" + tag + "\", " + str(args.len()) + ", (Value*[]){{" + args.map(cexpr).join(", ") + "}})"
         DCall(nm, args) => nm + "(" + args.map(cexpr).join(", ") + ")"
-        DBin(op, l, r) => cbin(op, cexpr(l), cexpr(r))
+        DBin(op, l, r) => if decimal_expr(l) and decimal_expr(r) then cdecimal_bin(op, cexpr(l), cexpr(r)) else cbin(op, cexpr(l), cexpr(r))
         DIf(c, t, e2)  => "(truthy(" + cexpr(c) + ") ? " + cexpr(t) + " : " + cexpr(e2) + ")"
         DLetIn(nm, v, body) => "({{ Value* " + nm + " = " + cexpr(v) + "; " + cexpr(body) + "; }})"
         DMatch(scrut, arms) => cmatch(scrut, arms)

@@ -81,6 +81,41 @@ fn env_copy(env: map[str, RV]) -> map[str, RV]
         out[e[0]] = e[1]
     out
 
+fn rv_entries_have(xs, key: str) -> bool
+    match xs
+        Nil => false
+        Cons(h, t) => h[0] == key or rv_entries_have(t, key)
+
+fn rv_is_decimal(v: RV) -> bool
+    match v
+        VRec(fields) => rv_entries_have(fields.entries(), "coefficient") and rv_entries_have(fields.entries(), "scale")
+        _ => false
+
+fn rv_decimal_expr(v: RV) -> DExpr
+    match v
+        VRec(fields) => do
+            let coefficient = rv_int(fields.get("coefficient") ?? VInt(n: 0))
+            let scale = rv_int(fields.get("scale") ?? VInt(n: 0))
+            DRec(fields: [RecField(name: "coefficient", value: DInt(n: coefficient)), RecField(name: "scale", value: DInt(n: scale))])
+        _ => DDecimal(coefficient: 0, scale: 0)
+
+fn decimal_eval_bin(op: str, left: RV, right: RV, env: map[str, RV], fns: [DStmt]) -> RV
+    let le = rv_decimal_expr(left)
+    let re = rv_decimal_expr(right)
+    if op == "+"
+        deval(DCall(name: "decimal_add", args: [le, re]), env, fns)
+    elif op == "-"
+        deval(DCall(name: "decimal_sub", args: [le, re]), env, fns)
+    elif op == "*"
+        deval(DCall(name: "decimal_mul", args: [le, re]), env, fns)
+    elif op == "/"
+        deval(DCall(name: "decimal_div", args: [le, re]), env, fns)
+    elif op == "==" or op == "!=" or op == "<" or op == ">" or op == "<=" or op == ">="
+        let cmp = rv_int(deval(DCall(name: "decimal_compare", args: [le, re]), env, fns))
+        VInt(n: if op == "==" then cmp == 0 else if op == "!=" then cmp != 0 else if op == "<" then cmp < 0 else if op == ">" then cmp > 0 else if op == "<=" then cmp <= 0 else cmp >= 0)
+    else
+        VInt(n: 0)
+
 fn deval(e: DExpr, env: map[str, RV], fns: [DStmt]) -> RV
     match e
         DInt(n)       => VInt(n: n)
@@ -221,6 +256,8 @@ fn deval(e: DExpr, env: map[str, RV], fns: [DStmt]) -> RV
                     return VInt(n: if sl <= sr then 1 else 0)
                 if op == ">="
                     return VInt(n: if sl >= sr then 1 else 0)
+            if rv_is_decimal(lv) and rv_is_decimal(rv)
+                return decimal_eval_bin(op, lv, rv, env, fns)
             let a = rv_int(lv)
             let b = rv_int(rv)
             match op

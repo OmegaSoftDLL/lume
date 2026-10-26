@@ -40,6 +40,14 @@ fn decimal_cast(value, precision, scale) = if precision < 1 or precision > 18 or
 
 fn decimal_div_exact(left, right, target_scale) = if right.coefficient == 0 then ctfail("lume: decimal division by zero\n") else let numerator = decimal_shift(left.coefficient, right.scale + target_scale) in let denominator = decimal_shift(right.coefficient, left.scale) in if numerator % denominator != 0 then ctfail("lume: decimal division is inexact at requested scale\n") else decimal_cast(decimal_make(numerator / denominator, target_scale), 18, target_scale)
 
+fn decimal_trim(value) = if value.scale > 0 and value.coefficient % 10 == 0 then decimal_trim(decimal_make(value.coefficient / 10, value.scale - 1)) else value
+
+fn decimal_div(left, right) = if right.coefficient == 0 then ctfail("lume: decimal division by zero\n") else decimal_div_search(left, right, 0)
+
+fn decimal_div_search(left, right, target_scale) = if target_scale > 18 then ctfail("lume: decimal division has no exact result within scale 18\n") else decimal_div_try(left, right, target_scale, decimal_shift(left.coefficient, right.scale + target_scale), decimal_shift(right.coefficient, left.scale))
+
+fn decimal_div_try(left, right, target_scale, numerator, denominator) = if numerator % denominator == 0 then decimal_trim(decimal_make(numerator / denominator, target_scale)) else decimal_div_search(left, right, target_scale + 1)
+
 fn test_decimal_add_aligns_scales() = let result = decimal_add(decimal_make(123, 2), decimal_make(7, 1)) in result.coefficient == 193 and result.scale == 2
 
 fn test_decimal_sub_aligns_scales() = let result = decimal_sub(decimal_make(7, 1), decimal_make(123, 2)) in result.coefficient + 53 == 0 and result.scale == 2
