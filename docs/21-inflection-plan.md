@@ -73,10 +73,16 @@ in `compiler/stage1/data_parser.lume`, while marking all five core compiler pipe
 any accidental effect leak in a pure pass is rejected at compile time with `[E0200]`. Covered by
 `compiler/stage1/compiler_effects_ok.src`.
 
-## Stage D — Ownership / Perceus in the compiler (later; after A–C are stable)
+## Stage D — Ownership / Perceus in the compiler (✅ Done)
 
-Annotate hot data structures (token lists, AST cells) with `own` to exercise Perceus in-place reuse
-in the compiler itself — a performance dogfood. Only after the correctness stages are solid.
+Annotate hot compiler data structures (string/assembly chunk lists and AST/statement/argument/record/arm
+cells) with `own` to exercise Perceus in-place constructor reuse (`__perceus_reuse_1` /
+`__perceus_reuse_2`) inside `lumec` itself (`joinall`/`pairs`/`pairs2` in `05_codegen.src`, called
+from `01_lexer.src`, `02_parser.src`, and `05_codegen.src`; and `gerase`/`gestmts`/`gestmt`/`geexpr`/
+`geargs`/`gerec`/`gearms` plus `cfold`/`cfoldstmts`/`cfoldstmt` in `03_comptime.src`, wired in
+`07_driver.src` and mirrored in `compiler/stage1/data_parser.lume`). Covered by
+`compiler/stage1/compiler_perceus_ok.src` and assembly verification proving zero `call alloc` /
+`call mkctor` in `gestmts`, `geargs`, and `cfoldstmts`.
 
 ## Critical path and ownership
 

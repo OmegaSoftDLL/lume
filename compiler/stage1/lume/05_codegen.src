@@ -23,15 +23,15 @@ fn revacc(xs, acc) = match xs
     Nil        => acc
     Cons(h, t) => revacc(t, Cons(h, acc))
 fn rev(xs) = revacc(xs, Nil)
-fn pairs(xs) = match xs
+fn pairs(own xs) = match xs
     Nil        => Nil
-    Cons(a, t) => pairs2(a, t)
-fn pairs2(a, t) = match t
+    Cons(a, t) => pairs2(a, own t)
+fn pairs2(a, own t) = match t
     Nil        => Cons(a, Nil)
-    Cons(b, r) => Cons(a + b, pairs(r))
-fn joinall(xs) = match xs
+    Cons(b, r) => Cons(a + b, pairs(own r))
+fn joinall(own xs) = match xs
     Nil        => ""
-    Cons(a, t) => if isnil(t) == 1 then a else joinall(pairs(xs))
+    Cons(a, t) => if isnil(t) == 1 then a else joinall(own pairs2(a, own t))
 
 ## --- registers, operators, frame slots ---
 fn areg(i) = if i == 0 then "%rdi" else if i == 1 then "%rsi" else if i == 2 then "%rdx" else if i == 3 then "%rcx" else if i == 4 then "%r8" else "%r9"
@@ -129,7 +129,7 @@ fn isctor(name) = let c = at(name, 0) in c >= "A" and c <= "Z"
 ## --- string literals: escape for .asciz and emit a .rodata label (port of sesc / strlabel) ---
 fn lsesc1(c) = if c == "\"" then "\\\"" else if c == "\\" then "\\\\" else if c == "\n" then "\\n" else if c == "\t" then "\\t" else if c == "\r" then "\\r" else c
 fn lsescl(s, i, n) = if i >= n then Nil else Cons(lsesc1(at(s, i)), lsescl(s, i + 1, n))
-fn lsesc(s) = joinall(lsescl(s, 0, count(s)))
+fn lsesc(s) = joinall(own lsescl(s, 0, count(s)))
 fn lstrlabel(v, s) = let lab = ".Ls" + str(s.ns) in {lab: lab, nl: s.nl, ns: s.ns + 1, dt: Cons(lab + ":\n    .asciz \"" + lsesc(v) + "\"\n", s.dt)}
 fn lstr(sl) = lres("    leaq " + sl.lab + "(%rip), %rdi\n    call mkstr\n    pushq %rax\n", sl)
 
@@ -264,7 +264,7 @@ fn lstmtprint(pr, t, mlocals) = let rest = lstmts(t, mlocals, pr) in {funcs: res
 fn lstmtexpr(er, t, mlocals) = let rest = lstmts(t, mlocals, er) in {funcs: rest.funcs, mains: Cons(er.code + "    popq %rax\n", rest.mains), nl: rest.nl, ns: rest.ns, dt: rest.dt}
 
 ## --- the program: bss + rodata (oom_msg + string chunks) + text(funcs, runtime, _start, main) ---
-fn lgen(prog) = let mlocals = app(lmlocals(prog), lsds(0, lmdprog(prog))) in let gs = lstmts(prog, mlocals, {nl: 0, ns: 0, dt: Nil}) in let mframe = lframe(len(mlocals)) in let mprol = "    movq %rsp, %rbp\n" + (if mframe > 0 then "    subq $" + str(mframe) + ", %rsp\n" else "") in let bss = "    .section .bss\n    .lcomm pbuf, 32\n    .lcomm heap_cur, 8\n    .lcomm heap_end, 8\n    .lcomm emit_buf, 8\n    .lcomm emit_len, 8\n    .lcomm emit_cap, 8\n" in let rodata = "    .section .rodata\noom_msg:\n    .asciz \"lume: out of memory (heap exhausted, brk failed)\\n\"\n" in let heapinit = "    movq $12, %rax\n    xorq %rdi, %rdi\n    syscall\n    movq %rax, heap_cur(%rip)\n    leaq 67108864(%rax), %rdi\n    movq %rdi, %rsi\n    movq $12, %rax\n    syscall\n    cmpq %rsi, %rax\n    jne alloc_oom\n    movq %rsi, heap_end(%rip)\n" in joinall(Cons(bss, Cons(rodata, Cons(joinall(rev(gs.dt)), Cons("    .section .text\n", Cons(joinall(gs.funcs), Cons(runtime_tail(), Cons("    .globl _start\n_start:\n", Cons(heapinit, Cons(mprol, Cons(joinall(gs.mains), Cons("    movq $60, %rax\n    xorq %rdi, %rdi\n    syscall\n", Nil))))))))))))
+fn lgen(prog) = let mlocals = app(lmlocals(prog), lsds(0, lmdprog(prog))) in let gs = lstmts(prog, mlocals, {nl: 0, ns: 0, dt: Nil}) in let mframe = lframe(len(mlocals)) in let mprol = "    movq %rsp, %rbp\n" + (if mframe > 0 then "    subq $" + str(mframe) + ", %rsp\n" else "") in let bss = "    .section .bss\n    .lcomm pbuf, 32\n    .lcomm heap_cur, 8\n    .lcomm heap_end, 8\n    .lcomm emit_buf, 8\n    .lcomm emit_len, 8\n    .lcomm emit_cap, 8\n" in let rodata = "    .section .rodata\noom_msg:\n    .asciz \"lume: out of memory (heap exhausted, brk failed)\\n\"\n" in let heapinit = "    movq $12, %rax\n    xorq %rdi, %rdi\n    syscall\n    movq %rax, heap_cur(%rip)\n    leaq 67108864(%rax), %rdi\n    movq %rdi, %rsi\n    movq $12, %rax\n    syscall\n    cmpq %rsi, %rax\n    jne alloc_oom\n    movq %rsi, heap_end(%rip)\n" in joinall(own Cons(bss, Cons(rodata, Cons(joinall(own rev(gs.dt)), Cons("    .section .text\n", Cons(joinall(own gs.funcs), Cons(runtime_tail(), Cons("    .globl _start\n_start:\n", Cons(heapinit, Cons(mprol, Cons(joinall(own gs.mains), Cons("    movq $60, %rax\n    xorq %rdi, %rdi\n    syscall\n", Nil))))))))))))
 
 
 ## --- runtime (copied verbatim from data_asmgen.lume) ---

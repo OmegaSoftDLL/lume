@@ -848,6 +848,19 @@ PY
     printf 'effect CompilerIO { fn read_source() -> str }\nfn lumec_lex_bad(src: str) -> int / pure = count(read_source()) + count(src)\nprint lumec_lex_bad("hi")\n' >"$ntmp/ce_bad.src"
     "$ntmp/lc" <"$ntmp/ce_bad.src" >"$ntmp/ce_bad.s" 2>"$ntmp/ce_bad.err"; cebadc=$?
     if [ -x "$ntmp/ce_ok.elf" ] && "$ntmp/ce_ok.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/compiler_effects_ok_asm.expected - >/dev/null && grep -q "^read_source:" "$ntmp/bp_c.s" && grep -q "^lumec_drive:" "$ntmp/bp_c.s" && [ "$cebadc" = 3 ] && [ ! -s "$ntmp/ce_bad.s" ] && grep -q "\[E0200\]" "$ntmp/ce_bad.err"; then ok "inflection Stage C: 07_driver CompilerIO effect boundary + / pure compiler passes compile, run, and reject impure pass leaks with [E0200]"; else bad "inflection Stage C: 07_driver CompilerIO effect boundary"; cat "$ntmp/ce_ok.err" "$ntmp/ce_bad.err" 2>/dev/null; fi
+    # Inflection Stage D (docs/21-inflection-plan.md): Perceus in-place constructor reuse dogfooded across
+    # hot compiler passes (`joinall`/`pairs`/`pairs2` in `05_codegen.src`, `gerase`/`gestmts`/`gestmt`/
+    # `geexpr`/`geargs`/`gerec`/`gearms` and `cfold`/`cfoldstmts`/`cfoldstmt` in `03_comptime.src`):
+    "$ntmp/lc" <../../compiler/stage1/compiler_perceus_ok.src >"$ntmp/cp_ok.s" 2>"$ntmp/cp_ok.err"
+    if [ -s "$ntmp/cp_ok.s" ]; then "$ntmp/lasm" <"$ntmp/cp_ok.s" >"$ntmp/cp_ok.elf" 2>/dev/null; chmod +x "$ntmp/cp_ok.elf"; fi
+    awk '/^gestmts:/{p=1} p{print} p&&/^    ret$/{exit}' "$ntmp/bp_c.s" >"$ntmp/lc_gestmts.s"
+    awk '/^geargs:/{p=1} p{print} p&&/^    ret$/{exit}' "$ntmp/bp_c.s" >"$ntmp/lc_geargs.s"
+    awk '/^cfoldstmts:/{p=1} p{print} p&&/^    ret$/{exit}' "$ntmp/bp_c.s" >"$ntmp/lc_cfoldstmts.s"
+    awk '/^pairs2:/{p=1} p{print} p&&/^    ret$/{exit}' "$ntmp/bp_c.s" >"$ntmp/lc_pairs2.s"
+    awk '/^geexpr:/{p=1} p{print} p&&/^    ret$/{exit}' "$ntmp/bp_c.s" >"$ntmp/lc_geexpr.s"
+    printf 'fn joinall(own xs) = match xs { Nil => "", Cons(a, Nil) => a, Cons(a, b) => a }\nfn bad(xs) = joinall(xs)\nprint bad(Nil)\n' >"$ntmp/cp_bad.src"
+    "$ntmp/lc" <"$ntmp/cp_bad.src" >"$ntmp/cp_bad.s" 2>"$ntmp/cp_bad.err"; cpbadc=$?
+    if [ -x "$ntmp/cp_ok.elf" ] && "$ntmp/cp_ok.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/compiler_perceus_ok_asm.expected - >/dev/null && [ -s "$ntmp/lc_gestmts.s" ] && ! grep -q "call alloc" "$ntmp/lc_gestmts.s" && ! grep -q "call mkctor" "$ntmp/lc_gestmts.s" && grep -q "movq %rdx, 8(%rcx)" "$ntmp/lc_gestmts.s" && [ -s "$ntmp/lc_geargs.s" ] && ! grep -q "call alloc" "$ntmp/lc_geargs.s" && ! grep -q "call mkctor" "$ntmp/lc_geargs.s" && grep -q "movq %rdx, 8(%rcx)" "$ntmp/lc_geargs.s" && [ -s "$ntmp/lc_cfoldstmts.s" ] && ! grep -q "call alloc" "$ntmp/lc_cfoldstmts.s" && ! grep -q "call mkctor" "$ntmp/lc_cfoldstmts.s" && grep -q "movq %rdx, 8(%rcx)" "$ntmp/lc_cfoldstmts.s" && [ -s "$ntmp/lc_pairs2.s" ] && grep -q "movq %rdx, 8(%rcx)" "$ntmp/lc_pairs2.s" && [ -s "$ntmp/lc_geexpr.s" ] && grep -q "movq %rsi, 0(%rcx)" "$ntmp/lc_geexpr.s" && [ "$cpbadc" = 3 ] && [ ! -s "$ntmp/cp_bad.s" ] && grep -q "\[O0012\]" "$ntmp/cp_bad.err"; then ok "inflection Stage D: Perceus in-place reuse in lumec (zero 'call alloc'/'call mkctor' in gestmts/geargs/cfoldstmts + in-place reuse in pairs2/geexpr + [O0012] enforcement)"; else bad "inflection Stage D: Perceus in-place reuse in lumec"; cat "$ntmp/cp_ok.err" "$ntmp/cp_bad.err" 2>/dev/null; fi
     rm -rf "$ntmp"
 else
     ok "no-toolchain ELF pipeline (skipped: not linux/x86_64, or under ASan)"
@@ -862,17 +875,13 @@ rm -f "$_k2x_tmp"
 
 if ../../lume agent eval ../../compiler/stage1/compiler_effects_ok.src 2>/dev/null | grep -q '"result":"108\\n244"'; then ok "inflection Stage C: cross-platform CompilerIO driver effect & / pure pipeline passes"; else bad "inflection Stage C: cross-platform CompilerIO driver effect & / pure pipeline passes"; fi
 
-_sb1_tmp=$(mktemp)
-_sb2_tmp=$(mktemp)
-_sb3_tmp=$(mktemp)
-printf 'fn f(x: int) -> int requires x >= 0 ensures result >= 0 = 10 - x\nprint f(20)\n' >"$_sb1_tmp"
-printf 'fn h(x: int) -> int requires x >= 0 ensures result != 0 = x - 1000000\nprint h(0)\n' >"$_sb2_tmp"
-printf 'fn g(x: int) -> int requires x >= 5 ensures result >= 1 = x - 4\nfn sq(x: int) -> int ensures result >= 0 = x * x\nprint g(6)\nprint sq(0 - 7)\n' >"$_sb3_tmp"
-_sb1_out=$(../../lume prove --json "$_sb1_tmp" 2>/dev/null || true)
-_sb2_out=$(../../lume prove --json "$_sb2_tmp" 2>/dev/null || true)
-_sb3_out=$(../../lume prove --json "$_sb3_tmp" 2>/dev/null || true)
-if printf '%s' "$_sb1_out" | grep -q '"status":"refuted"' && printf '%s' "$_sb1_out" | grep -q '"counterexample":"x = 11 (result = -1)"' && printf '%s' "$_sb2_out" | grep -q '"status":"refuted"' && printf '%s' "$_sb2_out" | grep -q '"counterexample":"x = 1000000 (result = 0)"' && printf '%s' "$_sb3_out" | grep -q '"name":"g","kind":"contract","status":"proven"' && printf '%s' "$_sb3_out" | grep -q '"name":"sq","kind":"contract","status":"runtime_checked"' && printf '%s' "$_sb3_out" | grep -q '"result":"2\\n49"'; then ok "inflection Stage B (#173 case 6): cross-platform QF_LIA soundness & determinism (ubuntu + macOS + ASan/UBSan)"; else bad "inflection Stage B (#173 case 6): cross-platform QF_LIA soundness & determinism"; printf '%s\n%s\n%s\n' "$_sb1_out" "$_sb2_out" "$_sb3_out"; fi
-rm -f "$_sb1_tmp" "$_sb2_tmp" "$_sb3_tmp"
+if ../../lume agent eval ../../compiler/stage1/compiler_perceus_ok.src 2>/dev/null | grep -q '"result":"lume-stage-d\\n70"'; then ok "inflection Stage D: cross-platform Perceus own-annotated compiler passes (joinall, gerase, cfold)"; else bad "inflection Stage D: cross-platform Perceus own-annotated compiler passes"; fi
+
+_sb_all_tmp=$(mktemp)
+printf 'fn f(x: int) -> int requires x >= 0 ensures result >= 0 = 10 - x\nfn h(x: int) -> int requires x >= 0 ensures result != 0 = x - 1000000\nfn g(x: int) -> int requires x >= 5 ensures result >= 1 = x - 4\nfn sq(x: int) -> int ensures result >= 0 = x * x\nprint g(6)\nprint sq(0 - 7)\n' >"$_sb_all_tmp"
+_sb_all_out=$(../../lume prove --json "$_sb_all_tmp" 2>/dev/null || true)
+if printf '%s' "$_sb_all_out" | grep -q '"name":"f","kind":"contract","status":"refuted","counterexample":"x = 11 (result = -1)"' && printf '%s' "$_sb_all_out" | grep -q '"name":"h","kind":"contract","status":"refuted","counterexample":"x = 1000000 (result = 0)"' && printf '%s' "$_sb_all_out" | grep -q '"name":"g","kind":"contract","status":"proven"' && printf '%s' "$_sb_all_out" | grep -q '"name":"sq","kind":"contract","status":"runtime_checked"'; then ok "inflection Stage B (#173 case 6): cross-platform QF_LIA soundness & determinism (ubuntu + macOS + ASan/UBSan)"; else bad "inflection Stage B (#173 case 6): cross-platform QF_LIA soundness & determinism"; printf '%s\n' "$_sb_all_out"; fi
+rm -f "$_sb_all_tmp"
 
 if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_ASAN:-}" ]; then
     _e1ok=$(../../lume compile --json --run ../../compiler/stage1/e1_sample.src 2>/dev/null)
