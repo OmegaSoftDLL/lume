@@ -142,7 +142,7 @@ fn cs_arms(ts) = let p = cs_pat(ts) in let b = cs_expr(cs_dropkw(p.rest, "=>")) 
 fn cs_armcons(p, b, rr) = {items: Cons({pat: p, body: b}, rr.items), rest: rr.rest}
 
 ## --- declarations (type / fn / print / expr) ---
-fn cs_istyapp1(nm) = nm == "table" or nm == "rc" or nm == "arc" or nm == "weak" or nm == "cell" or nm == "chan" or nm == "Ref" or nm == "View"
+fn cs_istyapp1(nm) = nm == "table" or nm == "rc" or nm == "arc" or nm == "weak" or nm == "cell" or nm == "chan" or nm == "Ref" or nm == "View" or nm == "unverified"
 fn cs_ptype1(ts) = if cs_hdtext(ts) == "[" then cs_ptlist(cs_ptype1(cs_drop1(ts))) else if cs_istyapp1(cs_hdtext(ts)) and cs_hdtext(cs_drop1(ts)) == "[" then cs_ptapp(cs_hdtext(ts), cs_ptype1(cs_drop1(cs_drop1(ts)))) else {node: TyName(cs_hdtext(ts)), rest: cs_drop1(ts)}
 fn cs_ptlist(r) = {node: TyList(r.node), rest: cs_skiprk(r.rest)}
 fn cs_ptapp(kind, r) = {node: TyApply(kind, r.node), rest: cs_skiprk(r.rest)}
@@ -172,7 +172,7 @@ fn cs_anyownp(pl) = match pl
     Nil        => 0
     Cons(p, r) => if p.cf >= 2 then 1 else cs_anyownp(r)
 fn cs_mksig(nm, ps, rty) = if cs_ganyct(ps.plist) == 1 then GSig(nm, ps.plist, rty) else if cs_anyann(ps.tys) == 1 or cs_isany(rty) == 0 then Sig(nm, ps.items, ps.tys, rty) else Nil
-fn cs_mkosig(nm, pubf, freef, pl, rty, fromp) = if pubf == 1 or freef == 1 or cs_anyownp(pl) == 1 or fromp != "" then OSig(nm, pubf, freef, pl, rty, fromp) else Nil
+fn cs_mkosig(nm, pubf, freef, pl, rty, fromp) = if pubf == 1 or freef > 0 or cs_anyownp(pl) == 1 or fromp != "" then OSig(nm, pubf, freef, pl, rty, fromp) else Nil
 fn cs_pfnp(ts, pubf, freef) = let nm = cs_hdtext(ts) in let ps = cs_pparams(cs_dropkw(cs_drop1(ts), "(")) in let rt = cs_pret(ps.rest) in let b = cs_expr(cs_dropkw(rt.rest, "=")) in {node: Fn(nm, ps.items, b.node), sg: cs_mksig(nm, ps, rt.ty), osg: cs_mkosig(nm, pubf, freef, ps.plist, rt.ty, rt.fromp), rest: b.rest}
 fn cs_pfn(ts) = cs_pfnp(ts, 0, 0)
 
@@ -190,9 +190,10 @@ fn cs_tdeclname(nd) = match nd
 fn cs_progtyped(kind, r) = Cons(OType(cs_tdeclname(r.node), kind), Cons(r.node, cs_pprog(r.rest)))
 fn cs_progfree(ts) = if cs_hdtext(ts) == "pub" then cs_pprogfn(cs_pfnp(cs_drop1(cs_drop1(ts)), 1, 1)) else cs_pprogfn(cs_pfnp(cs_drop1(ts), 0, 1))
 fn cs_progat(t) = if cs_hdtext(t) == "freestanding" then cs_progfree(cs_drop1(t)) else if cs_hdtext(t) == "gc" then cs_progtyped("gc", cs_ptype(cs_drop1(cs_drop1(t)))) else cs_pprog(cs_drop1(t))
+fn cs_progpub(t) = if cs_hdtext(t) == "total" and cs_hdtext(cs_drop1(t)) == "fn" then cs_pprogfn(cs_pfnp(cs_drop1(cs_drop1(t)), 1, 2)) else if cs_hdtext(t) == "llm" and cs_hdtext(cs_drop1(t)) == "fn" then cs_pprogfn(cs_pfnp(cs_drop1(cs_drop1(t)), 1, 4)) else cs_pprogfn(cs_pfnp(cs_drop1(t), 1, 0))
 fn cs_pprog(ts) = match ts
     Nil        => Nil
-    Cons(h, t) => if h.text == "fn" then cs_pprogfn(cs_pfn(cs_drop1(ts))) else if h.text == "pub" and cs_hdtext(t) == "fn" then cs_pprogfn(cs_pfnp(cs_drop1(t), 1, 0)) else if h.text == "@" then cs_progat(t) else if h.text == "resource" and cs_hdtext(t) == "type" then cs_progtyped("resource", cs_ptype(cs_drop1(t))) else if h.text == "type" then let r = cs_ptype(cs_drop1(ts)) in Cons(r.node, cs_pprog(r.rest)) else if h.text == "print" then let r = cs_expr(cs_drop1(ts)) in Cons(Print(r.node), cs_pprog(r.rest)) else let r = cs_expr(ts) in Cons(ExprS(r.node), cs_pprog(r.rest))
+    Cons(h, t) => if h.text == "fn" then cs_pprogfn(cs_pfn(cs_drop1(ts))) else if h.text == "pub" and (cs_hdtext(t) == "fn" or cs_hdtext(t) == "total" or cs_hdtext(t) == "llm") then cs_progpub(t) else if h.text == "total" and cs_hdtext(t) == "fn" then cs_pprogfn(cs_pfnp(cs_drop1(t), 0, 2)) else if h.text == "llm" and cs_hdtext(t) == "fn" then cs_pprogfn(cs_pfnp(cs_drop1(t), 0, 4)) else if h.text == "@" then cs_progat(t) else if h.text == "resource" and cs_hdtext(t) == "type" then cs_progtyped("resource", cs_ptype(cs_drop1(t))) else if h.text == "type" then let r = cs_ptype(cs_drop1(ts)) in Cons(r.node, cs_pprog(r.rest)) else if h.text == "print" then let r = cs_expr(cs_drop1(ts)) in Cons(Print(r.node), cs_pprog(r.rest)) else let r = cs_expr(ts) in Cons(ExprS(r.node), cs_pprog(r.rest))
 fn cs_pprogfn(r) = cs_pprogfn2(r.osg, cs_pprogfn2(r.sg, Cons(r.node, cs_pprog(r.rest))))
 fn cs_pprogfn2(sg, rest) = match sg
     Nil => rest
@@ -627,22 +628,149 @@ fn cs_ochkargs(args, ctx, moved) = match args
     Nil        => {diags: Nil, moved: moved}
     Cons(h, t) => let r1 = cs_ochke(h, ctx, moved) in let r2 = cs_ochkargs(t, ctx, r1.moved) in {diags: cs_app(r1.diags, r2.diags), moved: r2.moved}
 fn cs_ois_heap(nm) = nm == "rc_new" or nm == "arc_new" or nm == "alloc_heap" or nm == "table_new" or nm == "box_new"
-fn cs_ochkcall(fnm, args, ctx, moved) = let d0 = if ctx.freef == 1 and ctx.halloc == 0 and cs_ois_heap(fnm) then Cons(cs_mkdiag("O0030", "ownership", "ownership error: ambient heap allocation '" + fnm + "' in '@freestanding' function '" + ctx.fnm + "'", "wrap allocation in 'with alloc = <arena> in ...'"), Nil) else Nil in if fnm == "borrow" and cs_len(args) == 1 then let ra = cs_ochke(cs_asthead(args), ctx, moved) in {diags: cs_app(d0, ra.diags), moved: ra.moved, origin: "borrow:" + ra.origin} else cs_ochkcall_sig(fnm, args, cs_osiglookup(fnm, ctx.osigs), ctx, moved, d0)
+fn cs_ois_free(mf) = mf % 2
+fn cs_ois_total(mf) = (mf / 2) % 2
+fn cs_ois_llm(mf) = (mf / 4) % 2
+fn cs_ochkcall(fnm, args, ctx, moved) = let d0 = if cs_ois_free(ctx.freef) == 1 and ctx.halloc == 0 and cs_ois_heap(fnm) then Cons(cs_mkdiag("O0030", "ownership", "ownership error: ambient heap allocation '" + fnm + "' in '@freestanding' function '" + ctx.fnm + "'", "wrap allocation in 'with alloc = <arena> in ...'"), Nil) else Nil in if fnm == "borrow" and cs_len(args) == 1 then let ra = cs_ochke(cs_asthead(args), ctx, moved) in {diags: cs_app(d0, ra.diags), moved: ra.moved, origin: "borrow:" + ra.origin} else cs_ochkcall_sig(fnm, args, cs_osiglookup(fnm, ctx.osigs), ctx, moved, d0)
 fn cs_ochkcall_sig(fnm, args, msig, ctx, moved, d0) = match msig
     Nil          => let dc = cs_ochk_conf(fnm, cs_ocollect_muts(args, Nil), args) in let ra = cs_ochkargs(args, ctx, moved) in {diags: cs_app(d0, cs_app(dc, ra.diags)), moved: ra.moved, origin: ""}
     Cons(sg, sr) => let dm = cs_ochk_modes(fnm, args, sg.pl, ctx) in let dc = cs_ochk_conf(fnm, cs_ocollect_muts(args, sg.pl), args) in let ra = cs_ochkargs(args, ctx, moved) in {diags: cs_app(d0, cs_app(dm, cs_app(dc, ra.diags))), moved: ra.moved, origin: ""}
 fn cs_ochk_ret(nm, pubf, fromp, org) = let core_org = cs_ostrip_b(org) in if cs_startswith(org, "borrow:") == 1 and cs_startswith(core_org, "local:") == 1 then let lx = slice(core_org, 6, count(core_org)) in Cons(cs_mkdiag("O0020", "region", "region error: borrowed value '" + lx + "' escapes local scope of '" + nm + "'", "return an owned value instead of borrowing local '" + lx + "'"), Nil) else if cs_startswith(org, "borrow:") == 1 and cs_startswith(core_org, "param:") == 1 then let px = slice(core_org, 6, count(core_org)) in (if pubf == 1 and fromp == "" then Cons(cs_mkdiag("O0021", "region", "region error: public function '" + nm + "' returns a borrow from '" + px + "' without an origin clause", "add 'from " + px + "' to the return type of '" + nm + "'"), Nil) else if fromp != "" and fromp != px then Cons(cs_mkdiag("O0021", "region", "region error: function '" + nm + "' declares 'from " + fromp + "' but returns a borrow from '" + px + "'", "change origin clause to 'from " + px + "'"), Nil) else Nil) else Nil
-fn cs_ochk_fn(nm, ps, body, msig, osigs) = match msig
-    Nil          => let ctx = {fnm: nm, pubf: 0, freef: 0, halloc: 0, bparams: ps, mvars: Nil, origins: cs_oinit_orgs(ps), osigs: osigs} in let rb = cs_ochke(body, ctx, Nil) in cs_app(rb.diags, cs_ochk_ret(nm, 0, "", rb.origin))
-    Cons(sg, sr) => let bparams = if cs_isnil(sg.pl) == 1 then ps else cs_obparams(sg.pl) in let ctx = {fnm: nm, pubf: sg.pubf, freef: sg.freef, halloc: 0, bparams: bparams, mvars: cs_omvars(sg.pl), origins: cs_oinit_orgs(ps), osigs: osigs} in let rb = cs_ochke(body, ctx, Nil) in cs_app(rb.diags, cs_ochk_ret(nm, sg.pubf, sg.fromp, rb.origin))
-fn cs_odiagnose_stmts(prog, osigs, moved) = match prog
+
+## --- Track A1/A2/A3 diagnostics & hole synthesis in lcaas ---
+fn cs_is_hole(nm) = if nm == "_" or cs_startswith(nm, "_hole") == 1 then 1 else 0
+fn cs_is_unv_ty(ty) = match ty
+    TyApply(n, e) => if n == "unverified" then 1 else 0
+    _             => 0
+fn cs_hd_ty(xs) = match xs
+    Nil        => TyAny
+    Cons(h, t) => h
+fn cs_tl_ty(xs) = match xs
     Nil        => Nil
-    Cons(h, t) => cs_odiagnose_stmt1(h, t, osigs, moved)
-fn cs_odiagnose_stmt1(s0, rest, osigs, moved) = match s0
-    Fn(nm, ps, body) => cs_app(cs_ochk_fn(nm, ps, body, cs_osiglookup(nm, osigs), osigs), cs_odiagnose_stmts(rest, osigs, moved))
-    Print(v)         => let r = cs_ochke(v, {fnm: "<main>", pubf: 0, freef: 0, halloc: 0, bparams: Nil, mvars: Nil, origins: Nil, osigs: osigs}, moved) in cs_app(r.diags, cs_odiagnose_stmts(rest, osigs, r.moved))
-    ExprS(v)         => let r = cs_ochke(v, {fnm: "<main>", pubf: 0, freef: 0, halloc: 0, bparams: Nil, mvars: Nil, origins: Nil, osigs: osigs}, moved) in cs_app(r.diags, cs_odiagnose_stmts(rest, osigs, r.moved))
-    _                => cs_odiagnose_stmts(rest, osigs, moved)
+    Cons(h, t) => t
+fn cs_hd_str(xs, def) = match xs
+    Nil        => def
+    Cons(h, t) => h
+fn cs_plenv(pns, pts) = match pns
+    Nil         => Nil
+    Cons(pn, r) => Cons({k: pn, v: cs_tystr(cs_hd_ty(pts))}, cs_plenv(r, cs_tl_ty(pts)))
+fn cs_fn_lenv(msig) = match msig
+    Nil        => Nil
+    Cons(sg, r) => cs_plenv(sg.pn, sg.pt)
+fn cs_fn_rty(msig, mosig) = match mosig
+    Cons(osg, r) => if cs_isany(osg.rty) == 0 then cs_tystr(osg.rty) else cs_sig_rty(msig)
+    Nil          => cs_sig_rty(msig)
+fn cs_sig_rty(msig) = match msig
+    Cons(sg, r) => cs_tystr(sg.rt)
+    Nil         => "int"
+fn cs_synth_vars(ety, lenv) = match lenv
+    Nil        => Nil
+    Cons(h, t) => if h.v == ety then Cons(h.k, cs_synth_vars(ety, t)) else cs_synth_vars(ety, t)
+fn cs_synth_fn_arg(pty, lenv) = match lenv
+    Nil        => ""
+    Cons(h, t) => if h.v == pty then h.k else cs_synth_fn_arg(pty, t)
+fn cs_synth_fns(ety, lenv, sigs, curfn) = match sigs
+    Nil        => Nil
+    Cons(sg, r) => if sg.fname == curfn or cs_tystr(sg.rt) != ety then cs_synth_fns(ety, lenv, r, curfn) else if cs_len(sg.pt) == 0 then Cons(sg.fname + "()", cs_synth_fns(ety, lenv, r, curfn)) else if cs_len(sg.pt) == 1 then let v = cs_synth_fn_arg(cs_tystr(cs_hd_ty(sg.pt)), lenv) in (if v != "" then Cons(sg.fname + "(" + v + ")", cs_synth_fns(ety, lenv, r, curfn)) else cs_synth_fns(ety, lenv, r, curfn)) else cs_synth_fns(ety, lenv, r, curfn)
+fn cs_synth_def(ety) = if ety == "int" then Cons("0", Nil) else if ety == "str" then Cons("\"\"", Nil) else Cons("Nil", Nil)
+fn cs_synth_cands(ety, lenv, sigs, curfn) = cs_app(cs_synth_vars(ety, lenv), cs_app(cs_synth_fns(ety, lenv, sigs, curfn), cs_synth_def(ety)))
+
+fn cs_holes_e(e, fnm, ety, lenv, sigs) = match e
+    Var(nm)         => if cs_is_hole(nm) == 1 then let cands = cs_synth_cands(ety, lenv, sigs, fnm) in let best = cs_hd_str(cands, "0") in {holes: Cons({hole: nm, fnm: fnm, expected_type: ety, context: lenv, candidates: cands}, Nil), diags: Cons(cs_mkdiag("A0001", "hole", "hole error: unfilled typed hole '" + nm + "' of expected type " + ety + " in '" + fnm + "'", "replace '" + nm + "' with '" + best + "'"), Nil)} else {holes: Nil, diags: Nil}
+    Bin(op, l, r)   => let r1 = cs_holes_e(l, fnm, ety, lenv, sigs) in let r2 = cs_holes_e(r, fnm, ety, lenv, sigs) in {holes: cs_app(r1.holes, r2.holes), diags: cs_app(r1.diags, r2.diags)}
+    If(c, t, e2)    => let rc = cs_holes_e(c, fnm, "int", lenv, sigs) in let rt = cs_holes_e(t, fnm, ety, lenv, sigs) in let re = cs_holes_e(e2, fnm, ety, lenv, sigs) in {holes: cs_app(rc.holes, cs_app(rt.holes, re.holes)), diags: cs_app(rc.diags, cs_app(rt.diags, re.diags))}
+    LetIn(nm, v, b) => let rv = cs_holes_e(v, fnm, ety, lenv, sigs) in let rb = cs_holes_e(b, fnm, ety, Cons({k: nm, v: ety}, lenv), sigs) in {holes: cs_app(rv.holes, rb.holes), diags: cs_app(rv.diags, rb.diags)}
+    VarIn(nm, v, b) => let rv = cs_holes_e(v, fnm, ety, lenv, sigs) in let rb = cs_holes_e(b, fnm, ety, Cons({k: nm, v: ety}, lenv), sigs) in {holes: cs_app(rv.holes, rb.holes), diags: cs_app(rv.diags, rb.diags)}
+    Call(cnm, args) => cs_holes_args(args, fnm, ety, lenv, sigs)
+    _               => {holes: Nil, diags: Nil}
+fn cs_holes_args(args, fnm, ety, lenv, sigs) = match args
+    Nil        => {holes: Nil, diags: Nil}
+    Cons(h, t) => let r1 = cs_holes_e(h, fnm, ety, lenv, sigs) in let r2 = cs_holes_args(t, fnm, ety, lenv, sigs) in {holes: cs_app(r1.holes, r2.holes), diags: cs_app(r1.diags, r2.diags)}
+fn cs_collect_holes_stmts(prog, sigs, osigs) = match prog
+    Nil        => {holes: Nil, diags: Nil}
+    Cons(h, t) => cs_collect_holes_stmt1(h, t, sigs, osigs)
+fn cs_collect_holes_stmt1(st, rest, sigs, osigs) = match st
+    Fn(nm, ps, body) => let msig = cs_siglookup(nm, sigs) in let mosig = cs_osiglookup(nm, osigs) in let r1 = cs_holes_e(body, nm, cs_fn_rty(msig, mosig), cs_fn_lenv(msig), sigs) in let r2 = cs_collect_holes_stmts(rest, sigs, osigs) in {holes: cs_app(r1.holes, r2.holes), diags: cs_app(r1.diags, r2.diags)}
+    _                => cs_collect_holes_stmts(rest, sigs, osigs)
+
+## --- Track A2: totality check (`[A0002]`) ---
+fn cs_pat_subvars(p) = match p
+    PCons(tag, sub) => sub
+    _               => Nil
+fn cs_guard_ps(ps, c, guarded) = match ps
+    Nil        => guarded
+    Cons(p, r) => if cs_omention(p, c) == 1 and cs_omem(p, guarded) == 0 then Cons(p, cs_guard_ps(r, c, guarded)) else cs_guard_ps(r, c, guarded)
+fn cs_is_pos_num(e, minv) = match e
+    Num(k) => if k >= minv then 1 else 0
+    _      => 0
+fn cs_is_dec_bin(op, l, r, ps, guarded) = match l
+    Var(p) => if cs_omem(p, ps) == 1 and cs_omem(p, guarded) == 1 then (if op == "-" and cs_is_pos_num(r, 1) == 1 then 1 else if op == "/" and cs_is_pos_num(r, 2) == 1 then 1 else 0) else 0
+    _      => 0
+fn cs_is_dec_arg(arg, ps, subvars, guarded) = match arg
+    Var(v)        => cs_omem(v, subvars)
+    Bin(op, l, r) => cs_is_dec_bin(op, l, r, ps, guarded)
+    _             => 0
+fn cs_has_dec_arg(args, ps, subvars, guarded) = match args
+    Nil        => 0
+    Cons(a, r) => if cs_is_dec_arg(a, ps, subvars, guarded) == 1 then 1 else cs_has_dec_arg(r, ps, subvars, guarded)
+fn cs_achk_total_e(e, fnm, ps, subvars, guarded) = match e
+    Call(cnm, args) => let da = cs_achk_total_args(args, fnm, ps, subvars, guarded) in if cnm == fnm and cs_has_dec_arg(args, ps, subvars, guarded) == 0 then Cons(cs_mkdiag("A0002", "totality", "totality error: cannot prove termination of 'total fn " + fnm + "': recursive call does not decrease any parameter", "recurse on a structural pattern subterm or a guarded 'n - 1' measure"), da) else da
+    If(c, t, e2)    => let g2 = cs_guard_ps(ps, c, guarded) in cs_app(cs_achk_total_e(c, fnm, ps, subvars, guarded), cs_app(cs_achk_total_e(t, fnm, ps, subvars, g2), cs_achk_total_e(e2, fnm, ps, subvars, g2)))
+    Bin(op, l, r)   => cs_app(cs_achk_total_e(l, fnm, ps, subvars, guarded), cs_achk_total_e(r, fnm, ps, subvars, guarded))
+    LetIn(nm, v, b) => cs_app(cs_achk_total_e(v, fnm, ps, subvars, guarded), cs_achk_total_e(b, fnm, ps, subvars, guarded))
+    Match(sc, arms) => cs_achk_total_arms(arms, fnm, ps, subvars, guarded)
+    _               => Nil
+fn cs_achk_total_args(args, fnm, ps, subvars, guarded) = match args
+    Nil        => Nil
+    Cons(h, t) => cs_app(cs_achk_total_e(h, fnm, ps, subvars, guarded), cs_achk_total_args(t, fnm, ps, subvars, guarded))
+fn cs_achk_total_arms(arms, fnm, ps, subvars, guarded) = match arms
+    Nil        => Nil
+    Cons(h, t) => cs_app(cs_achk_total_e(h.body, fnm, ps, cs_app(cs_pat_subvars(h.pat), subvars), guarded), cs_achk_total_arms(t, fnm, ps, subvars, guarded))
+
+## --- Track A3: provenance check (`[A0003]`) ---
+fn cs_uinit_vars(pns, pts) = match pns
+    Nil         => Nil
+    Cons(pn, r) => if cs_is_unv_ty(cs_hd_ty(pts)) == 1 then Cons(pn, cs_uinit_vars(r, cs_tl_ty(pts))) else cs_uinit_vars(r, cs_tl_ty(pts))
+fn cs_uinit_sig(msig) = match msig
+    Nil        => Nil
+    Cons(sg, r) => cs_uinit_vars(sg.pn, sg.pt)
+fn cs_is_unv_fn(cnm, osigs, sigs) = if cnm == "llm_complete" or cnm == "prob_sample" then 1 else if cs_is_llm_osig(cs_osiglookup(cnm, osigs)) == 1 then 1 else cs_is_unv_ret(cs_siglookup(cnm, sigs))
+fn cs_is_llm_osig(msig) = match msig
+    Nil        => 0
+    Cons(sg, r) => cs_ois_llm(sg.freef)
+fn cs_is_unv_ret(msig) = match msig
+    Nil        => 0
+    Cons(sg, r) => cs_is_unv_ty(sg.rt)
+fn cs_is_sink(cnm, osigs) = if cnm == "io_write" or cnm == "db_exec" or cnm == "net_send" or cnm == "fs_write" or cnm == "trusted_sink" or cnm == "law_assert" then 1 else cs_is_pub_nonllm(cs_osiglookup(cnm, osigs))
+fn cs_is_pub_nonllm(msig) = match msig
+    Nil        => 0
+    Cons(sg, r) => if sg.pubf == 1 and cs_ois_llm(sg.freef) == 0 then 1 else 0
+fn cs_discharge_vars(uvars, c) = match uvars
+    Nil        => Nil
+    Cons(v, r) => if cs_omention(v, c) == 1 then cs_discharge_vars(r, c) else Cons(v, cs_discharge_vars(r, c))
+fn cs_achk_prov_e(e, fnm, uvars, osigs, sigs) = match e
+    Var(x)          => {taint: cs_omem(x, uvars), diags: Nil}
+    Bin(op, l, r)   => let rl = cs_achk_prov_e(l, fnm, uvars, osigs, sigs) in let rr = cs_achk_prov_e(r, fnm, uvars, osigs, sigs) in {taint: if rl.taint == 1 or rr.taint == 1 then 1 else 0, diags: cs_app(rl.diags, rr.diags)}
+    If(c, t, e2)    => let rc = cs_achk_prov_e(c, fnm, uvars, osigs, sigs) in let rt = cs_achk_prov_e(t, fnm, cs_discharge_vars(uvars, c), osigs, sigs) in let re = cs_achk_prov_e(e2, fnm, uvars, osigs, sigs) in {taint: if rt.taint == 1 or re.taint == 1 then 1 else 0, diags: cs_app(rc.diags, cs_app(rt.diags, re.diags))}
+    LetIn(nm, v, b) => let rv = cs_achk_prov_e(v, fnm, uvars, osigs, sigs) in let uv2 = if rv.taint == 1 then Cons(nm, cs_orem(nm, uvars)) else cs_orem(nm, uvars) in let rb = cs_achk_prov_e(b, fnm, uv2, osigs, sigs) in {taint: rb.taint, diags: cs_app(rv.diags, rb.diags)}
+    Call(cnm, args) => cs_achk_prov_call(cnm, args, fnm, uvars, osigs, sigs)
+    _               => {taint: 0, diags: Nil}
+fn cs_achk_prov_args(args, fnm, uvars, osigs, sigs) = match args
+    Nil        => {taint: 0, diags: Nil}
+    Cons(h, t) => let r1 = cs_achk_prov_e(h, fnm, uvars, osigs, sigs) in let r2 = cs_achk_prov_args(t, fnm, uvars, osigs, sigs) in {taint: if r1.taint == 1 or r2.taint == 1 then 1 else 0, diags: cs_app(r1.diags, r2.diags)}
+fn cs_achk_prov_call(cnm, args, fnm, uvars, osigs, sigs) = if cnm == "verify" or cnm == "law_check" or cnm == "evolve_approve" then let ra = cs_achk_prov_args(args, fnm, uvars, osigs, sigs) in {taint: 0, diags: ra.diags} else let ra = cs_achk_prov_args(args, fnm, uvars, osigs, sigs) in let d_sink = if cs_is_sink(cnm, osigs) == 1 and ra.taint == 1 then Cons(cs_mkdiag("A0003", "provenance", "provenance error: unverified AI/probabilistic value in '" + fnm + "' cannot flow into trusted sink '" + cnm + "' without verification", "validate with 'verify(x, <contract>)' before calling '" + cnm + "'"), Nil) else Nil in {taint: if cs_is_unv_fn(cnm, osigs, sigs) == 1 or ra.taint == 1 then 1 else 0, diags: cs_app(ra.diags, d_sink)}
+
+fn cs_ochk_fn(nm, ps, body, msig, osigs, sigs) = match msig
+    Nil          => let rp = cs_achk_prov_e(body, nm, cs_uinit_sig(cs_siglookup(nm, sigs)), osigs, sigs) in let ctx = {fnm: nm, pubf: 0, freef: 0, halloc: 0, bparams: ps, mvars: Nil, origins: cs_oinit_orgs(ps), osigs: osigs} in let rb = cs_ochke(body, ctx, Nil) in cs_app(rp.diags, cs_app(rb.diags, cs_ochk_ret(nm, 0, "", rb.origin)))
+    Cons(sg, sr) => let dtot = if cs_ois_total(sg.freef) == 1 then cs_achk_total_e(body, nm, ps, Nil, Nil) else Nil in let rp = cs_achk_prov_e(body, nm, cs_uinit_sig(cs_siglookup(nm, sigs)), osigs, sigs) in let dret = if sg.pubf == 1 and cs_ois_llm(sg.freef) == 0 and cs_is_unv_ty(sg.rty) == 0 and rp.taint == 1 then Cons(cs_mkdiag("A0003", "provenance", "provenance error: unverified AI/probabilistic value cannot be returned from trusted 'pub fn " + nm + "' without verification", "wrap the return value in 'verify(val, <contract>)'"), Nil) else Nil in let bparams = if cs_isnil(sg.pl) == 1 then ps else cs_obparams(sg.pl) in let ctx = {fnm: nm, pubf: sg.pubf, freef: sg.freef, halloc: 0, bparams: bparams, mvars: cs_omvars(sg.pl), origins: cs_oinit_orgs(ps), osigs: osigs} in let rb = cs_ochke(body, ctx, Nil) in cs_app(dtot, cs_app(rp.diags, cs_app(dret, cs_app(rb.diags, cs_ochk_ret(nm, sg.pubf, sg.fromp, rb.origin)))))
+fn cs_odiagnose_stmts(prog, osigs, sigs, moved) = match prog
+    Nil        => Nil
+    Cons(h, t) => cs_odiagnose_stmt1(h, t, osigs, sigs, moved)
+fn cs_odiagnose_stmt1(s0, rest, osigs, sigs, moved) = match s0
+    Fn(nm, ps, body) => cs_app(cs_ochk_fn(nm, ps, body, cs_osiglookup(nm, osigs), osigs, sigs), cs_odiagnose_stmts(rest, osigs, sigs, moved))
+    Print(v)         => let r = cs_ochke(v, {fnm: "<main>", pubf: 0, freef: 0, halloc: 0, bparams: Nil, mvars: Nil, origins: Nil, osigs: osigs}, moved) in cs_app(r.diags, cs_odiagnose_stmts(rest, osigs, sigs, r.moved))
+    ExprS(v)         => let r = cs_ochke(v, {fnm: "<main>", pubf: 0, freef: 0, halloc: 0, bparams: Nil, mvars: Nil, origins: Nil, osigs: osigs}, moved) in cs_app(r.diags, cs_odiagnose_stmts(rest, osigs, sigs, r.moved))
+    _                => cs_odiagnose_stmts(rest, osigs, sigs, moved)
 
 fn cs_diagnose_stmts(prog, tt) = match prog
     Nil        => Nil
@@ -652,7 +780,7 @@ fn cs_diagnose_stmt(s0, tt) = match s0
     Print(v)         => cs_chk_expr(v, tt)
     ExprS(v)         => cs_chk_expr(v, tt)
     _                => Nil
-fn cs_diagnose(prog) = cs_app(cs_diagnose_stmts(prog, cs_tcollect(prog)), cs_odiagnose_stmts(prog, cs_ocollects(prog), Nil))
+fn cs_diagnose(prog) = let tt = cs_tcollect(prog) in let osigs = cs_ocollects(prog) in let hr = cs_collect_holes_stmts(prog, tt.sigs, osigs) in cs_app(cs_diagnose_stmts(prog, tt), cs_app(hr.diags, cs_odiagnose_stmts(prog, osigs, tt.sigs, Nil)))
 
 ## --- C3 generic erasure & C1/C2/M1/M2 comptime + hygienic macro expansion ---
 fn cs_gcfs(pl) = match pl
@@ -828,9 +956,11 @@ fn cs_eval_stmts(prog, ft) = match prog
 fn cs_eval_prog(prog) = cs_joinsep(cs_eval_stmts(prog, cs_buildft(prog)), "\n")
 
 ## --- PUBLIC CALLABLE LIBRARY API (`use lcaas`) ---
-fn caas_compile(src) = let ast = cs_parse(src) in let syms = cs_symbols(ast) in let diags = cs_diagnose(ast) in let raw_sexpr = cs_prog_sexpr(ast) in if cs_isnil(diags) == 0 then {ok: 0, diagnostics: diags, symbols: syms, ast: ast, ast_sexpr: raw_sexpr, expanded: Nil, expanded_sexpr: "", asm: "", result: ""} else let exp = cs_expand(ast) in {ok: 1, diagnostics: Nil, symbols: syms, ast: ast, ast_sexpr: raw_sexpr, expanded: exp, expanded_sexpr: cs_prog_sexpr(exp), asm: cs_asm_gen(exp), result: cs_eval_prog(exp)}
+fn cs_collect_holes(prog) = let tt = cs_tcollect(prog) in let osigs = cs_ocollects(prog) in (cs_collect_holes_stmts(prog, tt.sigs, osigs)).holes
+fn caas_compile(src) = let ast = cs_parse(src) in let syms = cs_symbols(ast) in let holes = cs_collect_holes(ast) in let diags = cs_diagnose(ast) in let raw_sexpr = cs_prog_sexpr(ast) in if cs_isnil(diags) == 0 then {ok: 0, diagnostics: diags, holes: holes, symbols: syms, ast: ast, ast_sexpr: raw_sexpr, expanded: Nil, expanded_sexpr: "", asm: "", result: ""} else let exp = cs_expand(ast) in {ok: 1, diagnostics: Nil, holes: holes, symbols: syms, ast: ast, ast_sexpr: raw_sexpr, expanded: exp, expanded_sexpr: cs_prog_sexpr(exp), asm: cs_asm_gen(exp), result: cs_eval_prog(exp)}
 
 fn caas_check(src) = caas_compile(src)
+fn caas_fill(src) = (caas_compile(src)).holes
 fn caas_ast(src) = (caas_compile(src)).ast_sexpr
 fn caas_expand(src) = (caas_compile(src)).expanded_sexpr
 fn caas_symbols(src) = (caas_compile(src)).symbols
@@ -838,6 +968,17 @@ fn caas_asm(src) = (caas_compile(src)).asm
 fn caas_eval(src) = (caas_compile(src)).result
 
 ## --- JSON serialisation for `lume agent` ---
+fn cs_strlist_json(xs) = match xs
+    Nil        => ""
+    Cons(h, t) => "\"" + cs_jesc(h) + "\"" + (if cs_isnil(t) == 1 then "" else "," + cs_strlist_json(t))
+fn cs_ctx1_json(c) = "{\"name\":\"" + cs_jesc(c.k) + "\",\"type\":\"" + cs_jesc(c.v) + "\"}"
+fn cs_ctx_json(cs) = match cs
+    Nil        => ""
+    Cons(h, t) => cs_ctx1_json(h) + (if cs_isnil(t) == 1 then "" else "," + cs_ctx_json(t))
+fn cs_hole_json(h) = "{\"hole\":\"" + cs_jesc(h.hole) + "\",\"function\":\"" + cs_jesc(h.fnm) + "\",\"expected_type\":\"" + cs_jesc(h.expected_type) + "\",\"context\":[" + cs_ctx_json(h.context) + "],\"candidates\":[" + cs_strlist_json(h.candidates) + "]}"
+fn cs_holes_json(hs) = match hs
+    Nil        => ""
+    Cons(h, t) => cs_hole_json(h) + (if cs_isnil(t) == 1 then "" else "," + cs_holes_json(t))
 fn cs_diag_json(d) = "{\"code\":\"" + cs_jesc(d.code) + "\",\"phase\":\"" + cs_jesc(d.phase) + "\",\"message\":\"" + cs_jesc(d.message) + "\",\"fixit\":\"" + cs_jesc(d.fixit) + "\"}"
 fn cs_diags_json(ds) = match ds
     Nil        => ""
@@ -846,6 +987,6 @@ fn cs_sym_json(s) = "{\"name\":\"" + cs_jesc(s.name) + "\",\"kind\":\"" + cs_jes
 fn cs_syms_json(ss) = match ss
     Nil        => ""
     Cons(h, t) => if cs_isnil(t) == 1 then cs_sym_json(h) else cs_sym_json(h) + "," + cs_syms_json(t)
-fn caas_json(r) = "{\"ok\":" + (if r.ok == 1 then "true" else "false") + ",\"diagnostics\":[" + cs_diags_json(r.diagnostics) + "],\"symbols\":[" + cs_syms_json(r.symbols) + "],\"ast\":\"" + cs_jesc(r.ast_sexpr) + "\",\"expanded\":\"" + cs_jesc(r.expanded_sexpr) + "\",\"has_asm\":" + (if count(r.asm) > 0 then "true" else "false") + ",\"result\":\"" + cs_jesc(r.result) + "\"}"
+fn caas_json(r) = "{\"ok\":" + (if r.ok == 1 then "true" else "false") + ",\"diagnostics\":[" + cs_diags_json(r.diagnostics) + "],\"holes\":[" + cs_holes_json(r.holes) + "],\"symbols\":[" + cs_syms_json(r.symbols) + "],\"ast\":\"" + cs_jesc(r.ast_sexpr) + "\",\"expanded\":\"" + cs_jesc(r.expanded_sexpr) + "\",\"has_asm\":" + (if count(r.asm) > 0 then "true" else "false") + ",\"result\":\"" + cs_jesc(r.result) + "\"}"
 
 print caas_json(caas_compile(readall()))

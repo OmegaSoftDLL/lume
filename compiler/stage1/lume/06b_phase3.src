@@ -1,12 +1,12 @@
-## --- Phase 3 Track O: ownership, borrow checker, region inference (`from`), and memory tiers (`06b_phase3.src`) ---
-## Gradual & fixpoint-safe: when a program uses no Track O constructs (`oany(prog) == 0`), `ocheck(prog)` returns
-## `prog` immediately with zero allocation, so `lumec.src` and all Stage 1/2 programs compile byte-identically.
-## When Track O constructs are present (`own`/`mut` params, `pub fn`, `@freestanding`, `@gc`, `resource type`,
-## `from <param>` return origins, `var`, `own <e>`, `mut <e>`, `defer`, `errdefer`, `with alloc`), `ocheck(prog)`
-## enforces O1 (O0001 use-after-move, O0002 move from borrowed param/field), O2 (O0010 immutable to mut, O0011
-## conflicting borrows, O0012 missing call-site `own`), O3 (O0020 escaping local borrow, O0021 missing/mismatched
-## `from <param>` origin on `pub fn`), and O4 (O0030 ambient heap allocation in `@freestanding` or `@gc` boundary
-## leak), then lowers surface Track O expression nodes into canonical Lume-Core (`LetIn`/`If`).
+## --- Phase 3 Track O & Track A (`06b_phase3.src`) ---
+## Track O: ownership (`own`), borrow checker (`shared`/`mut`), regions (`from <param>`), LIFO `defer`/`errdefer`,
+##          and memory tiers (`rc`/`arc`/`weak`/`cell`/arena, `@gc`, `@freestanding` + `with alloc`).
+## Track A: AI-native authoring:
+##   - A1: Typed holes (`_`, `_hole*`) + hole-driven candidate synthesis (`[A0001]`).
+##   - A2: `total fn` termination & structural/measure recursion checker (`[A0002]`).
+##   - A3: Provenance & uncertainty in the type (`unverified[T]`, `llm fn`, `prob_sample`) with contract/law/evolve
+##         discharge (`verify`, `law_check`, `evolve_approve`, or branch guard) before trusted boundaries (`[A0003]`).
+## Gradual & fixpoint-safe: when `oany(prog) == 0`, `ocheck(prog)` returns `prog` immediately with zero allocation.
 
 fn omem(x, xs) = match xs
     Nil        => 0
@@ -18,6 +18,20 @@ fn orem(x, xs) = match xs
 
 fn ostarts(s, p) = if count(s) < count(p) then 0 else slice(s, 0, count(p)) == p
 
+fn ois_free(mflags) = mflags % 2
+fn ois_total(mflags) = (mflags / 2) % 2
+fn ois_llm(mflags) = (mflags / 4) % 2
+
+fn ais_hole_name(nm) = if nm == "_" or ostarts(nm, "_hole") == 1 then 1 else 0
+
+fn ois_unverified_ty(ty) = match ty
+    TyApply(n, e) => if n == "unverified" then 1 else 0
+    _             => 0
+
+fn ohas_unverified_tys(tys) = match tys
+    Nil        => 0
+    Cons(h, t) => if ois_unverified_ty(h) == 1 then 1 else ohas_unverified_tys(t)
+
 fn oany(prog) = match prog
     Nil        => 0
     Cons(h, t) => if oanystmt(h) == 1 then 1 else oany(t)
@@ -25,12 +39,14 @@ fn oany(prog) = match prog
 fn oanystmt(st) = match st
     OSig(nm, pubf, freef, pl, rty, fromp) => 1
     OType(nm, k)                          => 1
+    Sig(nm, ps, ts, rt)                   => if ohas_unverified_tys(ts) == 1 or ois_unverified_ty(rt) == 1 then 1 else 0
     Fn(nm, ps, body)                      => oanye(body)
     Print(v)                              => oanye(v)
     ExprS(v)                              => oanye(v)
     _                                     => 0
 
 fn oanye(e) = match e
+    Var(nm)           => ais_hole_name(nm)
     VarIn(nm, v, b)   => 1
     OwnE(inner)       => 1
     MutE(inner)       => 1
@@ -40,7 +56,7 @@ fn oanye(e) = match e
     LetIn(nm, v, b)   => if oanye(v) == 1 then 1 else oanye(b)
     If(c, t, e2)      => if oanye(c) == 1 then 1 else if oanye(t) == 1 then 1 else oanye(e2)
     Bin(op, l, r)     => if oanye(l) == 1 then 1 else oanye(r)
-    Call(nm, args)    => if nm == "borrow" or nm == "borrow_mut" or nm == "move" or nm == "clone" then 1 else oanyargs(args)
+    Call(nm, args)    => if nm == "borrow" or nm == "borrow_mut" or nm == "move" or nm == "clone" or nm == "verify" or nm == "law_check" or nm == "evolve_approve" or nm == "llm_complete" or nm == "prob_sample" then 1 else oanyargs(args)
     Field(o, fld)     => oanye(o)
     Rec(items)        => oanyrec(items)
     RecT(tn, items)   => oanyrec(items)
@@ -60,7 +76,7 @@ fn oanyarms(xs) = match xs
     Nil        => 0
     Cons(h, t) => if oanye(h.body) == 1 then 1 else oanyarms(t)
 
-## --- collect OSig, OType, and user function names ---
+## --- collect OSig, OType, and user functions ---
 fn ocollects(prog) = match prog
     Nil        => Nil
     Cons(h, t) => ocollects1(h, ocollects(t))
@@ -131,19 +147,23 @@ fn obind_origin(x, v, orgs) = Cons({k: x, v: v}, orgs)
 
 ## Intra-module quick origin inference for private helper functions (`borrow(p)` -> `p`)
 fn oquick_origin(e, orgs) = match e
-    Var(x)          => olookup_origin(x, orgs)
-    Field(o, fld)   => oquick_origin(o, orgs)
-    LetIn(nm, v, b) => let vo = oquick_origin(v, orgs) in oquick_origin(b, obind_origin(nm, if vo != "" then vo else "local:" + nm, orgs))
-    VarIn(nm, v, b) => let vo = oquick_origin(v, orgs) in oquick_origin(b, obind_origin(nm, if vo != "" then vo else "local:" + nm, orgs))
-    If(c, t, e2)    => let to = oquick_origin(t, orgs) in if to != "" then to else oquick_origin(e2, orgs)
-    DeferE(c, b)    => oquick_origin(b, orgs)
-    ErrDeferE(c, b) => oquick_origin(b, orgs)
+    Var(x)           => olookup_origin(x, orgs)
+    Field(o, fld)    => oquick_origin(o, orgs)
+    LetIn(nm, v, b)  => let vo = oquick_origin(v, orgs) in oquick_origin(b, obind_origin(nm, if vo != "" then vo else "local:" + nm, orgs))
+    VarIn(nm, v, b)  => let vo = oquick_origin(v, orgs) in oquick_origin(b, obind_origin(nm, if vo != "" then vo else "local:" + nm, orgs))
+    If(c, t, e2)     => let to = oquick_origin(t, orgs) in if to != "" then to else oquick_origin(e2, orgs)
+    DeferE(c, b)     => oquick_origin(b, orgs)
+    ErrDeferE(c, b)  => oquick_origin(b, orgs)
     WithAllocE(a, b) => oquick_origin(b, orgs)
-    Call(nm, args)  => if (nm == "borrow" or nm == "borrow_mut") and len(args) == 1 then "borrow:" + oquick_origin(ohd_e(args), orgs) else ""
-    _               => ""
+    Call(nm, args)   => if (nm == "borrow" or nm == "borrow_mut") and len(args) == 1 then "borrow:" + oquick_origin(ohd_e(args), orgs) else ""
+    _                => ""
 
 fn ohd_e(xs) = match xs
     Nil        => Num(0)
+    Cons(h, t) => h
+
+fn ohd_s(xs, def) = match xs
+    Nil        => def
     Cons(h, t) => h
 
 fn ostrip_borrow(org) = if ostarts(org, "borrow:") == 1 then ostrip_borrow(slice(org, 7, count(org))) else org
@@ -299,7 +319,7 @@ fn ochkargs(args, ctx, moved) = match args
     Nil        => moved
     Cons(h, t) => let r = ochke(h, ctx, moved) in ochkargs(t, ctx, r.moved)
 
-fn ochkcall(fnm, args, ctx, moved) = if ctx.freef == 1 and ctx.halloc == 0 and ois_heap_alloc(fnm) == 1 then ctfail("lume: ownership error [O0030]: ambient heap allocation '" + fnm + "' in '@freestanding' function '" + ctx.fnm + "' (help: pass an explicit allocator via 'with alloc = <arena> in ...')\n") else if fnm == "move" and len(args) == 1 then ochk_own_target(ohd_e(args), ctx, moved) else if fnm == "borrow" and len(args) == 1 then let ra = ochke(ohd_e(args), ctx, moved) in {moved: ra.moved, origin: "borrow:" + ra.origin} else if fnm == "borrow_mut" and len(args) == 1 then ochk_mut_target(ohd_e(args), ctx, moved) else ochkcall_sig(fnm, args, osiglookup(fnm, ctx.osigs), ctx, moved)
+fn ochkcall(fnm, args, ctx, moved) = if ois_free(ctx.freef) == 1 and ctx.halloc == 0 and ois_heap_alloc(fnm) == 1 then ctfail("lume: ownership error [O0030]: ambient heap allocation '" + fnm + "' in '@freestanding' function '" + ctx.fnm + "' (help: pass an explicit allocator via 'with alloc = <arena> in ...')\n") else if fnm == "move" and len(args) == 1 then ochk_own_target(ohd_e(args), ctx, moved) else if fnm == "borrow" and len(args) == 1 then let ra = ochke(ohd_e(args), ctx, moved) in {moved: ra.moved, origin: "borrow:" + ra.origin} else if fnm == "borrow_mut" and len(args) == 1 then ochk_mut_target(ohd_e(args), ctx, moved) else ochkcall_sig(fnm, args, osiglookup(fnm, ctx.osigs), ctx, moved)
 
 fn ochkcall_sig(fnm, args, msig, ctx, moved) = match msig
     Nil          => let z = ochk_conflicts(fnm, ocollect_mut_args(args, Nil), args) in {moved: ochkargs(args, ctx, moved), origin: ""}
@@ -308,11 +328,262 @@ fn ochkcall_sig(fnm, args, msig, ctx, moved) = match msig
 ## --- check function return region rules O0020 & O0021 ---
 fn ochk_ret_origin(nm, pubf, fromp, rty, pnames, org) = let core_org = ostrip_borrow(org) in if ostarts(org, "borrow:") == 1 and ostarts(core_org, "local:") == 1 then let lx = slice(core_org, 6, count(core_org)) in ctfail("lume: region error [O0020]: borrowed value '" + lx + "' does not live long enough (escapes local scope of '" + nm + "')\n") else if ostarts(org, "borrow:") == 1 and ostarts(core_org, "param:") == 1 then let px = slice(core_org, 6, count(core_org)) in (if pubf == 1 and fromp == "" then ctfail("lume: region error [O0021]: public function '" + nm + "' returns a borrow from parameter '" + px + "' without an origin clause (help: add 'from " + px + "' to the return type)\n") else if fromp != "" and fromp != px then ctfail("lume: region error [O0021]: function '" + nm + "' declares 'from " + fromp + "' but returns a borrow from parameter '" + px + "' (help: change origin clause to 'from " + px + "')\n") else 1) else if pubf == 1 and oisreftype(rty) == 1 and fromp == "" then ctfail("lume: region error [O0021]: public function '" + nm + "' returns a borrowed view without a 'from <param>' origin clause\n") else 1
 
-fn ochkfn(nm, ps, body, ot) = ochkfn2(nm, ps, body, osiglookup(nm, ot.osigs), ot)
+## ============================================================================================================
+## Track A1: Typed holes (`_`, `_hole*`) + hole-driven candidate synthesis (`[A0001]`)
+## ============================================================================================================
+fn asynth_vars(expty, lenv) = match lenv
+    Nil        => Nil
+    Cons(h, t) => if tystr(h.v) != "?" and tcompat(expty, h.v) == 1 then Cons(h.k, asynth_vars(expty, t)) else asynth_vars(expty, t)
 
-fn ochkfn2(nm, ps, body, msig, ot) = match msig
-    Nil          => let ctx = {fnm: nm, pubf: 0, freef: 0, halloc: 0, bparams: ps, mvars: Nil, pnames: ps, locals: Nil, origins: oinit_origins(ps), osigs: ot.osigs, otypes: ot.otypes} in let rb = ochke(body, ctx, Nil) in ochk_ret_origin(nm, 0, "", TyAny, ps, rb.origin)
-    Cons(sg, sr) => if sg.pubf == 1 and oisgctype(sg.rty, ot.otypes) == 1 then ctfail("lume: ownership error [O0030]: public function '" + nm + "' cannot expose '@gc' region type across a public module boundary\n") else let bparams = if isnil(sg.pl) == 1 then ps else obparams_pl(sg.pl) in let mvars = omvars_pl(sg.pl) in let ctx = {fnm: nm, pubf: sg.pubf, freef: sg.freef, halloc: 0, bparams: bparams, mvars: mvars, pnames: ps, locals: Nil, origins: oinit_origins(ps), osigs: ot.osigs, otypes: ot.otypes} in let rb = ochke(body, ctx, Nil) in ochk_ret_origin(nm, sg.pubf, sg.fromp, sg.rty, ps, rb.origin)
+fn asynth_fn_arg(pt, lenv) = match lenv
+    Nil        => ""
+    Cons(h, t) => if tystr(h.v) != "?" and tcompat(pt, h.v) == 1 then h.k else asynth_fn_arg(pt, t)
+
+fn asynth_fns(expty, lenv, sigs, curfn) = match sigs
+    Nil        => Nil
+    Cons(sg, r) => if sg.fname == curfn or tystr(sg.rt) == "?" or tcompat(expty, sg.rt) == 0 then asynth_fns(expty, lenv, r, curfn) else if len(sg.pt) == 0 then Cons(sg.fname + "()", asynth_fns(expty, lenv, r, curfn)) else if len(sg.pt) == 1 then let v = asynth_fn_arg(ohd_ty(sg.pt), lenv) in (if v != "" then Cons(sg.fname + "(" + v + ")", asynth_fns(expty, lenv, r, curfn)) else asynth_fns(expty, lenv, r, curfn)) else asynth_fns(expty, lenv, r, curfn)
+
+fn ohd_ty(xs) = match xs
+    Nil        => TyAny
+    Cons(h, t) => h
+
+fn asynth_default(expty) = match expty
+    TyName(n) => if n == "int" then Cons("0", Nil) else if n == "str" then Cons("\"\"", Nil) else Nil
+    TyList(e) => Cons("Nil", Nil)
+    _         => Nil
+
+fn asynth_cands(expty, lenv, sigs, curfn) = app(asynth_vars(expty, lenv), app(asynth_fns(expty, lenv, sigs, curfn), asynth_default(expty)))
+
+fn aquick_ty(e, lenv, sigs) = match e
+    Num(n)        => TyName("int")
+    Str(s)        => TyName("str")
+    Var(nm)       => if ais_hole_name(nm) == 1 then TyAny else aquick_var_ty(nm, lenv)
+    Bin(op, a, b) => if op == "+" then aquick_plus_ty(aquick_ty(a, lenv, sigs), aquick_ty(b, lenv, sigs)) else TyName("int")
+    Call(nm, xs)  => aquick_call_ty(tsiglookup(nm, sigs))
+    _             => TyAny
+
+fn aquick_var_ty(nm, lenv) = match lenv
+    Nil        => TyAny
+    Cons(h, t) => if h.k == nm then h.v else aquick_var_ty(nm, t)
+
+fn aquick_plus_ty(ta, tb) = if tystr(ta) != "?" then ta else tb
+
+fn aquick_call_ty(msig) = match msig
+    Nil        => TyAny
+    Cons(sg, r) => sg.rt
+
+fn abin_expty(op, other_e, expty, lenv, sigs) = if op == "+" then let ot = aquick_ty(other_e, lenv, sigs) in (if tystr(ot) != "?" then ot else if tystr(expty) != "?" then expty else TyName("int")) else if op == "-" or op == "*" or op == "/" or op == "%" then TyName("int") else let ot = aquick_ty(other_e, lenv, sigs) in if tystr(ot) != "?" then ot else TyName("int")
+
+fn achk_hole_var(hnm, expty, lenv, hctx) = let cands = asynth_cands(expty, lenv, hctx.sigs, hctx.fnm) in let best = ohd_s(cands, "0") in if hctx.pubf == 1 or tystr(expty) == "?" then ctfail("lume: hole error [A0001]: unfilled typed hole '" + hnm + "' of expected type " + tystr(expty) + " in '" + hctx.fnm + "' (fix-it: replace '" + hnm + "' with '" + best + "')\n") else 1
+
+fn achk_holes_e(e, expty, lenv, hctx) = match e
+    Var(nm)         => if ais_hole_name(nm) == 1 then achk_hole_var(nm, expty, lenv, hctx) else 0
+    Bin(op, a, b)   => achk_holes_e(a, abin_expty(op, b, expty, lenv, hctx.sigs), lenv, hctx) + achk_holes_e(b, abin_expty(op, a, expty, lenv, hctx.sigs), lenv, hctx)
+    If(c, t, e2)    => achk_holes_e(c, TyName("int"), lenv, hctx) + achk_holes_e(t, expty, lenv, hctx) + achk_holes_e(e2, expty, lenv, hctx)
+    LetIn(nm, v, b) => let vt = aquick_ty(v, lenv, hctx.sigs) in achk_holes_e(v, vt, lenv, hctx) + achk_holes_e(b, expty, Cons({k: nm, v: vt}, lenv), hctx)
+    VarIn(nm, v, b) => let vt = aquick_ty(v, lenv, hctx.sigs) in achk_holes_e(v, vt, lenv, hctx) + achk_holes_e(b, expty, Cons({k: nm, v: vt}, lenv), hctx)
+    DeferE(c, b)    => achk_holes_e(c, TyAny, lenv, hctx) + achk_holes_e(b, expty, lenv, hctx)
+    ErrDeferE(c, b) => achk_holes_e(c, TyAny, lenv, hctx) + achk_holes_e(b, expty, lenv, hctx)
+    WithAllocE(a, b) => achk_holes_e(a, TyName("int"), lenv, hctx) + achk_holes_e(b, expty, lenv, hctx)
+    Call(nm, args)  => achk_holes_call(nm, args, tsiglookup(nm, hctx.sigs), lenv, hctx)
+    Match(sc, arms) => achk_holes_e(sc, TyAny, lenv, hctx) + achk_holes_arms(arms, expty, lenv, hctx)
+    _               => 0
+
+fn achk_holes_call(nm, args, msig, lenv, hctx) = match msig
+    Nil        => achk_holes_args_any(args, lenv, hctx)
+    Cons(sg, r) => achk_holes_args_typed(args, sg.pt, lenv, hctx)
+
+fn achk_holes_args_any(args, lenv, hctx) = match args
+    Nil        => 0
+    Cons(h, t) => achk_holes_e(h, TyAny, lenv, hctx) + achk_holes_args_any(t, lenv, hctx)
+
+fn achk_holes_args_typed(args, pts, lenv, hctx) = match args
+    Nil        => 0
+    Cons(h, t) => achk_holes_e(h, ohd_ty(pts), lenv, hctx) + achk_holes_args_typed(t, ptl(pts), lenv, hctx)
+
+fn achk_holes_arms(arms, expty, lenv, hctx) = match arms
+    Nil        => 0
+    Cons(h, t) => achk_holes_e(h.body, expty, lenv, hctx) + achk_holes_arms(t, expty, lenv, hctx)
+
+## ============================================================================================================
+## Track A2: `total fn` termination & structural/measure recursion checker (`[A0002]`)
+## ============================================================================================================
+fn apat_binds(p) = match p
+    PBind(v)        => Cons(v, Nil)
+    PCons(tag, sub) => apat_bind_list(sub)
+    _               => Nil
+
+fn apat_bind_list(xs) = match xs
+    Nil        => Nil
+    Cons(h, t) => app(apat_binds(h), apat_bind_list(t))
+
+fn apat_subvars(p) = match p
+    PCons(tag, sub) => apat_bind_list(sub)
+    _               => Nil
+
+fn aguard_params(ps, c, guarded) = match ps
+    Nil        => guarded
+    Cons(p, r) => if omentions_var(p, c) == 1 and omem(p, guarded) == 0 then Cons(p, aguard_params(r, c, guarded)) else aguard_params(r, c, guarded)
+
+fn ais_pos_num(e, minv) = match e
+    Num(k) => if k >= minv then 1 else 0
+    _      => 0
+
+fn ais_dec_bin(op, l, r, ps, guarded) = match l
+    Var(p) => if omem(p, ps) == 1 and omem(p, guarded) == 1 then (if op == "-" and ais_pos_num(r, 1) == 1 then 1 else if op == "/" and ais_pos_num(r, 2) == 1 then 1 else 0) else 0
+    _      => 0
+
+fn ais_dec_arg(arg, ps, subvars, guarded) = match arg
+    Var(v)        => omem(v, subvars)
+    Bin(op, l, r) => ais_dec_bin(op, l, r, ps, guarded)
+    _             => 0
+
+fn ahas_dec_arg(args, ps, subvars, guarded) = match args
+    Nil        => 0
+    Cons(a, r) => if ais_dec_arg(a, ps, subvars, guarded) == 1 then 1 else ahas_dec_arg(r, ps, subvars, guarded)
+
+fn afn_calls_self(nm, e) = match e
+    Call(cnm, args) => if cnm == nm then 1 else afn_calls_args(nm, args)
+    Bin(op, l, r)   => if afn_calls_self(nm, l) == 1 then 1 else afn_calls_self(nm, r)
+    If(c, t, e2)    => if afn_calls_self(nm, c) == 1 then 1 else if afn_calls_self(nm, t) == 1 then 1 else afn_calls_self(nm, e2)
+    LetIn(x, v, b)  => if afn_calls_self(nm, v) == 1 then 1 else afn_calls_self(nm, b)
+    VarIn(x, v, b)  => if afn_calls_self(nm, v) == 1 then 1 else afn_calls_self(nm, b)
+    Match(sc, arms) => if afn_calls_self(nm, sc) == 1 then 1 else afn_calls_arms(nm, arms)
+    _               => 0
+
+fn afn_calls_args(nm, xs) = match xs
+    Nil        => 0
+    Cons(h, t) => if afn_calls_self(nm, h) == 1 then 1 else afn_calls_args(nm, t)
+
+fn afn_calls_arms(nm, xs) = match xs
+    Nil        => 0
+    Cons(h, t) => if afn_calls_self(nm, h.body) == 1 then 1 else afn_calls_arms(nm, t)
+
+fn ais_fn_marked_total(nm, osigs) = match osiglookup(nm, osigs)
+    Nil        => 0
+    Cons(sg, r) => ois_total(sg.freef)
+
+fn ais_nontotal_rec(cnm, fns, osigs) = if ais_fn_marked_total(cnm, osigs) == 1 then 0 else ais_nontotal_rec2(cnm, fns)
+
+fn ais_nontotal_rec2(cnm, fns) = match fns
+    Nil        => 0
+    Cons(f, r) => if f.nm == cnm then afn_calls_self(cnm, f.body) else ais_nontotal_rec2(cnm, r)
+
+fn amatch_is_param(sc, ps, subvars) = match sc
+    Var(x) => if omem(x, ps) == 1 or omem(x, subvars) == 1 then 1 else 0
+    _      => 0
+
+fn achk_total_e(e, tctx, subvars, guarded) = match e
+    Call(cnm, args) => let z = achk_total_args(args, tctx, subvars, guarded) in if cnm == tctx.fnm then (if ahas_dec_arg(args, tctx.ps, subvars, guarded) == 1 then 1 else ctfail("lume: totality error [A0002]: cannot prove termination of 'total fn " + tctx.fnm + "': recursive call '" + cnm + "(...)' does not decrease any parameter (fix-it: recurse on a structural pattern subterm or a guarded 'n - 1' measure)\n")) else if ais_nontotal_rec(cnm, tctx.fns, tctx.osigs) == 1 then ctfail("lume: totality error [A0002]: 'total fn " + tctx.fnm + "' cannot call non-total recursive function '" + cnm + "' (fix-it: mark 'total fn " + cnm + "' and prove its termination)\n") else 1
+    If(c, t, e2)    => let g2 = aguard_params(tctx.ps, c, guarded) in achk_total_e(c, tctx, subvars, guarded) + achk_total_e(t, tctx, subvars, g2) + achk_total_e(e2, tctx, subvars, g2)
+    Bin(op, l, r)   => achk_total_e(l, tctx, subvars, guarded) + achk_total_e(r, tctx, subvars, guarded)
+    LetIn(nm, v, b) => achk_total_e(v, tctx, subvars, guarded) + achk_total_e(b, tctx, subvars, guarded)
+    VarIn(nm, v, b) => achk_total_e(v, tctx, subvars, guarded) + achk_total_e(b, tctx, subvars, guarded)
+    DeferE(c, b)    => achk_total_e(c, tctx, subvars, guarded) + achk_total_e(b, tctx, subvars, guarded)
+    ErrDeferE(c, b) => achk_total_e(c, tctx, subvars, guarded) + achk_total_e(b, tctx, subvars, guarded)
+    WithAllocE(a, b) => achk_total_e(a, tctx, subvars, guarded) + achk_total_e(b, tctx, subvars, guarded)
+    Match(sc, arms) => achk_total_e(sc, tctx, subvars, guarded) + achk_total_arms(arms, amatch_is_param(sc, tctx.ps, subvars), tctx, subvars, guarded)
+    _               => 0
+
+fn achk_total_args(args, tctx, subvars, guarded) = match args
+    Nil        => 0
+    Cons(h, t) => achk_total_e(h, tctx, subvars, guarded) + achk_total_args(t, tctx, subvars, guarded)
+
+fn achk_total_arms(arms, is_p, tctx, subvars, guarded) = match arms
+    Nil        => 0
+    Cons(h, t) => let sv2 = if is_p == 1 then app(apat_subvars(h.pat), subvars) else subvars in achk_total_e(h.body, tctx, sv2, guarded) + achk_total_arms(t, is_p, tctx, subvars, guarded)
+
+## ============================================================================================================
+## Track A3: Provenance & uncertainty in the type (`unverified[T]`, `llm fn`, `prob_sample`) (`[A0003]`)
+## ============================================================================================================
+fn auinit_vars(pns, pts) = match pns
+    Nil         => Nil
+    Cons(pn, pr) => if ois_unverified_ty(ohd_ty(pts)) == 1 then Cons(pn, auinit_vars(pr, ptl(pts))) else auinit_vars(pr, ptl(pts))
+
+fn auinit_from_sig(msig) = match msig
+    Nil        => Nil
+    Cons(sg, r) => auinit_vars(sg.pn, sg.pt)
+
+fn ais_unverified_fn(cnm, osigs, sigs) = if cnm == "llm_complete" or cnm == "prob_sample" then 1 else if ais_llm_osig(osiglookup(cnm, osigs)) == 1 then 1 else ais_unverified_ret(tsiglookup(cnm, sigs))
+
+fn ais_llm_osig(msig) = match msig
+    Nil        => 0
+    Cons(sg, r) => ois_llm(sg.freef)
+
+fn ais_unverified_ret(msig) = match msig
+    Nil        => 0
+    Cons(sg, r) => ois_unverified_ty(sg.rt)
+
+fn ais_trusted_sink(cnm, osigs) = if cnm == "io_write" or cnm == "db_exec" or cnm == "net_send" or cnm == "fs_write" or cnm == "trusted_sink" or cnm == "law_assert" then 1 else ais_pub_nonllm(osiglookup(cnm, osigs))
+
+fn ais_pub_nonllm(msig) = match msig
+    Nil        => 0
+    Cons(sg, r) => if sg.pubf == 1 and ois_llm(sg.freef) == 0 then 1 else 0
+
+fn asig_pts(cnm, sigs) = match tsiglookup(cnm, sigs)
+    Nil        => Nil
+    Cons(sg, r) => sg.pt
+
+fn ais_cmp_guard(c) = match c
+    Bin(op, l, r) => if tiscmp(op) == 1 then 1 else 0
+    _             => 0
+
+fn adischarge_vars(uvars, c) = if ais_cmp_guard(c) == 0 then uvars else adischarge_vars2(uvars, c)
+
+fn adischarge_vars2(uvars, c) = match uvars
+    Nil        => Nil
+    Cons(v, r) => if omentions_var(v, c) == 1 then adischarge_vars2(r, c) else Cons(v, adischarge_vars2(r, c))
+
+fn achk_prov_e(e, fnm, uvars, ot) = match e
+    Var(x)           => omem(x, uvars)
+    Field(o, fld)    => achk_prov_e(o, fnm, uvars, ot)
+    OwnE(inner)      => achk_prov_e(inner, fnm, uvars, ot)
+    MutE(inner)      => achk_prov_e(inner, fnm, uvars, ot)
+    Bin(op, l, r)    => let tl = achk_prov_e(l, fnm, uvars, ot) in let tr = achk_prov_e(r, fnm, uvars, ot) in if tl == 1 or tr == 1 then 1 else 0
+    If(c, t, e2)     => let tc = achk_prov_e(c, fnm, uvars, ot) in let uvt = adischarge_vars(uvars, c) in let tt = achk_prov_e(t, fnm, uvt, ot) in let te = achk_prov_e(e2, fnm, uvars, ot) in if tt == 1 or te == 1 then 1 else 0
+    LetIn(nm, v, b)  => let tv = achk_prov_e(v, fnm, uvars, ot) in let uv2 = if tv == 1 then Cons(nm, orem(nm, uvars)) else orem(nm, uvars) in achk_prov_e(b, fnm, uv2, ot)
+    VarIn(nm, v, b)  => let tv = achk_prov_e(v, fnm, uvars, ot) in let uv2 = if tv == 1 then Cons(nm, orem(nm, uvars)) else orem(nm, uvars) in achk_prov_e(b, fnm, uv2, ot)
+    DeferE(c, b)     => let tc = achk_prov_e(c, fnm, uvars, ot) in achk_prov_e(b, fnm, uvars, ot)
+    ErrDeferE(c, b)  => let tc = achk_prov_e(c, fnm, uvars, ot) in achk_prov_e(b, fnm, uvars, ot)
+    WithAllocE(a, b) => let ta = achk_prov_e(a, fnm, uvars, ot) in achk_prov_e(b, fnm, uvars, ot)
+    Match(sc, arms)  => let tsc = achk_prov_e(sc, fnm, uvars, ot) in achk_prov_arms(arms, tsc, fnm, uvars, ot)
+    Call(cnm, args)  => achk_prov_call(cnm, args, fnm, uvars, ot)
+    _                => 0
+
+fn achk_prov_arms(arms, tsc, fnm, uvars, ot) = match arms
+    Nil        => 0
+    Cons(h, t) => let uv2 = if tsc == 1 then app(apat_binds(h.pat), uvars) else uvars in let tb = achk_prov_e(h.body, fnm, uv2, ot) in let tr = achk_prov_arms(t, tsc, fnm, uvars, ot) in if tb == 1 or tr == 1 then 1 else 0
+
+fn achk_prov_args(args, fnm, uvars, ot) = match args
+    Nil        => 0
+    Cons(h, t) => let th = achk_prov_e(h, fnm, uvars, ot) in let tt = achk_prov_args(t, fnm, uvars, ot) in if th == 1 or tt == 1 then 1 else 0
+
+fn achk_sink_args(fnm, cnm, args, pts, uvars, ot) = match args
+    Nil        => 0
+    Cons(a, r) => let ta = achk_prov_e(a, fnm, uvars, ot) in if ta == 1 and ois_unverified_ty(ohd_ty(pts)) == 0 then ctfail("lume: provenance error [A0003]: unverified AI/probabilistic value in '" + fnm + "' cannot flow into trusted sink '" + cnm + "' without verification (fix-it: validate with 'verify(x, <contract>)' before calling '" + cnm + "')\n") else achk_sink_args(fnm, cnm, r, ptl(pts), uvars, ot)
+
+fn achk_prov_call(cnm, args, fnm, uvars, ot) = if cnm == "verify" or cnm == "law_check" or cnm == "evolve_approve" then let z = achk_prov_args(args, fnm, uvars, ot) in 0 else if ais_trusted_sink(cnm, ot.osigs) == 1 then let z = achk_sink_args(fnm, cnm, args, asig_pts(cnm, ot.sigs), uvars, ot) in ais_unverified_fn(cnm, ot.osigs, ot.sigs) else let ta = achk_prov_args(args, fnm, uvars, ot) in if ais_unverified_fn(cnm, ot.osigs, ot.sigs) == 1 or ta == 1 then 1 else 0
+
+## ============================================================================================================
+## Combined function driver for Track O & Track A (`ochkfn`)
+## ============================================================================================================
+fn aget_fn_rty(msig, mosig) = match mosig
+    Cons(osg, r) => if isany(osg.rty) == 0 then osg.rty else aget_sig_rty(msig)
+    Nil          => aget_sig_rty(msig)
+
+fn aget_sig_rty(msig) = match msig
+    Cons(sg, r) => sg.rt
+    Nil         => TyAny
+
+fn aget_fn_lenv(msig) = match msig
+    Cons(sg, r) => tparamlenv(sg)
+    Nil         => Nil
+
+fn ochkfn(nm, ps, body, ot) = ochkfn2(nm, ps, body, osiglookup(nm, ot.osigs), tsiglookup(nm, ot.sigs), ot)
+
+fn ochkfn2(nm, ps, body, mosig, msig, ot) = match mosig
+    Nil          => let rty = aget_sig_rty(msig) in let lenv = aget_fn_lenv(msig) in let zh = achk_holes_e(body, rty, lenv, {fnm: nm, pubf: 0, sigs: ot.sigs}) in let zp = achk_prov_e(body, nm, auinit_from_sig(msig), ot) in let ctx = {fnm: nm, pubf: 0, freef: 0, halloc: 0, bparams: ps, mvars: Nil, pnames: ps, locals: Nil, origins: oinit_origins(ps), osigs: ot.osigs, otypes: ot.otypes} in let rb = ochke(body, ctx, Nil) in ochk_ret_origin(nm, 0, "", rty, ps, rb.origin)
+    Cons(sg, sr) => if sg.pubf == 1 and oisgctype(sg.rty, ot.otypes) == 1 then ctfail("lume: ownership error [O0030]: public function '" + nm + "' cannot expose '@gc' region type across a public module boundary\n") else let rty = aget_fn_rty(msig, mosig) in let lenv = aget_fn_lenv(msig) in let zh = achk_holes_e(body, rty, lenv, {fnm: nm, pubf: sg.pubf, sigs: ot.sigs}) in let zt = (if ois_total(sg.freef) == 1 then achk_total_e(body, {fnm: nm, ps: ps, fns: ot.fns, osigs: ot.osigs}, Nil, Nil) else 0) in let tret = achk_prov_e(body, nm, auinit_from_sig(msig), ot) in if sg.pubf == 1 and ois_llm(sg.freef) == 0 and ois_unverified_ty(rty) == 0 and tret == 1 then ctfail("lume: provenance error [A0003]: unverified AI/probabilistic value cannot be returned from trusted 'pub fn " + nm + "' without verification (fix-it: wrap the return value in 'verify(val, <contract>)' or validate with a contract guard before returning)\n") else let bparams = if isnil(sg.pl) == 1 then ps else obparams_pl(sg.pl) in let mvars = omvars_pl(sg.pl) in let ctx = {fnm: nm, pubf: sg.pubf, freef: sg.freef, halloc: 0, bparams: bparams, mvars: mvars, pnames: ps, locals: Nil, origins: oinit_origins(ps), osigs: ot.osigs, otypes: ot.otypes} in let rb = ochke(body, ctx, Nil) in ochk_ret_origin(nm, sg.pubf, sg.fromp, rty, ps, rb.origin)
 
 fn ochkstmts(prog, ot, moved) = match prog
     Nil        => 1
@@ -320,14 +591,23 @@ fn ochkstmts(prog, ot, moved) = match prog
 
 fn ochkstmt1(st, rest, ot, moved) = match st
     Fn(nm, ps, body) => let z = ochkfn(nm, ps, body, ot) in ochkstmts(rest, ot, moved)
-    Print(v)         => let ctx = {fnm: "<main>", pubf: 0, freef: 0, halloc: 0, bparams: Nil, mvars: Nil, pnames: Nil, locals: Nil, origins: Nil, osigs: ot.osigs, otypes: ot.otypes} in let r = ochke(v, ctx, moved) in ochkstmts(rest, ot, r.moved)
-    ExprS(v)         => let ctx = {fnm: "<main>", pubf: 0, freef: 0, halloc: 0, bparams: Nil, mvars: Nil, pnames: Nil, locals: Nil, origins: Nil, osigs: ot.osigs, otypes: ot.otypes} in let r = ochke(v, ctx, moved) in ochkstmts(rest, ot, r.moved)
+    Print(v)         => let zp = achk_prov_e(v, "<main>", Nil, ot) in let ctx = {fnm: "<main>", pubf: 0, freef: 0, halloc: 0, bparams: Nil, mvars: Nil, pnames: Nil, locals: Nil, origins: Nil, osigs: ot.osigs, otypes: ot.otypes} in let r = ochke(v, ctx, moved) in ochkstmts(rest, ot, r.moved)
+    ExprS(v)         => let zp = achk_prov_e(v, "<main>", Nil, ot) in let ctx = {fnm: "<main>", pubf: 0, freef: 0, halloc: 0, bparams: Nil, mvars: Nil, pnames: Nil, locals: Nil, origins: Nil, osigs: ot.osigs, otypes: ot.otypes} in let r = ochke(v, ctx, moved) in ochkstmts(rest, ot, r.moved)
     _                => ochkstmts(rest, ot, moved)
 
-## --- lower Track O surface AST nodes into canonical Lume-Core (`LetIn`/`If`) ---
-fn ois_intrinsic(nm, ufns) = if (nm == "borrow" or nm == "borrow_mut" or nm == "move" or nm == "clone") and omem(nm, ufns) == 0 then 1 else 0
+## --- lower Track O & Track A surface AST nodes into canonical Lume-Core (`LetIn`/`If`) ---
+fn ois_intrinsic(nm, ufns) = if (nm == "borrow" or nm == "borrow_mut" or nm == "move" or nm == "clone" or nm == "evolve_approve") and omem(nm, ufns) == 0 then 1 else 0
+
+fn ois_verify_call(nm, ufns) = if (nm == "verify" or nm == "law_check") and omem(nm, ufns) == 0 then 1 else 0
+
+fn olower_verify(args, ufns, d) = if len(args) == 1 then olowere(ohd_e(args), ufns, d) else if len(args) >= 2 then let val_e = ohd_e(args) in let cond_e = ohd_e(ptl(args)) in let vn = "_v_val_" + str(d) in LetIn(vn, olowere(val_e, ufns, d + 1), If(olowere(cond_e, ufns, d + 2), Var(vn), Call("ctfail", Cons(Str("lume: runtime verification failed for unverified value\n"), Nil)))) else Num(0)
+
+fn ois_str_expr(e) = match e
+    Str(s) => 1
+    _      => 0
 
 fn olowere(e, ufns, d) = match e
+    Var(nm)          => if ais_hole_name(nm) == 1 then Num(0) else Var(nm)
     VarIn(nm, v, b)  => LetIn(nm, olowere(v, ufns, d), olowere(b, ufns, d + 1))
     OwnE(inner)      => olowere(inner, ufns, d)
     MutE(inner)      => olowere(inner, ufns, d)
@@ -336,14 +616,20 @@ fn olowere(e, ufns, d) = match e
     WithAllocE(a, b) => LetIn("_alloc_ctx_" + str(d), olowere(a, ufns, d + 1), olowere(b, ufns, d + 2))
     LetIn(nm, v, b)  => LetIn(nm, olowere(v, ufns, d), olowere(b, ufns, d + 1))
     If(c, t, e2)     => If(olowere(c, ufns, d), olowere(t, ufns, d + 1), olowere(e2, ufns, d + 2))
-    Bin(op, l, r)    => Bin(op, olowere(l, ufns, d), olowere(r, ufns, d + 1))
-    Call(nm, args)   => if ois_intrinsic(nm, ufns) == 1 and len(args) == 1 then olowere(ohd_e(args), ufns, d) else Call(nm, olowerargs(args, ufns, d))
+    Bin(op, l, r)    => olowerbin(op, l, r, ufns, d)
+    Call(nm, args)   => if ois_intrinsic(nm, ufns) == 1 and len(args) == 1 then olowere(ohd_e(args), ufns, d) else if ois_verify_call(nm, ufns) == 1 then olower_verify(args, ufns, d) else Call(nm, olowerargs(args, ufns, d))
     Field(o, fld)    => Field(olowere(o, ufns, d), fld)
     Rec(items)       => Rec(olowerrec(items, ufns, d))
     RecT(tn, items)  => RecT(tn, olowerrec(items, ufns, d))
     Match(sc, arms)  => Match(olowere(sc, ufns, d), olowerarms(arms, ufns, d + 1))
     CT(inner)        => CT(olowere(inner, ufns, d))
     _                => e
+
+fn olowerbin(op, l, r, ufns, d) = if op == "+" and ois_str_expr(l) == 1 and ois_hole_expr(r) == 1 then Bin(op, olowere(l, ufns, d), Str("")) else if op == "+" and ois_hole_expr(l) == 1 and ois_str_expr(r) == 1 then Bin(op, Str(""), olowere(r, ufns, d + 1)) else Bin(op, olowere(l, ufns, d), olowere(r, ufns, d + 1))
+
+fn ois_hole_expr(e) = match e
+    Var(nm) => ais_hole_name(nm)
+    _       => 0
 
 fn olowerargs(xs, ufns, d) = match xs
     Nil        => Nil
@@ -370,4 +656,4 @@ fn olowerstmt(st, rest, ufns) = match st
     _                                     => Cons(st, rest)
 
 fn ocheck(prog) = if oany(prog) == 0 then prog else ocheckforce(prog)
-fn ocheckforce(prog) = let raw_osigs = ocollects(prog) in let fns = ocollectf(prog) in let osigs = oinfer_priv_osigs(fns, raw_osigs) in let otypes = ocollectt(prog) in let ufns = ocollectfnms(prog) in let z = ochkstmts(prog, {osigs: osigs, otypes: otypes}, Nil) in olowerprog(prog, ufns)
+fn ocheckforce(prog) = let raw_osigs = ocollects(prog) in let fns = ocollectf(prog) in let osigs = oinfer_priv_osigs(fns, raw_osigs) in let otypes = ocollectt(prog) in let sigs = tcollects(prog) in let ufns = ocollectfnms(prog) in let z = ochkstmts(prog, {osigs: osigs, otypes: otypes, sigs: sigs, fns: fns}, Nil) in olowerprog(prog, ufns)
