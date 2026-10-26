@@ -8,7 +8,8 @@
 #   lume doc   [--json] <file.src|file.lume>  extract module/item docs and contracts (Markdown or JSON)
 #   lume fmt   [--check] <file.src|file.lume> format source to canonical layout (or check with --check)
 #   lume pkg   <init|check|lock|verify|tree>  package manager: lume.toml manifest, capabilities & SHA-256 lume.lock
-#   lume agent [check|compile|ast|...] <file> in-process compiler-as-a-service JSON query (E1b)
+#   lume agent [check|compile|ast|...] <file> in-process compiler-as-a-service JSON protocol (E1b)
+#   lume prove [--json] <file.src>            static QF_LIA contract, invariant & law verification (V2/V3)
 #   lume evolve <verify|approve|goals|...>    self-evolution & governance loop (E3)
 #   lume check [--json] <file.lume|file.src>  static lexical, parse, name, type and contract checks
 #   lume compile [--json] [--run] <file.src>  compile-as-a-service: {ok, diagnostics, asm, stdout} (E1, AI-first)
@@ -40,6 +41,7 @@ usage:
   lume fmt   [--check] <file>               format a Lume source file in place (or verify with --check)
   lume pkg   <init|check|lock|verify|tree>  manage lume.toml manifest, capabilities & SHA-256 lume.lock
   lume agent [check|compile|ast|...] <file> query in-process compiler-as-a-service JSON protocol
+  lume prove [--json] <file.src>            verify requires/ensures/invariant/law contracts statically
   lume evolve <verify|approve|goals|...>    run self-evolution gates and human governance loop
   lume check [--json] <file.lume|file.src>  run static semantic checks
   lume compile [--json] [--run] <file.src>  compile-as-a-service: structured {ok, diagnostics, asm, stdout}
@@ -698,6 +700,35 @@ cmd_agent() {
     rm -f "$_abun"
 }
 
+cmd_prove() {
+    [ $# -ge 1 ] || usage
+    _pfile=""
+    for _arg in "$@"; do
+        case "$_arg" in
+            --json) ;;
+            -*) usage ;;
+            *) _pfile=$_arg ;;
+        esac
+    done
+    [ -n "$_pfile" ] || usage
+    if [ ! -f "$_pfile" ]; then
+        echo "lume prove: cannot read $_pfile" >&2
+        exit 66
+    fi
+    _pbun=$(mktemp)
+    if ! bundle_src_if_needed "$_pfile" "$_pbun"; then
+        rm -f "$_pbun"
+        exit 1
+    fi
+    _pjson=$(run_core_tool lcaas "$_pbun")
+    rm -f "$_pbun"
+    printf '%s\n' "$_pjson"
+    case "$_pjson" in
+        *'"ok":true'*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 cmd_evolve() {
     [ $# -ge 1 ] || usage
     _eact=$1
@@ -813,6 +844,9 @@ case "$_sub" in
         ;;
     agent|service)
         cmd_agent "$@"
+        ;;
+    prove)
+        cmd_prove "$@"
         ;;
     evolve)
         cmd_evolve "$@"

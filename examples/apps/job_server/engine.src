@@ -1,0 +1,29 @@
+## engine.src -- Algebraic effects, AI provenance verification & scheduling engine (Tracks O, A, K, V).
+## Zero `unsafe`.
+
+effect Clock {
+    fn now_tick() -> int
+}
+
+effect Audit {
+    fn record_event(code: int, weight: int) -> int
+}
+
+## Track A3: AI/probabilistic priority estimator returning `unverified[int]`
+pub llm fn estimate_job_priority(payload_size: int) -> unverified[int] = (payload_size % 5) + 3
+
+## Track A3 + V1: Trusted boundary that discharges `unverified[int]` via `verify(...)` contract guard
+pub fn verified_priority(payload_size: int) -> int = let raw = estimate_job_priority(payload_size) in verify(raw, raw >= 1 and raw <= 10)
+
+## Track K1/K2: Effect-polymorphic job execution step tracked in the type (`/ {Clock, Audit}`)
+pub fn execute_job_step(job_id: int, cost: int) -> int / {Clock, Audit} = let t0 = now_tick() in let tag = record_event(job_id, cost) in t0 + cost + tag
+
+## Track K2: Deterministic replay handler for `Clock` and `Audit` effects (pure after handling)
+pub fn run_deterministic_batch(base_tick: int, cost1: int, cost2: int) -> int = with handler Clock {
+    fn now_tick() -> int = base_tick
+} in with handler Audit {
+    fn record_event(code: int, weight: int) -> int = (code * 10) + weight
+} in execute_job_step(1, cost1) + execute_job_step(2, cost2)
+
+## Track O3: Scoped execution with `defer` LIFO cleanup & `var` mutable state
+pub fn run_transactional_job(initial: int, step_cost: int) -> int requires initial >= step_cost requires step_cost >= 0 ensures result == old(initial) = var acc = initial in defer (acc + 0) in let after_charge = acc - step_cost in after_charge + step_cost

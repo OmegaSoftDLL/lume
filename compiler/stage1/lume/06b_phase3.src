@@ -42,6 +42,9 @@ fn oanystmt(st) = match st
     KEffSig(nm, effs)                     => 1
     KEffectDecl(enm, ops)                 => 1
     KCapGrant(effs)                       => 1
+    VContractSig(nm, ps, reqs, enss)      => 1
+    VTypeInvariant(nm, fs, inv)           => 1
+    VLawDecl(nm, ps, body)                => 1
     Sig(nm, ps, ts, rt)                   => if ohas_unverified_tys(ts) == 1 or ois_unverified_ty(rt) == 1 then 1 else 0
     Fn(nm, ps, body)                      => oanye(body)
     Print(v)                              => oanye(v)
@@ -748,7 +751,174 @@ fn schk_conc_arms(arms, fnm, in_scope, nsvars, mvars) = match arms
     Cons(h, t) => schk_conc_e(h.body, fnm, in_scope, nsvars, mvars) + schk_conc_arms(t, fnm, in_scope, nsvars, mvars)
 
 ## ============================================================================================================
-## Combined function driver for Track O, Track A, Track K & Track S (`ochkfn`)
+## Track V: Contract Verification (`requires` / `ensures` / `invariant` / `old`), QF_LIA Prover & `law` (`[V0001]`)
+## ============================================================================================================
+fn vcollect_vsigs(prog) = match prog
+    Nil        => Nil
+    Cons(h, t) => vcollect_vsig1(h, vcollect_vsigs(t))
+
+fn vcollect_vsig1(st, rest) = match st
+    VContractSig(nm, ps, reqs, enss) => Cons({nm: nm, ps: ps, reqs: reqs, enss: enss}, rest)
+    _                                => rest
+
+fn vcollect_invs(prog) = match prog
+    Nil        => Nil
+    Cons(h, t) => vcollect_inv1(h, vcollect_invs(t))
+
+fn vcollect_inv1(st, rest) = match st
+    VTypeInvariant(nm, fs, inv) => Cons({nm: nm, fs: fs, inv: inv}, rest)
+    _                           => rest
+
+fn vsiglookup(nm, vsigs) = match vsigs
+    Nil        => Nil
+    Cons(h, t) => if h.nm == nm then Cons(h, Nil) else vsiglookup(nm, t)
+
+fn vinvlookup(nm, invs) = match invs
+    Nil        => Nil
+    Cons(h, t) => if h.nm == nm then Cons(h, Nil) else vinvlookup(nm, t)
+
+fn vfnlookup(nm, fns) = match fns
+    Nil        => Nil
+    Cons(h, t) => if h.nm == nm then Cons(h, Nil) else vfnlookup(nm, t)
+
+fn vv_int(n) = {ok: 1, i: n, fields: Nil}
+fn vv_rec(fs) = {ok: 1, i: 0, fields: fs}
+fn vv_err() = {ok: 0, i: 0, fields: Nil}
+
+fn vlookup(nm, env) = match env
+    Nil        => vv_err()
+    Cons(h, t) => if h.k == nm then h.v else vlookup(nm, t)
+
+fn vflookup(fld, fs) = match fs
+    Nil        => vv_err()
+    Cons(h, t) => if h.key == fld then h.val else vflookup(fld, t)
+
+fn vbind_ps(ps, vs) = match ps
+    Nil        => Nil
+    Cons(p, r) => vbind_p1(p, r, vs)
+
+fn vbind_p1(p, r, vs) = match vs
+    Nil         => Nil
+    Cons(v, vr) => Cons({k: p, v: v}, vbind_ps(r, vr))
+
+fn vfields_env(fs) = match fs
+    Nil        => Nil
+    Cons(h, t) => Cons({k: h.key, v: h.val}, vfields_env(t))
+
+fn veval_bin(op, rl, rr) = if rl.ok == 0 or rr.ok == 0 then vv_err() else let x = rl.i in let y = rr.i in if op == "+" then vv_int(x + y) else if op == "-" then vv_int(x - y) else if op == "*" then vv_int(x * y) else if op == "/" then (if y == 0 then vv_err() else vv_int(x / y)) else if op == "%" then (if y == 0 then vv_err() else vv_int(x % y)) else if op == "==" then vv_int(if x == y then 1 else 0) else if op == "!=" then vv_int(if x != y then 1 else 0) else if op == "<" then vv_int(if x < y then 1 else 0) else if op == ">" then vv_int(if x > y then 1 else 0) else if op == "<=" then vv_int(if x <= y then 1 else 0) else if op == ">=" then vv_int(if x >= y then 1 else 0) else if op == "and" then vv_int(if x != 0 and y != 0 then 1 else 0) else if op == "or" then vv_int(if x != 0 or y != 0 then 1 else 0) else vv_err()
+
+fn veval(e, env, old_env, fns, d) = if d > 20 then vv_err() else veval1(e, env, old_env, fns, d)
+
+fn veval1(e, env, old_env, fns, d) = match e
+    Num(n)          => vv_int(n)
+    Var(nm)         => vlookup(nm, env)
+    OwnE(inner)     => veval(inner, env, old_env, fns, d)
+    MutE(inner)     => veval(inner, env, old_env, fns, d)
+    CT(inner)       => veval(inner, env, old_env, fns, d)
+    Bin(op, l, r)   => veval_bin(op, veval(l, env, old_env, fns, d), veval(r, env, old_env, fns, d))
+    If(c, t, e2)    => let rc = veval(c, env, old_env, fns, d) in if rc.ok == 0 then vv_err() else if rc.i != 0 then veval(t, env, old_env, fns, d) else veval(e2, env, old_env, fns, d)
+    LetIn(nm, v, b) => let rv = veval(v, env, old_env, fns, d) in if rv.ok == 0 then vv_err() else veval(b, Cons({k: nm, v: rv}, env), old_env, fns, d)
+    VarIn(nm, v, b) => let rv = veval(v, env, old_env, fns, d) in if rv.ok == 0 then vv_err() else veval(b, Cons({k: nm, v: rv}, env), old_env, fns, d)
+    Rec(items)      => veval_rec(items, env, old_env, fns, d)
+    RecT(tn, items) => veval_rec(items, env, old_env, fns, d)
+    Field(o, fld)   => let ro = veval(o, env, old_env, fns, d) in if ro.ok == 0 then vv_err() else vflookup(fld, ro.fields)
+    Call(cnm, args) => veval_call(cnm, args, env, old_env, fns, d)
+    _               => vv_err()
+
+fn veval_rec(items, env, old_env, fns, d) = match items
+    Nil        => vv_rec(Nil)
+    Cons(h, t) => let rv = veval(h.val, env, old_env, fns, d) in if rv.ok == 0 then vv_err() else let rt = veval_rec(t, env, old_env, fns, d) in if rt.ok == 0 then vv_err() else vv_rec(Cons({key: h.key, val: rv}, rt.fields))
+
+fn veval_args(args, env, old_env, fns, d) = match args
+    Nil        => {ok: 1, vals: Nil}
+    Cons(h, t) => let rh = veval(h, env, old_env, fns, d) in if rh.ok == 0 then {ok: 0, vals: Nil} else let rt = veval_args(t, env, old_env, fns, d) in if rt.ok == 0 then {ok: 0, vals: Nil} else {ok: 1, vals: Cons(rh, rt.vals)}
+
+fn veval_call(cnm, args, env, old_env, fns, d) = if cnm == "old" and len(args) == 1 then veval(ohd_e(args), old_env, old_env, fns, d) else if (cnm == "verify" or cnm == "law_check" or cnm == "evolve_approve" or cnm == "borrow" or cnm == "borrow_mut" or cnm == "move" or cnm == "clone") and len(args) >= 1 then veval(ohd_e(args), env, old_env, fns, d) else if cnm == "dec_add" and len(args) == 2 then veval_bin("+", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else if cnm == "dec_sub" and len(args) == 2 then veval_bin("-", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else if cnm == "dec_eq" and len(args) == 2 then veval_bin("==", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else if cnm == "dec_lt" and len(args) == 2 then veval_bin("<", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else if cnm == "dec_le" and len(args) == 2 then veval_bin("<=", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else if cnm == "dec_gt" and len(args) == 2 then veval_bin(">", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else if cnm == "dec_ge" and len(args) == 2 then veval_bin(">=", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else veval_ufn(vfnlookup(cnm, fns), veval_args(args, env, old_env, fns, d), fns, d)
+
+fn veval_ufn(mf, ra, fns, d) = match mf
+    Nil        => vv_err()
+    Cons(f, r) => if ra.ok == 0 then vv_err() else let fenv = vbind_ps(f.ps, ra.vals) in veval(f.body, fenv, fenv, fns, d + 1)
+
+fn vpts_a() = Cons(0, Cons(1, Cons(0 - 1, Nil)))
+fn vpts_b() = Cons(0, Cons(1, Nil))
+fn vpts_c() = Cons(0, Cons(1, Nil))
+fn vpts_for(idx, total) = if total <= 1 then vpts_a() else if total == 2 then vpts_b() else vpts_c()
+
+fn vgen_envs(ps, idx, total) = match ps
+    Nil        => Cons(Nil, Nil)
+    Cons(p, r) => vcross_p(p, vpts_for(idx, total), vgen_envs(r, idx + 1, total))
+
+fn vcross_p(p, pts, envs) = match pts
+    Nil         => Nil
+    Cons(x, xr) => app(vbind_all(p, vv_int(x), envs), vcross_p(p, xr, envs))
+
+fn vbind_all(p, v, envs) = match envs
+    Nil         => Nil
+    Cons(e, er) => Cons(Cons({k: p, v: v}, e), vbind_all(p, v, er))
+
+fn vfmt_env(env) = match env
+    Nil        => ""
+    Cons(h, t) => let s = h.k + " = " + str((h.v).i) in if isnil(t) == 1 then s else s + ", " + vfmt_env(t)
+
+fn veval_all_true(es, env, old_env, fns) = match es
+    Nil        => {ok: 1, hold: 1}
+    Cons(h, t) => let rh = veval(h, env, old_env, fns, 0) in if rh.ok == 0 then {ok: 0, hold: 0} else if rh.i == 0 then {ok: 1, hold: 0} else veval_all_true(t, env, old_env, fns)
+
+fn vprove_envs(envs, reqs, enss, body, fns, undec) = match envs
+    Nil          => if undec == 0 then {status: 1, cex: ""} else {status: 0, cex: ""}
+    Cons(env, r) => let rq = veval_all_true(reqs, env, env, fns) in if rq.ok == 0 then vprove_envs(r, reqs, enss, body, fns, 1) else if rq.hold == 0 then vprove_envs(r, reqs, enss, body, fns, undec) else if isnil(enss) == 1 then vprove_envs(r, reqs, enss, body, fns, undec) else let rb = veval(body, env, env, fns, 0) in if rb.ok == 0 then vprove_envs(r, reqs, enss, body, fns, 1) else let penv = Cons({k: "result", v: rb}, Cons({k: "ret", v: rb}, env)) in let eq = veval_all_true(enss, penv, env, fns) in if eq.ok == 0 then vprove_envs(r, reqs, enss, body, fns, 1) else if eq.hold == 0 then {status: 0 - 1, cex: vfmt_env(env) + " (result = " + str(rb.i) + ")"} else vprove_envs(r, reqs, enss, body, fns, undec)
+
+fn vprove_fn_status(nm, ps, body, vsigs, fns) = vprove_fn1(nm, ps, body, vsiglookup(nm, vsigs), fns)
+
+fn vprove_fn1(nm, ps, body, mvs, fns) = match mvs
+    Nil          => 1
+    Cons(vsg, r) => let pr = vprove_envs(vgen_envs(ps, 0, len(ps)), vsg.reqs, vsg.enss, body, fns, 0) in if pr.status < 0 then ctfail("lume: contract verification error [V0001]: cannot prove 'ensures' postcondition of '" + nm + "' — refuted with counterexample: " + pr.cex + " (fix-it: strengthen 'requires' precondition or fix implementation of '" + nm + "')\n") else pr.status
+
+fn vprove_law_envs(envs, body, fns) = match envs
+    Nil          => {status: 1, cex: ""}
+    Cons(env, r) => let rb = veval(body, env, env, fns, 0) in if rb.ok == 1 and rb.i == 0 then {status: 0 - 1, cex: vfmt_env(env)} else vprove_law_envs(r, body, fns)
+
+fn vchk_law(nm, ps, body, fns) = let pr = vprove_law_envs(vgen_envs(ps, 0, len(ps)), body, fns) in if pr.status < 0 then ctfail("lume: contract verification error [V0001]: law '" + nm + "' refuted with counterexample: " + pr.cex + " (fix-it: fix the implementation or refine law '" + nm + "')\n") else 1
+
+fn vchk_call_req(cnm, args, fnm, mvs, fns) = match mvs
+    Nil          => 0
+    Cons(vsg, r) => if isnil(vsg.reqs) == 1 then 0 else let ra = veval_args(args, Nil, Nil, fns, 0) in if ra.ok == 0 then 0 else let env = vbind_ps(vsg.ps, ra.vals) in let rq = veval_all_true(vsg.reqs, env, env, fns) in if rq.ok == 1 and rq.hold == 0 then ctfail("lume: contract verification error [V0001]: call to '" + cnm + "' in '" + fnm + "' violates 'requires' precondition with counterexample: " + vfmt_env(env) + " (fix-it: ensure arguments passed to '" + cnm + "' satisfy its 'requires' contract)\n") else 0
+
+fn vchk_rect_inv(tn, items, fnm, miv, fns) = match miv
+    Nil         => 0
+    Cons(iv, r) => let rr = veval_rec(items, Nil, Nil, fns, 0) in if rr.ok == 0 then 0 else let env = vfields_env(rr.fields) in let ri = veval(iv.inv, env, env, fns, 0) in if ri.ok == 1 and ri.i == 0 then ctfail("lume: contract verification error [V0001]: record construction of '" + tn + "' in '" + fnm + "' violates type 'invariant' with counterexample: " + vfmt_env(env) + " (fix-it: satisfy the 'invariant' of '" + tn + "' before constructing the record)\n") else 0
+
+fn vchk_expr_e(e, fnm, ot) = match e
+    Call(cnm, args)         => vchk_call_req(cnm, args, fnm, vsiglookup(cnm, ot.vsigs), ot.fns) + vchk_args_e(args, fnm, ot)
+    RecT(tn, items)         => vchk_rect_inv(tn, items, fnm, vinvlookup(tn, ot.invs), ot.fns) + vchk_rec_e(items, fnm, ot)
+    Rec(items)              => vchk_rec_e(items, fnm, ot)
+    Bin(op, l, r)           => vchk_expr_e(l, fnm, ot) + vchk_expr_e(r, fnm, ot)
+    If(c, t, e2)            => vchk_expr_e(c, fnm, ot) + vchk_expr_e(t, fnm, ot) + vchk_expr_e(e2, fnm, ot)
+    LetIn(nm, v, b)         => vchk_expr_e(v, fnm, ot) + vchk_expr_e(b, fnm, ot)
+    VarIn(nm, v, b)         => vchk_expr_e(v, fnm, ot) + vchk_expr_e(b, fnm, ot)
+    DeferE(c, b)            => vchk_expr_e(c, fnm, ot) + vchk_expr_e(b, fnm, ot)
+    ErrDeferE(c, b)         => vchk_expr_e(c, fnm, ot) + vchk_expr_e(b, fnm, ot)
+    WithAllocE(a, b)        => vchk_expr_e(a, fnm, ot) + vchk_expr_e(b, fnm, ot)
+    WithHandlerE(en, hs, b) => vchk_expr_e(b, fnm, ot)
+    ScopeE(snm, b)          => vchk_expr_e(b, fnm, ot)
+    SpawnE(inner)           => vchk_expr_e(inner, fnm, ot)
+    Match(sc, arms)         => vchk_expr_e(sc, fnm, ot) + vchk_arms_e(arms, fnm, ot)
+    _                       => 0
+
+fn vchk_args_e(args, fnm, ot) = match args
+    Nil        => 0
+    Cons(h, t) => vchk_expr_e(h, fnm, ot) + vchk_args_e(t, fnm, ot)
+
+fn vchk_rec_e(items, fnm, ot) = match items
+    Nil        => 0
+    Cons(h, t) => vchk_expr_e(h.val, fnm, ot) + vchk_rec_e(t, fnm, ot)
+
+fn vchk_arms_e(arms, fnm, ot) = match arms
+    Nil        => 0
+    Cons(h, t) => vchk_expr_e(h.body, fnm, ot) + vchk_arms_e(t, fnm, ot)
+
+## ============================================================================================================
+## Combined function driver for Track O, Track A, Track K, Track S & Track V (`ochkfn`)
 ## ============================================================================================================
 fn aget_fn_rty(msig, mosig) = match mosig
     Cons(osg, r) => if isany(osg.rty) == 0 then osg.rty else aget_sig_rty(msig)
@@ -765,21 +935,22 @@ fn aget_fn_lenv(msig) = match msig
 fn ochkfn(nm, ps, body, ot) = ochkfn2(nm, ps, body, osiglookup(nm, ot.osigs), tsiglookup(nm, ot.sigs), ot)
 
 fn ochkfn2(nm, ps, body, mosig, msig, ot) = match mosig
-    Nil          => let rty = aget_sig_rty(msig) in let lenv = aget_fn_lenv(msig) in let zk = kchk_fn_effs(nm, 0, body, ot) in let zs = schk_conc_e(body, nm, 0, sinit_nonsend_sig(msig), Nil) in let zh = achk_holes_e(body, rty, lenv, {fnm: nm, pubf: 0, sigs: ot.sigs}) in let zp = achk_prov_e(body, nm, auinit_from_sig(msig), ot) in let ctx = {fnm: nm, pubf: 0, freef: 0, halloc: 0, bparams: ps, mvars: Nil, pnames: ps, locals: Nil, origins: oinit_origins(ps), osigs: ot.osigs, otypes: ot.otypes} in let rb = ochke(body, ctx, Nil) in ochk_ret_origin(nm, 0, "", rty, ps, rb.origin)
-    Cons(sg, sr) => if sg.pubf == 1 and oisgctype(sg.rty, ot.otypes) == 1 then ctfail("lume: ownership error [O0030]: public function '" + nm + "' cannot expose '@gc' region type across a public module boundary\n") else let rty = aget_fn_rty(msig, mosig) in let lenv = aget_fn_lenv(msig) in let mvars = omvars_pl(sg.pl) in let zk = kchk_fn_effs(nm, sg.pubf, body, ot) in let zs = schk_conc_e(body, nm, 0, sinit_nonsend_sig(msig), mvars) in let zh = achk_holes_e(body, rty, lenv, {fnm: nm, pubf: sg.pubf, sigs: ot.sigs}) in let zt = (if ois_total(sg.freef) == 1 then achk_total_e(body, {fnm: nm, ps: ps, fns: ot.fns, osigs: ot.osigs}, Nil, Nil) else 0) in let tret = achk_prov_e(body, nm, auinit_from_sig(msig), ot) in if sg.pubf == 1 and ois_llm(sg.freef) == 0 and ois_unverified_ty(rty) == 0 and tret == 1 then ctfail("lume: provenance error [A0003]: unverified AI/probabilistic value cannot be returned from trusted 'pub fn " + nm + "' without verification (fix-it: wrap the return value in 'verify(val, <contract>)' or validate with a contract guard before returning)\n") else let bparams = if isnil(sg.pl) == 1 then ps else obparams_pl(sg.pl) in let ctx = {fnm: nm, pubf: sg.pubf, freef: sg.freef, halloc: 0, bparams: bparams, mvars: mvars, pnames: ps, locals: Nil, origins: oinit_origins(ps), osigs: ot.osigs, otypes: ot.otypes} in let rb = ochke(body, ctx, Nil) in ochk_ret_origin(nm, sg.pubf, sg.fromp, rty, ps, rb.origin)
+    Nil          => let rty = aget_sig_rty(msig) in let lenv = aget_fn_lenv(msig) in let zv = vprove_fn_status(nm, ps, body, ot.vsigs, ot.fns) + vchk_expr_e(body, nm, ot) in let zk = kchk_fn_effs(nm, 0, body, ot) in let zs = schk_conc_e(body, nm, 0, sinit_nonsend_sig(msig), Nil) in let zh = achk_holes_e(body, rty, lenv, {fnm: nm, pubf: 0, sigs: ot.sigs}) in let zp = achk_prov_e(body, nm, auinit_from_sig(msig), ot) in let ctx = {fnm: nm, pubf: 0, freef: 0, halloc: 0, bparams: ps, mvars: Nil, pnames: ps, locals: Nil, origins: oinit_origins(ps), osigs: ot.osigs, otypes: ot.otypes} in let rb = ochke(body, ctx, Nil) in ochk_ret_origin(nm, 0, "", rty, ps, rb.origin)
+    Cons(sg, sr) => if sg.pubf == 1 and oisgctype(sg.rty, ot.otypes) == 1 then ctfail("lume: ownership error [O0030]: public function '" + nm + "' cannot expose '@gc' region type across a public module boundary\n") else let rty = aget_fn_rty(msig, mosig) in let lenv = aget_fn_lenv(msig) in let mvars = omvars_pl(sg.pl) in let zv = vprove_fn_status(nm, ps, body, ot.vsigs, ot.fns) + vchk_expr_e(body, nm, ot) in let zk = kchk_fn_effs(nm, sg.pubf, body, ot) in let zs = schk_conc_e(body, nm, 0, sinit_nonsend_sig(msig), mvars) in let zh = achk_holes_e(body, rty, lenv, {fnm: nm, pubf: sg.pubf, sigs: ot.sigs}) in let zt = (if ois_total(sg.freef) == 1 then achk_total_e(body, {fnm: nm, ps: ps, fns: ot.fns, osigs: ot.osigs}, Nil, Nil) else 0) in let tret = achk_prov_e(body, nm, auinit_from_sig(msig), ot) in if sg.pubf == 1 and ois_llm(sg.freef) == 0 and ois_unverified_ty(rty) == 0 and tret == 1 then ctfail("lume: provenance error [A0003]: unverified AI/probabilistic value cannot be returned from trusted 'pub fn " + nm + "' without verification (fix-it: wrap the return value in 'verify(val, <contract>)' or validate with a contract guard before returning)\n") else let bparams = if isnil(sg.pl) == 1 then ps else obparams_pl(sg.pl) in let ctx = {fnm: nm, pubf: sg.pubf, freef: sg.freef, halloc: 0, bparams: bparams, mvars: mvars, pnames: ps, locals: Nil, origins: oinit_origins(ps), osigs: ot.osigs, otypes: ot.otypes} in let rb = ochke(body, ctx, Nil) in ochk_ret_origin(nm, sg.pubf, sg.fromp, rty, ps, rb.origin)
 
 fn ochkstmts(prog, ot, moved) = match prog
     Nil        => 1
     Cons(h, t) => ochkstmt1(h, t, ot, moved)
 
 fn ochkstmt1(st, rest, ot, moved) = match st
-    Fn(nm, ps, body) => let z = ochkfn(nm, ps, body, ot) in ochkstmts(rest, ot, moved)
-    Print(v)         => let zs = schk_conc_e(v, "<main>", 0, Nil, Nil) in let zp = achk_prov_e(v, "<main>", Nil, ot) in let ctx = {fnm: "<main>", pubf: 0, freef: 0, halloc: 0, bparams: Nil, mvars: Nil, pnames: Nil, locals: Nil, origins: Nil, osigs: ot.osigs, otypes: ot.otypes} in let r = ochke(v, ctx, moved) in ochkstmts(rest, ot, r.moved)
-    ExprS(v)         => let zs = schk_conc_e(v, "<main>", 0, Nil, Nil) in let zp = achk_prov_e(v, "<main>", Nil, ot) in let ctx = {fnm: "<main>", pubf: 0, freef: 0, halloc: 0, bparams: Nil, mvars: Nil, pnames: Nil, locals: Nil, origins: Nil, osigs: ot.osigs, otypes: ot.otypes} in let r = ochke(v, ctx, moved) in ochkstmts(rest, ot, r.moved)
-    _                => ochkstmts(rest, ot, moved)
+    VLawDecl(nm, ps, body) => let zl = vchk_law(nm, ps, body, ot.fns) in ochkstmts(rest, ot, moved)
+    Fn(nm, ps, body)       => let z = ochkfn(nm, ps, body, ot) in ochkstmts(rest, ot, moved)
+    Print(v)               => let zv = vchk_expr_e(v, "<main>", ot) in let zs = schk_conc_e(v, "<main>", 0, Nil, Nil) in let zp = achk_prov_e(v, "<main>", Nil, ot) in let ctx = {fnm: "<main>", pubf: 0, freef: 0, halloc: 0, bparams: Nil, mvars: Nil, pnames: Nil, locals: Nil, origins: Nil, osigs: ot.osigs, otypes: ot.otypes} in let r = ochke(v, ctx, moved) in ochkstmts(rest, ot, r.moved)
+    ExprS(v)               => let zv = vchk_expr_e(v, "<main>", ot) in let zs = schk_conc_e(v, "<main>", 0, Nil, Nil) in let zp = achk_prov_e(v, "<main>", Nil, ot) in let ctx = {fnm: "<main>", pubf: 0, freef: 0, halloc: 0, bparams: Nil, mvars: Nil, pnames: Nil, locals: Nil, origins: Nil, osigs: ot.osigs, otypes: ot.otypes} in let r = ochke(v, ctx, moved) in ochkstmts(rest, ot, r.moved)
+    _                      => ochkstmts(rest, ot, moved)
 
-## --- lower Track O, Track A & Track K surface AST nodes into canonical Lume-Core (`LetIn`/`If`) ---
-fn ois_intrinsic(nm, ufns) = if (nm == "borrow" or nm == "borrow_mut" or nm == "move" or nm == "clone" or nm == "evolve_approve") and omem(nm, ufns) == 0 then 1 else 0
+## --- lower Track O, Track A, Track K, Track S & Track V surface AST nodes into canonical Lume-Core (`LetIn`/`If`) ---
+fn ois_intrinsic(nm, ufns) = if (nm == "borrow" or nm == "borrow_mut" or nm == "move" or nm == "clone" or nm == "evolve_approve" or nm == "old") and omem(nm, ufns) == 0 then 1 else 0
 
 fn ois_verify_call(nm, ufns) = if (nm == "verify" or nm == "law_check") and omem(nm, ufns) == 0 then 1 else 0
 
@@ -866,20 +1037,33 @@ fn kownps_pl(pl) = match pl
     Nil        => Nil
     Cons(p, r) => if p.cf == 2 then Cons(p.pn, kownps_pl(r)) else kownps_pl(r)
 
-fn olowerprog(prog, ufns, osigs) = match prog
-    Nil        => Nil
-    Cons(h, t) => olowerstmt(h, olowerprog(t, ufns, osigs), ufns, osigs)
+fn vwrap_conds(cs, nm, kind, inner, lctx, d) = match cs
+    Nil        => inner
+    Cons(c, r) => If(olowere(c, lctx, d), vwrap_conds(r, nm, kind, inner, lctx, d + 1), Call("ctfail", Cons(Str("lume: runtime contract violation (" + kind + ") in '" + nm + "'\n"), Nil)))
 
-fn olowerstmt(st, rest, ufns, osigs) = match st
+fn vwrap_fn_contract(nm, ps, raw_body, low_body, lctx, vctx) = vwrap_fn_c1(nm, ps, raw_body, low_body, lctx, vsiglookup(nm, vctx.vsigs))
+
+fn vwrap_fn_c1(nm, ps, raw_body, low_body, lctx, mvs) = match mvs
+    Nil          => low_body
+    Cons(vsg, r) => let post = if isnil(vsg.enss) == 1 then low_body else LetIn("result", low_body, LetIn("ret", Var("result"), vwrap_conds(vsg.enss, nm, "ensures", Var("result"), lctx, 100))) in vwrap_conds(vsg.reqs, nm, "requires", post, lctx, 200)
+
+fn olowerprog(prog, ufns, osigs, vctx) = match prog
+    Nil        => Nil
+    Cons(h, t) => olowerstmt(h, olowerprog(t, ufns, osigs, vctx), ufns, osigs, vctx)
+
+fn olowerstmt(st, rest, ufns, osigs, vctx) = match st
     OSig(nm, pubf, freef, pl, rty, fromp) => rest
     OType(nm, k)                          => rest
     KEffSig(nm, effs)                     => rest
     KEffectDecl(enm, ops)                 => rest
     KCapGrant(effs)                       => rest
-    Fn(nm, ps, body)                      => Cons(Fn(nm, ps, olowere(body, {ufns: ufns, hops: Nil, ownps: kfn_ownps(nm, osigs)}, 0)), rest)
+    VContractSig(nm, ps, reqs, enss)      => rest
+    VTypeInvariant(nm, fs, inv)           => rest
+    VLawDecl(nm, ps, body)                => rest
+    Fn(nm, ps, body)                      => let lctx = {ufns: ufns, hops: Nil, ownps: kfn_ownps(nm, osigs)} in let lb = olowere(body, lctx, 0) in let wb = if vprove_fn_status(nm, ps, body, vctx.vsigs, vctx.fns) == 1 then lb else vwrap_fn_contract(nm, ps, body, lb, lctx, vctx) in Cons(Fn(nm, ps, wb), rest)
     Print(v)                              => Cons(Print(olowere(v, {ufns: ufns, hops: Nil, ownps: Nil}, 0)), rest)
     ExprS(v)                              => Cons(ExprS(olowere(v, {ufns: ufns, hops: Nil, ownps: Nil}, 0)), rest)
     _                                     => Cons(st, rest)
 
 fn ocheck(prog) = if oany(prog) == 0 then prog else ocheckforce(prog)
-fn ocheckforce(prog) = let raw_osigs = ocollects(prog) in let fns = ocollectf(prog) in let osigs = oinfer_priv_osigs(fns, raw_osigs) in let otypes = ocollectt(prog) in let sigs = tcollects(prog) in let ksigs = kcollect_effsigs(prog) in let edecls = kcollect_effdecls(prog) in let caps = kcollect_caps(prog) in let ufns = ocollectfnms(prog) in let z = ochkstmts(prog, {osigs: osigs, otypes: otypes, sigs: sigs, fns: fns, ksigs: ksigs, edecls: edecls, caps: caps}, Nil) in olowerprog(prog, ufns, osigs)
+fn ocheckforce(prog) = let raw_osigs = ocollects(prog) in let fns = ocollectf(prog) in let osigs = oinfer_priv_osigs(fns, raw_osigs) in let otypes = ocollectt(prog) in let sigs = tcollects(prog) in let ksigs = kcollect_effsigs(prog) in let edecls = kcollect_effdecls(prog) in let caps = kcollect_caps(prog) in let vsigs = vcollect_vsigs(prog) in let invs = vcollect_invs(prog) in let ufns = ocollectfnms(prog) in let z = ochkstmts(prog, {osigs: osigs, otypes: otypes, sigs: sigs, fns: fns, ksigs: ksigs, edecls: edecls, caps: caps, vsigs: vsigs, invs: invs}, Nil) in olowerprog(prog, ufns, osigs, {vsigs: vsigs, fns: fns})

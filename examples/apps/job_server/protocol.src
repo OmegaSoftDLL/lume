@@ -1,0 +1,42 @@
+## protocol.src -- Job Server domain types, Perceus reuse, type invariants & laws (Tracks O, A, K, V).
+## Zero `unsafe`. All invariants and laws are statically verified by `lume prove`.
+
+type JobNode = enum JNil | JCons(int, JobNode)
+
+type JobTicket = record id: int, cost: int, priority: int invariant cost >= 0 and priority >= 1
+
+type JobLedger = record budget: int, spent: int, completed: int invariant budget >= spent and spent >= 0
+
+## Track K3: Perceus in-place constructor reuse on `own` JobNode list
+pub total fn bump_job_costs(own xs: JobNode, delta: int) -> JobNode = match xs
+    JNil        => JNil
+    JCons(c, r) => JCons(c + delta, bump_job_costs(own r, delta))
+
+pub total fn sum_job_costs(xs: JobNode) -> int = match xs
+    JNil        => 0
+    JCons(c, r) => c + sum_job_costs(r)
+
+pub total fn count_jobs(xs: JobNode) -> int = match xs
+    JNil        => 0
+    JCons(c, r) => 1 + count_jobs(r)
+
+## Track O2: Region-tracked borrow projection (`from t`)
+pub fn ticket_cost_view(t: JobTicket) -> int from t = borrow(t.cost)
+
+## Track V1/V2: Verified ticket & ledger constructors with `requires`, `ensures`, `old(...)` and `invariant`
+pub fn make_ticket(id: int, cost: int, prio: int) -> JobTicket requires cost >= 0 requires prio >= 1 = JobTicket{id: id, cost: cost, priority: prio}
+
+pub fn open_ledger(initial_budget: int) -> JobLedger requires initial_budget >= 0 = JobLedger{budget: initial_budget, spent: 0, completed: 0}
+
+pub fn charge_budget(rem: int, cost: int) -> int requires rem >= cost requires cost >= 0 ensures result >= 0 ensures result + cost == old(rem) = rem - cost
+
+pub fn refund_budget(rem: int, refund: int) -> int requires rem >= 0 requires refund >= 0 ensures result >= rem ensures result == old(rem) + refund = rem + refund
+
+pub fn clamp_priority(p: int) -> int ensures result >= 1 ensures result <= 10 = if p < 1 then 1 else if p > 10 then 10 else p
+
+## Track V3: Project-level `law` declarations (`P34`) statically proven by `lume prove`
+pub law budget_conservation(rem: int, cost: int) = if rem >= cost and cost >= 0 then refund_budget(charge_budget(rem, cost), cost) == rem else 1
+
+pub law priority_clamp_idempotent(p: int) = clamp_priority(clamp_priority(p)) == clamp_priority(p)
+
+pub law non_negative_charge(rem: int, cost: int) = if rem >= cost and cost >= 0 then charge_budget(rem, cost) >= 0 else 1
