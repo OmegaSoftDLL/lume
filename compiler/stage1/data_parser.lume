@@ -52,6 +52,28 @@ fn dlbp(op: str) -> int
     else
         0
 
+fn ddecimal_expr(e: DExpr) -> bool
+    match e
+        DDecimal(coefficient, scale) => true
+        DCall(name, args) => name == "decimal_make" or name == "decimal_parse" or name == "decimal_cast" or name == "decimal_div_exact" or name == "decimal_add" or name == "decimal_sub" or name == "decimal_mul" or name == "decimal_div"
+        DIf(cond, then_value, else_value) => ddecimal_expr(then_value) and ddecimal_expr(else_value)
+        DLetIn(name, value, body) => ddecimal_expr(body)
+        _ => false
+
+fn ddecimal_operator(op: str, left: DExpr, right: DExpr) -> DExpr
+    if op == "+"
+        DCall(name: "decimal_add", args: [left, right])
+    elif op == "-"
+        DCall(name: "decimal_sub", args: [left, right])
+    elif op == "*"
+        DCall(name: "decimal_mul", args: [left, right])
+    elif op == "/"
+        DCall(name: "decimal_div", args: [left, right])
+    elif op == "==" or op == "!=" or op == "<" or op == ">" or op == "<=" or op == ">="
+        DBin(op: op, l: DCall(name: "decimal_compare", args: [left, right]), r: DInt(n: 0))
+    else
+        DCall(name: "ctfail", args: [DStr(value: "lume: operator '" + op + "' is not defined for decimals\n")])
+
 fn dpat(p: mut DP) -> Pat
     let t = deat(p)
     if t.kind == Int
@@ -191,7 +213,11 @@ fn dexpr(p: mut DP, min_bp: int) -> DExpr
         if bp == 0 or bp < min_bp
             break
         deat(p)
-        left = DBin(op: t.text, l: left, r: dexpr(p, bp + 1))
+        let right = dexpr(p, bp + 1)
+        if ddecimal_expr(left) and ddecimal_expr(right)
+            left = ddecimal_operator(t.text, left, right)
+        else
+            left = DBin(op: t.text, l: left, r: right)
     left
 
 fn dstmt(p: mut DP) -> DStmt

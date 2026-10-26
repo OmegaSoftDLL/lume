@@ -81,103 +81,6 @@ fn env_copy(env: map[str, RV]) -> map[str, RV]
         out[e[0]] = e[1]
     out
 
-fn rv_entries_have(xs: [RV], key: str) -> bool
-    match xs
-        Nil => false
-        Cons(h, t) => h[0] == key or rv_entries_have(t, key)
-
-fn rv_is_decimal(v: RV) -> bool
-    match v
-        VRec(fields) => rv_entries_have(fields.entries(), "coefficient") and rv_entries_have(fields.entries(), "scale")
-        _ => false
-
-fn decimal_eval_abs(value: int) -> int = if value < 0 then 0 - value else value
-
-fn decimal_eval_power10(n: int) -> int = if n <= 0 then 1 else 10 * decimal_eval_power10(n - 1)
-
-fn decimal_eval_shift(value: int, places: int) -> int
-    if value == 0
-        0
-    elif count(str(decimal_eval_abs(value))) + places > 18
-        panic "lume: decimal arithmetic exceeds the 18 digit coefficient limit\n"
-    else
-        value * decimal_eval_power10(places)
-
-fn decimal_eval_value(coefficient: int, scale: int) -> RV
-    VRec(fields: {"coefficient": VInt(n: coefficient), "scale": VInt(n: scale)})
-
-fn decimal_eval_compare(lc: int, ls: int, rc: int, rs: int) -> int
-    if lc < 0 and rc >= 0
-        0 - 1
-    elif lc >= 0 and rc < 0
-        1
-    else
-        let ld = str(decimal_eval_abs(lc))
-        let rd = str(decimal_eval_abs(rc))
-        let lm = count(ld) - ls
-        let rm = count(rd) - rs
-        let cmp = if lm < rm then 0 - 1 else if lm > rm then 1 else decimal_eval_aligned_cmp(ld, rd, ls, rs)
-        if lc < 0 then 0 - cmp else cmp
-
-fn decimal_eval_aligned_cmp(ld: str, rd: str, ls: int, rs: int) -> int
-    let scale = if ls >= rs then ls else rs
-    let la = ld + repeat("0", scale - ls)
-    let ra = rd + repeat("0", scale - rs)
-    if la < ra then 0 - 1 else if la > ra then 1 else 0
-
-fn decimal_eval_bin(op: str, left: RV, right: RV, env: map[str, RV], fns: [DStmt]) -> RV
-    match left
-        VRec(lf) => match right
-            VRec(rf) => do
-                let lc = rv_int(lf.get("coefficient") ?? VInt(n: 0))
-                let ls = rv_int(lf.get("scale") ?? VInt(n: 0))
-                let rc = rv_int(rf.get("coefficient") ?? VInt(n: 0))
-                let rs = rv_int(rf.get("scale") ?? VInt(n: 0))
-                let scale = if ls >= rs then ls else rs
-                let la = decimal_eval_shift(lc, scale - ls)
-                let ra = decimal_eval_shift(rc, scale - rs)
-                if op == "+"
-                    decimal_eval_value(decimal_eval_checked(la + ra), scale)
-                elif op == "-"
-                    decimal_eval_value(decimal_eval_checked(la - ra), scale)
-                elif op == "*"
-                    if ls + rs > 18 or (rc != 0 and decimal_eval_abs(lc) > 999999999999999999 / decimal_eval_abs(rc))
-                        panic "lume: decimal multiplication exceeds precision limits\n"
-                    decimal_eval_value(lc * rc, ls + rs)
-                elif op == "/"
-                    decimal_eval_div(lc, ls, rc, rs, 0)
-                elif op == "==" or op == "!=" or op == "<" or op == ">" or op == "<=" or op == ">="
-                    let cmp = decimal_eval_compare(lc, ls, rc, rs)
-                    VInt(n: if op == "==" then cmp == 0 else if op == "!=" then cmp != 0 else if op == "<" then cmp < 0 else if op == ">" then cmp > 0 else if op == "<=" then cmp <= 0 else cmp >= 0)
-                else
-                    VInt(n: 0)
-            _ => VInt(n: 0)
-        _ => VInt(n: 0)
-
-fn decimal_eval_checked(coefficient: int) -> int
-    if count(str(decimal_eval_abs(coefficient))) > 18
-        panic "lume: decimal arithmetic exceeds the 18 digit coefficient limit\n"
-    coefficient
-
-fn decimal_eval_div(lc: int, ls: int, rc: int, rs: int, target: int) -> RV
-    if rc == 0
-        panic "lume: decimal division by zero\n"
-    elif target > 18
-        panic "lume: decimal division has no exact result within scale 18\n"
-    else
-        let numerator = decimal_eval_shift(lc, rs + target)
-        let denominator = decimal_eval_shift(rc, ls)
-        if numerator % denominator == 0
-            decimal_eval_trim(numerator / denominator, target)
-        else
-            decimal_eval_div(lc, ls, rc, rs, target + 1)
-
-fn decimal_eval_trim(coefficient: int, scale: int) -> RV
-    if scale > 0 and coefficient % 10 == 0
-        decimal_eval_trim(coefficient / 10, scale - 1)
-    else
-        decimal_eval_value(coefficient, scale)
-
 fn deval(e: DExpr, env: map[str, RV], fns: [DStmt]) -> RV
     match e
         DInt(n)       => VInt(n: n)
@@ -318,8 +221,6 @@ fn deval(e: DExpr, env: map[str, RV], fns: [DStmt]) -> RV
                     return VInt(n: if sl <= sr then 1 else 0)
                 if op == ">="
                     return VInt(n: if sl >= sr then 1 else 0)
-            if rv_is_decimal(lv) and rv_is_decimal(rv)
-                return decimal_eval_bin(op, lv, rv, env, fns)
             let a = rv_int(lv)
             let b = rv_int(rv)
             match op
