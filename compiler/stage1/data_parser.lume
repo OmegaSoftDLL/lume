@@ -52,12 +52,23 @@ fn dlbp(op: str) -> int
     else
         0
 
-fn ddecimal_expr(e: DExpr) -> bool
+fn ddecimal_name(names: [str], name: str) -> bool
+    match names
+        [] => false
+        [h, ..t] => h == name or ddecimal_name(t, name)
+
+fn ddecimal_remove(names: [str], name: str) -> [str]
+    match names
+        [] => []
+        [h, ..t] => if h == name then ddecimal_remove(t, name) else [h, ..ddecimal_remove(t, name)]
+
+fn ddecimal_expr(e: DExpr, names: [str]) -> bool
     match e
         DDecimal(coefficient, scale) => true
         DCall(name, args) => name == "decimal" or name == "decimal_make" or name == "decimal_parse" or name == "decimal_cast" or name == "decimal_div_exact" or name == "decimal_add" or name == "decimal_sub" or name == "decimal_mul" or name == "decimal_div"
-        DIf(cond, then_value, else_value) => ddecimal_expr(then_value) and ddecimal_expr(else_value)
-        DLetIn(name, value, body) => ddecimal_expr(body)
+        DVar(name) => ddecimal_name(names, name)
+        DIf(cond, then_value, else_value) => ddecimal_expr(then_value, names) and ddecimal_expr(else_value, names)
+        DLetIn(name, value, body) => ddecimal_expr(body, if ddecimal_expr(value, names) then [name, ..ddecimal_remove(names, name)] else ddecimal_remove(names, name))
         _ => false
 
 fn ddecimal_operator(op: str, left: DExpr, right: DExpr) -> DExpr
@@ -214,11 +225,51 @@ fn dexpr(p: mut DP, min_bp: int) -> DExpr
             break
         deat(p)
         let right = dexpr(p, bp + 1)
-        if ddecimal_expr(left) and ddecimal_expr(right)
-            left = ddecimal_operator(t.text, left, right)
-        else
-            left = DBin(op: t.text, l: left, r: right)
+        left = DBin(op: t.text, l: left, r: right)
     left
+
+## Resolve decimal operators after parsing so decimal-ness can flow through let bindings.
+## The lowering is shared by the interpreter, C oracle, and native assembly backends.
+fn dlower_expr(e: DExpr, names: [str]) -> DExpr
+    match e
+        DDecimal(coefficient, scale) => e
+        DInt(n) => e
+        DStr(value) => e
+        DVar(name) => e
+        DCons(tag, args) => DCons(tag: tag, args: args.map(|a| dlower_expr(a, names)))
+        DCall(name, args) => DCall(name: name, args: args.map(|a| dlower_expr(a, names)))
+        DList(elems) => DList(elems: elems.map(|a| dlower_expr(a, names)))
+        DIndex(coll, idx) => DIndex(coll: dlower_expr(coll, names), idx: dlower_expr(idx, names))
+        DRec(fields) => DRec(fields: fields.map(|f| RecField(name: f.name, value: dlower_expr(f.value, names))))
+        DField(obj, name) => DField(obj: dlower_expr(obj, names), name: name)
+        DBin(op, left, right) => do
+            let l = dlower_expr(left, names)
+            let r = dlower_expr(right, names)
+            if ddecimal_expr(l, names) and ddecimal_expr(r, names)
+                ddecimal_operator(op, l, r)
+            else
+                DBin(op: op, l: l, r: r)
+        DIf(cond, then_val, else_val) => DIf(cond: dlower_expr(cond, names), then_val: dlower_expr(then_val, names), else_val: dlower_expr(else_val, names))
+        DLetIn(name, value, body) => do
+            let v = dlower_expr(value, names)
+            let inner_names = if ddecimal_expr(v, names) then [name, ..ddecimal_remove(names, name)] else ddecimal_remove(names, name)
+            DLetIn(name: name, value: v, body: dlower_expr(body, inner_names))
+        DMatch(scrut, arms) => DMatch(scrut: dlower_expr(scrut, names), arms: arms.map(|a| Arm(pat: a.pat, body: dlower_expr(a.body, names))))
+
+fn dlower_stmts(stmts: [DStmt], names: [str]) -> [DStmt]
+    match stmts
+        [] => []
+        [h, ..t] => dlower_stmt(h, t, names)
+
+fn dlower_stmt(stmt: DStmt, rest: [DStmt], names: [str]) -> [DStmt]
+    match stmt
+        DLet(name, value) => do
+            let v = dlower_expr(value, names)
+            let inner_names = if ddecimal_expr(v, names) then [name, ..ddecimal_remove(names, name)] else ddecimal_remove(names, name)
+            [DLet(name: name, value: v), ..dlower_stmts(rest, inner_names)]
+        DPrint(value) => [DPrint(value: dlower_expr(value, names)), ..dlower_stmts(rest, names)]
+        DExprS(value) => [DExprS(value: dlower_expr(value, names)), ..dlower_stmts(rest, names)]
+        DFnS(name, params, body) => [DFnS(name: name, params: params, body: dlower_expr(body, [])), ..dlower_stmts(rest, names)]
 
 fn dstmt(p: mut DP) -> DStmt
     let t = dcur(p)
@@ -256,5 +307,5 @@ fn parse_data_program(src: str) -> [DStmt]
         prog.push(dstmt(p))
         dnl(p)
         if p.pos == before
-            return prog
-    prog
+            return dlower_stmts(prog, [])
+    dlower_stmts(prog, [])

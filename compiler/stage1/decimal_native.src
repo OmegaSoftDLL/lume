@@ -18,3 +18,7 @@ print decimal(4, 2, 1.2).precision
 print decimal_format(decimal(4, 2, 1.2) + 0.30)
 print (decimal(4, 2, 1.2) + decimal(4, 2, 0.30)).precision
 print decimal_mul(decimal(3, 2, 1.25), decimal(2, 1, 0.4)).precision
+print decimal_format(let local_decimal = 0.10 in local_decimal + 0.20)
+let saved_decimal = 0.10
+print decimal_format(saved_decimal + 0.20)
+print let saved_decimal = 1 in saved_decimal + 2

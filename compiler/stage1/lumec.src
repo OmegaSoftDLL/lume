@@ -392,11 +392,18 @@ fn lbintail(op) = if op == "==" then "    popq %rsi\n    popq %rdi\n    call eqv
 fn ldec_key(items, key) = match items
     Nil        => 0
     Cons(h, t) => if h.key == key then 1 else ldec_key(t, key)
-fn ldec_expr(e) = match e
+fn ldec_name(names, name) = match names
+    Nil        => 0
+    Cons(h, t) => if h == name then 1 else ldec_name(t, name)
+fn ldec_remove(names, name) = match names
+    Nil        => Nil
+    Cons(h, t) => if h == name then ldec_remove(t, name) else Cons(h, ldec_remove(t, name))
+fn ldec_expr(e, names) = match e
     Rec(items)    => len(items) == 3 and ldec_key(items, "coefficient") == 1 and ldec_key(items, "scale") == 1 and ldec_key(items, "precision") == 1
     Call(nm, args) => nm == "decimal" or nm == "decimal_make" or nm == "decimal_parse" or nm == "decimal_cast" or nm == "decimal_div_exact" or nm == "decimal_add" or nm == "decimal_sub" or nm == "decimal_mul" or nm == "decimal_div"
-    If(c, t, e2) => ldec_expr(t) and ldec_expr(e2)
-    LetIn(nm, v, body) => ldec_expr(body)
+    Var(nm)       => ldec_name(names, nm)
+    If(c, t, e2) => ldec_expr(t, names) and ldec_expr(e2, names)
+    LetIn(nm, v, body) => ldec_expr(body, if ldec_expr(v, names) then Cons(nm, ldec_remove(names, nm)) else ldec_remove(names, nm))
     _             => 0
 fn ldec_tail(op) = if op == "+" then "    popq %rsi\n    popq %rdi\n    call decimal_add\n    pushq %rax\n" else if op == "-" then "    popq %rsi\n    popq %rdi\n    call decimal_sub\n    pushq %rax\n" else if op == "*" then "    popq %rsi\n    popq %rdi\n    call decimal_mul\n    pushq %rax\n" else if op == "/" then "    popq %rsi\n    popq %rdi\n    call decimal_div\n    pushq %rax\n" else "    popq %rsi\n    popq %rdi\n    call decimal_compare\n    movq 8(%rax), %rax\n    cmpq $0, %rax\n" + (if op == "==" then "    sete %al\n" else if op == "!=" then "    setne %al\n" else lsetc(op)) + "    movzbq %al, %rax\n    movq %rax, %rdi\n    call mkint\n    pushq %rax\n"
 
@@ -466,18 +473,18 @@ fn labind(p, acc, locals) = match p
 fn labinds(subs, k, acc, locals) = match subs
     Nil        => ""
     Cons(h, t) => labind(h, lacck(acc, k), locals) + labinds(t, k + 1, acc, locals)
-fn lmatch(lab, ctx, sc, arms, s1) = let c2 = {locals: ctx.locals, bound: ctx.bound, depth: ctx.depth + 1} in lmatch1(lab, lslot(lidxof(ctx.locals, "_sd" + str(ctx.depth))), arms, c2, laexpr(sc, c2, s1))
+fn lmatch(lab, ctx, sc, arms, s1) = let c2 = {locals: ctx.locals, bound: ctx.bound, dvars: ctx.dvars, depth: ctx.depth + 1} in lmatch1(lab, lslot(lidxof(ctx.locals, "_sd" + str(ctx.depth))), arms, c2, laexpr(sc, c2, s1))
 fn lmatch1(lab, soff, arms, c2, scr) = let ar = lmarms(lab, 0, "    movq " + soff + "(%rbp), %rax\n", arms, c2, scr) in lres(scr.code + "    popq %rax\n    movq %rax, " + soff + "(%rbp)\n" + ar.code + ".Lm" + lab + "_" + str(len(arms)) + ":\n    movq $0, %rdi\n    call mkint\n    pushq %rax\n.Lm" + lab + "_end:\n", ar)
 fn lmarms(lab, i, acc, arms, c2, s) = match arms
     Nil        => lres("", s)
-    Cons(h, t) => lmarm(lab, i, acc, h, t, c2, laexpr(h.body, {locals: c2.locals, bound: app(c2.bound, lpatbinds(h.pat)), depth: c2.depth}, s))
+    Cons(h, t) => lmarm(lab, i, acc, h, t, c2, laexpr(h.body, {locals: c2.locals, bound: app(c2.bound, lpatbinds(h.pat)), dvars: c2.dvars, depth: c2.depth}, s))
 fn lmarm(lab, i, acc, h, t, c2, bd) = lmarm2(lab, i, acc, h, t, c2, bd, latest(h.pat, acc, ".Lm" + lab + "_" + str(i + 1), bd))
 fn lmarm2(lab, i, acc, h, t, c2, bd, ts) = let rest = lmarms(lab, i + 1, acc, t, c2, ts) in lres(".Lm" + lab + "_" + str(i) + ":\n" + ts.code + labind(h.pat, acc, c2.locals) + bd.code + "    jmp .Lm" + lab + "_end\n" + rest.code, rest)
 
 ## --- expressions: asm that leaves the value of `e` pushed; `s` is the threaded state ---
-fn lbin(op, l, lr, r, ctx) = let rr = laexpr(r, ctx, lr) in lres(lr.code + rr.code + (if ldec_expr(l) and ldec_expr(r) then ldec_tail(op) else lbintail(op)), rr)
+fn lbin(op, l, lr, r, ctx) = let rr = laexpr(r, ctx, lr) in lres(lr.code + rr.code + (if ldec_expr(l, ctx.dvars) and ldec_expr(r, ctx.dvars) then ldec_tail(op) else lbintail(op)), rr)
 fn lif(lab, cr, t, e2, ctx) = let tr = laexpr(t, ctx, cr) in let er = laexpr(e2, ctx, tr) in lres(cr.code + "    popq %rax\n    movq 8(%rax), %rax\n    testq %rax, %rax\n    jz .Le" + lab + "\n" + tr.code + "    jmp .Lx" + lab + "\n.Le" + lab + ":\n" + er.code + ".Lx" + lab + ":\n", er)
-fn llet(nm, vr, b, ctx) = let inner = {locals: ctx.locals, bound: app(ctx.bound, Cons(nm, Nil)), depth: ctx.depth} in let br = laexpr(b, inner, vr) in lres(vr.code + "    popq %rax\n    movq %rax, " + lslot(lidxof(ctx.locals, nm)) + "(%rbp)\n" + br.code, br)
+fn llet(nm, v, vr, b, ctx) = let inner = {locals: ctx.locals, bound: app(ctx.bound, Cons(nm, Nil)), dvars: if ldec_expr(v, ctx.dvars) then Cons(nm, ldec_remove(ctx.dvars, nm)) else ldec_remove(ctx.dvars, nm), depth: ctx.depth} in let br = laexpr(b, inner, vr) in lres(vr.code + "    popq %rax\n    movq %rax, " + lslot(lidxof(ctx.locals, nm)) + "(%rbp)\n" + br.code, br)
 fn lvar(nm, ctx, s) = if isctor(nm) then lctor(nm, Nil, ctx, s) else lres("    movq " + lslot(lidxof(ctx.locals, nm)) + "(%rbp), %rax\n    pushq %rax\n", s)
 fn lcallx(nm, args, ctx, s) = if isctor(nm) then lctor(nm, args, ctx, s) else lcall(nm, args, ctx, s)
 fn laexpr(e, ctx, s) = match e
@@ -486,7 +493,7 @@ fn laexpr(e, ctx, s) = match e
     Var(nm)        => lvar(nm, ctx, s)
     Bin(op, l, r)  => lbin(op, l, laexpr(l, ctx, s), r, ctx)
     If(c, t, e2)   => lif(str(s.nl), laexpr(c, ctx, lnext(s)), t, e2, ctx)
-    LetIn(nm, v, b) => llet(nm, laexpr(v, ctx, s), b, ctx)
+    LetIn(nm, v, b) => llet(nm, v, laexpr(v, ctx, s), b, ctx)
     Call(nm, args) => lcallx(nm, args, ctx, s)
     Rec(items)     => lrec(items, ctx, s)
     RecT(tn, items) => lrec(items, ctx, s)
@@ -498,7 +505,7 @@ fn laexpr(e, ctx, s) = match e
 fn lparams(ps, i) = match ps
     Nil        => ""
     Cons(h, t) => if i < 6 then "    movq " + areg(i) + ", " + lslot(i) + "(%rbp)\n" + lparams(t, i + 1) else "    movq " + str(16 + 8 * (i - 6)) + "(%rbp), %rax\n    movq %rax, " + lslot(i) + "(%rbp)\n" + lparams(t, i + 1)
-fn lafn(nm, params, body, s) = let locals = app(params, app(lcollect(body), lsds(0, lmdepth(body)))) in let frame = lframe(len(locals)) in let br = laexpr(body, {locals: locals, bound: params, depth: 0}, s) in let sub = if frame > 0 then "    subq $" + str(frame) + ", %rsp\n" else "" in lres(nm + ":\n    pushq %rbp\n    movq %rsp, %rbp\n" + sub + lparams(params, 0) + br.code + "    popq %rax\n    movq %rbp, %rsp\n    popq %rbp\n    ret\n", br)
+fn lafn(nm, params, body, s) = let locals = app(params, app(lcollect(body), lsds(0, lmdepth(body)))) in let frame = lframe(len(locals)) in let br = laexpr(body, {locals: locals, bound: params, dvars: Nil, depth: 0}, s) in let sub = if frame > 0 then "    subq $" + str(frame) + ", %rsp\n" else "" in lres(nm + ":\n    pushq %rbp\n    movq %rsp, %rbp\n" + sub + lparams(params, 0) + br.code + "    popq %rax\n    movq %rbp, %rsp\n    popq %rbp\n    ret\n", br)
 
 ## --- statements: one pass in source order threading the state ---
 fn lmlocals(prog) = match prog
@@ -520,8 +527,8 @@ fn lstmts(prog, mlocals, s) = match prog
     Cons(h, t) => lstmt(h, t, mlocals, s)
 fn lstmt(s0, t, mlocals, s) = match s0
     Fn(nm, ps, body) => lstmtfn(lafn(nm, ps, body, s), t, mlocals)
-    Print(v)         => lstmtprint(laexpr(v, {locals: mlocals, bound: Nil, depth: 0}, s), t, mlocals)
-    ExprS(v)         => lstmtexpr(laexpr(v, {locals: mlocals, bound: Nil, depth: 0}, s), t, mlocals)
+    Print(v)         => lstmtprint(laexpr(v, {locals: mlocals, bound: Nil, dvars: Nil, depth: 0}, s), t, mlocals)
+    ExprS(v)         => lstmtexpr(laexpr(v, {locals: mlocals, bound: Nil, dvars: Nil, depth: 0}, s), t, mlocals)
     _                => lstmts(t, mlocals, s)
 fn lstmtfn(f, t, mlocals) = let rest = lstmts(t, mlocals, f) in {funcs: Cons(f.code, rest.funcs), mains: rest.mains, nl: rest.nl, ns: rest.ns, dt: rest.dt}
 fn lstmtprint(pr, t, mlocals) = let rest = lstmts(t, mlocals, pr) in {funcs: rest.funcs, mains: Cons(pr.code + "    popq %rdi\n    call printval\n", rest.mains), nl: rest.nl, ns: rest.ns, dt: rest.dt}

@@ -16,3 +16,5 @@ print decimal_format(decimal_parse("-12.340"))
 print decimal_format(decimal_div_exact(0.50, 0.2, 2))
 print decimal_format(-0.10)
 print decimal_format(0.000000000000000001)
+print decimal_format(let local_decimal = 0.10 in local_decimal + 0.20)
+print let local_decimal = 1 in local_decimal + 2
