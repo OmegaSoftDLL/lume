@@ -86,8 +86,33 @@ fn tanydecl2(h, t) = match h
     TypeS(nm, k, items) => 1
     _                   => tanydecl(t)
 ## the type table {ctors, recs}: ctors is a flat list of {tag, ar} from every enum, recs a list of {rname, fields}
-fn tcollect(prog) = {ctors: tcollectc(prog), recs: tcollectr(prog), sigs: tcollects(prog), gsigs: tcollectg(prog), decl: tanydecl(prog), lenv: Nil}
-fn twithlenv(tt, lenv) = {ctors: tt.ctors, recs: tt.recs, sigs: tt.sigs, gsigs: tt.gsigs, decl: tt.decl, lenv: lenv}
+fn tcollect(prog) = {ctors: tcollectc(prog), recs: tcollectr(prog), sigs: tcollects(prog), gsigs: tcollectg(prog), decl: tanydecl(prog), lenv: Nil, recenv: Nil}
+fn twith(tt, lenv, recenv) = {ctors: tt.ctors, recs: tt.recs, sigs: tt.sigs, gsigs: tt.gsigs, decl: tt.decl, lenv: lenv, recenv: recenv}
+fn twithlenv(tt, lenv) = twith(tt, lenv, tt.recenv)
+## F3c (structural inference): a `let` bound to an ANONYMOUS record literal records its field names in `tt.recenv`,
+## so a later `<var>.<field>` on that variable is checked WITHOUT any annotation -- accessing a field the record
+## does not have is a compile-time error. Only a direct record literal gives a known field set (a call/unknown
+## leaves the variable unchecked, so zero false positives). Checker-only, so lumec.src and the fixpoint are
+## untouched. This is the first structural piece of full Hindley-Milner inference (F3c).
+fn tletbind(tt, nm, v) = twith(tt, Cons({k: nm, v: tnarrow(tknownl(v, tt, tt.lenv))}, tt.lenv), trecbind(nm, v, tt.recenv))
+fn trecbind(nm, v, renv) = match v
+    Rec(items) => Cons({k: nm, fields: reckeys(items)}, renv)
+    _          => renv
+fn reckeys(items) = match items
+    Nil        => Nil
+    Cons(h, t) => Cons(h.key, reckeys(t))
+fn tchkfieldaccess(o, nm, tt) = match o
+    Var(x) => tchkfieldv(x, nm, trecenvlookup(x, tt.recenv))
+    _      => 0
+fn trecenvlookup(x, renv) = match renv
+    Nil        => Nil
+    Cons(h, t) => if h.k == x then Cons(h, Nil) else trecenvlookup(x, t)
+fn tchkfieldv(x, nm, m) = match m
+    Nil           => 0
+    Cons(r, rest) => if tfieldname(r.fields, nm) == 1 then 1 else ctfail("lume: type error: record '" + x + "' has no field '" + nm + "'\n")
+fn tfieldname(fields, nm) = match fields
+    Nil        => 0
+    Cons(f, t) => if f == nm then 1 else tfieldname(t, nm)
 fn tcollectg(prog) = match prog
     Nil        => Nil
     Cons(h, t) => tcollectg2(h, t)
@@ -134,12 +159,12 @@ fn tfnlenv2(m) = match m
 fn tchke(e, tt) = match e
     Bin(op, a, b)   => tchke(a, tt) + tchke(b, tt)
     If(c, t, e2)    => tchke(c, tt) + tchke(t, tt) + tchke(e2, tt)
-    LetIn(nm, v, b) => tchke(v, tt) + tchke(b, twithlenv(tt, Cons({k: nm, v: tnarrow(tknownl(v, tt, tt.lenv))}, tt.lenv)))
+    LetIn(nm, v, b) => tchke(v, tt) + tchke(b, tletbind(tt, nm, v))
     Call(nm, args)  => tchkquerycall(nm, args, tt) + tchkcall(nm, args, tt) + tchkeargsc(nm, args, tglookup(nm, tt.gsigs), tt) + tchkinferargs(nm, args, tt)
     Var(nm)         => tchkvar(nm, tt)
     Rec(items)      => tchkerec(items, tt)
     RecT(tn, items) => tchkrect(tn, items, tt) + tchkerec(items, tt)
-    Field(o, nm)    => tchke(o, tt)
+    Field(o, nm)    => tchke(o, tt) + tchkfieldaccess(o, nm, tt)
     Match(sc, arms) => tchke(sc, tt) + tchkarms(arms, tt)
     CT(inner)       => tchke(inner, tt)
     Quote(inner)    => 0

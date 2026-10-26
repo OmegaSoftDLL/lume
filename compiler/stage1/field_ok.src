@@ -1,0 +1,4 @@
+## F3c structural inference: a let-bound anonymous record's fields are known, so field access is checked
+## without any annotation. p has fields x and y; p.x + p.y = 7. (mkpt's -> int opts the program into checking.)
+fn mkpt() -> int = let p = {x: 3, y: 4} in p.x + p.y
+print mkpt()

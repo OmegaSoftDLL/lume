@@ -602,6 +602,12 @@ assert a["approver"] == "ricardo" and a["can_merge"] is True
 PY
         then ok "phase-2 E3: lume evolve verify/approve enforces 6 automated gates and human maintainer approval"; else bad "phase-2 E3: lume evolve CLI verify/approve JSON governance"; cat "$ntmp/ev_v.err" "$ntmp/ev_verify.json" "$ntmp/ev_a.err" "$ntmp/ev_approve.json"; fi
     fi
+    # phase-2 F3c (structural inference): a let-bound anonymous record's field access is checked without annotation.
+    "$ntmp/lc" <../../compiler/stage1/field_ok.src >"$ntmp/fo.s" 2>"$ntmp/fo.err"; "$ntmp/lasm" <"$ntmp/fo.s" >"$ntmp/fo.elf" 2>/dev/null; chmod +x "$ntmp/fo.elf"
+    if [ -x "$ntmp/fo.elf" ] && "$ntmp/fo.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/field_ok_asm.expected - >/dev/null; then ok "phase-2 F3c: field access on a let-bound anonymous record is inferred, type-checks, and runs"; else bad "phase-2 F3c: structural field inference (passing)"; cat "$ntmp/fo.err"; fi
+    printf 'fn mkpt() -> int = let p = {x: 3, y: 4} in p.z\nprint mkpt()\n' >"$ntmp/f3cbad.src"
+    "$ntmp/lc" <"$ntmp/f3cbad.src" >"$ntmp/f3cbad.s" 2>"$ntmp/f3cbad.err"; f3c=$?
+    if [ "$f3c" = 3 ] && [ ! -s "$ntmp/f3cbad.s" ] && grep -q "record 'p' has no field 'z'" "$ntmp/f3cbad.err"; then ok "phase-2 F3c: accessing a field an anonymous record lacks fails at compile time (exit 3, no asm)"; else bad "phase-2 F3c: unknown field access fails"; fi
     rm -rf "$ntmp"
 else
     ok "no-toolchain ELF pipeline (skipped: not linux/x86_64, or under ASan)"
