@@ -22,8 +22,9 @@ fn parammend(nm, ty, ct, rest) = {items: gaddrt(nm, ct, Nil), tys: Cons(ty, Nil)
 fn gaddrt(nm, ct, rest) = if ct != 1 then Cons(nm, rest) else rest
 fn parseeffitems(ts) = if headtext(ts) == "}" then {items: Nil, rest: droponce(ts)} else let enm = headtext(ts) in let t1 = droponce(ts) in if headtext(t1) == "," then let rr = parseeffitems(droponce(t1)) in {items: Cons(enm, rr.items), rest: rr.rest} else {items: Cons(enm, Nil), rest: skiprb(t1)}
 fn parseeffrow(ts) = if headtext(ts) == "/" then (let t1 = droponce(ts) in if headtext(t1) == "{" then parseeffitems(droponce(t1)) else {items: Cons(headtext(t1), Nil), rest: droponce(t1)}) else {items: Nil, rest: ts}
-fn parseret(ts) = if headtext(ts) == "-" and headtext(droponce(ts)) == ">" then parseret2(parsetype1(droponce(droponce(ts)))) else let er = parseeffrow(ts) in {ty: TyAny, fromp: "", effs: er.items, rest: er.rest}
-fn parseret2(r) = if headtext(r.rest) == "from" then let rest2 = droponce(droponce(r.rest)) in let er = parseeffrow(rest2) in {ty: r.node, fromp: headtext(droponce(r.rest)), effs: er.items, rest: er.rest} else let er = parseeffrow(r.rest) in {ty: r.node, fromp: "", effs: er.items, rest: er.rest}
+fn parsecontracts(ts) = if headtext(ts) == "requires" then let r = expr(droponce(ts)) in let rr = parsecontracts(r.rest) in {reqs: Cons(r.node, rr.reqs), enss: rr.enss, rest: rr.rest} else if headtext(ts) == "ensures" then let r = expr(droponce(ts)) in let rr = parsecontracts(r.rest) in {reqs: rr.reqs, enss: Cons(r.node, rr.enss), rest: rr.rest} else {reqs: Nil, enss: Nil, rest: ts}
+fn parseret(ts) = if headtext(ts) == "-" and headtext(droponce(ts)) == ">" then parseret2(parsetype1(droponce(droponce(ts)))) else let er = parseeffrow(ts) in let vc = parsecontracts(er.rest) in {ty: TyAny, fromp: "", effs: er.items, reqs: vc.reqs, enss: vc.enss, rest: vc.rest}
+fn parseret2(r) = if headtext(r.rest) == "from" then let rest2 = droponce(droponce(r.rest)) in let er = parseeffrow(rest2) in let vc = parsecontracts(er.rest) in {ty: r.node, fromp: headtext(droponce(r.rest)), effs: er.items, reqs: vc.reqs, enss: vc.enss, rest: vc.rest} else let er = parseeffrow(r.rest) in let vc = parsecontracts(er.rest) in {ty: r.node, fromp: "", effs: er.items, reqs: vc.reqs, enss: vc.enss, rest: vc.rest}
 ## `sg` is the annotation record of the function: `Nil` when nothing is annotated (the AST is then exactly the
 ## pre-F2 one), else a `Sig(name, paramnames, paramtypes, rettype)` that parseprog places just before the `Fn`.
 fn anyownp(pl) = match pl
@@ -31,10 +32,11 @@ fn anyownp(pl) = match pl
     Cons(p, r) => if p.cf >= 2 then 1 else anyownp(r)
 fn mkosig(nm, pubf, freef, pl, rty, fromp) = if pubf == 1 or freef > 0 or anyownp(pl) == 1 or fromp != "" then OSig(nm, pubf, freef, pl, rty, fromp) else Nil
 fn mkksig(nm, effs) = if isnil(effs) == 0 then KEffSig(nm, effs) else Nil
+fn mkvsig(nm, ps, reqs, enss) = if isnil(reqs) == 0 or isnil(enss) == 0 then VContractSig(nm, ps, reqs, enss) else Nil
 fn parsefnp(t, pubf, freef) = parsefn2(headtext(t), pubf, freef, parseparams(dropkw(droponce(t), "(")))
 fn parsefn2(nm, pubf, freef, ps) = parsefn3(nm, pubf, freef, ps, parseret(ps.rest))
 fn parsefn3(nm, pubf, freef, ps, rt) = parsefn4(nm, pubf, freef, ps, rt, expr(dropkw(rt.rest, "=")))
-fn parsefn4(nm, pubf, freef, ps, rt, b) = {node: Fn(nm, ps.items, b.node), sg: mksig(nm, ps, rt.ty), osg: mkosig(nm, pubf, freef, ps.plist, rt.ty, rt.fromp), ksg: mkksig(nm, rt.effs), rest: b.rest}
+fn parsefn4(nm, pubf, freef, ps, rt, b) = {node: Fn(nm, ps.items, b.node), sg: mksig(nm, ps, rt.ty), osg: mkosig(nm, pubf, freef, ps.plist, rt.ty, rt.fromp), ksg: mkksig(nm, rt.effs), vsg: mkvsig(nm, ps.items, rt.reqs, rt.enss), rest: b.rest}
 fn parsefn(t) = parsefnp(t, 0, 0)
 fn isany(t) = match t
     TyAny => 1
@@ -53,25 +55,28 @@ fn ganyct(pl) = match pl
 fn parseprint(t) = let e = expr(t) in {node: Print(e.node), rest: e.rest}
 fn parsestmt(ts) = if headtext(ts) == "fn" then parsefn(droponce(ts)) else if headtext(ts) == "type" then parsetype(droponce(ts)) else parseprint(droponce(ts))
 fn progmore(r) = Cons(r.node, parseprog(r.rest))
-fn progfn(r) = progsig(r.ksg, progsig(r.osg, progsig(r.sg, Cons(r.node, parseprog(r.rest)))))
+fn progfn(r) = progsig(r.vsg, progsig(r.ksg, progsig(r.osg, progsig(r.sg, Cons(r.node, parseprog(r.rest))))))
 fn progsig(sg, rest) = match sg
     Nil => rest
     _   => Cons(sg, rest)
 fn tdeclname(nd) = match nd
     TypeS(nm, k, items) => nm
     _                   => ""
-fn progtyped(kind, r) = Cons(OType(tdeclname(r.node), kind), Cons(r.node, parseprog(r.rest)))
+fn progtype(r) = progsig(r.inv, Cons(r.node, parseprog(r.rest)))
+fn progtyped(kind, r) = Cons(OType(tdeclname(r.node), kind), progsig(r.inv, Cons(r.node, parseprog(r.rest))))
+fn parselaw(t) = let nm = headtext(t) in let ps = parseparams(dropkw(droponce(t), "(")) in let rt = parseret(ps.rest) in let b = expr(dropkw(rt.rest, "=")) in {law: VLawDecl(nm, ps.items, b.node), sg: mksig("law_" + nm, ps, TyName("int")), fnnode: Fn("law_" + nm, ps.items, b.node), rest: b.rest}
+fn proglaw(r) = Cons(r.law, progsig(r.sg, Cons(r.fnnode, parseprog(r.rest))))
 fn parseeffop(ts) = let opnm = headtext(droponce(ts)) in let ps = parseparams(dropkw(droponce(droponce(ts)), "(")) in let rt = parseret(ps.rest) in {op: {op: opnm, ps: ps.items, pt: ps.tys, rt: rt.ty}, rest: dropkw(rt.rest, ";")}
 fn parseeffops(ts) = if headtext(ts) == "fn" then let r = parseeffop(ts) in let rr = parseeffops(r.rest) in {items: Cons(r.op, rr.items), rest: rr.rest} else {items: Nil, rest: ts}
 fn parseeffect(t) = let enm = headtext(t) in let ops = parseeffops(dropkw(droponce(t), "{")) in {node: KEffectDecl(enm, ops.items), rest: skiprb(ops.rest)}
 fn parsecapat(t) = let t1 = droponce(t) in let er = if headtext(t1) == "{" then parseeffitems(droponce(t1)) else if headtext(t1) == "(" then let nm = headtext(droponce(t1)) in {items: Cons(nm, Nil), rest: skiprp(droponce(droponce(t1)))} else {items: Cons(headtext(t1), Nil), rest: droponce(t1)} in Cons(KCapGrant(er.items), parseprog(er.rest))
 fn progfree(ts) = if headtext(ts) == "pub" then progfn(parsefnp(droponce(droponce(ts)), 1, 1)) else progfn(parsefnp(droponce(ts), 0, 1))
 fn progat(t) = if headtext(t) == "freestanding" then progfree(droponce(t)) else if headtext(t) == "gc" then progtyped("gc", parsetype(droponce(droponce(t)))) else if headtext(t) == "capability" or headtext(t) == "grant" then parsecapat(t) else parseprog(droponce(t))
-fn progpub(t) = if headtext(t) == "total" and headtext(droponce(t)) == "fn" then progfn(parsefnp(droponce(droponce(t)), 1, 2)) else if headtext(t) == "llm" and headtext(droponce(t)) == "fn" then progfn(parsefnp(droponce(droponce(t)), 1, 4)) else if headtext(t) == "effect" then progmore(parseeffect(droponce(t))) else progfn(parsefnp(droponce(t), 1, 0))
+fn progpub(t) = if headtext(t) == "total" and headtext(droponce(t)) == "fn" then progfn(parsefnp(droponce(droponce(t)), 1, 2)) else if headtext(t) == "llm" and headtext(droponce(t)) == "fn" then progfn(parsefnp(droponce(droponce(t)), 1, 4)) else if headtext(t) == "effect" then progmore(parseeffect(droponce(t))) else if headtext(t) == "law" then proglaw(parselaw(droponce(t))) else progfn(parsefnp(droponce(t), 1, 0))
 fn lexprstmt(e) = {node: ExprS(e.node), rest: e.rest}
 fn parseprog(ts) = match ts
     Nil        => Nil
-    Cons(h, t) => if h.text == "fn" then progfn(parsefn(droponce(ts))) else if h.text == "pub" and (headtext(t) == "fn" or headtext(t) == "total" or headtext(t) == "llm" or headtext(t) == "effect") then progpub(t) else if h.text == "total" and headtext(t) == "fn" then progfn(parsefnp(droponce(t), 0, 2)) else if h.text == "llm" and headtext(t) == "fn" then progfn(parsefnp(droponce(t), 0, 4)) else if h.text == "effect" then progmore(parseeffect(t)) else if h.text == "@" then progat(t) else if h.text == "resource" and headtext(t) == "type" then progtyped("resource", parsetype(droponce(t))) else if h.text == "print" or h.text == "type" then progmore(parsestmt(ts)) else progmore(lexprstmt(expr(ts)))
+    Cons(h, t) => if h.text == "fn" then progfn(parsefn(droponce(ts))) else if h.text == "pub" and (headtext(t) == "fn" or headtext(t) == "total" or headtext(t) == "llm" or headtext(t) == "effect" or headtext(t) == "law") then progpub(t) else if h.text == "total" and headtext(t) == "fn" then progfn(parsefnp(droponce(t), 0, 2)) else if h.text == "llm" and headtext(t) == "fn" then progfn(parsefnp(droponce(t), 0, 4)) else if h.text == "effect" then progmore(parseeffect(t)) else if h.text == "law" then proglaw(parselaw(t)) else if h.text == "@" then progat(t) else if h.text == "resource" and headtext(t) == "type" then progtyped("resource", parsetype(droponce(t))) else if h.text == "type" then progtype(parsetype(droponce(ts))) else if h.text == "print" then progmore(parseprint(droponce(ts))) else progmore(lexprstmt(expr(ts)))
 fn parseprogram(s) = parseprog(lex(s, 0))
 
 ## --- parser: named type declarations (F1) -----------------------------------------------------------------
@@ -89,7 +94,7 @@ fn parseprogram(s) = parseprog(lex(s, 0))
 fn parsetype(t) = parsetypebody(headtext(t), dropkw(droponce(t), "="))
 fn parsetypebody(nm, t) = if headtext(t) == "record" then parserecordty(nm, droponce(t)) else parseenumty(nm, dropkw(t, "enum"))
 fn parseenumty(nm, t) = let hb = if headtext(t) == "{" then 1 else 0 in parseenumty2(nm, hb, parsevariants(dropkw(dropkw(t, "{"), "|")))
-fn parseenumty2(nm, hb, vs) = {node: TypeS(nm, "enum", vs.items), rest: if hb == 1 then skiprb(vs.rest) else vs.rest}
+fn parseenumty2(nm, hb, vs) = {node: TypeS(nm, "enum", vs.items), inv: Nil, rest: if hb == 1 then skiprb(vs.rest) else vs.rest}
 fn parsevariants(ts) = parsevariant(headtext(ts), droponce(ts))
 fn parsevariant(tag, ts) = if headtext(ts) == "(" then parsevariantp(tag, parsevpayload(droponce(ts))) else parsevariantend(tag, 0, ts)
 ## F4 (front-end unification, slice 1): an enum variant payload accepts BOTH the Lume-Core positional form
@@ -105,7 +110,7 @@ fn parsevariantp(tag, a) = parsevariantend(tag, len(a.items), a.rest)
 fn parsevariantend(tag, ar, ts) = if headtext(ts) == "|" then parsevariantcons(tag, ar, parsevariants(droponce(ts))) else {items: Cons({tag: tag, ar: ar}, Nil), rest: ts}
 fn parsevariantcons(tag, ar, rr) = {items: Cons({tag: tag, ar: ar}, rr.items), rest: rr.rest}
 fn parserecordty(nm, t) = let hb = if headtext(t) == "{" then 1 else 0 in parserecordty2(nm, hb, parsefields(dropkw(t, "{")))
-fn parserecordty2(nm, hb, fs) = {node: TypeS(nm, "record", fs.items), rest: if hb == 1 then skiprb(fs.rest) else fs.rest}
+fn parserecordty2(nm, hb, fs) = let rest1 = if hb == 1 then skiprb(fs.rest) else fs.rest in if headtext(rest1) == "invariant" then let inv = expr(droponce(rest1)) in {node: TypeS(nm, "record", fs.items), inv: VTypeInvariant(nm, fs.items, inv.node), rest: inv.rest} else {node: TypeS(nm, "record", fs.items), inv: Nil, rest: rest1}
 fn parsefields(ts) = parsefield(headtext(ts), dropkw(droponce(ts), ":"))
 fn parsefield(fname, ts) = parsefieldt(fname, parsetype1(ts))
 fn isfieldsep(ts) = headtext(ts) == "," or headtext(ts) == ";"

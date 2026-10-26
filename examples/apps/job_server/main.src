@@ -1,0 +1,39 @@
+## main.src -- Stage 3 Capstone: Concurrent Job Server, Worker Pool & Supervised Actor System.
+## Exercises Tracks O, A, K, S, and V with zero `unsafe`.
+
+use protocol
+use engine
+use workers
+
+## 1. Track O + K3 + V: Verified tickets, Perceus in-place queue transformation & ledger accounting
+pub fn run_queue_pipeline() -> int = let q0 = JCons(10, JCons(20, JCons(30, JNil))) in let q1 = bump_job_costs(own q0, 5) in let total_cost = sum_job_costs(q1) in let t1 = make_ticket(1, 15, verified_priority(12)) in let cview = ticket_cost_view(t1) in let l0 = open_ledger(200) in let rem1 = charge_budget(l0.budget, total_cost) in let rem2 = refund_budget(rem1, cview) in rem2 + count_jobs(q1)
+
+## 2. Track S1 + S2: Structured concurrency (`scope` / `spawn`), `arc[T]`, bounded `chan[T]` & `select`
+pub fn run_worker_pool() -> int / {alloc} = let shared_bonus = arc_new(10) in let ch_high = chan_new(4) in let ch_low = chan_new(4) in scope pool in let w1 = spawn(arc_get(arc_clone(shared_bonus)) + 15) in let w2 = spawn(arc_get(arc_clone(shared_bonus)) + 25) in let ch_h1 = chan_send(ch_high, w1) in let ch_l1 = chan_send(ch_low, w2) in let sel1 = chan_select2(ch_h1, ch_l1, 0, 0) in let sel2 = chan_select2(sel1.ch1, sel1.ch2, 1, 0) in let mapped = par_map_add(JCons(5, JCons(10, JCons(15, JNil))), 2) in sel1.val + sel2.val + par_sum(mapped)
+
+## 3. Track S3: Supervised actor system (`one_for_one`) with fault injection, restart & logical time
+pub fn run_supervised_actors() -> int = let clk0 = lclock_new(42) in let sup0 = supervisor_new(3) in let a1 = actor_step(actor_send(actor_new(1, 100), 0 - 1)) in let a2 = actor_step(actor_step(actor_send(actor_send(actor_new(2, 100), 30), 20))) in let healed = supervisor_heal2(sup0, a1, a2) in let clk1 = lclock_advance(clk0, 15) in let clk2 = lclock_advance(clk1, 5) in actor_state(healed.a1) + actor_state(healed.a2) + actor_restarts(healed.a1) + (healed.sup).total_restarts + lclock_now(clk2) + lclock_ticks(clk2)
+
+## --- Unit & Property Tests (`lume test`) ---
+fn test_perceus_queue_and_ledger() = run_queue_pipeline() == 143
+
+fn test_verified_ai_priority() = let p = verified_priority(12) in p >= 1 and p <= 10
+
+fn test_effect_handlers_deterministic() = run_deterministic_batch(100, 15, 25) == 310
+
+fn test_transactional_defer() = run_transactional_job(80, 30) == 80
+
+fn test_worker_pool_channels_and_select() = run_worker_pool() == 96
+
+fn test_supervised_actors_and_logical_clock() = run_supervised_actors() == 274
+
+fn test_laws_hold() = law_budget_conservation(500, 120) == 1 and law_priority_clamp_idempotent(99) == 1 and law_non_negative_charge(200, 200) == 1
+
+print run_queue_pipeline()
+print verified_priority(12)
+print run_deterministic_batch(100, 15, 25)
+print run_transactional_job(80, 30)
+print run_worker_pool()
+print run_supervised_actors()
+print law_budget_conservation(500, 120)
+print law_priority_clamp_idempotent(99)

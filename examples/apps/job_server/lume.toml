@@ -1,0 +1,14 @@
+# job_server — Stage 3 Official Exit-Criterion Capstone Application
+# Exercises Tracks O (ownership/regions), A (total/provenance), K (effects/handlers/Perceus),
+# S (structured concurrency/channels/supervised actors/logical time), and V (contracts/laws)
+# with zero `unsafe`.
+
+[package]
+name = "job_server"
+version = "0.3.0"
+edition = "2026"
+
+[capabilities]
+allow = ["io", "alloc", "time", "Clock", "Audit"]
+
+[dependencies]

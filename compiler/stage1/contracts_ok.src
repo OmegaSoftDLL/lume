@@ -1,0 +1,31 @@
+## contracts_ok.src -- Phase 3 Track V conformance test (`V1`–`V3`).
+## Verifies:
+##   1. V1: First-class `requires` / `ensures` / `invariant` and `old(...)` in Lume-Core.
+##   2. V2: Compile-time bounded counterexample search (`[V0001]`) + sound `runtime_checked` contract guards (`lume prove` v0).
+##   3. V3: Top-level `law` declarations (`P34`) checked against counterexample search and callable as property checks (`law_<name>`).
+
+type Wallet = record balance: int, min_bal: int invariant balance >= min_bal and min_bal >= 0
+
+pub fn deposit(bal: int, amt: int) -> int requires bal >= 0 requires amt > 0 ensures result > bal ensures result == old(bal) + amt = bal + amt
+
+pub fn safe_withdraw(bal: int, amt: int) -> int requires bal >= amt requires amt >= 0 ensures result >= 0 ensures result + amt == old(bal) = bal - amt
+
+pub fn clamp_non_neg(x: int) -> int ensures result >= 0 = if x < 0 then 0 else x
+
+pub fn open_wallet(initial: int) -> Wallet requires initial >= 100 = Wallet{balance: initial, min_bal: 100}
+
+pub fn wallet_available(w: Wallet) -> int = w.balance - w.min_bal
+
+pub law deposit_withdraw_roundtrip(bal: int, amt: int) = if bal >= 0 and amt > 0 then safe_withdraw(deposit(bal, amt), amt) == bal else 1
+
+pub law clamp_idempotent(x: int) = clamp_non_neg(clamp_non_neg(x)) == clamp_non_neg(x)
+
+pub law fee_conservation(gross: int, fee: int) = if gross >= fee and fee >= 0 then (gross - fee) + fee == gross else 1
+
+print deposit(100, 45)
+print safe_withdraw(145, 45)
+print clamp_non_neg(0 - 15)
+print wallet_available(open_wallet(250))
+print law_deposit_withdraw_roundtrip(500, 75)
+print law_clamp_idempotent(0 - 9)
+print law_fee_conservation(1000, 25)
