@@ -17,7 +17,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build
         run: make -C bootstrap/lume0
       - name: Test
@@ -29,7 +29,7 @@ jobs:
     name: Documentation & examples
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Required files exist
         run: |
           set -e
@@ -66,7 +66,7 @@ jobs:
     name: Self-host bootstrap (stage2 == stage3)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: make bootstrap
         run: make bootstrap
       - name: Verify Zero-C steady state (no cc/as/ld)
@@ -85,6 +85,6 @@ jobs:
     name: Zero-C steady state (no cc/as/ld)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: make zero-c
         run: make zero-c
