@@ -1,0 +1,355 @@
+## --- type checker (F1): GRADUAL, AI-first, zero false positives ----------------------------------------------
+## GRADUAL RULE (TypeScript/Zig spirit, decided and documented here): a program that declares NO `type` is
+## UNCHECKED -- constructors and records stay free, exactly as before (so every existing `.src`, and lumec.src
+## itself, compile byte-identically; the self-host fixpoint is untouched). The moment a program declares ANY
+## `type`, it opts IN: every constructor it uses (in an expression OR a pattern) must resolve to a declared enum
+## variant with the right ARITY, and every field named in a NOMINAL record literal `T{...}` must be a field of
+## the declared record type `T`. This is what catches a model's typo (`Conss` for `Cons`, a wrong field name,
+## a missing/extra argument) -- the AI-first win -- while never flagging a correct program. ANONYMOUS records
+## `{...}` are NEVER checked (they have no declared type without inference, which is F3), so opting in to types
+## does not forbid ad-hoc helper records. tcheck returns the program UNCHANGED on success and aborts via `ctfail`
+## (clear message to stderr, exit 3, no asm) on the first error -- the same failure channel comptime already uses.
+##
+## F2 (gradual argument checking): `fn f(a: T1, b: T2) -> R = ...` annotations are optional. A call `f(args)` of an
+## annotated function checks ONLY the arguments whose type is INEQUIVOCAL without inference: an integer literal is
+## `int`, a string literal is `str`, a constructor of a declared enum (its UNIQUE owner) is that enum, a nominal
+## record literal of a declared record is that record. A variable, a call of a function, an operator expression --
+## anything not known -- is NEVER flagged (that is F3 inference). An unannotated parameter accepts anything. The
+## same rule checks a function body that is a bare literal/constructor against its `-> R`. Annotations alone
+## (no `type` declaration) enable argument checking but NOT the F1 constructor/record declaration checks, so a
+## program that only annotates `int`/`str` never gets a false "constructor not declared".
+fn tcheck(prog) = if tanydecl(prog) == 0 and tanysig(prog) == 0 then prog else tcheckforce(prog, tcollect(prog))
+fn tanysig(prog) = match prog
+    Nil        => 0
+    Cons(h, t) => tanysig2(h, t)
+fn tanysig2(h, t) = match h
+    Sig(nm, ps, ts, rt) => 1
+    GSig(nm, pl, rt)    => 1
+    _                   => tanysig(t)
+fn tcheckforce(prog, tt) = tforced(tchkstmts(prog, tt), prog)
+fn tforced(chk, prog) = tcoerce_program(prog, tcollects(prog))
+fn tcoerce_program(prog, sigs) = match prog
+    Nil => Nil
+    Cons(h, t) => tcoerce_stmt(h, t, sigs)
+fn tcoerce_stmt(stmt, rest, sigs) = match stmt
+    Fn(nm, ps, body) => Cons(Fn(nm, ps, tcoerce_fn_body(nm, body, sigs)), tcoerce_program(rest, sigs))
+    Print(v) => Cons(Print(tcoerce_expr(v, sigs)), tcoerce_program(rest, sigs))
+    ExprS(v) => Cons(ExprS(tcoerce_expr(v, sigs)), tcoerce_program(rest, sigs))
+    Sig(nm, ps, tys, rt) => Cons(stmt, tcoerce_program(rest, sigs))
+    _ => Cons(stmt, tcoerce_program(rest, sigs))
+fn tcoerce_fn_body(nm, body, sigs) = tcoerce_fn_body2(body, tsiglookup(nm, sigs), sigs)
+fn tcoerce_fn_body2(body, signature, sigs) = match signature
+    Nil => tcoerce_expr(body, sigs)
+    Cons(sg, rest) => tcoerce_expected(body, sg.rt, sigs)
+fn tcoerce_expr(e, sigs) = match e
+    Bin(op, l, r) => Bin(op, tcoerce_expr(l, sigs), tcoerce_expr(r, sigs))
+    If(c, t, e2) => If(tcoerce_expr(c, sigs), tcoerce_expr(t, sigs), tcoerce_expr(e2, sigs))
+    LetIn(nm, v, body) => LetIn(nm, tcoerce_expr(v, sigs), tcoerce_expr(body, sigs))
+    Call(nm, args) => tcoerce_call(nm, args, sigs, tsiglookup(nm, sigs))
+    Rec(items) => Rec(tcoerce_entries(items, sigs))
+    RecT(tn, items) => RecT(tn, tcoerce_entries(items, sigs))
+    Match(sc, arms) => Match(tcoerce_expr(sc, sigs), tcoerce_arms(arms, sigs))
+    CT(inner) => CT(tcoerce_expr(inner, sigs))
+    _ => e
+fn tcoerce_entries(items, sigs) = match items
+    Nil => Nil
+    Cons(h, t) => Cons({key: h.key, val: tcoerce_expr(h.val, sigs)}, tcoerce_entries(t, sigs))
+fn tcoerce_arms(arms, sigs) = match arms
+    Nil => Nil
+    Cons(h, t) => Cons({pat: h.pat, body: tcoerce_expr(h.body, sigs)}, tcoerce_arms(t, sigs))
+fn tcoerce_call(nm, args, sigs, signature) = match signature
+    Nil => Call(nm, tcoerce_args_untyped(args, sigs))
+    Cons(sg, rest) => tcoerce_call_result(nm, tcoerce_args(args, sg.pt, sigs), sg.rt)
+fn tcoerce_call_result(nm, args, rt) = tcoerce_decimal_result(Call(nm, args), rt)
+fn tcoerce_decimal_result(call, rt) = match rt
+    TyDecimal(p, s) => Call("decimal", Cons(Num(p), Cons(Num(s), Cons(call, Nil))))
+    _ => call
+fn tcoerce_args(args, types, sigs) = match args
+    Nil => Nil
+    Cons(arg, rest) => tcoerce_arg(arg, rest, types, sigs)
+fn tcoerce_arg(arg, rest, types, sigs) = match types
+    Nil => Cons(tcoerce_expr(arg, sigs), tcoerce_args(rest, Nil, sigs))
+    Cons(ty, more) => Cons(tcoerce_expected(arg, ty, sigs), tcoerce_args(rest, more, sigs))
+fn tcoerce_args_untyped(args, sigs) = match args
+    Nil => Nil
+    Cons(arg, rest) => Cons(tcoerce_expr(arg, sigs), tcoerce_args_untyped(rest, sigs))
+fn tcoerce_expected(e, ty, sigs) = match ty
+    TyDecimal(p, s) => if tdecimal_literal(e) then Call("decimal", Cons(Num(p), Cons(Num(s), Cons(tcoerce_expr(e, sigs), Nil)))) else tcoerce_expr(e, sigs)
+    _ => tcoerce_expr(e, sigs)
+fn tdecimal_literal(e) = match e
+    Rec(items) => ldec_expr(e, Nil) and ldec_value(items, "coefficient") != (0 - 999999999999999999) and ldec_value(items, "scale") != (0 - 999999999999999999)
+    _ => 0
+fn tanydecl(prog) = match prog
+    Nil        => 0
+    Cons(h, t) => tanydecl2(h, t)
+fn tanydecl2(h, t) = match h
+    TypeS(nm, k, items) => 1
+    _                   => tanydecl(t)
+## the type table {ctors, recs}: ctors is a flat list of {tag, ar} from every enum, recs a list of {rname, fields}
+fn tcollect(prog) = {ctors: tcollectc(prog), recs: tcollectr(prog), sigs: tcollects(prog), gsigs: tcollectg(prog), decl: tanydecl(prog)}
+fn tcollectg(prog) = match prog
+    Nil        => Nil
+    Cons(h, t) => tcollectg2(h, t)
+fn tcollectg2(h, t) = match h
+    GSig(nm, pl, rt) => Cons({fname: nm, params: pl, rt: rt}, tcollectg(t))
+    _                => tcollectg(t)
+fn tcollects(prog) = match prog
+    Nil        => Nil
+    Cons(h, t) => tcollects2(h, t)
+fn tcollects2(h, t) = match h
+    Sig(nm, ps, ts, rt) => Cons({fname: nm, pn: ps, pt: ts, rt: rt}, tcollects(t))
+    _                   => tcollects(t)
+fn townerize(nm, items) = match items
+    Nil        => Nil
+    Cons(h, t) => Cons({tag: h.tag, ar: h.ar, en: nm}, townerize(nm, t))
+fn tcollectc(prog) = match prog
+    Nil        => Nil
+    Cons(h, t) => tcollectc2(h, t)
+fn tcollectc2(h, t) = match h
+    TypeS(nm, k, items) => if k == "enum" then app(townerize(nm, items), tcollectc(t)) else tcollectc(t)
+    _                   => tcollectc(t)
+fn tcollectr(prog) = match prog
+    Nil        => Nil
+    Cons(h, t) => tcollectr2(h, t)
+fn tcollectr2(h, t) = match h
+    TypeS(nm, k, items) => if k == "record" then Cons({rname: nm, fields: items}, tcollectr(t)) else tcollectr(t)
+    _                   => tcollectr(t)
+## walk every statement/expression/pattern; each node returns an int so `+` FORCES evaluation (the core is eager)
+fn tchkstmts(prog, tt) = match prog
+    Nil        => 0
+    Cons(h, t) => tchkstmt(h, tt) + tchkstmts(t, tt)
+fn tchkstmt(s0, tt) = match s0
+    Fn(nm, ps, body) => tchke(body, tt) + tchkret(nm, body, tsiglookup(nm, tt.sigs), tt)
+    Print(v)         => tchke(v, tt)
+    ExprS(v)         => tchke(v, tt)
+    _                => 0
+fn tchke(e, tt) = match e
+    Bin(op, a, b)   => tchke(a, tt) + tchke(b, tt)
+    If(c, t, e2)    => tchke(c, tt) + tchke(t, tt) + tchke(e2, tt)
+    LetIn(nm, v, b) => tchke(v, tt) + tchke(b, tt)
+    Call(nm, args)  => tchkcall(nm, args, tt) + tchkeargsc(nm, args, tglookup(nm, tt.gsigs), tt)
+    Var(nm)         => tchkvar(nm, tt)
+    Rec(items)      => tchkerec(items, tt)
+    RecT(tn, items) => tchkrect(tn, items, tt) + tchkerec(items, tt)
+    Field(o, nm)    => tchke(o, tt)
+    Match(sc, arms) => tchke(sc, tt) + tchkarms(arms, tt)
+    CT(inner)       => tchke(inner, tt)
+    Quote(inner)    => 0
+    Splice(inner)   => tchke(inner, tt)
+    _               => 0
+fn tchkeargs(xs, tt) = match xs
+    Nil        => 0
+    Cons(h, t) => tchke(h, tt) + tchkeargs(t, tt)
+fn tchkerec(xs, tt) = match xs
+    Nil        => 0
+    Cons(h, t) => tchke(h.val, tt) + tchkerec(t, tt)
+fn tchkarms(xs, tt) = match xs
+    Nil        => 0
+    Cons(h, t) => tchkpat(h.pat, tt) + tchke(h.body, tt) + tchkarms(t, tt)
+fn tchkpat(p, tt) = match p
+    PCons(tag, subs) => tchkctor(tag, len(subs), tt) + tchkpatl(subs, tt)
+    _                => 0
+fn tchkpatl(xs, tt) = match xs
+    Nil        => 0
+    Cons(h, t) => tchkpat(h, tt) + tchkpatl(t, tt)
+## a capitalised name is a constructor use; check it is declared and its arity matches
+fn tchkvar(nm, tt) = if isctor(nm) then tchkctor(nm, 0, tt) else 0
+fn tchkcall(nm, args, tt) = if isctor(nm) then tchkctor(nm, len(args), tt) else tchkcallg(nm, args, tglookup(nm, tt.gsigs), tt)
+## a generic function (has a GSig) is checked with the generic rule (bind type params, then check runtime args);
+## everything else keeps F2's ordinary signature check.
+fn tchkcallg(nm, args, g, tt) = match g
+    Nil         => tchksig(nm, args, tsiglookup(nm, tt.sigs), tt)
+    Cons(gg, r) => tchkgcall(nm, args, gg, tt)
+fn isastctorar(tag) = if tag == "Nil" then 0 else if tag == "Num" or tag == "Str" or tag == "Var" then 1 else if tag == "Cons" or tag == "Call" then 2 else if tag == "Bin" or tag == "If" or tag == "LetIn" then 3 else 0 - 1
+fn tchkctor(tag, ar, tt) = tchkctor2(tag, ar, tctorlookup(tag, tt.ctors), tt.decl)
+fn tchkctor2(tag, ar, m, dc) = match m
+    Nil        => if isastctorar(tag) == ar then 1 else if isastctorar(tag) >= 0 then ctfail("lume: type error: constructor '" + tag + "' expects " + str(isastctorar(tag)) + " argument(s) but got " + str(ar) + "\n") else if dc == 1 then ctfail("lume: type error: constructor '" + tag + "' is not declared in any enum type (add it to a `type ... = enum ...` declaration)\n") else 0
+    Cons(v, r) => if v.ar == ar then 1 else ctfail("lume: type error: constructor '" + tag + "' expects " + str(v.ar) + " argument(s) but got " + str(ar) + "\n")
+fn tctorlookup(tag, cs) = match cs
+    Nil        => Nil
+    Cons(h, t) => if h.tag == tag then Cons(h, Nil) else tctorlookup(tag, t)
+## a nominal record literal T{...}: T must be a declared record type and every key must be one of its fields
+fn tchkrect(tn, items, tt) = tchkrect2(tn, items, trecptypelookup(tn, tt.recs), tt.decl)
+fn tchkrect2(tn, items, m, dc) = match m
+    Nil        => if dc == 1 then ctfail("lume: type error: record type '" + tn + "' is not declared (declare it with `type " + tn + " = record ...`)\n") else 0
+    Cons(rd, r) => tchkfields(tn, items, rd.fields)
+fn trecptypelookup(tn, rs) = match rs
+    Nil        => Nil
+    Cons(h, t) => if h.rname == tn then Cons(h, Nil) else trecptypelookup(tn, t)
+fn tchkfields(tn, items, fields) = match items
+    Nil        => 0
+    Cons(h, t) => tchkfield(tn, h.key, fields) + tchkfields(tn, t, fields)
+fn tchkfield(tn, key, fields) = if tfieldhas(fields, key) == 1 then 1 else ctfail("lume: type error: record type '" + tn + "' has no field '" + key + "'\n")
+fn tfieldhas(fields, key) = match fields
+    Nil        => 0
+    Cons(f, r) => if f.fname == key then 1 else tfieldhas(r, key)
+
+## --- F2: signatures, the type an expression is KNOWN to have, and the argument/return checks ---
+fn tsiglookup(nm, ss) = match ss
+    Nil        => Nil
+    Cons(h, t) => if h.fname == nm then Cons(h, Nil) else tsiglookup(nm, t)
+fn tctorcnt(tag, cs) = match cs
+    Nil        => 0
+    Cons(h, t) => (if h.tag == tag then 1 else 0) + tctorcnt(tag, t)
+## tknown: TyName/TyList when the type is certain WITHOUT inference, else TyAny (= unknown, never an error)
+fn tknown(e, tt) = match e
+    Num(n)        => TyName("int")
+    Str(s)        => TyName("str")
+    Var(nm)       => tknownctor(nm, tt)
+    Call(nm, xs)  => tknowncall(nm, xs, tt)
+    Rec(items)    => tknown_decimal_record(items)
+    RecT(tn, its) => tknownrec(tn, trecptypelookup(tn, tt.recs))
+    _             => TyAny
+fn tknowncall(nm, xs, tt) = if nm == "decimal" then tknown_decimal_call(xs) else if nm == "decimal_cast" then tknown_decimal_cast(xs) else tknown_call_result(nm, xs, tt)
+fn tknown_call_result(nm, xs, tt) = match tglookup(nm, tt.gsigs)
+    Cons(g, rest) => tsubst(g.rt, tknown_gbind(xs, g.params, Nil), tpset(g.params))
+    Nil => tknown_simple_result(tsiglookup(nm, tt.sigs), tknownctor(nm, tt))
+fn tknown_simple_result(signature, fallback) = match signature
+    Nil => fallback
+    Cons(sg, rest) => sg.rt
+fn tknown_gbind(args, params, env) = match params
+    Nil => env
+    Cons(param, rest_params) => match args
+        Nil => env
+        Cons(arg, rest_args) => if param.cf == 1 then tknown_gbind(rest_args, rest_params, gbind(param.pn, arg, env)) else tknown_gbind(rest_args, rest_params, env)
+fn tknown_decimal_call(xs) = match xs
+    Cons(Num(p), Cons(Num(s), rest)) => TyDecimal(p, s)
+    _ => TyAny
+fn tknown_decimal_cast(xs) = match xs
+    Cons(v, Cons(Num(p), Cons(Num(s), rest))) => TyDecimal(p, s)
+    _ => TyAny
+fn tknown_decimal_record(items) = if ldec_expr(Rec(items), Nil) then tknown_decimal_record2(ldec_value(items, "coefficient"), ldec_value(items, "scale")) else TyAny
+fn tknown_decimal_record2(c, s) = if c == (0 - 999999999999999999) or s == (0 - 999999999999999999) then TyAny else TyDecimalLiteral(c, s)
+fn ldec_value(items, key) = match items
+    Nil => 0 - 999999999999999999
+    Cons(h, t) => if h.key == key then ldec_num(h.val) else ldec_value(t, key)
+fn ldec_num(e) = match e
+    Num(n) => n
+    _ => 0 - 999999999999999999
+fn tknownctor(nm, tt) = if isctor(nm) then tknownctor2(tctorlookup(nm, tt.ctors), tctorcnt(nm, tt.ctors)) else TyAny
+fn tknownctor2(m, n) = if n != 1 then TyAny else tknownctor3(m)
+fn tknownctor3(m) = match m
+    Nil        => TyAny
+    Cons(v, r) => TyName(v.en)
+fn tknownrec(tn, m) = match m
+    Nil        => TyAny
+    Cons(rd, r) => TyName(tn)
+fn tystr(t) = match t
+    TyName(n) => n
+    TyList(e) => "[" + tystr(e) + "]"
+    TyApply(n, e) => n + "[" + tystr(e) + "]"
+    TyDecimal(p, s) => "decimal(" + str(p) + ", " + str(s) + ")"
+    TyDecimalLiteral(c, s) => "decimal literal"
+    _         => "?"
+## tcompat(expected, known): 1 unless both are known and differ
+fn tcompat(ex, k) = match ex
+    TyAny     => 1
+    TyName(n) => tcompatn(n, k)
+    TyList(e) => tcompatl(e, k)
+    TyApply(n, e) => tcompatapply(n, e, k)
+    TyDecimal(p, s) => tcompatdecimal(p, s, k)
+fn tcompatn(n, k) = match k
+    TyAny     => 1
+    TyName(m) => if n == m then 1 else 0
+    TyList(e) => 0
+    TyDecimal(p, s) => 0
+    TyDecimalLiteral(c, s) => 0
+fn tcompatl(e, k) = match k
+    TyAny     => 1
+    TyName(m) => 0
+    TyList(e2) => tcompat(e, e2)
+    TyDecimal(p, s) => 0
+    TyDecimalLiteral(c, s) => 0
+fn tcompatapply(n, e, k) = match k
+    TyAny => 1
+    TyApply(n2, e2) => if n == n2 then tcompat(e, e2) else 0
+    _ => 0
+fn tcompatdecimal(p, s, known) = match known
+    TyAny => 1
+    TyDecimal(p2, s2) => if p == p2 and s == s2 then 1 else 0
+    TyDecimalLiteral(c, s2) => tdecimal_literal_fits(c, s2, p, s)
+    _ => 0
+fn tdecimal_literal_fits(c, source_scale, precision, target_scale) = if source_scale > target_scale then tdecimal_reduce_fits(c, source_scale - target_scale, precision) else if c == 0 then 1 else tdecimal_digits(c) + target_scale - source_scale <= precision
+fn tdecimal_reduce_fits(c, shift, precision) = let divisor = tdecimal_pow10(shift) in if c % divisor == 0 then tdecimal_digits(c / divisor) <= precision else 0
+fn tdecimal_digits(c) = count(str(if c < 0 then 0 - c else c))
+fn tdecimal_pow10(n) = if n <= 0 then 1 else 10 * tdecimal_pow10(n - 1)
+fn tchksig(nm, args, m, tt) = match m
+    Nil        => 0
+    Cons(sg, r) => tchkargs(nm, 1, args, sg.pn, sg.pt, tt)
+fn phd(xs) = match xs
+    Nil        => ""
+    Cons(h, t) => h
+fn ptl(xs) = match xs
+    Nil        => Nil
+    Cons(h, t) => t
+fn tchkargs(nm, i, args, pns, pts, tt) = match args
+    Nil        => 0
+    Cons(a, rest) => tchkargs2(nm, i, a, rest, pns, pts, tt)
+fn tchkargs2(nm, i, a, rest, pns, pts, tt) = match pts
+    Nil        => 0
+    Cons(ty, pr) => tchkarg(nm, i, phd(pns), ty, tknown(a, tt)) + tchkargs(nm, i + 1, rest, ptl(pns), pr, tt)
+fn tchkarg(nm, i, pn, ty, k) = if tcompat(ty, k) == 1 then 1 else ctfail("lume: type error: argument " + str(i) + " of '" + nm + "' has type " + tystr(k) + " but parameter '" + pn + "' expects " + tystr(ty) + "\n")
+fn tchkret(nm, body, m, tt) = match m
+    Nil        => 0
+    Cons(sg, r) => tchkret2(nm, sg.rt, tknown(body, tt))
+fn tchkret2(nm, rt, k) = if tcompat(rt, k) == 1 then 1 else ctfail("lume: type error: function '" + nm + "' returns " + tystr(k) + " but is declared to return " + tystr(rt) + "\n")
+
+## --- C3: generic argument checking (reuses F2's `tknown`/`tcompat`/`tchkarg`) -----------------------------------
+## A call `id(int, "hi")` to a generic function is checked left-to-right against the GSig parameter list, threading a
+## type environment `env` (type-parameter name -> the TyName it was bound to). A COMPTIME parameter (cf=1, e.g.
+## `comptime T: type`) consumes its argument as a TYPE value: a bare type name `Var("int")` binds `T := int` (any
+## non-name argument binds nothing, so the parameter stays unknown and nothing downstream is flagged -- zero false
+## positives). A RUNTIME parameter (cf=0) is checked exactly as in F2, except its declared type is first substituted
+## through `env`: `x: T` with `T := int` becomes `x: int`, so `id(int, "hi")` reports `argument 2 ... has type str but
+## parameter 'x' expects int`. `tps` is the set of this function's type-parameter names, so only those names are
+## substituted (and, if a type param was never bound, they resolve to TyAny = unknown, never a false error). `tsubst`
+## leaves a concrete type (`int`, a declared type) untouched. Argument indices count ALL arguments as written, so the
+## message's position matches the source. Superior to Zig: gradual (annotations optional), AI-first (one clear
+## message), and never a false positive on an argument whose type is not inequivocally known.
+fn tglookup(nm, gs) = match gs
+    Nil        => Nil
+    Cons(h, t) => if h.fname == nm then Cons(h, Nil) else tglookup(nm, t)
+fn tchkgcall(nm, args, gg, tt) = tchkgargs(nm, 1, args, gg.params, {env: Nil, tps: tpset(gg.params), tt: tt})
+fn tchkgargs(nm, i, args, ps, c) = match ps
+    Nil         => 0
+    Cons(p, pr) => tchkgargs2(nm, i, args, p, pr, c)
+fn tchkgargs2(nm, i, args, p, pr, c) = match args
+    Nil         => 0
+    Cons(a, ar) => tchkgstep(nm, i, a, ar, p, pr, c)
+fn tchkgstep(nm, i, a, ar, p, pr, c) = if p.cf == 1 then tchkgargs(nm, i + 1, ar, pr, {env: gbind(p.pn, a, c.env), tps: c.tps, tt: c.tt}) else tchkgrt(nm, i, a, ar, p, pr, c)
+fn tchkgrt(nm, i, a, ar, p, pr, c) = tchkarg(nm, i, p.pn, tsubst(p.pt, c.env, c.tps), tknown(a, c.tt)) + tchkgargs(nm, i + 1, ar, pr, c)
+fn tpset(ps) = match ps
+    Nil        => Nil
+    Cons(p, r) => if p.cf == 1 then Cons(p.pn, tpset(r)) else tpset(r)
+fn gbind(pn, a, env) = gbind2(pn, gtypeval(a), env)
+fn gbind2(pn, mt, env) = match mt
+    Nil         => env
+    Cons(ty, r) => Cons({k: pn, v: ty}, env)
+fn gtypeval(a) = match a
+    Var(nm) => Cons(TyName(nm), Nil)
+    _       => Nil
+fn tsubst(ty, env, tps) = match ty
+    TyName(n) => tsubstn(n, env, tps)
+    TyList(e) => TyList(tsubst(e, env, tps))
+    TyApply(n, e) => TyApply(n, tsubst(e, env, tps))
+    _         => ty
+fn tsubstn(n, env, tps) = if tmem(n, tps) == 1 then tlookupty(n, env) else TyName(n)
+fn tlookupty(n, env) = match env
+    Nil        => TyAny
+    Cons(h, t) => if h.k == n then h.v else tlookupty(n, t)
+fn tmem(n, xs) = match xs
+    Nil        => 0
+    Cons(h, t) => if h == n then 1 else tmem(n, t)
+## recursive argument check of a Call: for a generic call, skip the comptime (type-name) arguments -- they are types,
+## not value expressions, so they must not go through the ordinary `tchke` (which would, for a declared-type name,
+## wrongly treat it as a constructor use). For any non-generic call, check every argument as before.
+fn tchkeargsc(nm, args, g, tt) = match g
+    Nil         => tchkeargs(args, tt)
+    Cons(gg, r) => tchkeargs(gfilterrt(args, gg.params), tt)
+fn gfilterrt(args, ps) = match ps
+    Nil         => args
+    Cons(p, pr) => gfilterrt2(args, p, pr)
+fn gfilterrt2(args, p, pr) = match args
+    Nil         => Nil
+    Cons(a, ar) => if p.cf == 1 then gfilterrt(ar, pr) else Cons(a, gfilterrt(ar, pr))
+

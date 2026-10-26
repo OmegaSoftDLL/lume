@@ -1,0 +1,95 @@
+## --- parser: programs (fn definitions, print statements, and bare expression statements) ---
+## A statement is `fn ...`, `print <expr>`, or a bare `<expr>` evaluated for its effect (value discarded).
+## `fn`/`print` are dispatched by keyword; anything else begins an expression statement. The program is a
+## sequence of statements up to end of input (the `Nil` arm stops the recursion). Each top-level `<expr>` must
+## consume at least one token (prim always advances on a non-empty stream), so progmore cannot loop forever.
+## F2: a parameter may carry an optional annotation `name: T` and the signature an optional `-> R` (T as in F1:
+## `int`, `str`, a declared name, `[T]`, or D1's `decimal(p, s)`). `items` are the bare names (so `Fn(nm, ps, body)` is UNCHANGED and the
+## codegen never sees a type); `tys` is the parallel list of annotations, `TyAny` where a parameter has none.
+## C3: a parameter may be prefixed `comptime` (a Zig-style comptime type parameter: `fn id(comptime T: type, x: T)`).
+## The params record now also carries `plist` = one {cf, pn, pt} per parameter in source order (cf=1 iff it is a
+## comptime parameter, pn its name, pt its type expression), while `items` holds ONLY the RUNTIME parameter names.
+## So `Fn(nm, items, body)` is byte-identical for a comptime-free function (no comptime param => every cf=0 =>
+## items == all names => exactly the pre-C3 AST, so the self-host fixpoint is untouched); the comptime params are
+## recorded in a separate `GSig` statement (like F2's `Sig`), never in `Fn`, so codegen never sees an erased param.
+fn parseparams(ts) = if headtext(ts) == ")" then {items: Nil, tys: Nil, plist: Nil, rest: droponce(ts)} else parseparamk(ts)
+fn parseparamk(ts) = if headtext(ts) == "comptime" then parseparam(headtext(droponce(ts)), 1, droponce(droponce(ts))) else parseparam(headtext(ts), 0, droponce(ts))
+fn parseparam(nm, ct, ts) = if headtext(ts) == ":" then parseparamt(nm, ct, parsetype1(droponce(ts))) else parammore(nm, TyAny, ct, ts)
+fn parseparamt(nm, ct, r) = parammore(nm, r.node, ct, r.rest)
+fn parammore(nm, ty, ct, ts) = if headtext(ts) == "," then parammcons(nm, ty, ct, parseparams(droponce(ts))) else parammend(nm, ty, ct, skiprp(ts))
+fn parammcons(nm, ty, ct, rr) = {items: gaddrt(nm, ct, rr.items), tys: Cons(ty, rr.tys), plist: Cons({cf: ct, pn: nm, pt: ty}, rr.plist), rest: rr.rest}
+fn parammend(nm, ty, ct, rest) = {items: gaddrt(nm, ct, Nil), tys: Cons(ty, Nil), plist: Cons({cf: ct, pn: nm, pt: ty}, Nil), rest: rest}
+fn gaddrt(nm, ct, rest) = if ct == 0 then Cons(nm, rest) else rest
+fn parseret(ts) = if headtext(ts) == "-" and headtext(droponce(ts)) == ">" then parseret2(parsetype1(droponce(droponce(ts)))) else {ty: TyAny, rest: ts}
+fn parseret2(r) = {ty: r.node, rest: r.rest}
+## `sg` is the annotation record of the function: `Nil` when nothing is annotated (the AST is then exactly the
+## pre-F2 one), else a `Sig(name, paramnames, paramtypes, rettype)` that parseprog places just before the `Fn`.
+fn parsefn(t) = parsefn2(headtext(t), parseparams(dropkw(droponce(t), "(")))
+fn parsefn2(nm, ps) = parsefn3(nm, ps, parseret(ps.rest))
+fn parsefn3(nm, ps, rt) = parsefn4(nm, ps, rt, expr(dropkw(rt.rest, "=")))
+fn parsefn4(nm, ps, rt, b) = {node: Fn(nm, ps.items, b.node), sg: mksig(nm, ps, rt.ty), rest: b.rest}
+fn isany(t) = match t
+    TyAny => 1
+    _     => 0
+fn anyann(tys) = match tys
+    Nil        => 0
+    Cons(h, t) => if isany(h) == 0 then 1 else anyann(t)
+## C3: a function with any comptime parameter emits a `GSig(name, plist, rettype)` (plist = all params with their
+## comptime flag / name / type) instead of F2's `Sig`; the checker reads it for generic argument checking and the
+## erasure pass reads it to drop comptime arguments. A comptime-free function keeps F2's exact `Sig`/`Nil` choice.
+fn mksig(nm, ps, rty) = if ganyct(ps.plist) == 1 then GSig(nm, ps.plist, rty) else mksigf(nm, ps, rty)
+fn mksigf(nm, ps, rty) = if anyann(ps.tys) == 1 or isany(rty) == 0 then Sig(nm, ps.items, ps.tys, rty) else Nil
+fn ganyct(pl) = match pl
+    Nil        => 0
+    Cons(p, r) => if p.cf == 1 then 1 else ganyct(r)
+fn parseprint(t) = let e = expr(t) in {node: Print(e.node), rest: e.rest}
+fn parsestmt(ts) = if headtext(ts) == "fn" then parsefn(droponce(ts)) else if headtext(ts) == "type" then parsetype(droponce(ts)) else parseprint(droponce(ts))
+fn progmore(r) = Cons(r.node, parseprog(r.rest))
+fn progfn(r) = progsig(r.sg, Cons(r.node, parseprog(r.rest)))
+fn progsig(sg, rest) = match sg
+    Nil => rest
+    _   => Cons(sg, rest)
+fn lexprstmt(e) = {node: ExprS(e.node), rest: e.rest}
+fn parseprog(ts) = match ts
+    Nil        => Nil
+    Cons(h, t) => if h.text == "fn" then progfn(parsefn(droponce(ts))) else if h.text == "print" or h.text == "type" then progmore(parsestmt(ts)) else progmore(lexprstmt(expr(ts)))
+fn parseprogram(s) = parseprog(lex(s, 0))
+
+## --- parser: named type declarations (F1) -----------------------------------------------------------------
+## Inline, layout-free syntax (the lexer is indentation-blind, so the README's indented form is not used here):
+##   type Dept = enum Sales | IT | Finance            -- a sum type (ADT), nullary variants
+##   type Node = enum Nil | Cons(int, Node)            -- a variant with a typed, positional payload
+##   type Point = record x: int, y: int                -- a product type with named, typed fields
+## A field/payload type `T` is `int`, `str`, a declared type name, or `[T]` (a list of T). Like `match`, the
+## parts are delimited by LOOKAHEAD: enum variants continue while the next token is `|`, record fields while it
+## is `,`; the declaration ends as soon as the separator is absent, leaving the stream on the next statement
+## (`fn` / `print` / `type` / an expression). A declaration lowers to a `TypeS(name, kind, items)` statement that
+## emits NO code (compile-time information only); `kind` is "enum" (items are `{tag, ar}`) or "record" (items are
+## `{fname, fty}`). The `enum` keyword is optional (so `type T = A | B` is accepted); anything that is not
+## `record` is parsed as an enum. Type expressions are kept (`TyName`/`TyList`); F2 checks them against call arguments.
+fn parsetype(t) = parsetypebody(headtext(t), dropkw(droponce(t), "="))
+fn parsetypebody(nm, t) = if headtext(t) == "record" then parserecordty(nm, droponce(t)) else parseenumty(nm, dropkw(t, "enum"))
+fn parseenumty(nm, t) = parseenumty2(nm, parsevariants(t))
+fn parseenumty2(nm, vs) = {node: TypeS(nm, "enum", vs.items), rest: vs.rest}
+fn parsevariants(ts) = parsevariant(headtext(ts), droponce(ts))
+fn parsevariant(tag, ts) = if headtext(ts) == "(" then parsevariantp(tag, parsetypelist(droponce(ts))) else parsevariantend(tag, 0, ts)
+fn parsevariantp(tag, a) = parsevariantend(tag, len(a.items), a.rest)
+fn parsevariantend(tag, ar, ts) = if headtext(ts) == "|" then parsevariantcons(tag, ar, parsevariants(droponce(ts))) else {items: Cons({tag: tag, ar: ar}, Nil), rest: ts}
+fn parsevariantcons(tag, ar, rr) = {items: Cons({tag: tag, ar: ar}, rr.items), rest: rr.rest}
+fn parserecordty(nm, t) = parserecordty2(nm, parsefields(t))
+fn parserecordty2(nm, fs) = {node: TypeS(nm, "record", fs.items), rest: fs.rest}
+fn parsefields(ts) = parsefield(headtext(ts), dropkw(droponce(ts), ":"))
+fn parsefield(fname, ts) = parsefieldt(fname, parsetype1(ts))
+fn parsefieldt(fname, r) = if headtext(r.rest) == "," then parsefieldcons(fname, r.node, parsefields(droponce(r.rest))) else {items: Cons({fname: fname, fty: r.node}, Nil), rest: r.rest}
+fn parsefieldcons(fname, fty, rr) = {items: Cons({fname: fname, fty: fty}, rr.items), rest: rr.rest}
+fn parsetypelist(ts) = if headtext(ts) == ")" then {items: Nil, rest: droponce(ts)} else parsetypemore(parsetype1(ts))
+fn parsetypemore(r) = if headtext(r.rest) == "," then parsetypecons(r.node, parsetypelist(droponce(r.rest))) else {items: Cons(r.node, Nil), rest: skiprp(r.rest)}
+fn parsetypecons(n, rr) = {items: Cons(n, rr.items), rest: rr.rest}
+fn parsetype1(ts) = if headtext(ts) == "[" then parsetypelistof(parsetype1(droponce(ts))) else if headtext(ts) == "decimal" and headtext(droponce(ts)) == "(" then parsetypedecimal(droponce(droponce(ts))) else if headtext(ts) == "table" and headtext(droponce(ts)) == "[" then parsetypetable(droponce(droponce(ts))) else {node: TyName(headtext(ts)), rest: droponce(ts)}
+fn parsetypelistof(r) = {node: TyList(r.node), rest: skiprk(r.rest)}
+fn parsetypetable(ts) = parsetypetable2(parsetype1(ts))
+fn parsetypetable2(r) = {node: TyApply("table", r.node), rest: skiprk(r.rest)}
+fn parsetypedecimal(ts) = let p = toint(headtext(ts)) in let s = toint(headtext(droponce(droponce(ts)))) in let rest = skiprp(droponce(droponce(droponce(ts)))) in parsetypedecimal2(p, s, rest)
+fn parsetypedecimal2(p, s, rest) = if p < 1 or p > 18 or s < 0 or s > p then ctfail("lume: type error: decimal annotation requires 1 <= precision <= 18 and 0 <= scale <= precision\n") else {node: TyDecimal(p, s), rest: rest}
+fn skiprk(ts) = if headtext(ts) == "]" then droponce(ts) else ts
+

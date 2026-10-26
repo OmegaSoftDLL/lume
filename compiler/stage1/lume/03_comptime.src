@@ -1,0 +1,236 @@
+## --- comptime: evaluate `comptime <expr>`, `quote <expr>`, and `splice <expr>` at COMPILE TIME ---
+## `comptime E` consumes ONE primary E (so `comptime(...)` folds the whole parenthesised expression). C1 folded
+## in the parser; C2 DEFERS the fold to a post-parse pass (`cfold`, below) so that, by the time we evaluate, ALL
+## `fn`s are known and a `comptime` may CALL pure user functions (recursion included).
+## M1 exposes the compiler's own AST as a first-class comptime ADT value: `quote(e)` reifies `e` into constructors
+## `Num(n)`, `Str(s)`, `Var(nm)`, `Bin(op, l, r)`, `If(c, t, e2)`, `LetIn(nm, v, b)`, `Call(nm, args)` (where `args`
+## is a `Cons`/`Nil` list of AST values); `ceval` evaluates constructor expressions (`cv_ctor`), structural `==`/`!=`,
+## and `match` pattern matching (`PWild`, `PInt`, `PStr`, `PBind`, `PCons`) at compile time; and `splice(e)` reflects
+## a comptime-computed AST value back into a live compiler AST node that is compiled to native x86-64.
+fn cbudget() = 1000000
+fn cdmax() = 2000
+fn cv_int(n) = {kind: "int", i: n, s: "", items: Nil}
+fn cv_str(v) = {kind: "str", i: 0, s: v, items: Nil}
+fn cv_ctor(tag, xs) = {kind: "ctor", i: 0, s: tag, items: xs}
+fn cr(v, f) = {v: v, f: f}
+fn cvhd(xs) = match xs
+    Nil        => cv_int(0)
+    Cons(h, t) => h
+fn cvtl(xs) = match xs
+    Nil        => Nil
+    Cons(h, t) => t
+fn ceval(e, env, ft, f, cd) = if f <= 0 then ctfail("lume: comptime error: comptime evaluation exceeded " + str(cbudget()) + " steps (possible runaway comptime evaluation)\n") else cstep(e, env, ft, f - 1, cd)
+fn cstep(e, env, ft, f, cd) = match e
+    Num(n)          => cr(cv_int(n), f)
+    Str(v)          => cr(cv_str(v), f)
+    Bin(op, a, b)   => cbin(op, ceval(a, env, ft, f, cd), b, env, ft, cd)
+    If(c, t, e2)    => cif(ceval(c, env, ft, f, cd), t, e2, env, ft, cd)
+    LetIn(nm, v, b) => clet(nm, ceval(v, env, ft, f, cd), b, env, ft, cd)
+    Var(nm)         => cr(if isctor(nm) then cv_ctor(nm, Nil) else cevalvar(nm, env), f)
+    Call(nm, args)  => if isctor(nm) then cctor(nm, args, env, ft, f, cd) else ccall(nm, args, env, ft, f, cd)
+    CT(inner)       => ceval(inner, env, ft, f, cd)
+    Quote(inner)    => cr(creify(inner), f)
+    Splice(inner)   => csplice(ceval(inner, env, ft, f, cd), env, ft, cd)
+    Match(sc, arms) => cmatch(ceval(sc, env, ft, f, cd), arms, env, ft, cd)
+    Rec(items)      => ctfail("lume: comptime error: record literal is not foldable at compile time\n")
+    Field(o, nm)    => ctfail("lume: comptime error: field access is not foldable at compile time\n")
+    _               => ctfail("lume: comptime error: expression is not foldable at compile time\n")
+fn cctor(nm, args, env, ft, f, cd) = cctor2(nm, cargs(args, env, ft, f, cd))
+fn cctor2(nm, ra) = cr(cv_ctor(nm, ra.vals), ra.f)
+fn cmatch(rsc, arms, env, ft, cd) = cmatcharms(rsc.v, arms, env, ft, rsc.f, cd)
+fn cmatcharms(sv, arms, env, ft, f, cd) = match arms
+    Nil        => ctfail("lume: comptime error: non-exhaustive 'match' at compile time\n")
+    Cons(h, t) => cmatcharm(sv, h, t, env, ft, f, cd, cpatmatch(h.pat, sv, env))
+fn cmatcharm(sv, h, t, env, ft, f, cd, mp) = if mp.ok == 1 then ceval(h.body, mp.env, ft, f, cd) else cmatcharms(sv, t, env, ft, f, cd)
+fn cpatmatch(pat, sv, env) = match pat
+    PWild            => {ok: 1, env: env}
+    PInt(n)          => if sv.kind == "int" and sv.i == n then {ok: 1, env: env} else {ok: 0, env: env}
+    PStr(s)          => if sv.kind == "str" and sv.s == s then {ok: 1, env: env} else {ok: 0, env: env}
+    PBind(nm)        => {ok: 1, env: Cons({k: nm, v: sv}, env)}
+    PCons(tag, subs) => if sv.kind == "ctor" and sv.s == tag and len(subs) == len(sv.items) then cpatlist(subs, sv.items, env) else {ok: 0, env: env}
+fn cpatlist(ps, vs, env) = match ps
+    Nil         => {ok: 1, env: env}
+    Cons(p, pt) => cpatlist2(p, pt, vs, env)
+fn cpatlist2(p, pt, vs, env) = match vs
+    Nil         => {ok: 0, env: env}
+    Cons(v, vt) => cpatlist3(cpatmatch(p, v, env), pt, vt)
+fn cpatlist3(r, pt, vt) = if r.ok == 1 then cpatlist(pt, vt, r.env) else r
+fn cveq(a, b) = if a.kind != b.kind then 0 else if a.kind == "int" then (if a.i == b.i then 1 else 0) else if a.kind == "str" then (if a.s == b.s then 1 else 0) else if a.s == b.s and len(a.items) == len(b.items) then cveqlist(a.items, b.items) else 0
+fn cveqlist(xs, ys) = match xs
+    Nil          => 1
+    Cons(h, t)   => cveqlist2(h, t, ys)
+fn cveqlist2(h, t, ys) = match ys
+    Nil          => 0
+    Cons(yh, yt) => if cveq(h, yh) == 1 then cveqlist(t, yt) else 0
+fn cbin(op, ra, b, env, ft, cd) = cbin2(op, ra.v, ceval(b, env, ft, ra.f, cd))
+fn cbin2(op, av, rb) = cr(cevalbin(op, av, rb.v), rb.f)
+fn cif(rc, t, e2, env, ft, cd) = cif2(rc.v, rc.f, t, e2, env, ft, cd)
+fn cif2(cv, f, t, e2, env, ft, cd) = if cv.kind == "int" then (if cv.i != 0 then ceval(t, env, ft, f, cd) else ceval(e2, env, ft, f, cd)) else ctfail("lume: comptime error: `if` condition is not an integer at compile time\n")
+fn clet(nm, rv, b, env, ft, cd) = ceval(b, Cons({k: nm, v: rv.v}, env), ft, rv.f, cd)
+fn cevalvar(nm, env) = match env
+    Nil        => ctfail("lume: comptime error: free variable '" + nm + "' is not bound by a comptime let-in or function parameter\n")
+    Cons(h, t) => if h.k == nm then h.v else cevalvar(nm, t)
+fn cevalbin(op, a, b) = if op == "==" and a.kind == b.kind then cv_int(cveq(a, b)) else if op == "!=" and a.kind == b.kind then cv_int(if cveq(a, b) == 1 then 0 else 1) else if a.kind == "int" and b.kind == "int" then cevalii(op, a.i, b.i) else if op == "+" and a.kind == "str" and b.kind == "str" then cv_str(a.s + b.s) else ctfail("lume: comptime error: operator '" + op + "' is not defined for these comptime value types\n")
+fn cevalii(op, x, y) = if op == "+" then cv_int(x + y) else if op == "-" then cv_int(x - y) else if op == "*" then cv_int(x * y) else if op == "/" then cevaldiv(x, y) else if op == "%" then cevalmod(x, y) else if op == "==" then cv_int(x == y) else if op == "!=" then cv_int(x != y) else if op == "<" then cv_int(x < y) else if op == ">" then cv_int(x > y) else if op == "<=" then cv_int(x <= y) else if op == ">=" then cv_int(x >= y) else if op == "and" then cv_int(x != 0 and y != 0) else if op == "or" then cv_int(x != 0 or y != 0) else ctfail("lume: comptime error: unknown operator '" + op + "' at compile time\n")
+fn cevaldiv(x, y) = if y == 0 then ctfail("lume: comptime error: division by zero at compile time\n") else cv_int(x / y)
+fn cevalmod(x, y) = if y == 0 then ctfail("lume: comptime error: modulo by zero at compile time\n") else cv_int(x % y)
+fn ctnode(cv) = if cv.kind == "int" then Num(cv.i) else if cv.kind == "str" then Str(cv.s) else if isnil(cv.items) == 1 then Var(cv.s) else Call(cv.s, ctnodelist(cv.items))
+fn ctnodelist(xs) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons(ctnode(h), ctnodelist(t))
+fn creify(e) = match e
+    Num(n)          => cv_ctor("Num", Cons(cv_int(n), Nil))
+    Str(v)          => cv_ctor("Str", Cons(cv_str(v), Nil))
+    Var(nm)         => cv_ctor("Var", Cons(cv_str(nm), Nil))
+    Bin(op, a, b)   => cv_ctor("Bin", Cons(cv_str(op), Cons(creify(a), Cons(creify(b), Nil))))
+    If(c, t, e2)    => cv_ctor("If", Cons(creify(c), Cons(creify(t), Cons(creify(e2), Nil))))
+    LetIn(nm, v, b) => cv_ctor("LetIn", Cons(cv_str(nm), Cons(creify(v), Cons(creify(b), Nil))))
+    Call(nm, args)  => cv_ctor("Call", Cons(cv_str(nm), Cons(creifylist(args), Nil)))
+    _               => ctfail("lume: comptime error: unsupported AST node in quote\n")
+fn creifylist(xs) = match xs
+    Nil        => cv_ctor("Nil", Nil)
+    Cons(h, t) => cv_ctor("Cons", Cons(creify(h), Cons(creifylist(t), Nil)))
+fn isvalidbinop(op) = op == "+" or op == "-" or op == "*" or op == "/" or op == "%" or op == "==" or op == "!=" or op == "<" or op == ">" or op == "<=" or op == ">=" or op == "and" or op == "or"
+fn cunreify(cv) = if cv.kind != "ctor" then ctfail("lume: comptime error: splice expects an AST constructor value (Num, Str, Var, Bin, If, LetIn, Call)\n") else cunreifyctor(cv.s, cv.items)
+fn cunreifyctor(tag, xs) = if tag == "Num" and len(xs) == 1 and (cvhd(xs)).kind == "int" then Num((cvhd(xs)).i) else if tag == "Str" and len(xs) == 1 and (cvhd(xs)).kind == "str" then Str((cvhd(xs)).s) else if tag == "Var" and len(xs) == 1 and (cvhd(xs)).kind == "str" and count((cvhd(xs)).s) > 0 then Var((cvhd(xs)).s) else if tag == "Bin" and len(xs) == 3 and (cvhd(xs)).kind == "str" and isvalidbinop((cvhd(xs)).s) then Bin((cvhd(xs)).s, cunreify(cvhd(cvtl(xs))), cunreify(cvhd(cvtl(cvtl(xs))))) else if tag == "If" and len(xs) == 3 then If(cunreify(cvhd(xs)), cunreify(cvhd(cvtl(xs))), cunreify(cvhd(cvtl(cvtl(xs))))) else if tag == "LetIn" and len(xs) == 3 and (cvhd(xs)).kind == "str" and count((cvhd(xs)).s) > 0 then LetIn((cvhd(xs)).s, cunreify(cvhd(cvtl(xs))), cunreify(cvhd(cvtl(cvtl(xs))))) else if tag == "Call" and len(xs) == 2 and (cvhd(xs)).kind == "str" and count((cvhd(xs)).s) > 0 then Call((cvhd(xs)).s, cunreifylist(cvhd(cvtl(xs)))) else ctfail("lume: comptime error: invalid AST node '" + tag + "' in splice\n")
+fn cunreifylist(cv) = if cv.kind != "ctor" then ctfail("lume: comptime error: Call arguments in splice must be a Cons/Nil list of AST nodes\n") else if cv.s == "Nil" and len(cv.items) == 0 then Nil else if cv.s == "Cons" and len(cv.items) == 2 then Cons(cunreify(cvhd(cv.items)), cunreifylist(cvhd(cvtl(cv.items)))) else ctfail("lume: comptime error: Call arguments in splice must be a Cons/Nil list of AST nodes\n")
+fn csplice(r, env, ft, cd) = ceval(cunreify(r.v), env, ft, r.f, cd)
+## --- comptime calls to pure user functions: look up `nm` in the function table, evaluate the args (comptime),
+## bind them to the params in a FRESH scope, and evaluate the body. A name that is not a user `fn` is not pure. ---
+fn ispureprim(nm) = nm == "str" or nm == "count" or nm == "at" or nm == "slice" or nm == "toint" or nm == "ord"
+fn cpureprim(nm, ra) = cr(cpureprim2(nm, ra.vals), ra.f)
+fn cpureprim2(nm, vs) = if nm == "str" and len(vs) == 1 then (if (cvhd(vs)).kind == "int" then cv_str(str((cvhd(vs)).i)) else if (cvhd(vs)).kind == "str" then cvhd(vs) else ctfail("lume: comptime error: 'str' expects int or str at compile time\n")) else if nm == "count" and len(vs) == 1 and (cvhd(vs)).kind == "str" then cv_int(count((cvhd(vs)).s)) else if nm == "toint" and len(vs) == 1 and (cvhd(vs)).kind == "str" then cv_int(toint((cvhd(vs)).s)) else if nm == "ord" and len(vs) == 1 and (cvhd(vs)).kind == "str" then cv_int(ord((cvhd(vs)).s)) else if nm == "at" and len(vs) == 2 and (cvhd(vs)).kind == "str" and (cvhd(cvtl(vs))).kind == "int" then cv_str(at((cvhd(vs)).s, (cvhd(cvtl(vs))).i)) else if nm == "slice" and len(vs) == 3 and (cvhd(vs)).kind == "str" and (cvhd(cvtl(vs))).kind == "int" and (cvhd(cvtl(cvtl(vs)))).kind == "int" then cv_str(slice((cvhd(vs)).s, (cvhd(cvtl(vs))).i, (cvhd(cvtl(cvtl(vs)))).i)) else ctfail("lume: comptime error: invalid arguments to '" + nm + "' at compile time\n")
+fn ccall(nm, args, env, ft, f, cd) = ccall2(nm, lookupfn(nm, ft), args, env, ft, f, cd)
+fn ccall2(nm, mf, args, env, ft, f, cd) = match mf
+    Nil           => if ispureprim(nm) then cpureprim(nm, cargs(args, env, ft, f, cd)) else ctfail("lume: comptime error: cannot evaluate '" + nm + "' at compile time: not pure\n")
+    Cons(fn0, rr) => ccall3(nm, fn0, args, env, ft, f, cd)
+fn ccall3(nm, fn0, args, env, ft, f, cd) = if cd >= cdmax() then ctfail("lume: comptime error: comptime evaluation exceeded " + str(cdmax()) + " call levels (possible infinite recursion in '" + nm + "')\n") else ccall4(fn0, cargs(args, env, ft, f, cd), ft, cd)
+fn ccall4(fn0, ra, ft, cd) = match fn0
+    Fn(fnm, ps, body) => ceval(body, cbind(ps, ra.vals, Nil), ft, ra.f, cd + 1)
+    _                 => ctfail("lume: comptime error: not a function in comptime call\n")
+fn lookupfn(nm, ft) = match ft
+    Nil        => Nil
+    Cons(h, t) => if fnname(h) == nm then Cons(h, Nil) else lookupfn(nm, t)
+fn fnname(f0) = match f0
+    Fn(nm, ps, body) => nm
+    _                => ""
+fn cargs(args, env, ft, f, cd) = match args
+    Nil        => {vals: Nil, f: f}
+    Cons(h, t) => cargs2(ceval(h, env, ft, f, cd), t, env, ft, cd)
+fn cargs2(rh, t, env, ft, cd) = cargs3(rh, cargs(t, env, ft, rh.f, cd))
+fn cargs3(rh, rt) = {vals: Cons(rh.v, rt.vals), f: rt.f}
+fn cbind(ps, vals, env) = match ps
+    Nil         => env
+    Cons(p, pt) => cbind2(p, pt, vals, env)
+fn cbind2(p, pt, vals, env) = match vals
+    Nil         => ctfail("lume: comptime error: too few arguments in a comptime function call\n")
+    Cons(v, vt) => cbind(pt, vt, Cons({k: p, v: v}, env))
+fn parsect(t) = let r = prim(t) in {node: CT(r.node), rest: r.rest}
+fn parsequote(t) = let r = prim(t) in {node: Quote(r.node), rest: r.rest}
+fn parsesplice(t) = let r = prim(t) in {node: Splice(r.node), rest: r.rest}
+## --- comptime fold pass (post-parse): with every `fn` known, replace each `CT`, `Quote`, and `Splice` node
+## anywhere in the program. On a CT-free program (e.g. lumec.src itself) this is a faithful identity
+## rebuild of the AST, so the self-host fixpoint is untouched. ---
+fn cfold(prog) = cfoldstmts(prog, cbuildft(prog))
+fn cbuildft(prog) = match prog
+    Nil        => Nil
+    Cons(h, t) => cbuildft2(h, cbuildft(t))
+fn cbuildft2(s0, rest) = match s0
+    Fn(nm, ps, body) => Cons(s0, rest)
+    _                => rest
+fn cfoldstmts(prog, ft) = match prog
+    Nil        => Nil
+    Cons(h, t) => Cons(cfoldstmt(h, ft), cfoldstmts(t, ft))
+fn cfoldstmt(s0, ft) = match s0
+    Fn(nm, ps, body) => Fn(nm, ps, cfolde(body, ft))
+    Print(v)         => Print(cfolde(v, ft))
+    ExprS(v)         => ExprS(cfolde(v, ft))
+    _                => s0
+fn cfoldct(r) = ctnode(r.v)
+fn cfolde(e, ft) = match e
+    CT(inner)       => cfoldct(ceval(inner, Nil, ft, cbudget(), 0))
+    Quote(inner)    => ctnode(creify(inner))
+    Splice(inner)   => cfolde(cunreify((ceval(inner, Nil, ft, cbudget(), 0)).v), ft)
+    Bin(op, a, b)   => Bin(op, cfolde(a, ft), cfolde(b, ft))
+    If(c, t, e2)    => If(cfolde(c, ft), cfolde(t, ft), cfolde(e2, ft))
+    LetIn(nm, v, b) => LetIn(nm, cfolde(v, ft), cfolde(b, ft))
+    Call(nm, args)  => Call(nm, cfoldeargs(args, ft))
+    Rec(items)      => Rec(cfolderec(items, ft))
+    RecT(tn, items) => RecT(tn, cfolderec(items, ft))
+    Field(o, nm)    => Field(cfolde(o, ft), nm)
+    Match(sc, arms) => Match(cfolde(sc, ft), cfoldearms(arms, ft))
+    _               => e
+fn cfoldeargs(xs, ft) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons(cfolde(h, ft), cfoldeargs(t, ft))
+fn cfolderec(xs, ft) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons({key: h.key, val: cfolde(h.val, ft)}, cfolderec(t, ft))
+fn cfoldearms(xs, ft) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons({pat: h.pat, body: cfolde(h.body, ft)}, cfoldearms(t, ft))
+
+## --- C3 type erasure (post-parse, post-check): the comptime parameters of a generic function are apagados at
+## runtime. The function DEFINITION is already erased (the parser put only the runtime params in `Fn`); this pass
+## erases the CALL SITES: for every `Call(nm, args)` whose `nm` is a generic function, it DROPS the arguments that
+## sit at a comptime position, so `id(int, 42)` emits the call `id(42)` -- the type argument is consumed at build
+## time and never pushed. This is monomorphisation-lite: the runtime is dynamic/boxed, so one erased body serves
+## every instantiation; the win is compile-time checking plus the erasure, exactly as a comptime generic should.
+## On a program with NO generic function the gsig table is empty, so every `Call` is rebuilt unchanged -- a faithful
+## identity rebuild of the AST (like `cfold`), so `lumec.src` itself and every pre-C3 `.src` are byte-identical and
+## the fixpoint is untouched. Erasure runs BEFORE codegen (so the type args never reach it) and AFTER the checker
+## (which needs the type args present to bind the type parameters).
+fn gerase(prog) = gestmts(prog, gcoll(prog))
+fn gcoll(prog) = match prog
+    Nil        => Nil
+    Cons(h, t) => gcoll2(h, t)
+fn gcoll2(h, t) = match h
+    GSig(nm, pl, rt) => Cons({fname: nm, cfs: gcfs(pl)}, gcoll(t))
+    _                => gcoll(t)
+fn gcfs(pl) = match pl
+    Nil        => Nil
+    Cons(p, r) => Cons(p.cf, gcfs(r))
+fn gestmts(prog, gt) = match prog
+    Nil        => Nil
+    Cons(h, t) => Cons(gestmt(h, gt), gestmts(t, gt))
+fn gestmt(s0, gt) = match s0
+    Fn(nm, ps, body) => Fn(nm, ps, geexpr(body, gt))
+    Print(v)         => Print(geexpr(v, gt))
+    ExprS(v)         => ExprS(geexpr(v, gt))
+    _                => s0
+fn geexpr(e, gt) = match e
+    Bin(op, a, b)   => Bin(op, geexpr(a, gt), geexpr(b, gt))
+    If(c, t, e2)    => If(geexpr(c, gt), geexpr(t, gt), geexpr(e2, gt))
+    LetIn(nm, v, b) => LetIn(nm, geexpr(v, gt), geexpr(b, gt))
+    Call(nm, args)  => gecall(nm, geargs(args, gt), gt)
+    Rec(items)      => Rec(gerec(items, gt))
+    RecT(tn, items) => RecT(tn, gerec(items, gt))
+    Field(o, nm)    => Field(geexpr(o, gt), nm)
+    Match(sc, arms) => Match(geexpr(sc, gt), gearms(arms, gt))
+    CT(inner)       => CT(geexpr(inner, gt))
+    Quote(inner)    => Quote(geexpr(inner, gt))
+    Splice(inner)   => Splice(geexpr(inner, gt))
+    _               => e
+fn geargs(xs, gt) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons(geexpr(h, gt), geargs(t, gt))
+fn gerec(xs, gt) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons({key: h.key, val: geexpr(h.val, gt)}, gerec(t, gt))
+fn gearms(xs, gt) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons({pat: h.pat, body: geexpr(h.body, gt)}, gearms(t, gt))
+fn gecall(nm, args, gt) = gecall2(nm, args, gtlookup(nm, gt))
+fn gecall2(nm, args, m) = match m
+    Nil        => Call(nm, args)
+    Cons(g, r) => Call(nm, gefilter(args, g.cfs))
+fn gtlookup(nm, gt) = match gt
+    Nil        => Nil
+    Cons(h, t) => if h.fname == nm then Cons(h, Nil) else gtlookup(nm, t)
+fn gefilter(args, cfs) = match cfs
+    Nil        => args
+    Cons(c, cr) => gefilter2(args, c, cr)
+fn gefilter2(args, c, cr) = match args
+    Nil        => Nil
+    Cons(a, ar) => if c == 1 then gefilter(ar, cr) else Cons(a, gefilter(ar, cr))
+
