@@ -985,10 +985,10 @@ fn cs_veval_all_true(es, env, old_env, ft) = match es
     Nil        => {ok: 1, hold: 1}
     Cons(h, t) => let rh = cs_veval(h, env, old_env, ft, 0) in if rh.ok == 0 then {ok: 0, hold: 0} else if rh.i == 0 then {ok: 1, hold: 0} else cs_veval_all_true(t, env, old_env, ft)
 fn cs_vprove_envs(envs, reqs, enss, body, ft, undec) = match envs
-    Nil          => if undec == 0 then {status: "proven", cex: ""} else {status: "runtime_checked", cex: ""}
+    Nil          => {status: "runtime_checked", cex: ""}
     Cons(env, r) => let rq = cs_veval_all_true(reqs, env, env, ft) in if rq.ok == 0 then cs_vprove_envs(r, reqs, enss, body, ft, 1) else if rq.hold == 0 then cs_vprove_envs(r, reqs, enss, body, ft, undec) else if cs_isnil(enss) == 1 then cs_vprove_envs(r, reqs, enss, body, ft, undec) else let rb = cs_veval(body, env, env, ft, 0) in if rb.ok == 0 then cs_vprove_envs(r, reqs, enss, body, ft, 1) else let penv = Cons({k: "result", v: rb}, Cons({k: "ret", v: rb}, env)) in let eq = cs_veval_all_true(enss, penv, env, ft) in if eq.ok == 0 then cs_vprove_envs(r, reqs, enss, body, ft, 1) else if eq.hold == 0 then {status: "refuted", cex: cs_vfmt_env(env) + " (result = " + str(rb.i) + ")"} else cs_vprove_envs(r, reqs, enss, body, ft, undec)
 fn cs_vprove_law_envs(envs, body, ft, undec) = match envs
-    Nil          => if undec == 0 then {status: "proven", cex: ""} else {status: "runtime_checked", cex: ""}
+    Nil          => {status: "runtime_checked", cex: ""}
     Cons(env, r) => let rb = cs_veval(body, env, env, ft, 0) in if rb.ok == 0 then cs_vprove_law_envs(r, body, ft, 1) else if rb.i == 0 then {status: "refuted", cex: cs_vfmt_env(env)} else cs_vprove_law_envs(r, body, ft, undec)
 fn cs_vprove_fn(nm, ps, body, mvs, ft) = match mvs
     Nil          => {proofs: Nil, diags: Nil}
@@ -1018,7 +1018,7 @@ fn cs_vprove_stmts(prog, vsigs, invs, ft) = match prog
     Cons(h, t) => cs_vprove_stmt1(h, t, vsigs, invs, ft)
 fn cs_vprove_stmt1(st, rest, vsigs, invs, ft) = match st
     VLawDecl(nm, ps, body)      => let pr = cs_vprove_law_envs(cs_vgen_envs(ps, 0, cs_len(ps)), body, ft, 0) in let pf = Cons({name: nm, kind: "law", status: pr.status, obligation: cs_expr_sexpr(body), counterexample: pr.cex}, Nil) in let dg = if pr.status == "refuted" then Cons(cs_mkdiag("V0001", "law", "contract error: law '" + nm + "' refuted with counterexample: " + pr.cex, "fix the implementation or refine law '" + nm + "'"), Nil) else Nil in let rr = cs_vprove_stmts(rest, vsigs, invs, ft) in {proofs: cs_app(pf, rr.proofs), diags: cs_app(dg, rr.diags)}
-    VTypeInvariant(nm, fs, inv) => let pf = Cons({name: nm, kind: "invariant", status: "proven", obligation: cs_expr_sexpr(inv), counterexample: ""}, Nil) in let rr = cs_vprove_stmts(rest, vsigs, invs, ft) in {proofs: cs_app(pf, rr.proofs), diags: rr.diags}
+    VTypeInvariant(nm, fs, inv) => let pf = Cons({name: nm, kind: "invariant", status: "runtime_checked", obligation: cs_expr_sexpr(inv), counterexample: ""}, Nil) in let rr = cs_vprove_stmts(rest, vsigs, invs, ft) in {proofs: cs_app(pf, rr.proofs), diags: rr.diags}
     Fn(nm, ps, body)            => let r1 = cs_vprove_fn(nm, ps, body, cs_vsiglookup(nm, vsigs), ft) in let r2 = cs_vchk_expr_e(body, nm, vsigs, invs, ft) in let rr = cs_vprove_stmts(rest, vsigs, invs, ft) in {proofs: cs_app(r1.proofs, cs_app(r2.proofs, rr.proofs)), diags: cs_app(r1.diags, cs_app(r2.diags, rr.diags))}
     Print(v)                    => let r1 = cs_vchk_expr_e(v, "<main>", vsigs, invs, ft) in let rr = cs_vprove_stmts(rest, vsigs, invs, ft) in {proofs: cs_app(r1.proofs, rr.proofs), diags: cs_app(r1.diags, rr.diags)}
     ExprS(v)                    => let r1 = cs_vchk_expr_e(v, "<main>", vsigs, invs, ft) in let rr = cs_vprove_stmts(rest, vsigs, invs, ft) in {proofs: cs_app(r1.proofs, rr.proofs), diags: cs_app(r1.diags, rr.diags)}

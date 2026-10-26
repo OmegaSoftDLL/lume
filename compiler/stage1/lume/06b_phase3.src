@@ -865,7 +865,7 @@ fn veval_all_true(es, env, old_env, fns) = match es
     Cons(h, t) => let rh = veval(h, env, old_env, fns, 0) in if rh.ok == 0 then {ok: 0, hold: 0} else if rh.i == 0 then {ok: 1, hold: 0} else veval_all_true(t, env, old_env, fns)
 
 fn vprove_envs(envs, reqs, enss, body, fns, undec) = match envs
-    Nil          => if undec == 0 then {status: 1, cex: ""} else {status: 0, cex: ""}
+    Nil          => {status: 0, cex: ""}
     Cons(env, r) => let rq = veval_all_true(reqs, env, env, fns) in if rq.ok == 0 then vprove_envs(r, reqs, enss, body, fns, 1) else if rq.hold == 0 then vprove_envs(r, reqs, enss, body, fns, undec) else if isnil(enss) == 1 then vprove_envs(r, reqs, enss, body, fns, undec) else let rb = veval(body, env, env, fns, 0) in if rb.ok == 0 then vprove_envs(r, reqs, enss, body, fns, 1) else let penv = Cons({k: "result", v: rb}, Cons({k: "ret", v: rb}, env)) in let eq = veval_all_true(enss, penv, env, fns) in if eq.ok == 0 then vprove_envs(r, reqs, enss, body, fns, 1) else if eq.hold == 0 then {status: 0 - 1, cex: vfmt_env(env) + " (result = " + str(rb.i) + ")"} else vprove_envs(r, reqs, enss, body, fns, undec)
 
 fn vprove_fn_status(nm, ps, body, vsigs, fns) = vprove_fn1(nm, ps, body, vsiglookup(nm, vsigs), fns)
@@ -1037,15 +1037,15 @@ fn kownps_pl(pl) = match pl
     Nil        => Nil
     Cons(p, r) => if p.cf == 2 then Cons(p.pn, kownps_pl(r)) else kownps_pl(r)
 
-fn vwrap_conds(cs, nm, kind, inner, lctx, d) = match cs
-    Nil        => inner
-    Cons(c, r) => If(olowere(c, lctx, d), vwrap_conds(r, nm, kind, inner, lctx, d + 1), Call("ctfail", Cons(Str("lume: runtime contract violation (" + kind + ") in '" + nm + "'\n"), Nil)))
+fn vconj_conds(cs, lctx, d) = match cs
+    Nil        => Num(1)
+    Cons(c, r) => if isnil(r) == 1 then olowere(c, lctx, d) else Bin("and", olowere(c, lctx, d), vconj_conds(r, lctx, d + 1))
 
 fn vwrap_fn_contract(nm, ps, raw_body, low_body, lctx, vctx) = vwrap_fn_c1(nm, ps, raw_body, low_body, lctx, vsiglookup(nm, vctx.vsigs))
 
 fn vwrap_fn_c1(nm, ps, raw_body, low_body, lctx, mvs) = match mvs
     Nil          => low_body
-    Cons(vsg, r) => let post = if isnil(vsg.enss) == 1 then low_body else LetIn("result", low_body, LetIn("ret", Var("result"), vwrap_conds(vsg.enss, nm, "ensures", Var("result"), lctx, 100))) in vwrap_conds(vsg.reqs, nm, "requires", post, lctx, 200)
+    Cons(vsg, r) => let post = if isnil(vsg.enss) == 1 then low_body else LetIn("result", low_body, LetIn("ret", Var("result"), LetIn("_vens_ok", If(vconj_conds(vsg.enss, lctx, 100), Num(1), Call("ctfail", Cons(Str("lume: runtime contract violation (ensures) in '" + nm + "'\n"), Nil))), Var("result")))) in if isnil(vsg.reqs) == 1 then post else LetIn("_vreq_ok", If(vconj_conds(vsg.reqs, lctx, 200), Num(1), Call("ctfail", Cons(Str("lume: runtime contract violation (requires) in '" + nm + "'\n"), Nil))), post)
 
 fn olowerprog(prog, ufns, osigs, vctx) = match prog
     Nil        => Nil
@@ -1060,7 +1060,7 @@ fn olowerstmt(st, rest, ufns, osigs, vctx) = match st
     VContractSig(nm, ps, reqs, enss)      => rest
     VTypeInvariant(nm, fs, inv)           => rest
     VLawDecl(nm, ps, body)                => rest
-    Fn(nm, ps, body)                      => let lctx = {ufns: ufns, hops: Nil, ownps: kfn_ownps(nm, osigs)} in let lb = olowere(body, lctx, 0) in let wb = if vprove_fn_status(nm, ps, body, vctx.vsigs, vctx.fns) == 1 then lb else vwrap_fn_contract(nm, ps, body, lb, lctx, vctx) in Cons(Fn(nm, ps, wb), rest)
+    Fn(nm, ps, body)                      => let lctx = {ufns: ufns, hops: Nil, ownps: kfn_ownps(nm, osigs)} in let lb = olowere(body, lctx, 0) in let wb = vwrap_fn_contract(nm, ps, body, lb, lctx, vctx) in Cons(Fn(nm, ps, wb), rest)
     Print(v)                              => Cons(Print(olowere(v, {ufns: ufns, hops: Nil, ownps: Nil}, 0)), rest)
     ExprS(v)                              => Cons(ExprS(olowere(v, {ufns: ufns, hops: Nil, ownps: Nil}, 0)), rest)
     _                                     => Cons(st, rest)

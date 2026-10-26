@@ -150,24 +150,27 @@ Every Phase 3 brick obeys the project's non-negotiable rules:
   - Promotes contract clauses from doc/test annotations into checked Lume-Core AST nodes (`VContractSig`
     on functions and `VTypeInvariant` on `type ... = record` declarations in `04_parser_decls.src`,
     `06b_phase3.src`, and `lcaas.src`), with `result` / `ret` and `old(...)` entry snapshots.
-  - Contracts proven statically by `lume prove` are elided at runtime (zero runtime overhead); contracts
-    outside the decidable fragment (`runtime_checked`) are lowered into runtime assertions — never
-    silently assumed.
+  - Contracts that pass compile-time counterexample search are classified as `runtime_checked` and
+    lowered into runtime assertions (`vwrap_fn_contract`) so off-sample violations always trap safely
+    at runtime — never silently assumed or elided without a full decision proof.
   - *Ref: Eiffel Design by Contract, Ada SPARK, Dafny.*
 
-- **V2 — `lume prove` v0: static discharge + counterexample synthesis ✅**
-  - Built-in quantifier-free linear integer and scale-aligned `decimal(p, s)` arithmetic solver
-    (`QF_LIA` in `06b_phase3.src` and `compiler/stage1/lcaas.src`) for zero-dependency offline proofs.
-  - Every contract, call-site `requires`, and record `invariant` is classified as `proven` (runtime
-    check elided), `refuted` (compile-time error `[V0001]` with a concrete counterexample binding,
-    e.g. `counterexample: bal = 0, amt = 1 (result = -1)`), or `runtime_checked`.
+- **V2 — `lume prove` v0: compile-time counterexample search + sound runtime guards ✅**
+  - Built-in compile-time bounded counterexample evaluator in `06b_phase3.src` and
+    `compiler/stage1/lcaas.src` for zero-dependency offline refutation over integer and scale-aligned
+    `decimal(p, s)` expressions (full `QF_LIA` decision procedure for zero-overhead `proven` elision
+    is planned as the next verification upgrade).
+  - Every contract, call-site `requires`, and record `invariant` is classified as `refuted`
+    (compile-time error `[V0001]` with a concrete counterexample binding, e.g.
+    `counterexample: bal = 0, amt = 1 (result = -1)`) or `runtime_checked` (runtime contract guard
+    preserved in emitted code).
   - Exposed via `./lume prove [--json] <file.src>`, `lume agent prove <file.src>`, and `caas_prove(src)`
     emitting structured `"proofs":[...]` JSON objects.
   - *Ref: Dafny, Why3, Lean/Z3.*
 
 - **V3 — `LAWS` (`P34`) project-level invariants and `lume evolve` integration ✅**
-  - Top-level `law <Name>(...) = <expr>` (`VLawDecl`) declarations are both statically verified by the
-    Track V QF_LIA prover (rejecting refutable laws at compile time with `[V0001]` and a concrete
+  - Top-level `law <Name>(...) = <expr>` (`VLawDecl`) declarations are checked against bounded
+    counterexample search at compile time (rejecting refutable laws with `[V0001]` and a concrete
     counterexample) and lowered to callable `law_<Name>(...)` functions for property tests (`lume test`).
   - Wired into `lume evolve` (`compiler/stage1/levolve.src` via `use lcaas`) so any candidate patch
     violating a declared `law` or `requires`/`ensures` contract is automatically rejected by the
@@ -233,10 +236,10 @@ Phase 2 Exit (F3c + F4 + examples/apps/inventory/)
 ## Stage 3 Exit Criterion (`docs/04-roadmap.md` line 122, **DONE ✅**)
 
 Implemented in `examples/apps/job_server/` (`lume.toml`, `lume.lock`, `protocol.src`, `engine.src`,
-`main.src`, `expected_output.txt`) — a complete concurrent service + worker pool + supervised actor
-job system with **zero `unsafe`**, exercising:
+`workers.src`, `main.src`, `expected_output.txt`) — a complete concurrent service + worker pool +
+supervised actor job system with **zero `unsafe`**, exercising:
 - Ownership, borrowing, `from` regions, `defer` LIFO cleanup, and Perceus reuse (`Track O` + `Track K`),
 - Effect-checked handlers (`Clock`, `Audit`), AI provenance verification (`llm fn` + `verify`), and capability-audited modules (`Track A` + `Track K`),
 - Scoped tasks (`scope`/`spawn`), `arc[T]`, typed channels (`chan[T]`), deterministic `select`, actor supervision (`one_for_one`), and deterministic logical-time replay (`Track S`),
-- Statically proven accounting/queue contracts (`requires`/`ensures`/`old`/`invariant`) and project-level `law` declarations via `lume prove` and `LAWS` (`Track V`),
+- Checked accounting/queue contracts (`requires`/`ensures`/`old`/`invariant`) and project-level `law` declarations via `lume prove` and `LAWS` (`Track V`),
 passing `lume pkg verify`, `lume prove`, `lume test` (7 test suites), and native `lume run` in CI with zero data races by construction.

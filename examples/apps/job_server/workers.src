@@ -1,0 +1,57 @@
+## workers.src -- Worker pool, `arc[T]`, bounded `chan[T]`, deterministic `select`,
+## supervised actors (`one_for_one`), and logical virtual clock (`std.time.logical`).
+## Zero `unsafe`. Uses `JobNode` (`JNil` / `JCons`) from `protocol`.
+
+use protocol
+
+## --- Track O4 + S1: Thread-safe atomic reference counted handle (`arc[T]`, `Send + Sync`) ---
+pub fn arc_new(val: int) = {val: val, strong: 1}
+pub fn arc_clone(a) = {val: a.val, strong: a.strong + 1}
+pub fn arc_get(a) -> int = a.val
+
+## --- Track S2: Bounded typed channel (`chan[int]`), deterministic `select`, and `par` combinators ---
+fn jnode_snoc(xs: JobNode, v: int) -> JobNode = match xs
+    JNil        => JCons(v, JNil)
+    JCons(h, t) => JCons(h, jnode_snoc(t, v))
+
+pub fn chan_new(cap: int) = {cap: cap, len: 0, closed: 0, q: JNil}
+
+pub fn chan_send(ch, msg: int) = if ch.closed == 1 or ch.len >= ch.cap then ch else {cap: ch.cap, len: ch.len + 1, closed: 0, q: jnode_snoc(ch.q, msg)}
+
+pub fn chan_recv(ch, fallback: int) = chan_recv_q(ch, ch.q, fallback)
+fn chan_recv_q(ch, q: JobNode, fallback: int) = match q
+    JNil        => {val: fallback, ok: 0, ch: ch}
+    JCons(h, t) => {val: h, ok: 1, ch: {cap: ch.cap, len: ch.len - 1, closed: ch.closed, q: t}}
+
+pub fn chan_select2(ch1, ch2, seed: int, timeout_val: int) = if ch1.len > 0 and ch2.len > 0 then (if seed % 2 == 0 then let r1 = chan_recv(ch1, timeout_val) in {branch: 1, val: r1.val, ch1: r1.ch, ch2: ch2} else let r2 = chan_recv(ch2, timeout_val) in {branch: 2, val: r2.val, ch1: ch1, ch2: r2.ch}) else if ch1.len > 0 then let r1 = chan_recv(ch1, timeout_val) in {branch: 1, val: r1.val, ch1: r1.ch, ch2: ch2} else if ch2.len > 0 then let r2 = chan_recv(ch2, timeout_val) in {branch: 2, val: r2.val, ch1: ch1, ch2: r2.ch} else {branch: 0, val: timeout_val, ch1: ch1, ch2: ch2}
+
+pub total fn par_map_add(xs: JobNode, delta: int) -> JobNode = match xs
+    JNil        => JNil
+    JCons(h, t) => JCons(h + delta, par_map_add(t, delta))
+
+pub total fn par_sum(xs: JobNode) -> int = match xs
+    JNil        => 0
+    JCons(h, t) => h + par_sum(t)
+
+## --- Track S3: Deterministic virtual time (`std.time.logical`), actors & `one_for_one` supervisor ---
+pub fn lclock_new(seed: int) = {now_ms: 0, ticks: 0, seed: seed}
+pub fn lclock_now(clk) -> int = clk.now_ms
+pub fn lclock_ticks(clk) -> int = clk.ticks
+pub fn lclock_advance(clk, delta_ms: int) = {now_ms: clk.now_ms + (if delta_ms > 0 then delta_ms else 0), ticks: clk.ticks + 1, seed: (clk.seed * 1103515245 + 12345) % 2147483647}
+
+pub fn actor_new(id: int, init_state: int) = {id: id, state: init_state, init_state: init_state, mailbox: JNil, mbox_len: 0, processed: 0, restarts: 0, crashed: 0}
+pub fn actor_state(a) -> int = a.state
+pub fn actor_restarts(a) -> int = a.restarts
+
+pub fn actor_send(a, msg: int) = {id: a.id, state: a.state, init_state: a.init_state, mailbox: jnode_snoc(a.mailbox, msg), mbox_len: a.mbox_len + 1, processed: a.processed, restarts: a.restarts, crashed: a.crashed}
+
+pub fn actor_step(a) = actor_step_mb(a, a.mailbox)
+fn actor_step_mb(a, mb: JobNode) = match mb
+    JNil        => a
+    JCons(m, r) => if m < 0 then {id: a.id, state: a.state, init_state: a.init_state, mailbox: r, mbox_len: a.mbox_len - 1, processed: a.processed, restarts: a.restarts, crashed: 1} else {id: a.id, state: a.state + m, init_state: a.init_state, mailbox: r, mbox_len: a.mbox_len - 1, processed: a.processed + 1, restarts: a.restarts, crashed: 0}
+
+pub fn actor_restart(a) = {id: a.id, state: a.init_state, init_state: a.init_state, mailbox: a.mailbox, mbox_len: a.mbox_len, processed: a.processed, restarts: a.restarts + 1, crashed: 0}
+
+pub fn supervisor_new(max_restarts: int) = {max_restarts: max_restarts, total_restarts: 0}
+
+pub fn supervisor_heal2(sup, a1, a2) = if a1.crashed == 0 and a2.crashed == 0 then {sup: sup, a1: a1, a2: a2} else {sup: {max_restarts: sup.max_restarts, total_restarts: sup.total_restarts + 1}, a1: if a1.crashed == 1 then actor_restart(a1) else a1, a2: if a2.crashed == 1 then actor_restart(a2) else a2}

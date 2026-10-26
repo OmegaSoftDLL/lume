@@ -1,5 +1,5 @@
 ## protocol.src -- Job Server domain types, Perceus reuse, type invariants & laws (Tracks O, A, K, V).
-## Zero `unsafe`. All invariants and laws are statically verified by `lume prove`.
+## Zero `unsafe`. All contracts, invariants and laws are checked by `lume prove` and guarded at runtime.
 
 type JobNode = enum JNil | JCons(int, JobNode)
 
@@ -34,7 +34,7 @@ pub fn refund_budget(rem: int, refund: int) -> int requires rem >= 0 requires re
 
 pub fn clamp_priority(p: int) -> int ensures result >= 1 ensures result <= 10 = if p < 1 then 1 else if p > 10 then 10 else p
 
-## Track V3: Project-level `law` declarations (`P34`) statically proven by `lume prove`
+## Track V3: Project-level `law` declarations (`P34`) checked by `lume prove`
 pub law budget_conservation(rem: int, cost: int) = if rem >= cost and cost >= 0 then refund_budget(charge_budget(rem, cost), cost) == rem else 1
 
 pub law priority_clamp_idempotent(p: int) = clamp_priority(clamp_priority(p)) == clamp_priority(p)

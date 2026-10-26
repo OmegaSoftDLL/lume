@@ -1,8 +1,8 @@
 ## contracts_ok.src -- Phase 3 Track V conformance test (`V1`–`V3`).
 ## Verifies:
 ##   1. V1: First-class `requires` / `ensures` / `invariant` and `old(...)` in Lume-Core.
-##   2. V2: Static QF_LIA + scale-aligned decimal discharge (`lume prove` v0) eliding proven checks at runtime.
-##   3. V3: Top-level `law` declarations (`P34`) statically proven and callable as property checks (`law_<name>`).
+##   2. V2: Compile-time bounded counterexample search (`[V0001]`) + sound `runtime_checked` contract guards (`lume prove` v0).
+##   3. V3: Top-level `law` declarations (`P34`) checked against counterexample search and callable as property checks (`law_<name>`).
 
 type Wallet = record balance: int, min_bal: int invariant balance >= min_bal and min_bal >= 0
 
