@@ -1,0 +1,64 @@
+## Phase 3 Track K (`effects_ok.src`) — Effect rows (`/ {...}`), capability checking (`@capability`),
+## user-declared algebraic effects (`effect Name { fn op(...) -> R }`), and tail-resumptive handlers
+## (`with handler Name { fn op(...) = ... } in <body>`).
+
+@capability {io, fs, time, Log, Clock, Fail}
+
+effect Clock {
+    fn now() -> int
+}
+
+effect Log {
+    fn info(code: int) -> int
+}
+
+effect Fail {
+    fn raise(err: int) -> int
+}
+
+## K1: pure functions (`/ pure` or inferred pure) and explicit effect rows on `pub fn`
+pub fn pure_square(x: int) -> int / pure = x * x
+
+fn io_write(code: int) -> int = code + 100
+fn fs_read(id: int) -> int = id * 10
+
+## K1: private helper infers its `{io, fs}` effect row automatically
+fn read_and_log_priv(id: int) -> int =
+    let data = fs_read(id) in
+    io_write(data)
+
+## K1: public function declares its full required effect row `/ {io, fs}`
+pub fn audit_file(id: int) -> int / {io, fs} =
+    read_and_log_priv(id)
+
+## K2: function performing user-declared effects `Clock` and `Log`
+pub fn stamped_event(delta: int) -> int / {Clock, Log} =
+    let t = Clock.now() in
+    let logged = Log.info(t + delta) in
+    t + delta + logged
+
+## K2: lexical `with handler` discharges `Clock` and `Log`, leaving a pure function (`/ pure`)
+pub fn run_deterministic_event(delta: int) -> int / pure =
+    with handler Clock {
+        fn now() -> int = 1000
+    } in
+    with handler Log {
+        fn info(code: int) -> int = code / 10
+    } in
+    let t = Clock.now() in
+    let ack = Log.info(t + delta) in
+    t + delta + ack
+
+## K2: handler for `Fail` turning `Fail.raise(e)` into a fallback value
+pub fn safe_div_handled(a: int, b: int) -> int / pure =
+    with handler Fail {
+        fn raise(err: int) -> int = 0 - err
+    } in
+    if b == 0 then Fail.raise(999) else a / b
+
+print pure_square(9)
+print audit_file(4)
+print with handler Clock { fn now() -> int = 500 } in with handler Log { fn info(code: int) -> int = 7 } in let t = Clock.now() in let l = Log.info(t + 25) in t + 25 + l
+print run_deterministic_event(50)
+print safe_div_handled(84, 2)
+print safe_div_handled(84, 0)

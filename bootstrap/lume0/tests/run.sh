@@ -721,6 +721,27 @@ PY
     "$ntmp/lc" <"$ntmp/a3b.src" >"$ntmp/a3b.s" 2>"$ntmp/a3b.err"; a3bc=$?
     if [ "$a3ac" = 3 ] && [ ! -s "$ntmp/a3a.s" ] && grep -q "\[A0003\]" "$ntmp/a3a.err" && [ "$a3bc" = 3 ] && [ ! -s "$ntmp/a3b.s" ] && grep -q "\[A0003\]" "$ntmp/a3b.err"; then ok "phase-3 A3: unverified 'llm fn' output crossing 'pub fn' or trusted sink without verification fails with [A0003] (exit 3, no asm)"; else bad "phase-3 A3: [A0003] unverified provenance leak"; cat "$ntmp/a3a.err" "$ntmp/a3b.err"; fi
     if LUME_BIN_DIR="$ntmp" ../../lume agent check "$ntmp/a2.src" 2>/dev/null | grep -q '"code":"A0002"' && LUME_BIN_DIR="$ntmp" ../../lume agent check "$ntmp/a3a.src" 2>/dev/null | grep -q '"code":"A0003"'; then ok "phase-3 A1-A3: lume agent check emits structured A0001-A0003 JSON diagnostics with fix-its"; else bad "phase-3 A1-A3: lume agent check A0002/A0003 JSON"; fi
+    # phase-3 Track K (K1-K3): effect system (`/ {pure, io, ...}`), capability checking (`@capability` / `[E0200]`),
+    # user-declared `effect` + lexical `with handler` (`K2`), and Perceus in-place constructor reuse (`K3`).
+    "$ntmp/lc" <../../compiler/stage1/effects_ok.src >"$ntmp/eff.s" 2>"$ntmp/eff.err"
+    if [ -s "$ntmp/eff.s" ]; then "$ntmp/lasm" <"$ntmp/eff.s" >"$ntmp/eff.elf" 2>/dev/null; chmod +x "$ntmp/eff.elf"; fi
+    if [ -x "$ntmp/eff.elf" ] && "$ntmp/eff.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/effects_ok_asm.expected - >/dev/null; then ok "phase-3 K1-K2: effect rows (/ {io, fs}), @capability, user 'effect', and tail-resumptive 'with handler' compile + run"; else bad "phase-3 K1-K2: effects_ok.src compile + run"; cat "$ntmp/eff.err"; fi
+    # K1 [E0200]: impure `pub fn` missing `/ {io}` effect row fails at compile time
+    printf 'fn io_write(x: int) -> int = x\npub fn noisy(x: int) -> int = io_write(x)\nprint noisy(5)\n' >"$ntmp/k1a.src"
+    "$ntmp/lc" <"$ntmp/k1a.src" >"$ntmp/k1a.s" 2>"$ntmp/k1a.err"; k1ac=$?
+    # K1 [E0200]: module `@capability` violation fails at compile time
+    printf '@capability {fs}\nfn net_send(x: int) -> int = x\npub fn sync_remote(x: int) -> int / {net} = net_send(x)\nprint sync_remote(5)\n' >"$ntmp/k1b.src"
+    "$ntmp/lc" <"$ntmp/k1b.src" >"$ntmp/k1b.s" 2>"$ntmp/k1b.err"; k1bc=$?
+    # K2 [E0200]: unhandled user-declared effect in `pub fn ... / pure` fails at compile time
+    printf 'effect Clock { fn now() -> int }\npub fn bad_clock() -> int / pure = Clock.now()\nprint bad_clock()\n' >"$ntmp/k2bad.src"
+    "$ntmp/lc" <"$ntmp/k2bad.src" >"$ntmp/k2bad.s" 2>"$ntmp/k2bad.err"; k2bc=$?
+    if [ "$k1ac" = 3 ] && [ ! -s "$ntmp/k1a.s" ] && grep -q "\[E0200\]" "$ntmp/k1a.err" && [ "$k1bc" = 3 ] && [ ! -s "$ntmp/k1b.s" ] && grep -q "\[E0200\]" "$ntmp/k1b.err" && [ "$k2bc" = 3 ] && [ ! -s "$ntmp/k2bad.s" ] && grep -q "\[E0200\]" "$ntmp/k2bad.err"; then ok "phase-3 K1-K2: undeclared effect on pub fn, @capability violation, and unhandled user effect fail with [E0200] (exit 3, no asm)"; else bad "phase-3 K1-K2: [E0200] effect & capability enforcement"; cat "$ntmp/k1a.err" "$ntmp/k1b.err" "$ntmp/k2bad.err"; fi
+    if LUME_BIN_DIR="$ntmp" ../../lume agent check "$ntmp/k1a.src" 2>/dev/null | grep -q '"code":"E0200"' && LUME_BIN_DIR="$ntmp" ../../lume agent check "$ntmp/k1b.src" 2>/dev/null | grep -q '"code":"E0200"'; then ok "phase-3 K1-K2: lume agent check emits structured E0200 JSON diagnostics with effect-row & capability fix-its"; else bad "phase-3 K1-K2: lume agent check E0200 JSON"; fi
+    # K3: Perceus in-place constructor reuse (`perceus_ok.src`): compiles, runs, and emits zero `call mkctor`/`call alloc` in `unbox_inc_inplace`
+    "$ntmp/lc" <../../compiler/stage1/perceus_ok.src >"$ntmp/perc.s" 2>"$ntmp/perc.err"
+    if [ -s "$ntmp/perc.s" ]; then "$ntmp/lasm" <"$ntmp/perc.s" >"$ntmp/perc.elf" 2>/dev/null; chmod +x "$ntmp/perc.elf"; fi
+    _ub_asm=$(sed -n '/^unbox_inc_inplace:/,/^    ret$/p' "$ntmp/perc.s")
+    if [ -x "$ntmp/perc.elf" ] && "$ntmp/perc.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/perceus_ok_asm.expected - >/dev/null && ! printf '%s\n' "$_ub_asm" | grep -q "call mkctor" && ! printf '%s\n' "$_ub_asm" | grep -q "call alloc"; then ok "phase-3 K3: Perceus reuse mutates 'own' matched constructors in place (zero 'call alloc' / 'call mkctor' in unbox_inc_inplace)"; else bad "phase-3 K3: Perceus in-place constructor reuse"; cat "$ntmp/perc.err"; printf '%s\n' "$_ub_asm"; fi
     rm -rf "$ntmp"
 else
     ok "no-toolchain ELF pipeline (skipped: not linux/x86_64, or under ASan)"

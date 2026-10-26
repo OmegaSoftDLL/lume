@@ -56,7 +56,13 @@ fn parseowne(t) = let r = post(t) in {node: OwnE(r.node), rest: r.rest}
 fn parsemute(t) = let r = post(t) in {node: MutE(r.node), rest: r.rest}
 fn parsedefer(t) = let rc = expr(t) in let rb = expr(dropin(rc.rest)) in {node: DeferE(rc.node, rb.node), rest: rb.rest}
 fn parseerrdefer(t) = let rc = expr(t) in let rb = expr(dropin(rc.rest)) in {node: ErrDeferE(rc.node, rb.node), rest: rb.rest}
-fn parsewith(t) = if headtext(t) == "alloc" then let ra = expr(dropkw(droponce(t), "=")) in let rb = expr(dropin(ra.rest)) in {node: WithAllocE(ra.node, rb.node), rest: rb.rest} else expr(t)
-fn postloop(r) = if headtext(r.rest) == "." then postloop({node: Field(r.node, headtext(droponce(r.rest))), rest: droponce(droponce(r.rest))}) else r
+fn parsehop(ts) = let opnm = headtext(droponce(ts)) in let ps = parseparams(dropkw(droponce(droponce(ts)), "(")) in let rt = parseret(ps.rest) in let b = expr(dropkw(rt.rest, "=")) in {op: {op: opnm, ps: ps.items, body: b.node}, rest: dropkw(b.rest, ";")}
+fn parsehops(ts) = if headtext(ts) == "fn" then let r = parsehop(ts) in let rr = parsehops(r.rest) in {items: Cons(r.op, rr.items), rest: rr.rest} else {items: Nil, rest: ts}
+fn parsewithhandler(t) = let enm = headtext(t) in let hs = parsehops(dropkw(droponce(t), "{")) in let rb = expr(dropin(skiprb(hs.rest))) in {node: WithHandlerE(enm, hs.items, rb.node), rest: rb.rest}
+fn parsewith(t) = if headtext(t) == "alloc" then let ra = expr(dropkw(droponce(t), "=")) in let rb = expr(dropin(ra.rest)) in {node: WithAllocE(ra.node, rb.node), rest: rb.rest} else if headtext(t) == "handler" then parsewithhandler(droponce(t)) else expr(t)
+fn postdotcall(nd, mnm, a) = match nd
+    Var(enm) => {node: Call(mnm, a.items), rest: a.rest}
+    _        => {node: Call(mnm, Cons(nd, a.items)), rest: a.rest}
+fn postloop(r) = if headtext(r.rest) == "." then (let t1 = droponce(r.rest) in let mnm = headtext(t1) in let t2 = droponce(t1) in if headtext(t2) == "(" then postloop(postdotcall(r.node, mnm, arglist(droponce(t2)))) else postloop({node: Field(r.node, mnm), rest: t2})) else r
 fn post(ts) = postloop(prim(ts))
 

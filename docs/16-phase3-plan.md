@@ -81,31 +81,33 @@ Every Phase 3 brick obeys the project's non-negotiable rules:
 
 ---
 
-### K — Effect system, algebraic handlers, and Perceus reuse (`§8.2`)
+### K — Effect system, algebraic handlers, and Perceus reuse (`§8.2`, **DONE**)
 
-- **K1 — Effect rows, inference, and capability checking (`§8.2`, `P26`)**
-  - Functions carry an effect row `/ {pure, io, fs, net, alloc, async, fail, panic, rand, time}`.
+- **K1 — Effect rows, inference, and capability checking (`§8.2`, `P26`) ✅**
+  - Functions carry an effect row `/ {pure, io, fs, net, alloc, async, fail, panic, rand, time}` (and user-declared effects).
   - Private functions infer their minimal effect row from their body and callees; `pub` functions
-    require an explicit `/ {...}` annotation when impure (with a compiler fix-it emitting the exact
-    inferred row).
-  - Connects directly to `lume.toml`'s `[capabilities] allow = [...]`: calling a function whose
-    effect row exceeds the package's granted capabilities fails with `E0200`.
+    require an explicit `/ {...}` annotation when impure (failing with `[E0200]` and a compiler fix-it
+    emitting the exact inferred row).
+  - Connects directly to module capabilities (`@capability {io, ...}` / `lume.toml`'s `[capabilities] allow = [...]`):
+    calling a function whose effect row exceeds the module's granted capabilities fails with `[E0200]`.
   - *Ref: Koka effect rows, Eff, Austral capabilities.*
 
-- **K2 — User-declared `effect` and `with handler` (`§8.2`)**
-  - Algebraic effect declarations (`effect Clock { fn now() -> int }`, `effect Log { fn emit(msg: str) -> int }`)
-    and lexical handlers (`with handler Clock { fn now() = 1700000000 } in ...`).
+- **K2 — User-declared `effect` and `with handler` (`§8.2`) ✅**
+  - Algebraic effect declarations (`effect Clock { fn now() -> int }`, `effect Log { fn info(code: int) -> int }`)
+    and lexical handlers (`with handler Clock { fn now() -> int = 1000 } in ...`).
   - Unifies dependency injection, deterministic test mocking, `yield` generators, and `async`
-    execution without function coloring.
-  - Tail-resumptive handlers compile to direct calls with zero closure/continuation allocation.
+    execution without function coloring, discharging the handled effect from the enclosing function's row.
+  - Tail-resumptive handlers lower directly in `06b_phase3.src` with zero closure/continuation allocation.
   - *Ref: Koka, OCaml 5 effect handlers, Unison abilities.*
 
-- **K3 — Perceus reference-count & in-place reuse analysis**
-  - Static drop-guided reuse pass on Lume-Core: when a pattern match consumes the last reference to
-    a constructor or record (`Cons(h, t)` or `Rec(...)`) and immediately constructs a node of the
-    same size, the allocation slot is mutated in place rather than allocating from the heap.
-  - Proven in conformance tests by asserting zero additional heap growth across long functional
-    list/table transformations.
+- **K3 — Perceus reference-count & in-place reuse analysis ✅**
+  - Static drop-guided reuse pass on Lume-Core (`ktryp_perceus_arm` in `06b_phase3.src` + `lreuse1`/`lreuse2`
+    in `05_codegen.src`): when a pattern match on an `own` parameter consumes a constructor cell
+    (`Boxed(v)` or `Cons(h, t)`) and constructs a node of the same tag and arity in tail position,
+    the matched cell's payload array (`0(24(%rax))`, `8(24(%rax))`) is mutated in place with zero
+    `call alloc` and zero `call mkctor` instructions.
+  - Proven in `compiler/stage1/perceus_ok.src` and `bootstrap/lume0/tests/run.sh` by inspecting the
+    emitted x86-64 assembly to confirm zero heap allocations on the reused path.
   - *Ref: Koka Perceus (Reinking et al.), Lean 4 FBIP (Functional But In-Place).*
 
 ---
