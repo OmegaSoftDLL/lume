@@ -1,0 +1,11 @@
+## F2/F3 hardening: a VALID program that must type-check and run with ZERO false positives.
+## It mixes annotated and unannotated parameters, return annotations, let-bound variables used
+## as arguments, operator-result and call-result arguments, string concatenation and int math,
+## and an argument whose type is unknown (count(...) has no signature -> TyAny, never flagged).
+## If the gradual checker (F2 + the F3 inference) ever WRONGLY rejects valid code, this fails.
+fn inc(n: int) -> int = n + 1
+fn cat(a: str, b: str) -> str = a + b
+fn pick(flag: int, hi: int, lo: int) -> int = if flag > 0 then hi else lo
+fn label(n: int) -> str = cat("n=", str(n))
+fn use(n: int, s: str) -> int = let bumped = inc(n) in let msg = cat(s, label(bumped)) in pick(bumped, bumped + count(msg), 0)
+print use(10, "val ")
