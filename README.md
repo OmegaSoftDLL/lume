@@ -141,6 +141,32 @@ This is a **staged, self-verifying bootstrap** — the model GCC, Rust and Go us
 - [ ] **Stage 4** — tensors, autodiff, GPU kernels, `prob`, `rule`, `llm fn`.
 - [ ] **Stage 5** — bare metal, `lume-os`, verified core.
 
+## What works today (self-hosted, no C in the loop)
+
+Everything below compiles and runs through the Lume-written toolchain (`lumec` + `lasm`) — the C seed only mints the first binaries once.
+
+**comptime — the compiler runs Lume at build time (superior to C++ `constexpr`: deterministic, exact 64-bit ints, legible errors, guaranteed termination):**
+```lume
+fn fib(n) = if n < 2 then n else fib(n - 1) + fib(n - 2)
+print comptime(fib(10))     # folded to the constant 55 at compile time — no fib call in the binary
+```
+
+**Generics via comptime types — the type parameter is erased at runtime (Zig-style, but gradual + AI-first checked):**
+```lume
+fn id(comptime T: type, x: T) = x
+print id(int, 42)           # emitted call passes only 42; `id(int, "x")` is a clear compile-time type error
+```
+
+**Named types + gradual, AI-first checking (declare to opt in; typos and wrong arity are caught, zero false positives):**
+```lume
+type Expr = enum Lit(int) | Add(Expr, Expr)
+fn eval(e) = match e
+    Lit(n)    => n
+    Add(a, b) => eval(a) + eval(b)
+```
+
+**One tool, all in Lume:** `lume build|run|fmt|test|doc|check|pkg` — a canonical formatter (`lume fmt`), zero-config test discovery (`lume test` finds `fn test_*()`), doc/contract extraction (`lume doc`), and a module system + package manager with **capability-audited dependencies and content-addressed lockfiles** (superior to cargo/go mod). Plus **exact `decimal` arithmetic** for money/data.
+
 ## Quickstart
 
 ```sh
