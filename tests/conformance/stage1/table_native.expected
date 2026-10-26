@@ -10,6 +10,7 @@ say "yes"
 line1
 line2
 0
+CSV row 2, column 'id': invalid integer
 0
 0
 0

@@ -12,5 +12,6 @@ print table_cell(parsed, 2, 2).value.value
 print table_cell(parsed, 3, 2).value.value
 print read_csv("wrong,amount,note\n1,1.00,x", schema).ok
 print read_csv("id,amount,note\nnope,1.00,x", schema).ok
+print read_csv("id,amount,note\nnope,1.00,x", schema).error
 print read_csv("id,amount,note\n1,1.00,\"unterminated", schema).ok
 print read_csv("id,amount,note\n1,1.00", schema).ok
