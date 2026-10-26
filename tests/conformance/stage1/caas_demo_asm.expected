@@ -1,0 +1,17 @@
+1
+0
+7
+(fn fib (n) (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2))))) (fn id (x) x) (fn add_pt (p dx) (+ (+ (field p x) (field p y)) dx)) (fn m_with_tmp (k body) (quote (let tmp (unquote k) (+ tmp (unquote body))))) (fn bump (tmp) (let _hyg_1 10 (+ _hyg_1 (* tmp 2)))) (print (id 8)) (print (add_pt (Point{...}) 5)) (print (bump 7))
+1
+8
+12
+24
+0
+7
+T2002 | type error: function 'greet' returns int but is declared to return str | fixit: change return type of 'greet' to int or return a str value
+T1001 | type error: constructor 'Litt' is not declared in any enum | fixit: replace 'Litt' with declared constructor 'Lit'
+T1002 | type error: constructor 'Add' expects 2 arguments, got 1 | fixit: pass 2 arguments to 'Add'
+T1003 | type error: record 'Point' has no field 'z' | fixit: replace unknown field 'z' on 'Point' with 'x'
+T2001 | type error: argument 1 of 'greet' has type int but parameter 'name' expects str | fixit: change argument 1 of 'greet' (parameter 'name') to str
+T2001 | type error: argument 2 of 'id' has type str but parameter 'x' expects int | fixit: change argument 2 of 'id' (parameter 'x') to int
+C1001 | comptime error: 'unquote' may only appear inside 'quote(...)' | fixit: wrap the expression in 'quote(...)' or remove 'unquote'
