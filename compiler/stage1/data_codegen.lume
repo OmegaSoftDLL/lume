@@ -197,6 +197,8 @@ fn cgen_data(prog: [DStmt]) -> str
                 defs = defs + "Value* " + nm + "(" + cparams(ps) + ") {{\n    return " + cexpr(b) + ";\n}}\n"
             DPrint(v) => do
                 body = body + "    printval(" + cexpr(v) + ");\n"
+            DExprS(v) => do
+                body = body + "    (void)" + cexpr(v) + ";\n"
             DLet(nm, v) => do
                 body = body + "    Value* " + nm + " = " + cexpr(v) + ";\n"
     runtime() + protos + defs + "int main(void) {{\n" + body + "    return 0;\n}}\n"
