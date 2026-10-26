@@ -559,6 +559,14 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_
     { [ -x "$ntmp/ne.elf" ] && "$ntmp/ne.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/named_enum_asm.expected - >/dev/null; } || ne_ok=0
     cmp -s "$ntmp/ne.s" "$ntmp/ne_pos.s" || ne_ok=0
     if [ "$ne_ok" = 1 ]; then ok "phase-2 F4: core accepts named enum payloads; named and positional forms emit identical asm"; else bad "phase-2 F4: named enum payload unification"; cat "$ntmp/ne.err"; fi
+    # phase-2 F4 (slice 3): the surface's `elif` chain desugars to the core's nested If AST (byte-identical to else-if).
+    "$ntmp/lc" <../../compiler/stage1/elif_ok.src >"$ntmp/el.s" 2>"$ntmp/el.err"; "$ntmp/lasm" <"$ntmp/el.s" >"$ntmp/el.elf" 2>/dev/null; chmod +x "$ntmp/el.elf"
+    printf 'fn grade(n: int) -> str = if n >= 90 then "A" else if n >= 80 then "B" else if n >= 70 then "C" else "F"\nprint grade(85)\n' >"$ntmp/el_nested.src"
+    "$ntmp/lc" <"$ntmp/el_nested.src" >"$ntmp/el_nested.s" 2>/dev/null
+    el_ok=1
+    { [ -x "$ntmp/el.elf" ] && "$ntmp/el.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/elif_ok_asm.expected - >/dev/null; } || el_ok=0
+    cmp -s "$ntmp/el.s" "$ntmp/el_nested.s" || el_ok=0
+    if [ "$el_ok" = 1 ]; then ok "phase-2 F4: elif chain and else-if nesting emit identical asm, and run"; else bad "phase-2 F4: elif desugaring"; cat "$ntmp/el.err"; fi
     # phase-2 E1b: in-process compiler-as-a-service library (`use lcaas` + `lume agent` JSON query protocol).
     # 1. In-process library (`caas_demo.src` imports `use lcaas`, calls `caas_compile` on both valid F1/F2/C2/C3/M1/M2 code and 7-error code without aborting).
     if LUME_BIN_DIR="$ntmp" ../../lume run ../../compiler/stage1/caas_demo.src 2>/dev/null | diff -u ../../tests/conformance/stage1/caas_demo_asm.expected - >/dev/null; then ok "phase-2 E1b: compiler-as-a-service library (use lcaas: diagnostics/fixits/AST/expanded/symbols/asm/result in-memory)"; else bad "phase-2 E1b: compiler-as-a-service library (use lcaas)"; fi
