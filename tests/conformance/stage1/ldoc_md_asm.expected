@@ -1,0 +1,18 @@
+# Module documentation
+
+Math and geometry helpers for Lume-Core.
+
+## `fn sq(x)`
+
+Compute the square of x.
+
+## `fn fib(n)`
+
+Compute the nth Fibonacci number.
+
+## `pub fn clamp(v: int, lo: int, hi: int) -> int`
+
+Clamp v to [lo, hi].
+
+- **contract:** `requires lo <= hi`
+- **contract:** `ensures result >= lo and result <= hi`

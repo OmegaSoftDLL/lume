@@ -14,6 +14,7 @@ bootstrap/** linguist-vendored
 *.S  linguist-vendored
 Makefile     linguist-vendored
 **/Makefile  linguist-vendored
+lume         linguist-vendored
 *.sh  linguist-vendored
 .github/**  linguist-vendored
 *.yml  linguist-vendored

@@ -1,0 +1,13 @@
+## Math and geometry helpers for Lume-Core.
+
+## Compute the square of x.
+fn sq(x) = x * x
+
+## Compute the nth Fibonacci number.
+fn fib(n) = if n < 2 then n else fib(n - 1) + fib(n - 2)
+
+## Clamp v to [lo, hi].
+pub fn clamp(v: int, lo: int, hi: int) -> int
+    requires lo <= hi
+    ensures result >= lo and result <= hi
+    if v < lo then lo else if v > hi then hi else v

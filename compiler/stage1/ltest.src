@@ -1,0 +1,72 @@
+## ltest.src -- Lume-Core native unit-test harness generator (Track T, brick T1).
+## Reads a .src file from stdin, discovers all zero-argument `fn test_<name>()` functions, strips
+## non-test top-level `print` statements, and appends a Lume-Core test runner that executes each
+## `test_<name>()`, prints `  ok   test_<name>` or `  FAIL test_<name>`, prints `<P> passed, <F> failed`,
+## and aborts with exit code 3 via `ctfail` if any test returned 0 (false).
+## Compiled to a standalone native ELF by `lumec` + `lasm` with zero C in the loop.
+
+## --- list & string helpers ---
+fn app(xs, ys) = match xs
+    Nil        => ys
+    Cons(h, t) => Cons(h, app(t, ys))
+fn len(xs) = match xs
+    Nil        => 0
+    Cons(h, t) => 1 + len(t)
+fn isnil(xs) = match xs
+    Nil        => 1
+    Cons(h, t) => 0
+fn pairs(xs) = match xs
+    Nil        => Nil
+    Cons(a, t) => pairs2(a, t)
+fn pairs2(a, t) = match t
+    Nil        => Cons(a, Nil)
+    Cons(b, r) => Cons(a + b, pairs(r))
+fn joinall(xs) = match xs
+    Nil        => ""
+    Cons(a, t) => if isnil(t) == 1 then a else joinall(pairs(xs))
+fn joinsep(xs, sep) = match xs
+    Nil        => ""
+    Cons(h, t) => if isnil(t) == 1 then h else h + sep + joinsep(t, sep)
+
+fn nlpos(s, n, i) = if i >= n then i else if at(s, i) == "\n" then i else nlpos(s, n, i + 1)
+fn splitlinesn(s, n, i) = if i >= n then Nil else let e = nlpos(s, n, i) in Cons(slicen(s, n, i, e), splitlinesn(s, n, if e >= n then e else e + 1))
+fn splitlines(s) = splitlinesn(s, count(s), 0)
+
+fn isws(c) = c == " " or c == "\t" or c == "\r"
+fn rtrimend(s, e) = if e <= 0 then 0 else if isws(at(s, e - 1)) then rtrimend(s, e - 1) else e
+fn rtrim(s) = slice(s, 0, rtrimend(s, count(s)))
+fn startswith(s, p) = if count(s) < count(p) then 0 else slice(s, 0, count(p)) == p
+
+fn isdigit(c) = c >= "0" and c <= "9"
+fn isalpha(c) = (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or c == "_"
+fn isalnum(c) = isdigit(c) or isalpha(c)
+fn idend(s, i) = if i >= count(s) then i else if isalnum(at(s, i)) then idend(s, i + 1) else i
+
+## --- zero-arg `fn test_<name>()` detection ---
+fn testfnname(raw) = if startswith(raw, "fn test_") then testfnname2(raw, idend(raw, 3)) else ""
+fn testfnname2(raw, e) = if e > 8 and startswith(slice(raw, e, count(raw)), "()") then slice(raw, 3, e) else ""
+
+fn findtests(lines) = match lines
+    Nil        => Nil
+    Cons(h, t) => findtests1(testfnname(rtrim(h)), t)
+fn findtests1(nm, t) = if nm == "" then findtests(t) else Cons(nm, findtests(t))
+
+## Strip top-level `print ...` statements when synthesizing a unit-test harness
+fn keepdef(lines) = match lines
+    Nil        => Nil
+    Cons(h, t) => keepdef1(rtrim(h), t)
+fn keepdef1(raw, t) = if startswith(raw, "print ") then keepdef(t) else Cons(raw, keepdef(t))
+
+## --- synthesize runner statements for discovered tests ---
+fn printcalls(ts) = match ts
+    Nil        => Nil
+    Cons(h, t) => Cons("print _t_msg(" + h + "(), \"" + h + "\")", printcalls(t))
+fn sumcalls(ts) = match ts
+    Nil        => "0"
+    Cons(h, t) => if isnil(t) == 1 then "_t_ok(" + h + "())" else "_t_ok(" + h + "()) + " + sumcalls(t)
+
+fn synth(src, lines, ts) = if isnil(ts) == 1 then src else let n = str(len(ts)) in let sum = sumcalls(ts) in let defs = joinsep(keepdef(lines), "\n") in let pcs = joinsep(printcalls(ts), "\n") in defs + "\nfn _t_ok(x) = if x != 0 then 1 else 0\nfn _t_msg(ok, nm) = if ok != 0 then \"  ok   \" + nm else \"  FAIL \" + nm\nfn _t_sum(p, tot) = str(p) + \" passed, \" + str(tot - p) + \" failed\"\nfn _t_chk(p, tot) = if p == tot then 0 else ctfail(\"lume test: failed\\n\")\n" + pcs + "\nprint _t_sum(" + sum + ", " + n + ")\n_t_chk(" + sum + ", " + n + ")"
+
+fn run_ltest(src) = let lines = splitlines(src) in synth(src, lines, findtests(lines))
+
+print rtrim(run_ltest(readall()))
