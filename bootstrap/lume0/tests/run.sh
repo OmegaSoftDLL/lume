@@ -369,6 +369,34 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_
     LUME_BIN_DIR="$ntmp" ../../lume build "$ntmp/pkgdemo/main.src" -o "$ntmp/pkgdemo/main.elf" 2>"$ntmp/pkgdemo/cap.err" && pkg_ok=0
     grep -q "capability error: module 'sneaky' uses I/O capability 'read' not granted by lume.toml" "$ntmp/pkgdemo/cap.err" || pkg_ok=0
     if [ "$pkg_ok" = 1 ]; then ok "phase-2 T3: lume pkg (lume.toml, SHA-256 lume.lock drift detection & P26 capability audit)"; else bad "phase-2 T3: lume pkg lockfile & capability audit"; fi
+    # phase-2 C3: generic functions via comptime type parameters (`fn id(comptime T: type, x: T)`). The comptime
+    # parameter is ERASED at runtime (the function takes only the runtime params; each call drops the type arg),
+    # the type parameter is bound at the call site and the remaining annotated args are checked (reusing F2).
+    # POSITIVE: generics_ok.src defines id / pair_fst / pair_snd and prints id(int,42)=42, id(str,"hi")=hi, and a
+    # two-type-parameter pair -> compiles via lumec -> lasm -> native and prints the expected values.
+    "$ntmp/lc" <../../compiler/stage1/generics_ok.src >"$ntmp/go.s" 2>/dev/null; "$ntmp/lasm" <"$ntmp/go.s" >"$ntmp/go.elf" 2>/dev/null; chmod +x "$ntmp/go.elf"
+    if [ -x "$ntmp/go.elf" ] && "$ntmp/go.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/generics_ok_asm.expected - >/dev/null; then ok "phase-2 C3: generic fns (comptime T: type) compile + run (native, no C)"; else bad "phase-2 C3: generic fns (comptime T: type) compile + run (native, no C)"; fi
+    # PROOF of type erasure: for a one-runtime-param generic, `id(int, 42)` must emit a call to `id` passing ONLY the
+    # runtime argument 42 -- the type argument is gone. In the program entry (main) the call site therefore loads the
+    # literal 42 and calls `id` with a single register argument: `movq $42` and `call id` are present, and there is NO
+    # `popq %rsi` (which a surviving second argument would have produced).
+    printf 'fn id(comptime T: type, x: T) = x\nprint id(int, 42)\n' >"$ntmp/c3e.src"
+    "$ntmp/lc" <"$ntmp/c3e.src" >"$ntmp/c3e.s" 2>/dev/null
+    awk '/^_start:/{p=1} p{print}' "$ntmp/c3e.s" >"$ntmp/c3e_main.s"
+    c3e_ok=1
+    grep -q 'call id' "$ntmp/c3e_main.s" || c3e_ok=0
+    grep -q 'movq \$42, %rdi' "$ntmp/c3e_main.s" || c3e_ok=0
+    grep -q 'popq %rsi' "$ntmp/c3e_main.s" && c3e_ok=0
+    if [ "$c3e_ok" = 1 ]; then ok "phase-2 C3: type erasure -- id(int, 42) calls id with ONE arg (type arg erased, no popq %rsi)"; else bad "phase-2 C3: type erasure -- id(int, 42) calls id with ONE arg"; fi
+    # NEGATIVE: once the type parameter is bound (T := int), an argument of the wrong concrete type is a clear error.
+    printf 'fn id(comptime T: type, x: T) = x\nprint id(int, "hi")\n' >"$ntmp/c3n.src"
+    "$ntmp/lc" <"$ntmp/c3n.src" >"$ntmp/c3n.s" 2>"$ntmp/c3n.err"; c3n=$?
+    if [ "$c3n" = 3 ] && [ ! -s "$ntmp/c3n.s" ] && grep -q "argument 2 of 'id' has type str but parameter 'x' expects int" "$ntmp/c3n.err"; then ok "phase-2 C3: wrong-typed argument after binding T is a clear type error (exit 3, no asm)"; else bad "phase-2 C3: wrong-typed argument after binding T is a clear type error"; fi
+    # BACKWARD-COMPAT: programs that use no comptime parameter compile byte-identically through the C3 compiler.
+    for prog in annot_ok types_ok ev nfib; do
+        "$ntmp/lc" <../../compiler/stage1/$prog.src >"$ntmp/c3_$prog.s" 2>/dev/null; "$ntmp/lasm" <"$ntmp/c3_$prog.s" >"$ntmp/c3_$prog.elf" 2>/dev/null; chmod +x "$ntmp/c3_$prog.elf"
+        if [ -x "$ntmp/c3_$prog.elf" ] && "$ntmp/c3_$prog.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/${prog}_asm.expected - >/dev/null; then ok "phase-2 C3: backward-compat -- comptime-free $prog.src unchanged"; else bad "phase-2 C3: backward-compat -- comptime-free $prog.src unchanged"; fi
+    done
     rm -rf "$ntmp"
 else
     ok "no-toolchain ELF pipeline (skipped: not linux/x86_64, or under ASan)"

@@ -123,8 +123,13 @@ subset; the triple self-build is not reached.
   over the pure core (`Num`/`Str`/`Bin` with `+ - * / % == != < > <= >= and or`/`If`/`LetIn`/`Var` bound by a
   comptime `let`), emitting the result as a constant (`comptime(2 + 3 * 4)` emits the same asm as `14`); any
   non-foldable expression (a function call, `match`, record/field, free `Var`, `read()`) is a hard compile-time
-  error (`ctfail` → clear stderr message, exit 3, no output). NOT yet: compile-time calls to pure user functions,
-  comptime over types, `comptime` blocks/params. See `compiler/stage1/ct.src` and the `phase-2 comptime` tests.
+  error (`ctfail` → clear stderr message, exit 3, no output). **(C2 ✅)** comptime now also evaluates calls to pure
+  user functions (recursion + `if` + arithmetic) with step/depth guards; **(C3 ✅)** comptime **types** give generics
+  (`fn id(comptime T: type, x: T)`): a type name is a comptime value, the comptime parameter is erased at runtime
+  (recorded in a `GSig` statement, dropped from `Fn` and from every call by the `gerase` pass, so the fixpoint is
+  byte-identical), and the call site binds the type parameter and checks the remaining annotated arguments via the
+  F2 checker (`id(int, "hi")` → clear type error, exit 3). NOT yet: generics over declared types/containers,
+  `comptime assert`, comptime tables (C4). See `compiler/stage1/{ct,ct2,generics_ok}.src` and the `phase-2` tests.
 - Domain features (`table`/`query`, tensor/`grad`/`llm fn`) — docs only; `examples/future/*`
   pass the lexer only.
 - **Track T (`lume` single CLI, `lfmt.src` canonical formatter, `lmod.src` + `lume pkg` modules & package manager) is done (T1 #118, T2 #122, T3)**: `./lume` provides `build`, `run`, `test`, `doc` (`--json`), `fmt` (`--check` / `--stdout`), `pkg` (`init`/`check`/`lock`/`verify`/`tree`), `check` (`--json`), and `describe` (`--json`), backed by native Lume-Core tools (`compiler/stage1/ldoc.src`, `compiler/stage1/ltest.src`, `compiler/stage1/lfmt.src`, and `compiler/stage1/lmod.src` compiled to ELF by `lumec` + `lasm`). `lfmt.src` proves idempotence and byte-for-byte codegen invariance; `lmod.src` + `lume pkg` provide topological `use` bundling, cycle detection, SHA-256 `lume.lock` verification (P32), and capability-scoped dependency auditing (P26). `lsp`, P34 LAWS, P35 mandatory tests — not built yet.
