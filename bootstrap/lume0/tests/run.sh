@@ -579,6 +579,14 @@ PY
     # call-result arguments, int/str, and an unknown-typed argument must type-check with ZERO false positives.
     "$ntmp/lc" <../../compiler/stage1/typecheck_robust.src >"$ntmp/tr.s" 2>"$ntmp/tr.err"; "$ntmp/lasm" <"$ntmp/tr.s" >"$ntmp/tr.elf" 2>/dev/null; chmod +x "$ntmp/tr.elf"
     if [ -x "$ntmp/tr.elf" ] && "$ntmp/tr.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/typecheck_robust_asm.expected - >/dev/null; then ok "phase-2 F2/F3: a valid mixed-annotation program type-checks with zero false positives and runs"; else bad "phase-2 F2/F3: zero-false-positive hardening"; cat "$ntmp/tr.err"; fi
+    # phase-2 F4 (slice 2): string interpolation desugars to the same `+`-with-str(...) chain as explicit concat.
+    "$ntmp/lc" <../../compiler/stage1/interp.src >"$ntmp/ip.s" 2>"$ntmp/ip.err"; "$ntmp/lasm" <"$ntmp/ip.s" >"$ntmp/ip.elf" 2>/dev/null; chmod +x "$ntmp/ip.elf"
+    printf 'fn who() -> str = "lume"\nfn answer() -> int = 42\nprint "hi " + str(who()) + ", the answer is " + str(answer()) + "!"\n' >"$ntmp/ip_explicit.src"
+    "$ntmp/lc" <"$ntmp/ip_explicit.src" >"$ntmp/ipx.s" 2>/dev/null; "$ntmp/lasm" <"$ntmp/ipx.s" >"$ntmp/ipx.elf" 2>/dev/null; chmod +x "$ntmp/ipx.elf"
+    ip_ok=1
+    { [ -x "$ntmp/ip.elf" ] && "$ntmp/ip.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/interp_asm.expected - >/dev/null; } || ip_ok=0
+    { [ -x "$ntmp/ipx.elf" ] && "$ntmp/ipx.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/interp_asm.expected - >/dev/null; } || ip_ok=0
+    if [ "$ip_ok" = 1 ]; then ok "phase-2 F4: string interpolation and explicit str-concatenation produce the same output"; else bad "phase-2 F4: string interpolation"; cat "$ntmp/ip.err"; fi
     rm -rf "$ntmp"
 else
     ok "no-toolchain ELF pipeline (skipped: not linux/x86_64, or under ASan)"

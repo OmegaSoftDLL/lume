@@ -62,8 +62,10 @@ getting stuck), one green PR with a regression test, and the **self-host fixpoin
   forms"). **Slice 1 ✅ done:** the core parser now accepts the surface's **named enum payloads**
   (`Leaf(value: int) | Node(left: Tree, right: Tree)`), normalizing the names away so the named and positional
   forms lower to the same `{tag, ar}` AST and emit **byte-identical** assembly (proven in the suite); positional
-  payloads — every existing `.src`, `lumec.src` included — parse unchanged, so the fixpoint is untouched. Remaining
-  slices: layout/indentation form in the core, string interpolation, and one shared parser for both surfaces.
+  payloads — every existing `.src`, `lumec.src` included — parse unchanged, so the fixpoint is untouched. **Slice 2 ✅ done:** string interpolation — a string literal with a balanced `{<expr>}` desugars at parse time to
+  a `+` chain with each hole wrapped in `str(...)` (`"hi {name}"` == `"hi " + str(name)`), so interpolation and
+  explicit concatenation share one AST; a lone `{`/`}` stays literal, so the core's own `"{"`/`"}"` strings and the
+  fixpoint are untouched. Remaining slices: layout/indentation form in the core, and one shared parser for both surfaces.
 
 ### C — comptime (FLAGSHIP)
 - **C1 ✅ done (#116)** `comptime <expr>` of the pure core folds to a constant in the binary; non-evaluable comptime fails the compiler loudly. *Ref: Zig `comptime`. Superior to C++ `constexpr`: deterministic, exact integers, legible errors.*

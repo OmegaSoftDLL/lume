@@ -1,8 +1,21 @@
 ## --- parser: {node, rest}; AST constructors Num/Var/Bin/Call ---
 fn primid(name, t) = if headtext(t) == "(" then let a = arglist(droponce(t)) in {node: Call(name, a.items), rest: a.rest} else if headtext(t) == "{" then let a = recentries(droponce(t)) in {node: RecT(name, a.items), rest: a.rest} else {node: Var(name), rest: t}
+## F4 (front-end unification, slice 2): string interpolation. A string literal with a BALANCED `{<expr>}`
+## desugars, at parse time, into a `+` chain of string pieces and `str(<expr>)` of each interpolated expression
+## (`"hi {name}"` -> `"hi " + str(name)`), so the surface's interpolation and an explicit concatenation share
+## ONE AST. The inner expression is lexed and parsed with the same `lex`/`expr` used everywhere, and every hole
+## is wrapped in `str(...)` so non-string values print correctly (str is idempotent on strings). A `{` or `}`
+## that is NOT a balanced `{...}` stays a LITERAL brace, so the core's own `"{"` / `"}"` string literals are
+## unchanged and the self-host fixpoint is untouched (lumec.src has no balanced-brace string literal).
+fn strinterp(s) = strinterp2(s, findopen(s, 0))
+fn findopen(s, i) = if i >= count(s) then 0 - 1 else if at(s, i) == "{" then i else findopen(s, i + 1)
+fn strinterp2(s, i) = if i < 0 then Str(s) else strinterp3(s, i, findcloseb(s, i + 1))
+fn findcloseb(s, j) = if j >= count(s) then 0 - 1 else if at(s, j) == "}" then j else findcloseb(s, j + 1)
+fn strinterp3(s, i, j) = if j < 0 then Str(s) else strinterp4(slice(s, 0, i), slice(s, i + 1, j), slice(s, j + 1, count(s)))
+fn strinterp4(pre, inner, rest) = Bin("+", Bin("+", Str(pre), Call("str", Cons((expr(lex(inner, 0))).node, Nil))), strinterp(rest))
 fn prim(ts) = match ts
     Nil        => {node: Num(0), rest: Nil}
-    Cons(h, t) => if h.kind == "int" then {node: Num(toint(h.text)), rest: t} else if h.text == "-" and decimalhead(t) then {node: decnode(headtext(t), 1), rest: droponce(t)} else if h.kind == "decimal" then {node: decnode(h.text, 0), rest: t} else if h.kind == "str" then {node: Str(strval(h.text)), rest: t} else if h.kind == "id" then (if h.text == "if" then parseif(t) else if h.text == "let" then parselet(t) else if h.text == "match" then parsematch(t) else if h.text == "comptime" then parsect(t) else if h.text == "quote" then parsequote(t) else if h.text == "splice" then parsesplice(t) else primid(h.text, t)) else if h.text == "{" then let a = recentries(t) in {node: Rec(a.items), rest: a.rest} else if h.text == "(" then let r = expr(t) in {node: r.node, rest: skiprp(r.rest)} else {node: Num(0), rest: t}
+    Cons(h, t) => if h.kind == "int" then {node: Num(toint(h.text)), rest: t} else if h.text == "-" and decimalhead(t) then {node: decnode(headtext(t), 1), rest: droponce(t)} else if h.kind == "decimal" then {node: decnode(h.text, 0), rest: t} else if h.kind == "str" then {node: strinterp(strval(h.text)), rest: t} else if h.kind == "id" then (if h.text == "if" then parseif(t) else if h.text == "let" then parselet(t) else if h.text == "match" then parsematch(t) else if h.text == "comptime" then parsect(t) else if h.text == "quote" then parsequote(t) else if h.text == "splice" then parsesplice(t) else primid(h.text, t)) else if h.text == "{" then let a = recentries(t) in {node: Rec(a.items), rest: a.rest} else if h.text == "(" then let r = expr(t) in {node: r.node, rest: skiprp(r.rest)} else {node: Num(0), rest: t}
 fn arglist(ts) = if headtext(ts) == ")" then {items: Nil, rest: droponce(ts)} else argmore(expr(ts))
 fn argmore(r) = if headtext(r.rest) == "," then let rr = arglist(droponce(r.rest)) in {items: Cons(r.node, rr.items), rest: rr.rest} else {items: Cons(r.node, Nil), rest: skiprp(r.rest)}
 fn mulloop(r) = match r.rest
