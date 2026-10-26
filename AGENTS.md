@@ -11,6 +11,10 @@ is the short version.
   PRs in English.**
 - **Golden rule: zero bugs in Lume's own toolchain.** Every fix ships with a regression test.
 - **Do not use Rust** to implement Lume.
+- **Edit the self-hosted compiler in `compiler/stage1/lume/NN_*.src`, never the generated
+  `compiler/stage1/lumec.src`.** `lumec.src` is a build artifact (git-ignored), amalgamated
+  from the modules in numeric order by `scripts/amalgamate.sh` (`make amalgamate`); the
+  concatenation is byte-identical to the historical monolith. See `docs/13-module-split-plan.md`.
 - **Do not fake completion.** The triple self-build (Phase 1 exit) is NOT done — never claim it is.
 - **C is the disposable seed only.** The end state is no C and no external `as`/`ld` (Lume
   emits native ELF itself — see `lume0 asm`). Move work toward native, not toward C.

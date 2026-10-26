@@ -1,0 +1,2 @@
+## --- driver: read the whole source from stdin, check it, and compile it ---
+print lgen(cfold(gerase(tcheck(parseprogram(readall())))))

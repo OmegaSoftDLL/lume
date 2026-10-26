@@ -178,6 +178,7 @@ make -C bootstrap/lume0                               # build the seed (strict w
 bootstrap/lume0/lume0 check  examples/01_hello.lume   # lex + parse + name/type/arity checks
 bootstrap/lume0/lume0 run    examples/01_hello.lume   # interpret
 # source -> native with NO C in the loop (compiler AND assembler are Lume):
+make amalgamate                                       # generate compiler/stage1/lumec.src from compiler/stage1/lume/*.src
 bootstrap/lume0/lume0 run compiler/stage1/data_asm_cc.lume compiler/stage1/lumec.src /tmp/l.s
 bootstrap/lume0/lume0 asm /tmp/l.s /tmp/lumec         # one-time seed build of lumec
 bootstrap/lume0/lume0 run compiler/stage1/data_asm_cc.lume compiler/stage1/lasm.src /tmp/la.s

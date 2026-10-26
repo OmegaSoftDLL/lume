@@ -34,10 +34,17 @@ protection. License: dual **MIT OR Apache-2.0** (like Rust).
   and ultimately no `as`/`ld` either.
 - For each borrowed feature, check our implementation is **genuinely superior** to the
   source language's version, not a shallow clone. If it is only a doc promise, say so.
+- **Edit the self-hosted compiler in `compiler/stage1/lume/NN_*.src`, NOT in `lumec.src`.**
+  `compiler/stage1/lumec.src` is **generated** (git-ignored) by amalgamating the
+  `compiler/stage1/lume/*.src` modules in numeric order (`scripts/amalgamate.sh`, run as
+  `make amalgamate`). The concatenation is byte-identical to the old monolith, so the
+  fixpoint is preserved. See `docs/13-module-split-plan.md` for the module map.
 - Keep this file and `docs/10-stage1-status.md` honest and current.
 
 **DO NOT**
 - Do **not** use Rust to implement Lume.
+- Do **not** edit the generated `compiler/stage1/lumec.src` by hand — your change would be
+  overwritten by the next amalgamation. Edit the module under `compiler/stage1/lume/`.
 - Do **not** fake completion or claim a milestone that is not real (e.g. the triple
   self-build / fixpoint is NOT done — never say it is).
 - Do **not** let `check` regress; all 9 `examples/0*.lume` must `check` clean (name

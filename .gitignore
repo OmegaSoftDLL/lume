@@ -1,4 +1,7 @@
 # build outputs
+# lumec.src is GENERATED (amalgamated) from compiler/stage1/lume/*.src by
+# scripts/amalgamate.sh — edit the modules there, never this generated file.
+compiler/stage1/lumec.src
 bootstrap/lume0/lume0
 bootstrap/lume0/*.o
 bootstrap/lume0/*.dSYM/

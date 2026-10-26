@@ -1,0 +1,52 @@
+## --- parser: {node, rest}; AST constructors Num/Var/Bin/Call ---
+fn primid(name, t) = if headtext(t) == "(" then let a = arglist(droponce(t)) in {node: Call(name, a.items), rest: a.rest} else if headtext(t) == "{" then let a = recentries(droponce(t)) in {node: RecT(name, a.items), rest: a.rest} else {node: Var(name), rest: t}
+fn prim(ts) = match ts
+    Nil        => {node: Num(0), rest: Nil}
+    Cons(h, t) => if h.kind == "int" then {node: Num(toint(h.text)), rest: t} else if h.text == "-" and decimalhead(t) then {node: decnode(headtext(t), 1), rest: droponce(t)} else if h.kind == "decimal" then {node: decnode(h.text, 0), rest: t} else if h.kind == "str" then {node: Str(strval(h.text)), rest: t} else if h.kind == "id" then (if h.text == "if" then parseif(t) else if h.text == "let" then parselet(t) else if h.text == "match" then parsematch(t) else if h.text == "comptime" then parsect(t) else if h.text == "quote" then parsequote(t) else if h.text == "splice" then parsesplice(t) else primid(h.text, t)) else if h.text == "{" then let a = recentries(t) in {node: Rec(a.items), rest: a.rest} else if h.text == "(" then let r = expr(t) in {node: r.node, rest: skiprp(r.rest)} else {node: Num(0), rest: t}
+fn arglist(ts) = if headtext(ts) == ")" then {items: Nil, rest: droponce(ts)} else argmore(expr(ts))
+fn argmore(r) = if headtext(r.rest) == "," then let rr = arglist(droponce(r.rest)) in {items: Cons(r.node, rr.items), rest: rr.rest} else {items: Cons(r.node, Nil), rest: skiprp(r.rest)}
+fn mulloop(r) = match r.rest
+    Nil        => r
+    Cons(h, t) => if h.text == "*" or h.text == "/" or h.text == "%" then let r2 = post(t) in mulloop({node: Bin(h.text, r.node, r2.node), rest: r2.rest}) else r
+fn mul(ts) = mulloop(post(ts))
+fn addloop(r) = match r.rest
+    Nil        => r
+    Cons(h, t) => if h.text == "+" or h.text == "-" then let r2 = mul(t) in addloop({node: Bin(h.text, r.node, r2.node), rest: r2.rest}) else r
+fn add(ts) = addloop(mul(ts))
+fn cmploop(r) = match r.rest
+    Nil        => r
+    Cons(h, t) => if h.text == "==" or h.text == "!=" or h.text == "<" or h.text == ">" or h.text == "<=" or h.text == ">=" then let r2 = add(t) in cmploop({node: Bin(h.text, r.node, r2.node), rest: r2.rest}) else r
+fn cmp(ts) = cmploop(add(ts))
+fn andloop(r) = match r.rest
+    Nil        => r
+    Cons(h, t) => if h.text == "and" then let r2 = cmp(t) in andloop({node: Bin(h.text, r.node, r2.node), rest: r2.rest}) else r
+fn booland(ts) = andloop(cmp(ts))
+fn orloop(r) = match r.rest
+    Nil        => r
+    Cons(h, t) => if h.text == "or" then let r2 = booland(t) in orloop({node: Bin(h.text, r.node, r2.node), rest: r2.rest}) else r
+fn expr(ts) = orloop(booland(ts))
+fn parse(s) = (expr(lex(s, 0))).node
+
+## --- parser: match ---
+## INVARIANT (relied on by the parser, the frame-slot computation and the codegen): `match` appears ONLY as the
+## ENTIRE body of a function (or of a let-in / print / expression-statement body), never nested inside a larger
+## expression. The lexer is layout-blind (no INDENT/DEDENT), so the arms of a match are delimited by LOOKAHEAD:
+## an arm continues if and only if the next tokens form `<pattern> =>`; otherwise the arms have ended and the
+## token stream is left exactly as it was (nothing consumed) for the following statement. This is what lets a
+## top-level expression statement follow a function whose body is a `match`; the old rule ("arms end at `fn`,
+## `print` or end of input") would have swallowed such an expression as a bogus extra arm. A match nested in an
+## arm body would still swallow the outer arms, so such code must be factored into a helper function.
+## The lexer has no `=>` token: it lexes as the two ops "=" then ">", so an arrow is two dropkw calls, and the
+## lookahead `isarrow` likewise checks for "=" then ">".
+fn isarrow(ts) = headtext(ts) == "=" and headtext(droponce(ts)) == ">"
+fn parsematch(t) = let sc = expr(t) in let ar = parsearms(sc.rest) in {node: Match(sc.node, ar.items), rest: ar.rest}
+fn parsearms(ts) = armstart(ts, parsepat(ts))
+fn armstart(ts, p) = if isarrow(p.rest) then armmore(p) else {items: Nil, rest: ts}
+fn armmore(p) = let b = expr(dropkw(dropkw(p.rest, "="), ">")) in let rr = parsearms(b.rest) in {items: Cons({pat: p.node, body: b.node}, rr.items), rest: rr.rest}
+fn parsepat(ts) = match ts
+    Nil        => {node: PWild, rest: Nil}
+    Cons(h, t) => if h.kind == "int" then {node: PInt(toint(h.text)), rest: t} else if h.kind == "str" then {node: PStr(strval(h.text)), rest: t} else if h.text == "_" then {node: PWild, rest: t} else if isctor(h.text) then patcons(h.text, t) else {node: PBind(h.text), rest: t}
+fn patcons(tag, t) = if headtext(t) == "(" then let a = patlist(droponce(t)) in {node: PCons(tag, a.items), rest: a.rest} else {node: PCons(tag, Nil), rest: t}
+fn patlist(ts) = if headtext(ts) == ")" then {items: Nil, rest: droponce(ts)} else patmore(parsepat(ts))
+fn patmore(r) = if headtext(r.rest) == "," then let rr = patlist(droponce(r.rest)) in {items: Cons(r.node, rr.items), rest: rr.rest} else {items: Cons(r.node, Nil), rest: skiprp(r.rest)}
+
