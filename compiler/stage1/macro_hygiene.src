@@ -1,0 +1,26 @@
+## macro_hygiene.src -- Phase 2 M2 conformance: hygienic macros & quasiquote (`quote`, `unquote`, hygienic `splice`).
+
+## 1. Quasiquote with `unquote` (AST interpolation + scalar auto-lifting).
+fn m_affine(a, x_ast, b) = quote(unquote(a) * unquote(x_ast) + unquote(b))
+
+fn f_affine(x) = splice(m_affine(3, quote(x), 7))
+
+## 2. Hygiene property 1 (no caller capture): macro binds `let tmp = ...` internally while caller passes `quote(tmp * 2)`.
+## An unhygienic macro would capture `tmp` and compute `10 + 10 * 2 = 30`; hygienic expansion computes `10 + 16 * 2 = 42`.
+fn m_with_tmp(init_ast, body_ast) = quote(let tmp = unquote(init_ast) in tmp + unquote(body_ast))
+
+fn caller_capture(tmp) = splice(m_with_tmp(10, quote(tmp * 2)))
+
+## 3. Hygiene property 2 (nested expansion of the same macro where outer `tmp` is read AFTER inner expansion).
+## Outer `tmp` (100) and inner `tmp` (20) receive distinct gensyms (`_hyg_1` vs `_hyg_2`), so `nested_hyg(5)` = `(5 + 20) + 100 = 125`.
+fn m_wrap_tmp(v_ast, inner_ast) = quote(let tmp = unquote(v_ast) in unquote(inner_ast) + tmp)
+
+fn nested_hyg(x) = splice(m_wrap_tmp(100, m_wrap_tmp(20, quote(x))))
+
+## 4. Hygiene property 3 (sibling expansions of the same macro in one expression get distinct `_hyg_1` / `_hyg_2` slots).
+fn sibling_hyg(x) = splice(m_with_tmp(1, quote(x))) + splice(m_with_tmp(2, quote(x)))
+
+print f_affine(10)
+print caller_capture(16)
+print nested_hyg(5)
+print sibling_hyg(10)
