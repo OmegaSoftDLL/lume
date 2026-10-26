@@ -1,0 +1,42 @@
+## ai_authoring_ok.src -- Phase 3 Track A (A1-A3) positive conformance test:
+##   - A1: gradual typed hole (`_`) in private draft function coexisting with runnable code
+##   - A2: `total fn` structural recursion on lists and guarded decreasing integer measure (`n - 1`)
+##   - A3: `llm fn` & `unverified[T]` provenance discharged via `verify(val, contract)`, branch guard, and `evolve_approve`
+
+## A1: private draft function with a typed hole `_` (expected type `int`, lowers to default `0`)
+fn draft_bonus(base: int) -> int = base + _
+
+## A2: `total fn` proven terminating by structural recursion on `Cons(h, t)`
+total fn list_sum(xs: [int]) -> int = match xs
+    Nil        => 0
+    Cons(h, t) => h + list_sum(t)
+
+## A2: `pub total fn` proven terminating by guarded decreasing integer measure `n - 1`
+pub total fn tri_sum(n: int, acc: int) -> int =
+    if n <= 0 then acc else tri_sum(n - 1, acc + n)
+
+## A3: AI / probabilistic source carrying `unverified` provenance
+llm fn llm_suggest_discount(subtotal: int) -> int = 15
+
+## A3: discharging `unverified` provenance via `verify(val, contract)` before `pub fn` boundary
+pub fn checkout_with_verify(subtotal: int) -> int =
+    let raw_disc = llm_suggest_discount(subtotal) in
+    let safe_disc = verify(raw_disc, raw_disc >= 0 and raw_disc <= 50) in
+    subtotal - safe_disc
+
+## A3: discharging `unverified[int]` parameter via a contract branch guard (`if raw_disc >= 0 ...`)
+pub fn checkout_with_guard(raw_disc: unverified[int], subtotal: int) -> int =
+    if raw_disc >= 0 and raw_disc <= 50 then subtotal - raw_disc else subtotal
+
+## A3: discharging `unverified` provenance via `law_check` and `evolve_approve`
+pub fn checkout_with_governance(subtotal: int) -> int =
+    let d1 = law_check(llm_suggest_discount(subtotal), subtotal >= 50) in
+    let d2 = evolve_approve(llm_suggest_discount(subtotal)) in
+    subtotal - d1 - d2
+
+print draft_bonus(42)
+print list_sum(Cons(10, Cons(20, Cons(30, Nil))))
+print tri_sum(5, 0)
+print checkout_with_verify(100)
+print checkout_with_guard(20, 100)
+print checkout_with_governance(100)

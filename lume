@@ -679,7 +679,7 @@ cmd_agent() {
     _afile=""
     for _arg in "$@"; do
         case "$_arg" in
-            check|compile|ast|expand|symbols|eval|--json) ;;
+            check|compile|fill|prove|ast|expand|symbols|eval|--json) ;;
             -*) usage ;;
             *) _afile=$_arg ;;
         esac

@@ -27,7 +27,7 @@ fn parseret2(r) = if headtext(r.rest) == "from" then {ty: r.node, fromp: headtex
 fn anyownp(pl) = match pl
     Nil        => 0
     Cons(p, r) => if p.cf >= 2 then 1 else anyownp(r)
-fn mkosig(nm, pubf, freef, pl, rty, fromp) = if pubf == 1 or freef == 1 or anyownp(pl) == 1 or fromp != "" then OSig(nm, pubf, freef, pl, rty, fromp) else Nil
+fn mkosig(nm, pubf, freef, pl, rty, fromp) = if pubf == 1 or freef > 0 or anyownp(pl) == 1 or fromp != "" then OSig(nm, pubf, freef, pl, rty, fromp) else Nil
 fn parsefnp(t, pubf, freef) = parsefn2(headtext(t), pubf, freef, parseparams(dropkw(droponce(t), "(")))
 fn parsefn2(nm, pubf, freef, ps) = parsefn3(nm, pubf, freef, ps, parseret(ps.rest))
 fn parsefn3(nm, pubf, freef, ps, rt) = parsefn4(nm, pubf, freef, ps, rt, expr(dropkw(rt.rest, "=")))
@@ -60,10 +60,11 @@ fn tdeclname(nd) = match nd
 fn progtyped(kind, r) = Cons(OType(tdeclname(r.node), kind), Cons(r.node, parseprog(r.rest)))
 fn progfree(ts) = if headtext(ts) == "pub" then progfn(parsefnp(droponce(droponce(ts)), 1, 1)) else progfn(parsefnp(droponce(ts), 0, 1))
 fn progat(t) = if headtext(t) == "freestanding" then progfree(droponce(t)) else if headtext(t) == "gc" then progtyped("gc", parsetype(droponce(droponce(t)))) else parseprog(droponce(t))
+fn progpub(t) = if headtext(t) == "total" and headtext(droponce(t)) == "fn" then progfn(parsefnp(droponce(droponce(t)), 1, 2)) else if headtext(t) == "llm" and headtext(droponce(t)) == "fn" then progfn(parsefnp(droponce(droponce(t)), 1, 4)) else progfn(parsefnp(droponce(t), 1, 0))
 fn lexprstmt(e) = {node: ExprS(e.node), rest: e.rest}
 fn parseprog(ts) = match ts
     Nil        => Nil
-    Cons(h, t) => if h.text == "fn" then progfn(parsefn(droponce(ts))) else if h.text == "pub" and headtext(t) == "fn" then progfn(parsefnp(droponce(t), 1, 0)) else if h.text == "@" then progat(t) else if h.text == "resource" and headtext(t) == "type" then progtyped("resource", parsetype(droponce(t))) else if h.text == "print" or h.text == "type" then progmore(parsestmt(ts)) else progmore(lexprstmt(expr(ts)))
+    Cons(h, t) => if h.text == "fn" then progfn(parsefn(droponce(ts))) else if h.text == "pub" and (headtext(t) == "fn" or headtext(t) == "total" or headtext(t) == "llm") then progpub(t) else if h.text == "total" and headtext(t) == "fn" then progfn(parsefnp(droponce(t), 0, 2)) else if h.text == "llm" and headtext(t) == "fn" then progfn(parsefnp(droponce(t), 0, 4)) else if h.text == "@" then progat(t) else if h.text == "resource" and headtext(t) == "type" then progtyped("resource", parsetype(droponce(t))) else if h.text == "print" or h.text == "type" then progmore(parsestmt(ts)) else progmore(lexprstmt(expr(ts)))
 fn parseprogram(s) = parseprog(lex(s, 0))
 
 ## --- parser: named type declarations (F1) -----------------------------------------------------------------
@@ -107,7 +108,7 @@ fn parsefieldcons(fname, fty, rr) = {items: Cons({fname: fname, fty: fty}, rr.it
 fn parsetypelist(ts) = if headtext(ts) == ")" then {items: Nil, rest: droponce(ts)} else parsetypemore(parsetype1(ts))
 fn parsetypemore(r) = if headtext(r.rest) == "," then parsetypecons(r.node, parsetypelist(droponce(r.rest))) else {items: Cons(r.node, Nil), rest: skiprp(r.rest)}
 fn parsetypecons(n, rr) = {items: Cons(n, rr.items), rest: rr.rest}
-fn istyapp1(nm) = nm == "table" or nm == "rc" or nm == "arc" or nm == "weak" or nm == "cell" or nm == "chan" or nm == "Ref" or nm == "View"
+fn istyapp1(nm) = nm == "table" or nm == "rc" or nm == "arc" or nm == "weak" or nm == "cell" or nm == "chan" or nm == "Ref" or nm == "View" or nm == "unverified"
 fn parsetype1(ts) = if headtext(ts) == "[" then parsetypelistof(parsetype1(droponce(ts))) else if headtext(ts) == "decimal" and headtext(droponce(ts)) == "(" then parsetypedecimal(droponce(droponce(ts))) else if istyapp1(headtext(ts)) and headtext(droponce(ts)) == "[" then parsetypeapp(headtext(ts), droponce(droponce(ts))) else {node: TyName(headtext(ts)), rest: droponce(ts)}
 fn parsetypelistof(r) = {node: TyList(r.node), rest: skiprk(r.rest)}
 fn parsetypeapp(kind, ts) = parsetypeapp2(kind, parsetype1(ts))

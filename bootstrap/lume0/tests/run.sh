@@ -701,6 +701,26 @@ PY
     "$ntmp/lc" <"$ntmp/o30.src" >"$ntmp/o30.s" 2>"$ntmp/o30.err"; o30c=$?
     if [ "$o30c" = 3 ] && [ ! -s "$ntmp/o30.s" ] && grep -q "\[O0030\]" "$ntmp/o30.err"; then ok "phase-3 O4: ambient heap allocation in '@freestanding' fn fails with [O0030] (exit 3, no asm)"; else bad "phase-3 O4: [O0030] freestanding heap allocation"; cat "$ntmp/o30.err"; fi
     if LUME_BIN_DIR="$ntmp" ../../lume agent check "$ntmp/o1.src" 2>/dev/null | grep -q '"code":"O0001"' && LUME_BIN_DIR="$ntmp" ../../lume agent check "$ntmp/o21.src" 2>/dev/null | grep -q '"code":"O0021"'; then ok "phase-3 O1-O4: lume agent check (use lcaas) emits structured O0001-O0030 JSON diagnostics with fix-its"; else bad "phase-3 O1-O4: lume agent check O0001/O0021 JSON"; fi
+    # phase-3 Track A (A1-A3): AI-native authoring (typed holes + synthesis, `total fn` termination, `llm fn`/`unverified[T]` provenance).
+    "$ntmp/lc" <../../compiler/stage1/ai_authoring_ok.src >"$ntmp/ai.s" 2>"$ntmp/ai.err"
+    if [ -s "$ntmp/ai.s" ]; then "$ntmp/lasm" <"$ntmp/ai.s" >"$ntmp/ai.elf" 2>/dev/null; chmod +x "$ntmp/ai.elf"; fi
+    if [ -x "$ntmp/ai.elf" ] && "$ntmp/ai.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/ai_authoring_ok_asm.expected - >/dev/null; then ok "phase-3 A1-A3: typed holes, 'total fn' termination, and 'llm fn'/'unverified[T]' provenance compile + run"; else bad "phase-3 A1-A3: ai_authoring_ok.src compile + run"; cat "$ntmp/ai.err"; fi
+    # A0001: unfilled typed hole in a `pub fn` fails with [A0001] and synthesized candidate fix-it; `lume agent fill` returns ranked candidates in JSON
+    printf 'fn inc(v: int) -> int = v + 1\npub fn compute(x: int) -> int = _\nprint compute(10)\n' >"$ntmp/a1.src"
+    "$ntmp/lc" <"$ntmp/a1.src" >"$ntmp/a1.s" 2>"$ntmp/a1.err"; a1c=$?
+    if [ "$a1c" = 3 ] && [ ! -s "$ntmp/a1.s" ] && grep -q "\[A0001\]" "$ntmp/a1.err" && grep -q "replace '_' with 'x'" "$ntmp/a1.err"; then ok "phase-3 A1: unfilled typed hole in 'pub fn' fails with [A0001] and synthesized candidate fix-it (exit 3, no asm)"; else bad "phase-3 A1: [A0001] typed hole in pub fn"; cat "$ntmp/a1.err"; fi
+    if LUME_BIN_DIR="$ntmp" ../../lume agent fill "$ntmp/a1.src" 2>/dev/null | grep -q '"expected_type":"int"' && LUME_BIN_DIR="$ntmp" ../../lume agent fill "$ntmp/a1.src" 2>/dev/null | grep -q '"inc(x)"'; then ok "phase-3 A1: lume agent fill synthesizes hole expected_type, context, and ranked candidates in JSON"; else bad "phase-3 A1: lume agent fill JSON synthesis"; fi
+    # A0002: non-terminating `total fn` fails with [A0002]
+    printf 'total fn bad_loop(n: int) -> int = if n <= 0 then 0 else bad_loop(n)\nprint bad_loop(5)\n' >"$ntmp/a2.src"
+    "$ntmp/lc" <"$ntmp/a2.src" >"$ntmp/a2.s" 2>"$ntmp/a2.err"; a2c=$?
+    if [ "$a2c" = 3 ] && [ ! -s "$ntmp/a2.s" ] && grep -q "\[A0002\]" "$ntmp/a2.err"; then ok "phase-3 A2: non-decreasing recursive call in 'total fn' fails with [A0002] (exit 3, no asm)"; else bad "phase-3 A2: [A0002] non-terminating total fn"; cat "$ntmp/a2.err"; fi
+    # A0003: unverified AI value crossing a trusted `pub fn` boundary or effectful sink without verification fails with [A0003]
+    printf 'llm fn ask_ai(x: int) -> int = x + 10\npub fn ship_unverified(x: int) -> int = ask_ai(x)\nprint ship_unverified(5)\n' >"$ntmp/a3a.src"
+    "$ntmp/lc" <"$ntmp/a3a.src" >"$ntmp/a3a.s" 2>"$ntmp/a3a.err"; a3ac=$?
+    printf 'llm fn ask_ai(x: int) -> int = x + 10\nfn io_write(v: int) -> int = v\nfn leak_to_sink(x: int) -> int = io_write(ask_ai(x))\nprint leak_to_sink(5)\n' >"$ntmp/a3b.src"
+    "$ntmp/lc" <"$ntmp/a3b.src" >"$ntmp/a3b.s" 2>"$ntmp/a3b.err"; a3bc=$?
+    if [ "$a3ac" = 3 ] && [ ! -s "$ntmp/a3a.s" ] && grep -q "\[A0003\]" "$ntmp/a3a.err" && [ "$a3bc" = 3 ] && [ ! -s "$ntmp/a3b.s" ] && grep -q "\[A0003\]" "$ntmp/a3b.err"; then ok "phase-3 A3: unverified 'llm fn' output crossing 'pub fn' or trusted sink without verification fails with [A0003] (exit 3, no asm)"; else bad "phase-3 A3: [A0003] unverified provenance leak"; cat "$ntmp/a3a.err" "$ntmp/a3b.err"; fi
+    if LUME_BIN_DIR="$ntmp" ../../lume agent check "$ntmp/a2.src" 2>/dev/null | grep -q '"code":"A0002"' && LUME_BIN_DIR="$ntmp" ../../lume agent check "$ntmp/a3a.src" 2>/dev/null | grep -q '"code":"A0003"'; then ok "phase-3 A1-A3: lume agent check emits structured A0001-A0003 JSON diagnostics with fix-its"; else bad "phase-3 A1-A3: lume agent check A0002/A0003 JSON"; fi
     rm -rf "$ntmp"
 else
     ok "no-toolchain ELF pipeline (skipped: not linux/x86_64, or under ASan)"

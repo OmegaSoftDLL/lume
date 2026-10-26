@@ -162,32 +162,38 @@ Every Phase 3 brick obeys the project's non-negotiable rules:
   - Wired into `lume evolve` (`compiler/stage1/levolve.src`) as a verification gate so self-evolved
     patches must preserve all declared `LAWS`.
 
-### A — AI-native authoring: holes, totality, and provenance (the AI-first multiplier)
+### A — AI-native authoring: holes, totality, and provenance (the AI-first multiplier, **DONE**)
 
 > **Priority: not deferred.** Lume exists so an AI can author *correct* code faster; A1–A3 are the
 > features that most directly serve that mission, so they run **early and in parallel** with O/K/S/V,
 > not after. Each is driven by the compiler-as-a-service (`lcaas`) and `lume agent`, machine-first.
 
-- **A1 — Typed holes + hole-driven synthesis (`_`)**
+- **A1 — Typed holes + hole-driven synthesis (`_`) ✅**
   - A `_` (hole) is a well-typed term: the checker assigns it an expected type and the in-scope
-    environment, and `lume agent fill <file.src>` returns, per hole, its type, local context, and
-    ranked candidate completions (functions/constructors whose result unifies with the hole).
-  - A model writes a program incrementally and **never ships an ill-typed draft** — every
-    intermediate state type-checks with holes as the only unknowns. *Ref: Agda/Idris interactive
-    holes, GHC typed holes, Hazel. Superior: machine-first (JSON candidates for an AI), gradual
-    (holes coexist with runnable code).*
+    environment, and `lume agent fill <file.src>` (`caas_fill` in `compiler/stage1/lcaas.src`) returns,
+    per hole, its type, local context, and ranked candidate completions (in-scope bindings, functions
+    whose result unifies with the hole, and canonical default values), plus diagnostic `A0001` with
+    the top synthesized fix-it.
+  - A model writes a program incrementally and **never ships an ill-typed draft** — private draft
+    functions with holes coexist with runnable code, while unfilled holes in `pub fn` fail at compile
+    time with `[A0001]`. *Ref: Agda/Idris interactive holes, GHC typed holes, Hazel. Superior:
+    machine-first (JSON candidates for an AI), gradual (holes coexist with runnable code).*
 
-- **A2 — `total` totality / termination checking**
-  - An opt-in `total fn` is rejected unless the checker proves termination (structural recursion or
-    a decreasing measure), reusing the comptime step/depth machinery and V2's measures.
+- **A2 — `total` totality / termination checking ✅**
+  - An opt-in `total fn` (`total fn` / `pub total fn`) is rejected with `[A0002]` unless the checker
+    proves termination (structural recursion on ADT constructor sub-patterns or a guarded decreasing
+    integer measure `n - k` / `n / k`), and rejects calling non-total recursive functions from a
+    `total fn`.
   - For AI-generated code this guarantees **no shipped infinite loop**. *Ref: Idris `total`, Dafny
     `decreases`, Agda termination checker.*
 
-- **A3 — Provenance & uncertainty in the type (the one feature no source language has)**
-  - A value produced by an `llm fn` or a `prob` effect carries an `unverified` / `?conf` **provenance
-    tag in its type**. The checker FORBIDS an `unverified` value from flowing into trusted code (a
-    `pub` boundary, a `LAWS`-guarded region, an effectful action) until a contract (`V1`) proves it,
-    a `LAWS` gate (`V3`) accepts it, or a human approves it via `lume evolve`.
+- **A3 — Provenance & uncertainty in the type (the one feature no source language has) ✅**
+  - A value produced by an `llm fn`, `prob_sample`, or `unverified[T]` parameter carries an
+    `unverified` **provenance tag in its type**. The checker FORBIDS an `unverified` value from
+    flowing into trusted code (a `pub` boundary or an effectful/trusted sink such as `io_write`,
+    `db_exec`, `net_send`, `fs_write`) with `[A0003]` until a contract (`verify(val, contract)` or
+    comparison branch guard), a `LAWS` gate (`law_check(val, law)`), or human governance
+    (`evolve_approve(val)`) discharges it.
   - Makes **AI-origin first-class**, exactly as effects (`P14`) make capabilities first-class: an AI
     hallucination cannot silently become a production bug. *Ref: none — Lume's own, required by its
     AI-first mission (`P1`–`P6`). Composes with effects, contracts, and `lume evolve`.*
