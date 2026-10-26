@@ -664,7 +664,8 @@ PY
     "$ntmp/lc" <"$ntmp/hmbad.src" >"$ntmp/hmbad.s" 2>"$ntmp/hmbad.err"; hmb=$?
     if [ "$hmb" = 3 ] && [ ! -s "$ntmp/hmbad.s" ] && grep -q "argument 1 of 'inc' has type str but parameter 'x' expects int" "$ntmp/hmbad.err"; then ok "phase-2 F3c: HM catches a mismatched call to an unannotated function (inc(\"hi\") with inc(x)=x+1) (exit 3, no asm)"; else bad "phase-2 F3c: HM mismatched call fails"; fi
     # phase-3 Track O (O1-O4): ownership, borrow checker, region inference (`from`), LIFO `defer`/`errdefer`, and memory tiers (`rc`/`arc`/`weak`/`cell`/arena).
-    "$ntmp/lc" <../../compiler/stage1/own_ok.src >"$ntmp/own.s" 2>"$ntmp/own.err"; "$ntmp/lasm" <"$ntmp/own.s" >"$ntmp/own.elf" 2>/dev/null; chmod +x "$ntmp/own.elf"
+    "$ntmp/lc" <../../compiler/stage1/own_ok.src >"$ntmp/own.s" 2>"$ntmp/own.err"
+    if [ -s "$ntmp/own.s" ]; then "$ntmp/lasm" <"$ntmp/own.s" >"$ntmp/own.elf" 2>/dev/null; chmod +x "$ntmp/own.elf"; fi
     if [ -x "$ntmp/own.elf" ] && "$ntmp/own.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/own_ok_asm.expected - >/dev/null; then ok "phase-3 O1-O4: ownership, mut/own borrows, LIFO defer/errdefer, 'from' regions, and '@freestanding' compile + run"; else bad "phase-3 O1-O4: own_ok.src compile + run"; cat "$ntmp/own.err"; fi
     if LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/ownership.src 2>/dev/null | grep -q "5 passed, 0 failed"; then ok "phase-3 O4: ownership.src tiers (rc, arc, weak, cell, arena) pass native lume test"; else bad "phase-3 O4: ownership.src tiers unit tests"; fi
     # O0001: use of moved value
