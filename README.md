@@ -5,7 +5,7 @@
   <img alt="Built with 100% Lume" src="https://img.shields.io/badge/built%20with-100%25%20Lume-8A2BE2">
   <a href="https://github.com/OmegaSoftDLL/lume/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/OmegaSoftDLL/lume/actions/workflows/ci.yml/badge.svg"></a>
   <img alt="License: MIT OR Apache-2.0" src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue">
-  <img alt="Status: bootstrap" src="https://img.shields.io/badge/status-bootstrap-orange">
+  <img alt="Status: Phase 2 complete, Phase 3 in progress" src="https://img.shields.io/badge/status-phase%202%20complete%20%C2%B7%20phase%203%20in%20progress-8A2BE2">
   <img alt="PRs welcome" src="https://img.shields.io/badge/PRs-welcome-brightgreen">
 </p>
 
@@ -136,8 +136,8 @@ This is a **staged, self-verifying bootstrap** — the model GCC, Rust and Go us
 - [x] **Phase 0 — design.** ~260-language survey, principles (P1–P35), specification v0.1, grammar, roadmap, vision, and worked examples.
 - [x] **Stage 0 — seed `lume0`** (C, disposable; now frozen as the reproducibility root). Lexer, parser, tree-walking interpreter, a semantic `check` (undefined names, literal/annotation types, call arity, duplicate and immutable-assignment errors — the AI-first edit→check→fix loop), and the seed's own x86-64 assembler + ELF64 writer (`lume0 asm`), so no external `as`/`ld`/`cc` is ever needed.
 - [x] **Stage 1 — self-hosting, no C in the loop. ✅ Done.** Both the compiler (`compiler/stage1/lumec.src`) and the assembler + ELF writer (`compiler/stage1/lasm.src`) are written in Lume-Core. `lumec` lexes, parses (functions, `print`, expressions, `match`, records, constructors) and emits x86-64; `lasm` writes the ELF byte-by-byte. `make bootstrap` runs the staged build — the GCC/Rust/Go model: the frozen C seed mints the first tools once, then stages 1–3 rebuild the whole toolchain from Lume source with **no C**, asserting **stage 2 == stage 3, bit for bit**. `lasm`'s ELF is byte-identical to the seed assembler and strictly more correct (nearest GAS `1f`/`1b` resolution, which the seed gets wrong); the 300 KB compiler assembles in ~2.8 s. `make test` 218/0, `make asan` 177/0. See `docs/10-stage1-status.md` and `docs/11-self-hosting-plan.md`.
-- [ ] **Stage 2** — `comptime`, macros, `table`/`query`, package manager.
-- [ ] **Stage 3** — ownership/borrow checker, structured concurrency, effects, `@gc` regions.
+- [x] **Stage 2 — comptime, macros, data, tooling, self-evolution, types. ✅ Done.** `comptime` (fold, pure-fn calls, generics via `comptime T: type`, `assert`, precomputed tables), hygienic macros + quasiquote, exact `decimal(p, s)` / `table[T]` / type-checked `query`, the single `lume` CLI (`build`/`run`/`test`/`fmt`/`doc`/`pkg`/`agent`/`evolve`) with capability-audited deps + SHA-256 lockfiles, the `lume evolve` self-evolution loop (compiler-as-a-service + 6 gates + human approval), and the gradual type system (F1 declarations, F2 annotations, F3 Hindley–Milner inference, F4 unified front-ends). Exit criterion met: the `examples/apps/inventory/` business app, built only with `lume`. All keeping `stage 2 == stage 3` and the Zero-C gate green in CI. See `docs/15-phase2-status.md`.
+- [ ] **Stage 3 — ownership, effects, concurrency, verification.** *In progress:* Track O (move/borrow checker, `from` regions, memory tiers) ✅ and Track A (AI-native authoring: typed holes, `total`, provenance/uncertainty in the type) ✅ merged; effect handlers (K), structured concurrency + actors (S), and `lume prove`/SMT contract verification (V) remaining, plus the `job_server` capstone. See `docs/16-phase3-plan.md` and the AI-first north star `docs/19-intent-as-source.md`.
 - [ ] **Stage 4** — tensors, autodiff, GPU kernels, `prob`, `rule`, `llm fn`.
 - [ ] **Stage 5** — bare metal, `lume-os`, verified core.
 
