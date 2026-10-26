@@ -1,0 +1,19 @@
+let customer_schema = Cons({name: "id", type: "int"}, Cons({name: "city", type: "str"}, Cons({name: "spend", type: "int"}, Nil)))
+let customer_rows = Cons(Cons({kind: "int", value: 1}, Cons({kind: "str", value: "Oslo"}, Cons({kind: "int", value: 30}, Nil))), Cons(Cons({kind: "int", value: 2}, Cons({kind: "str", value: "Lima"}, Cons({kind: "int", value: 12}, Nil))), Cons(Cons({kind: "int", value: 3}, Cons({kind: "str", value: "Oslo"}, Cons({kind: "int", value: 22}, Nil))), Nil)))
+let customers = table_success(customer_schema, customer_rows)
+let filtered = query_where(customers, "spend", ">", {kind: "int", value: 15})
+print table_row_count(filtered)
+let ordered = query_order(filtered, "spend", "desc")
+print table_cell(ordered, 0, 0).value.value
+let order_schema = Cons({name: "id", type: "int"}, Cons({name: "customer_id", type: "int"}, Nil))
+let orders = table_success(order_schema, Cons(Cons({kind: "int", value: 101}, Cons({kind: "int", value: 1}, Nil)), Cons(Cons({kind: "int", value: 102}, Cons({kind: "int", value: 1}, Nil)), Cons(Cons({kind: "int", value: 103}, Cons({kind: "int", value: 3}, Nil)), Nil))))
+let joined = query_join(orders, customers, "orders", "customers", "customer_id", "id")
+print table_row_count(joined)
+print list_head(joined.schema).name
+let grouped = query_group(customers, "city", "spend")
+print table_row_count(grouped)
+print table_cell(grouped, 0, 1).value.value
+print table_cell(grouped, 0, 2).value.value
+print table_cell(grouped, 1, 2).value.value
+print query_where(customers, "missing", "==", {kind: "int", value: 1}).ok
+print query_join(orders, table_success(Cons({name: "id", type: "str"}, Nil), Cons(Cons({kind: "str", value: "x"}, Nil), Nil)), "l", "r", "customer_id", "id").ok
