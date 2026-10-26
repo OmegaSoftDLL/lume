@@ -1,0 +1,8 @@
+## F4 slice 1: an enum declared with the SURFACE named-field payload form. The core parser accepts
+## `Leaf(value: int)` / `Node(left: Tree, right: Tree)` and normalizes the names away, so this lowers to
+## exactly the same AST (and code) as the positional `Leaf(int) | Node(Tree, Tree)`. sum = 3 + 4 + 5 = 12.
+type Tree = enum Leaf(value: int) | Node(left: Tree, right: Tree)
+fn sumt(t) = match t
+    Leaf(v)    => v
+    Node(l, r) => sumt(l) + sumt(r)
+print sumt(Node(Leaf(3), Node(Leaf(4), Leaf(5))))

@@ -72,7 +72,16 @@ fn parsetypebody(nm, t) = if headtext(t) == "record" then parserecordty(nm, drop
 fn parseenumty(nm, t) = parseenumty2(nm, parsevariants(t))
 fn parseenumty2(nm, vs) = {node: TypeS(nm, "enum", vs.items), rest: vs.rest}
 fn parsevariants(ts) = parsevariant(headtext(ts), droponce(ts))
-fn parsevariant(tag, ts) = if headtext(ts) == "(" then parsevariantp(tag, parsetypelist(droponce(ts))) else parsevariantend(tag, 0, ts)
+fn parsevariant(tag, ts) = if headtext(ts) == "(" then parsevariantp(tag, parsevpayload(droponce(ts))) else parsevariantend(tag, 0, ts)
+## F4 (front-end unification, slice 1): an enum variant payload accepts BOTH the Lume-Core positional form
+## `Cons(int, Node)` and the surface form with NAMED fields `Cons(value: int, next: Node)`. A leading `name :`
+## is consumed and discarded, so both forms lower to the SAME `{tag, ar}` AST (arity = field count) and emit
+## byte-identical code -- the surface and the core share one grammar here. A positional payload (every existing
+## `.src`, lumec.src included) parses exactly as before, so the self-host fixpoint is untouched.
+fn parsevpayload(ts) = if headtext(ts) == ")" then {items: Nil, rest: droponce(ts)} else parsevpmore(parsevpfield(ts))
+fn parsevpfield(ts) = if headtext(droponce(ts)) == ":" then parsetype1(droponce(droponce(ts))) else parsetype1(ts)
+fn parsevpmore(r) = if headtext(r.rest) == "," then parsevpcons(r.node, parsevpayload(droponce(r.rest))) else {items: Cons(r.node, Nil), rest: skiprp(r.rest)}
+fn parsevpcons(n, rr) = {items: Cons(n, rr.items), rest: rr.rest}
 fn parsevariantp(tag, a) = parsevariantend(tag, len(a.items), a.rest)
 fn parsevariantend(tag, ar, ts) = if headtext(ts) == "|" then parsevariantcons(tag, ar, parsevariants(droponce(ts))) else {items: Cons({tag: tag, ar: ar}, Nil), rest: ts}
 fn parsevariantcons(tag, ar, rr) = {items: Cons({tag: tag, ar: ar}, rr.items), rest: rr.rest}
