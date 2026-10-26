@@ -1,0 +1,10 @@
+## F3 nominal inference: a variable of a declared enum type is inferred and checked by exact name.
+## idc/use thread a Color through; num matches it. All nominal types line up, so this compiles. num(Green)=2.
+type Color = enum Red | Green | Blue
+fn idc(c: Color) -> Color = c
+fn use(c: Color) -> Color = idc(c)
+fn num(c: Color) -> int = match use(c)
+    Red   => 1
+    Green => 2
+    Blue  => 3
+print num(Green)

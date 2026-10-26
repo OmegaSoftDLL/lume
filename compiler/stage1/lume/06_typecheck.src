@@ -299,7 +299,15 @@ fn tknownl(e, tt, lenv) = match e
     _               => tknown(e, tt)
 ## F3a infers only int/str (the unambiguous, high-value subset); decimal/record/list/apply fall back to TyAny
 ## (unchecked, as before), so the strict decimal/record equality can never produce a NEW false positive.
-fn tnarrow(ty) = if tisint(ty) == 1 or tisstr(ty) == 1 then ty else TyAny
+## F3 nominal inference: keep int/str AND any declared NOMINAL type name (enum/record); drop decimal/list/
+## table/literal, whose equality is scale/element-sensitive and coercion-prone. Nominal names compare by exact
+## identity (no coercion), so inferring and checking them adds real cross-type catches with zero false positives.
+fn tnarrow(ty) = match ty
+    TyName(n) => ty
+    _         => TyAny
+fn tisname(ty) = match ty
+    TyName(n) => 1
+    _         => 0
 fn tknownlvar(nm, lenv, tt) = match tlookuplenv(nm, lenv)
     Cons(ty, r) => ty
     Nil         => tknown(Var(nm), tt)
@@ -351,7 +359,7 @@ fn tisinferable(a) = match a
     If(c, t, e2)    => 1
     LetIn(x, v, b)  => 1
     _               => 0
-fn tchkinfercmp(nm, i, pn, ty, k) = if (tisint(ty) == 1 or tisstr(ty) == 1) and (tisint(k) == 1 or tisstr(k) == 1) and tcompat(ty, k) == 0 then ctfail("lume: type error: argument " + str(i) + " of '" + nm + "' has type " + tystr(k) + " but parameter '" + pn + "' expects " + tystr(ty) + "\n") else 0
+fn tchkinfercmp(nm, i, pn, ty, k) = if tisname(ty) == 1 and tisname(k) == 1 and tcompat(ty, k) == 0 then ctfail("lume: type error: argument " + str(i) + " of '" + nm + "' has type " + tystr(k) + " but parameter '" + pn + "' expects " + tystr(ty) + "\n") else 0
 fn tystr(t) = match t
     TyName(n) => n
     TyList(e) => "[" + tystr(e) + "]"
