@@ -809,23 +809,30 @@ fn vfields_env(fs) = match fs
 
 fn veval_bin(op, rl, rr) = if rl.ok == 0 or rr.ok == 0 then vv_err() else let x = rl.i in let y = rr.i in if op == "+" then vv_int(x + y) else if op == "-" then vv_int(x - y) else if op == "*" then vv_int(x * y) else if op == "/" then (if y == 0 then vv_err() else vv_int(x / y)) else if op == "%" then (if y == 0 then vv_err() else vv_int(x % y)) else if op == "==" then vv_int(if x == y then 1 else 0) else if op == "!=" then vv_int(if x != y then 1 else 0) else if op == "<" then vv_int(if x < y then 1 else 0) else if op == ">" then vv_int(if x > y then 1 else 0) else if op == "<=" then vv_int(if x <= y then 1 else 0) else if op == ">=" then vv_int(if x >= y then 1 else 0) else if op == "and" then vv_int(if x != 0 and y != 0 then 1 else 0) else if op == "or" then vv_int(if x != 0 or y != 0 then 1 else 0) else vv_err()
 
+fn vadd_hops_fns(hs, fns) = match hs
+    Nil        => fns
+    Cons(h, t) => Cons({nm: h.op, ps: h.ps, body: h.body}, vadd_hops_fns(t, fns))
+
 fn veval(e, env, old_env, fns, d) = if d > 20 then vv_err() else veval1(e, env, old_env, fns, d)
 
 fn veval1(e, env, old_env, fns, d) = match e
-    Num(n)          => vv_int(n)
-    Var(nm)         => vlookup(nm, env)
-    OwnE(inner)     => veval(inner, env, old_env, fns, d)
-    MutE(inner)     => veval(inner, env, old_env, fns, d)
-    CT(inner)       => veval(inner, env, old_env, fns, d)
-    Bin(op, l, r)   => veval_bin(op, veval(l, env, old_env, fns, d), veval(r, env, old_env, fns, d))
-    If(c, t, e2)    => let rc = veval(c, env, old_env, fns, d) in if rc.ok == 0 then vv_err() else if rc.i != 0 then veval(t, env, old_env, fns, d) else veval(e2, env, old_env, fns, d)
-    LetIn(nm, v, b) => let rv = veval(v, env, old_env, fns, d) in if rv.ok == 0 then vv_err() else veval(b, Cons({k: nm, v: rv}, env), old_env, fns, d)
-    VarIn(nm, v, b) => let rv = veval(v, env, old_env, fns, d) in if rv.ok == 0 then vv_err() else veval(b, Cons({k: nm, v: rv}, env), old_env, fns, d)
-    Rec(items)      => veval_rec(items, env, old_env, fns, d)
-    RecT(tn, items) => veval_rec(items, env, old_env, fns, d)
-    Field(o, fld)   => let ro = veval(o, env, old_env, fns, d) in if ro.ok == 0 then vv_err() else vflookup(fld, ro.fields)
-    Call(cnm, args) => veval_call(cnm, args, env, old_env, fns, d)
-    _               => vv_err()
+    Num(n)                  => vv_int(n)
+    Var(nm)                 => vlookup(nm, env)
+    OwnE(inner)             => veval(inner, env, old_env, fns, d)
+    MutE(inner)             => veval(inner, env, old_env, fns, d)
+    CT(inner)               => veval(inner, env, old_env, fns, d)
+    WithHandlerE(en, hs, b) => veval(b, env, old_env, vadd_hops_fns(hs, fns), d)
+    ScopeE(snm, b)          => veval(b, Cons({k: snm, v: vv_int(1)}, env), old_env, fns, d)
+    SpawnE(inner)           => veval(inner, env, old_env, fns, d)
+    Bin(op, l, r)           => veval_bin(op, veval(l, env, old_env, fns, d), veval(r, env, old_env, fns, d))
+    If(c, t, e2)            => let rc = veval(c, env, old_env, fns, d) in if rc.ok == 0 then vv_err() else if rc.i != 0 then veval(t, env, old_env, fns, d) else veval(e2, env, old_env, fns, d)
+    LetIn(nm, v, b)         => let rv = veval(v, env, old_env, fns, d) in if rv.ok == 0 then vv_err() else veval(b, Cons({k: nm, v: rv}, env), old_env, fns, d)
+    VarIn(nm, v, b)         => let rv = veval(v, env, old_env, fns, d) in if rv.ok == 0 then vv_err() else veval(b, Cons({k: nm, v: rv}, env), old_env, fns, d)
+    Rec(items)              => veval_rec(items, env, old_env, fns, d)
+    RecT(tn, items)         => veval_rec(items, env, old_env, fns, d)
+    Field(o, fld)           => let ro = veval(o, env, old_env, fns, d) in if ro.ok == 0 then vv_err() else vflookup(fld, ro.fields)
+    Call(cnm, args)         => veval_call(cnm, args, env, old_env, fns, d)
+    _                       => vv_err()
 
 fn veval_rec(items, env, old_env, fns, d) = match items
     Nil        => vv_rec(Nil)
@@ -966,13 +973,99 @@ fn khop_lookup(nm, hops) = match hops
     Nil        => Nil
     Cons(h, t) => if h.op == nm then Cons(h, Nil) else khop_lookup(nm, t)
 
-fn kbind_hop_args(ps, args, body, lctx, d) = match ps
-    Nil        => olowere(body, lctx, d)
-    Cons(p, r) => kbind_hop_arg1(p, r, args, body, lctx, d)
+fn ksubst_lookup(nm, renv) = match renv
+    Nil        => nm
+    Cons(h, t) => if h.k == nm then h.v else ksubst_lookup(nm, t)
 
-fn kbind_hop_arg1(p, r, args, body, lctx, d) = match args
-    Nil         => LetIn(p, Num(0), kbind_hop_args(r, Nil, body, lctx, d + 1))
-    Cons(a, ar) => LetIn(p, olowere(a, lctx, d), kbind_hop_args(r, ar, body, lctx, d + 1))
+fn kmk_renv(ps, pfx) = match ps
+    Nil        => Nil
+    Cons(p, r) => Cons({k: p, v: pfx + p}, kmk_renv(r, pfx))
+
+fn kmk_rps(ps, pfx) = match ps
+    Nil        => Nil
+    Cons(p, r) => Cons(pfx + p, kmk_rps(r, pfx))
+
+fn ksubst_e(e, renv, pfx) = match e
+    Var(nm)                 => Var(ksubst_lookup(nm, renv))
+    LetIn(nm, v, b)         => let nnm = pfx + nm in LetIn(nnm, ksubst_e(v, renv, pfx), ksubst_e(b, Cons({k: nm, v: nnm}, renv), pfx))
+    VarIn(nm, v, b)         => let nnm = pfx + nm in LetIn(nnm, ksubst_e(v, renv, pfx), ksubst_e(b, Cons({k: nm, v: nnm}, renv), pfx))
+    OwnE(inner)             => OwnE(ksubst_e(inner, renv, pfx))
+    MutE(inner)             => MutE(ksubst_e(inner, renv, pfx))
+    DeferE(c, b)            => DeferE(ksubst_e(c, renv, pfx), ksubst_e(b, renv, pfx))
+    ErrDeferE(c, b)         => ErrDeferE(ksubst_e(c, renv, pfx), ksubst_e(b, renv, pfx))
+    WithAllocE(a, b)        => WithAllocE(ksubst_e(a, renv, pfx), ksubst_e(b, renv, pfx))
+    WithHandlerE(en, hs, b) => WithHandlerE(en, hs, ksubst_e(b, renv, pfx))
+    ScopeE(snm, b)          => ScopeE(snm, ksubst_e(b, renv, pfx))
+    SpawnE(inner)           => SpawnE(ksubst_e(inner, renv, pfx))
+    If(c, t, e2)            => If(ksubst_e(c, renv, pfx), ksubst_e(t, renv, pfx), ksubst_e(e2, renv, pfx))
+    Bin(op, l, r)           => Bin(op, ksubst_e(l, renv, pfx), ksubst_e(r, renv, pfx))
+    Call(cnm, args)         => Call(cnm, ksubst_args(args, renv, pfx))
+    Field(o, fld)           => Field(ksubst_e(o, renv, pfx), fld)
+    Rec(items)              => Rec(ksubst_rec(items, renv, pfx))
+    RecT(tn, items)         => RecT(tn, ksubst_rec(items, renv, pfx))
+    Match(sc, arms)         => Match(ksubst_e(sc, renv, pfx), ksubst_arms(arms, renv, pfx))
+    CT(inner)               => CT(ksubst_e(inner, renv, pfx))
+    _                       => e
+
+fn ksubst_args(xs, renv, pfx) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons(ksubst_e(h, renv, pfx), ksubst_args(t, renv, pfx))
+
+fn ksubst_rec(xs, renv, pfx) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons({key: h.key, val: ksubst_e(h.val, renv, pfx)}, ksubst_rec(t, renv, pfx))
+
+fn ksubst_arms(xs, renv, pfx) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons({pat: h.pat, body: ksubst_e(h.body, renv, pfx)}, ksubst_arms(t, renv, pfx))
+
+fn kuses_hop(e, hops, fns, d) = if d > 6 then 0 else kuses_hop1(e, hops, fns, d)
+
+fn kuses_hop1(e, hops, fns, d) = match e
+    Call(cnm, args)         => if isnil(khop_lookup(cnm, hops)) == 0 then 1 else if kuses_hop_args(args, hops, fns, d) == 1 then 1 else kuses_hop_fn(vfnlookup(cnm, fns), hops, fns, d)
+    Bin(op, l, r)           => if kuses_hop(l, hops, fns, d) == 1 then 1 else kuses_hop(r, hops, fns, d)
+    If(c, t, e2)            => if kuses_hop(c, hops, fns, d) == 1 then 1 else if kuses_hop(t, hops, fns, d) == 1 then 1 else kuses_hop(e2, hops, fns, d)
+    LetIn(nm, v, b)         => if kuses_hop(v, hops, fns, d) == 1 then 1 else kuses_hop(b, hops, fns, d)
+    VarIn(nm, v, b)         => if kuses_hop(v, hops, fns, d) == 1 then 1 else kuses_hop(b, hops, fns, d)
+    OwnE(inner)             => kuses_hop(inner, hops, fns, d)
+    MutE(inner)             => kuses_hop(inner, hops, fns, d)
+    DeferE(c, b)            => if kuses_hop(c, hops, fns, d) == 1 then 1 else kuses_hop(b, hops, fns, d)
+    ErrDeferE(c, b)         => if kuses_hop(c, hops, fns, d) == 1 then 1 else kuses_hop(b, hops, fns, d)
+    WithAllocE(a, b)        => if kuses_hop(a, hops, fns, d) == 1 then 1 else kuses_hop(b, hops, fns, d)
+    WithHandlerE(en, hs, b) => kuses_hop(b, hops, fns, d)
+    ScopeE(snm, b)          => kuses_hop(b, hops, fns, d)
+    SpawnE(inner)           => kuses_hop(inner, hops, fns, d)
+    Field(o, fld)           => kuses_hop(o, hops, fns, d)
+    Rec(items)              => kuses_hop_rec(items, hops, fns, d)
+    RecT(tn, items)         => kuses_hop_rec(items, hops, fns, d)
+    Match(sc, arms)         => if kuses_hop(sc, hops, fns, d) == 1 then 1 else kuses_hop_arms(arms, hops, fns, d)
+    _                       => 0
+
+fn kuses_hop_fn(mf, hops, fns, d) = match mf
+    Nil        => 0
+    Cons(f, r) => kuses_hop(f.body, hops, fns, d + 1)
+
+fn kuses_hop_args(xs, hops, fns, d) = match xs
+    Nil        => 0
+    Cons(h, t) => if kuses_hop(h, hops, fns, d) == 1 then 1 else kuses_hop_args(t, hops, fns, d)
+
+fn kuses_hop_rec(xs, hops, fns, d) = match xs
+    Nil        => 0
+    Cons(h, t) => if kuses_hop(h.val, hops, fns, d) == 1 then 1 else kuses_hop_rec(t, hops, fns, d)
+
+fn kuses_hop_arms(xs, hops, fns, d) = match xs
+    Nil        => 0
+    Cons(h, t) => if kuses_hop(h.body, hops, fns, d) == 1 then 1 else kuses_hop_arms(t, hops, fns, d)
+
+fn kbind_hop_args(ps, args, body, pfx, lctx, d) = kbind_hop_r(kmk_rps(ps, pfx), args, ksubst_e(body, kmk_renv(ps, pfx), pfx), lctx, d)
+
+fn kbind_hop_r(rps, args, sbody, lctx, d) = match rps
+    Nil         => olowere(sbody, lctx, d + 1)
+    Cons(np, r) => kbind_hop_arg1(np, r, args, sbody, lctx, d)
+
+fn kbind_hop_arg1(np, r, args, sbody, lctx, d) = match args
+    Nil         => LetIn(np, Num(0), kbind_hop_r(r, Nil, sbody, lctx, d + 1))
+    Cons(a, ar) => LetIn(np, olowere(a, lctx, d), kbind_hop_r(r, ar, sbody, lctx, d + 1))
 
 fn ktry_perceus_arm(sc_v, pat, body, lctx, d) = match pat
     PCons(ptag, psubs) => let ar = len(psubs) in if ar == 1 or ar == 2 then ktry_perceus_body(sc_v, ptag, ar, body, lctx, d) else olowere(body, lctx, d)
@@ -989,17 +1082,17 @@ fn ksc_own_var(sc, ownps) = match sc
 
 fn olowere(e, lctx, d) = match e
     Var(nm)                 => if ais_hole_name(nm) == 1 then Num(0) else Var(nm)
-    VarIn(nm, v, b)         => LetIn(nm, olowere(v, lctx, d), olowere(b, lctx, d + 1))
+    VarIn(nm, v, b)         => LetIn(nm, olowere(v, lctx, d + 1), olowere(b, lctx, d + 17))
     OwnE(inner)             => olowere(inner, lctx, d)
     MutE(inner)             => olowere(inner, lctx, d)
     DeferE(c, b)            => let vn = "_d_val_" + str(d) in let rn = "_d_run_" + str(d) in LetIn(vn, olowere(b, lctx, d + 1), LetIn(rn, olowere(c, lctx, d + 2), Var(vn)))
     ErrDeferE(c, b)         => let vn = "_ed_val_" + str(d) in let rn = "_ed_run_" + str(d) in LetIn(vn, olowere(b, lctx, d + 1), If(Bin("<", Var(vn), Num(0)), LetIn(rn, olowere(c, lctx, d + 2), Var(vn)), Var(vn)))
     WithAllocE(a, b)        => LetIn("_alloc_ctx_" + str(d), olowere(a, lctx, d + 1), olowere(b, lctx, d + 2))
-    WithHandlerE(en, hs, b) => olowere(b, {ufns: lctx.ufns, hops: app(hs, lctx.hops), ownps: lctx.ownps}, d + 1)
+    WithHandlerE(en, hs, b) => olowere(b, {ufns: lctx.ufns, hops: app(hs, lctx.hops), ownps: lctx.ownps, fns: lctx.fns}, d + 1)
     ScopeE(snm, b)          => LetIn(snm, Num(1), olowere(b, lctx, d + 1))
     SpawnE(inner)           => olowere(inner, lctx, d + 1)
-    LetIn(nm, v, b)         => LetIn(nm, olowere(v, lctx, d), olowere(b, {ufns: lctx.ufns, hops: lctx.hops, ownps: orem(nm, lctx.ownps)}, d + 1))
-    If(c, t, e2)            => If(olowere(c, lctx, d), olowere(t, lctx, d + 1), olowere(e2, lctx, d + 2))
+    LetIn(nm, v, b)         => LetIn(nm, olowere(v, lctx, d + 1), olowere(b, {ufns: lctx.ufns, hops: lctx.hops, ownps: orem(nm, lctx.ownps), fns: lctx.fns}, d + 17))
+    If(c, t, e2)            => If(olowere(c, lctx, d + 1), olowere(t, lctx, d + 17), olowere(e2, lctx, d + 33))
     Bin(op, l, r)           => olowerbin(op, l, r, lctx, d)
     Call(nm, args)          => olowercall(nm, args, khop_lookup(nm, lctx.hops), lctx, d)
     Field(o, fld)           => Field(olowere(o, lctx, d), fld)
@@ -1010,10 +1103,14 @@ fn olowere(e, lctx, d) = match e
     _                       => e
 
 fn olowercall(nm, args, mhop, lctx, d) = match mhop
-    Cons(hop, r) => kbind_hop_args(hop.ps, args, hop.body, lctx, d)
-    Nil          => if ois_intrinsic(nm, lctx.ufns) == 1 and len(args) == 1 then olowere(ohd_e(args), lctx, d) else if ois_verify_call(nm, lctx.ufns) == 1 then olower_verify(args, lctx, d) else Call(nm, olowerargs(args, lctx, d))
+    Cons(hop, r) => kbind_hop_args(hop.ps, args, hop.body, "_khop_" + str(d) + "_" + hop.op + "_", lctx, d)
+    Nil          => if ois_intrinsic(nm, lctx.ufns) == 1 and len(args) == 1 then olowere(ohd_e(args), lctx, d) else if ois_verify_call(nm, lctx.ufns) == 1 then olower_verify(args, lctx, d) else if isnil(lctx.hops) == 0 and d < 200 then olowercall_fn(nm, args, vfnlookup(nm, lctx.fns), lctx, d) else Call(nm, olowerargs(args, lctx, d))
 
-fn olowerbin(op, l, r, lctx, d) = if op == "+" and ois_str_expr(l) == 1 and ois_hole_expr(r) == 1 then Bin(op, olowere(l, lctx, d), Str("")) else if op == "+" and ois_hole_expr(l) == 1 and ois_str_expr(r) == 1 then Bin(op, Str(""), olowere(r, lctx, d + 1)) else Bin(op, olowere(l, lctx, d), olowere(r, lctx, d + 1))
+fn olowercall_fn(nm, args, mf, lctx, d) = match mf
+    Nil        => Call(nm, olowerargs(args, lctx, d))
+    Cons(f, r) => if kuses_hop(f.body, lctx.hops, lctx.fns, 0) == 1 then kbind_hop_args(f.ps, args, f.body, "_khfn_" + str(d) + "_" + nm + "_", lctx, d) else Call(nm, olowerargs(args, lctx, d))
+
+fn olowerbin(op, l, r, lctx, d) = if op == "+" and ois_str_expr(l) == 1 and ois_hole_expr(r) == 1 then Bin(op, olowere(l, lctx, d + 1), Str("")) else if op == "+" and ois_hole_expr(l) == 1 and ois_str_expr(r) == 1 then Bin(op, Str(""), olowere(r, lctx, d + 17)) else Bin(op, olowere(l, lctx, d + 1), olowere(r, lctx, d + 17))
 
 fn ois_hole_expr(e) = match e
     Var(nm) => ais_hole_name(nm)
@@ -1021,15 +1118,15 @@ fn ois_hole_expr(e) = match e
 
 fn olowerargs(xs, lctx, d) = match xs
     Nil        => Nil
-    Cons(h, t) => Cons(olowere(h, lctx, d), olowerargs(t, lctx, d + 1))
+    Cons(h, t) => Cons(olowere(h, lctx, d + 1), olowerargs(t, lctx, d + 17))
 
 fn olowerrec(xs, lctx, d) = match xs
     Nil        => Nil
-    Cons(h, t) => Cons({key: h.key, val: olowere(h.val, lctx, d)}, olowerrec(t, lctx, d + 1))
+    Cons(h, t) => Cons({key: h.key, val: olowere(h.val, lctx, d + 1)}, olowerrec(t, lctx, d + 17))
 
 fn olowerarms(xs, sc_v, lctx, d) = match xs
     Nil        => Nil
-    Cons(h, t) => Cons({pat: h.pat, body: if sc_v != "" then ktry_perceus_arm(sc_v, h.pat, h.body, lctx, d) else olowere(h.body, lctx, d)}, olowerarms(t, sc_v, lctx, d + 1))
+    Cons(h, t) => Cons({pat: h.pat, body: if sc_v != "" then ktry_perceus_arm(sc_v, h.pat, h.body, lctx, d + 1) else olowere(h.body, lctx, d + 1)}, olowerarms(t, sc_v, lctx, d + 17))
 
 fn kfn_ownps(nm, osigs) = match osiglookup(nm, osigs)
     Nil          => Nil
@@ -1049,6 +1146,10 @@ fn vwrap_fn_c1(nm, ps, raw_body, low_body, lctx, mvs) = match mvs
     Nil          => low_body
     Cons(vsg, r) => let post = if isnil(vsg.enss) == 1 then low_body else LetIn("result", low_body, LetIn("ret", Var("result"), LetIn("_vens_ok", If(vconj_conds(vsg.enss, lctx, 100), Num(1), Call("ctfail", Cons(Str("lume: runtime contract violation (ensures) in '" + nm + "'\n"), Nil))), Var("result")))) in if isnil(vsg.reqs) == 1 then post else LetIn("_vreq_ok", If(vconj_conds(vsg.reqs, lctx, 200), Num(1), Call("ctfail", Cons(Str("lume: runtime contract violation (requires) in '" + nm + "'\n"), Nil))), post)
 
+fn klower_eff_ops(ops, ufns, rest) = match ops
+    Nil         => rest
+    Cons(op, r) => if omem(op.op, ufns) == 1 then klower_eff_ops(r, ufns, rest) else Cons(Fn(op.op, op.ps, Num(0)), klower_eff_ops(r, Cons(op.op, ufns), rest))
+
 fn olowerprog(prog, ufns, osigs, vctx) = match prog
     Nil        => Nil
     Cons(h, t) => olowerstmt(h, olowerprog(t, ufns, osigs, vctx), ufns, osigs, vctx)
@@ -1057,14 +1158,14 @@ fn olowerstmt(st, rest, ufns, osigs, vctx) = match st
     OSig(nm, pubf, freef, pl, rty, fromp) => rest
     OType(nm, k)                          => rest
     KEffSig(nm, effs)                     => rest
-    KEffectDecl(enm, ops)                 => rest
+    KEffectDecl(enm, ops)                 => klower_eff_ops(ops, ufns, rest)
     KCapGrant(effs)                       => rest
     VContractSig(nm, ps, reqs, enss)      => rest
     VTypeInvariant(nm, fs, inv)           => rest
     VLawDecl(nm, ps, body)                => rest
-    Fn(nm, ps, body)                      => let lctx = {ufns: ufns, hops: Nil, ownps: kfn_ownps(nm, osigs)} in let lb = olowere(body, lctx, 0) in let wb = vwrap_fn_contract(nm, ps, body, lb, lctx, vctx) in Cons(Fn(nm, ps, wb), rest)
-    Print(v)                              => Cons(Print(olowere(v, {ufns: ufns, hops: Nil, ownps: Nil}, 0)), rest)
-    ExprS(v)                              => Cons(ExprS(olowere(v, {ufns: ufns, hops: Nil, ownps: Nil}, 0)), rest)
+    Fn(nm, ps, body)                      => let lctx = {ufns: ufns, hops: Nil, ownps: kfn_ownps(nm, osigs), fns: vctx.fns} in let lb = olowere(body, lctx, 0) in let wb = vwrap_fn_contract(nm, ps, body, lb, lctx, vctx) in Cons(Fn(nm, ps, wb), rest)
+    Print(v)                              => Cons(Print(olowere(v, {ufns: ufns, hops: Nil, ownps: Nil, fns: vctx.fns}, 0)), rest)
+    ExprS(v)                              => Cons(ExprS(olowere(v, {ufns: ufns, hops: Nil, ownps: Nil, fns: vctx.fns}, 0)), rest)
     _                                     => Cons(st, rest)
 
 fn ocheck(prog) = if oany(prog) == 0 then prog else ocheckforce(prog)
