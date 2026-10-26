@@ -72,7 +72,7 @@ fn lpatbinds(p) = match p
 fn lpatbindsl(xs) = match xs
     Nil        => Nil
     Cons(h, t) => app(lpatbinds(h), lpatbindsl(t))
-fn imax(a, b) = if a > b then a else b
+fn imax(a, b) ensures result >= a ensures result >= b = if a > b then a else b
 fn lmdepth(e) = match e
     Match(sc, arms) => imax(lmdepth(sc), lmdarms(arms)) + 1
     If(c, t, e2)    => imax(lmdepth(c), imax(lmdepth(t), lmdepth(e2)))

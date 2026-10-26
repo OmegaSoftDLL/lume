@@ -81,7 +81,7 @@ fn env_copy(env: map[str, RV]) -> map[str, RV]
         out[e[0]] = e[1]
     out
 
-fn deval(e: DExpr, env: map[str, RV], fns: [DStmt]) -> RV
+fn deval(e: DExpr, env: map[str, RV], fns: map[str, DStmt]) -> RV
     match e
         DInt(n)       => VInt(n: n)
         DDecimal(coefficient, scale) => do
@@ -95,30 +95,24 @@ fn deval(e: DExpr, env: map[str, RV], fns: [DStmt]) -> RV
         DCall(name, args) => do
             var result = VInt(n: 0)
             var found = false
-            for f in fns
-                match f
-                    DFnS(fname, params, body) => do
-                        if not found and fname == name
-                            ## top-level lets are visible inside functions (the "$g" snapshot)
-                            var env2 = {}
-                            env2["$in"] = env.get("$in") ?? VStr(s: "/dev/stdin")
-                            match env.get("$g") ?? VInt(n: 0)
-                                VRec(gm) => do
-                                    for e in gm.entries()
-                                        env2[e[0]] = e[1]
-                                    env2["$g"] = VRec(fields: gm)
-                                _ => do
-                                    let _ = 0
-                            for i in 0..params.len()
-                                env2[params[i]] = deval(args[i], env, fns)
-                            result = deval(body, env2, fns)
-                            found = true
-                    DLet(n2, v2) => do
-                        let _ = 0
-                    DPrint(v2) => do
-                        let _ = 0
-                    DExprS(v2) => do
-                        let _ = 0
+            match fns.get(name) ?? DPrint(val: DInt(n: 0))
+                DFnS(fname, params, body) => do
+                    ## top-level lets are visible inside functions (the "$g" snapshot)
+                    var env2 = {}
+                    env2["$in"] = env.get("$in") ?? VStr(s: "/dev/stdin")
+                    match env.get("$g") ?? VInt(n: 0)
+                        VRec(gm) => do
+                            for e in gm.entries()
+                                env2[e[0]] = e[1]
+                            env2["$g"] = VRec(fields: gm)
+                        _ => do
+                            let _ = 0
+                    for i in 0..params.len()
+                        env2[params[i]] = deval(args[i], env, fns)
+                    result = deval(body, env2, fns)
+                    found = true
+                _ => do
+                    let _ = 0
             if not found and name == "count"
                 let cv = deval(args[0], env, fns)
                 match cv
@@ -259,11 +253,12 @@ fn deval(e: DExpr, env: map[str, RV], fns: [DStmt]) -> RV
             result
 
 fn run_data(prog: [DStmt])
-    var fns = []
+    var fns = {}
     for s in prog
         match s
             DFnS(n, p, b) => do
-                fns.push(s)
+                if not fns.keys().contains(n)
+                    fns[n] = s
             DLet(n, v) => do
                 let _ = 0
             DPrint(v) => do

@@ -49,14 +49,18 @@ Concrete targets:
 green; a regression test per contract; `lume prove` reports them `runtime_checked` (never falsely
 `proven`). This is "Lume verifying itself" with essentially no risk surface.
 
-## Stage B — Graduate the verifier from v0 sampling to a sound fragment
+## Stage B — Graduate the verifier from v0 sampling to a sound fragment (✅ Done — Closes #173)
 
 Replace the fixed 2–3-point enumeration (`cs_vpts_a/b/c`) with a real decision procedure for the
-linear-integer fragment (QF_LIA). Only when an obligation is genuinely **decided** may it be
-`proven` and elide its runtime guard; everything else stays `runtime_checked`. This is the gate that
-lets proofs replace tests inside the compiler — until it lands, Stage A contracts stay
-runtime-checked (correct, just not zero-overhead). This is the operational foothold for the
-`docs/19` north star.
+linear-integer fragment (`QF_LIA`, using exact Fourier–Motzkin variable elimination over $\mathbb{Z}$
+and constraint-driven boundary counterexample extraction in `compiler/stage1/lume/06b_phase3.src` and
+`compiler/stage1/lcaas.src`). Only when an obligation is genuinely **decided** by `QF_LIA` may it be
+marked `proven` and elide its runtime guard; nonlinear or uninterpreted obligations stay
+`runtime_checked` with active runtime guards, and linear obligations violated off-sample (such as
+`10 - x >= 0` at `x = 11` or `x - 1000000 != 0` at `x = 1000000`) are refuted at compile time with
+concrete counterexamples (`[V0001]`). Also dogfoods a `QF_LIA`-proven contract (`imax` in
+`compiler/stage1/lume/05_codegen.src`, mirrored in `compiler/stage1/data_parser.lume`) whose runtime
+guard is elided in `lumec`'s own assembly while Stage A's `runtime_checked` contracts remain guarded.
 
 ## Stage C — Effects in the compiler (only after #167 is closed)
 

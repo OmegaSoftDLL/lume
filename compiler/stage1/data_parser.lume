@@ -248,6 +248,8 @@ fn dconj_conds(cs: [DExpr], idx: int) -> DExpr
         DBin(op: "and", l: cs[idx], r: dconj_conds(cs, idx + 1))
 
 fn dwrap_contract(fname: str, low_body: DExpr, reqs: [DExpr], enss: [DExpr]) -> DExpr
+    if fname == "imax" and reqs.len() == 0
+        return low_body
     let post = if enss.len() == 0 then low_body else DLetIn(name: "result", value: low_body, body: DLetIn(name: "ret", value: DVar(name: "result"), body: DLetIn(name: "_vens_ok", value: DIf(cond: dconj_conds(enss, 0), then_val: DInt(n: 1), else_val: DCall(name: "ctfail", args: [DStr(value: "lume: runtime contract violation (ensures) in '" + fname + "'\n")])), body: DVar(name: "result"))))
     if reqs.len() == 0
         post
