@@ -1007,9 +1007,162 @@ fn cs_vprove_envs(envs, reqs, enss, body, ft, undec) = match envs
 fn cs_vprove_law_envs(envs, body, ft, undec) = match envs
     Nil          => {status: "runtime_checked", cex: ""}
     Cons(env, r) => let rb = cs_veval(body, env, env, ft, 0) in if rb.ok == 0 then cs_vprove_law_envs(r, body, ft, 1) else if rb.i == 0 then {status: "refuted", cex: cs_vfmt_env(env)} else cs_vprove_law_envs(r, body, ft, undec)
+
+## --- Stage B: Sound QF_LIA (Quantifier-Free Linear Integer Arithmetic) Decision Procedure (Fourier-Motzkin) ---
+fn cs_vlin_const(n) = {ok: 1, c0: n, cs: Nil}
+fn cs_vlin_var(nm) = {ok: 1, c0: 0, cs: Cons({k: nm, c: 1}, Nil)}
+fn cs_vlin_err() = {ok: 0, c0: 0, cs: Nil}
+fn cs_vlin_coeff(nm, cs) = match cs
+    Nil        => 0
+    Cons(h, t) => if h.k == nm then h.c else cs_vlin_coeff(nm, t)
+fn cs_vlin_add_term(nm, c, cs) = if c == 0 then cs else cs_vlin_add_t1(nm, c, cs)
+fn cs_vlin_add_t1(nm, c, cs) = match cs
+    Nil        => Cons({k: nm, c: c}, Nil)
+    Cons(h, t) => if h.k == nm then (if h.c + c == 0 then t else Cons({k: nm, c: h.c + c}, t)) else Cons(h, cs_vlin_add_t1(nm, c, t))
+fn cs_vlin_add_cs(cs1, cs2) = match cs1
+    Nil        => cs2
+    Cons(h, t) => cs_vlin_add_cs(t, cs_vlin_add_term(h.k, h.c, cs2))
+fn cs_vlin_scale_cs(k, cs) = if k == 0 then Nil else cs_vlin_scale_cs1(k, cs)
+fn cs_vlin_scale_cs1(k, cs) = match cs
+    Nil        => Nil
+    Cons(h, t) => Cons({k: h.k, c: k * h.c}, cs_vlin_scale_cs1(k, t))
+fn cs_vlin_add(a, b) = if a.ok == 0 or b.ok == 0 then cs_vlin_err() else {ok: 1, c0: a.c0 + b.c0, cs: cs_vlin_add_cs(a.cs, b.cs)}
+fn cs_vlin_scale(k, a) = if a.ok == 0 then cs_vlin_err() else {ok: 1, c0: k * a.c0, cs: cs_vlin_scale_cs(k, a.cs)}
+fn cs_vlin_sub(a, b) = cs_vlin_add(a, cs_vlin_scale(0 - 1, b))
+fn cs_vlin_mul(a, b) = if a.ok == 0 or b.ok == 0 then cs_vlin_err() else if cs_isnil(a.cs) == 1 then cs_vlin_scale(a.c0, b) else if cs_isnil(b.cs) == 1 then cs_vlin_scale(b.c0, a) else cs_vlin_err()
+fn cs_vlin_is_contra(l) = if l.ok == 1 and cs_isnil(l.cs) == 1 and l.c0 < 0 then 1 else 0
+fn cs_vfm_any_contra(hyps) = match hyps
+    Nil        => 0
+    Cons(h, t) => if cs_vlin_is_contra(h) == 1 then 1 else cs_vfm_any_contra(t)
+fn cs_vfm_vars_cs(cs, acc) = match cs
+    Nil        => acc
+    Cons(h, t) => cs_vfm_vars_cs(t, if cs_omem(h.k, acc) == 1 then acc else Cons(h.k, acc))
+fn cs_vfm_vars(hyps, acc) = match hyps
+    Nil        => acc
+    Cons(h, t) => cs_vfm_vars(t, cs_vfm_vars_cs(h.cs, acc))
+fn cs_vfm_part_pos(v, hyps) = match hyps
+    Nil        => Nil
+    Cons(h, t) => if cs_vlin_coeff(v, h.cs) > 0 then Cons(h, cs_vfm_part_pos(v, t)) else cs_vfm_part_pos(v, t)
+fn cs_vfm_part_neg(v, hyps) = match hyps
+    Nil        => Nil
+    Cons(h, t) => if cs_vlin_coeff(v, h.cs) < 0 then Cons(h, cs_vfm_part_neg(v, t)) else cs_vfm_part_neg(v, t)
+fn cs_vfm_part_zer(v, hyps) = match hyps
+    Nil        => Nil
+    Cons(h, t) => if cs_vlin_coeff(v, h.cs) == 0 then Cons(h, cs_vfm_part_zer(v, t)) else cs_vfm_part_zer(v, t)
+fn cs_vfm_pair1(v, p, cp, negs) = match negs
+    Nil        => Nil
+    Cons(n, r) => let cn = 0 - cs_vlin_coeff(v, n.cs) in Cons(cs_vlin_add(cs_vlin_scale(cn, p), cs_vlin_scale(cp, n)), cs_vfm_pair1(v, p, cp, r))
+fn cs_vfm_pairs(v, pos, negs) = match pos
+    Nil        => Nil
+    Cons(p, r) => let pairs1 = cs_vfm_pair1(v, p, cs_vlin_coeff(v, p.cs), negs) in if cs_len(pairs1) > 24 then pairs1 else cs_app(pairs1, cs_vfm_pairs(v, r, negs))
+fn cs_vfm_elim_var(v, hyps) = cs_app(cs_vfm_part_zer(v, hyps), cs_vfm_pairs(v, cs_vfm_part_pos(v, hyps), cs_vfm_part_neg(v, hyps)))
+fn cs_vfm_unsat(hyps, vars) = if cs_vfm_any_contra(hyps) == 1 then 1 else cs_vfm_unsat1(hyps, vars)
+fn cs_vfm_unsat1(hyps, vars) = match vars
+    Nil        => cs_vfm_any_contra(hyps)
+    Cons(v, r) => let next = cs_vfm_elim_var(v, hyps) in if cs_vfm_any_contra(next) == 1 then 1 else if cs_len(next) > 48 then 0 else cs_vfm_unsat(next, r)
+fn cs_vfm_check_unsat(hyps) = cs_vfm_unsat(hyps, cs_vfm_vars(hyps, Nil))
+fn cs_vlin_init_env(ps) = match ps
+    Nil        => Nil
+    Cons(p, r) => Cons({k: p, v: cs_vlin_var(p)}, cs_vlin_init_env(r))
+fn cs_vlin_lookup(nm, lenv) = match lenv
+    Nil        => cs_vlin_err()
+    Cons(h, t) => if h.k == nm then h.v else cs_vlin_lookup(nm, t)
+fn cs_vlin_bind_ps(ps, vs) = match ps
+    Nil        => Nil
+    Cons(p, r) => cs_vlin_bind_p1(p, r, vs)
+fn cs_vlin_bind_p1(p, r, vs) = match vs
+    Nil         => Nil
+    Cons(v, vr) => Cons({k: p, v: v}, cs_vlin_bind_ps(r, vr))
+fn cs_vlin_expr(e, hyps, lenv, ft, d) = if d > 6 then cs_vlin_err() else cs_vlin_expr1(e, hyps, lenv, ft, d)
+fn cs_vlin_expr1(e, hyps, lenv, ft, d) = match e
+    Num(n)          => cs_vlin_const(n)
+    Var(nm)         => cs_vlin_lookup(nm, lenv)
+    OwnE(inner)     => cs_vlin_expr(inner, hyps, lenv, ft, d)
+    MutE(inner)     => cs_vlin_expr(inner, hyps, lenv, ft, d)
+    CT(inner)       => cs_vlin_expr(inner, hyps, lenv, ft, d)
+    DeferE(c, b)    => cs_vlin_expr(b, hyps, lenv, ft, d)
+    ErrDeferE(c, b) => cs_vlin_expr(b, hyps, lenv, ft, d)
+    LetIn(nm, v, b) => let lv = cs_vlin_expr(v, hyps, lenv, ft, d) in if lv.ok == 0 then cs_vlin_err() else cs_vlin_expr(b, hyps, Cons({k: nm, v: lv}, lenv), ft, d)
+    VarIn(nm, v, b) => let lv = cs_vlin_expr(v, hyps, lenv, ft, d) in if lv.ok == 0 then cs_vlin_err() else cs_vlin_expr(b, hyps, Cons({k: nm, v: lv}, lenv), ft, d)
+    Bin(op, l, r)   => if op == "+" then cs_vlin_add(cs_vlin_expr(l, hyps, lenv, ft, d), cs_vlin_expr(r, hyps, lenv, ft, d)) else if op == "-" then cs_vlin_sub(cs_vlin_expr(l, hyps, lenv, ft, d), cs_vlin_expr(r, hyps, lenv, ft, d)) else if op == "*" then cs_vlin_mul(cs_vlin_expr(l, hyps, lenv, ft, d), cs_vlin_expr(r, hyps, lenv, ft, d)) else cs_vlin_err()
+    If(c, t, e2)    => let rp = cs_vcond_pos(c, hyps, lenv, ft, d) in let rn = cs_vcond_neg(c, hyps, lenv, ft, d) in if rp.ok == 1 and rn.ok == 1 and cs_vfm_check_unsat(cs_app(rn.hyps, hyps)) == 1 then cs_vlin_expr(t, hyps, lenv, ft, d) else if rp.ok == 1 and rn.ok == 1 and cs_vfm_check_unsat(cs_app(rp.hyps, hyps)) == 1 then cs_vlin_expr(e2, hyps, lenv, ft, d) else cs_vlin_err()
+    Call(cnm, args) => cs_vlin_call(cnm, args, hyps, lenv, ft, d)
+    _               => cs_vlin_err()
+fn cs_vlin_args(args, hyps, lenv, ft, d) = match args
+    Nil        => {ok: 1, vals: Nil}
+    Cons(h, t) => let rh = cs_vlin_expr(h, hyps, lenv, ft, d) in if rh.ok == 0 then {ok: 0, vals: Nil} else let rt = cs_vlin_args(t, hyps, lenv, ft, d) in if rt.ok == 0 then {ok: 0, vals: Nil} else {ok: 1, vals: Cons(rh, rt.vals)}
+fn cs_vlin_call(cnm, args, hyps, lenv, ft, d) = if cnm == "old" and cs_len(args) == 1 then cs_vlin_expr(cs_asthead(args), hyps, lenv, ft, d) else if (cnm == "verify" or cnm == "law_check" or cnm == "evolve_approve" or cnm == "borrow" or cnm == "borrow_mut" or cnm == "move" or cnm == "clone") and cs_len(args) >= 1 then cs_vlin_expr(cs_asthead(args), hyps, lenv, ft, d) else if cnm == "dec_add" and cs_len(args) == 2 then cs_vlin_add(cs_vlin_expr(cs_asthead(args), hyps, lenv, ft, d), cs_vlin_expr(cs_astsecond(args), hyps, lenv, ft, d)) else if cnm == "dec_sub" and cs_len(args) == 2 then cs_vlin_sub(cs_vlin_expr(cs_asthead(args), hyps, lenv, ft, d), cs_vlin_expr(cs_astsecond(args), hyps, lenv, ft, d)) else cs_vlin_ufn(cs_fnlookup(cnm, ft), cs_vlin_args(args, hyps, lenv, ft, d), hyps, ft, d)
+fn cs_vlin_ufn(mf, ra, hyps, ft, d) = match mf
+    Nil          => cs_vlin_err()
+    Cons(fn0, r) => if ra.ok == 0 then cs_vlin_err() else cs_vlin_ufn2(fn0, ra.vals, hyps, ft, d)
+fn cs_vlin_ufn2(fn0, vals, hyps, ft, d) = match fn0
+    Fn(fnm, ps, body) => cs_vlin_expr(body, hyps, cs_vlin_bind_ps(ps, vals), ft, d + 1)
+    _                 => cs_vlin_err()
+fn cs_vcond_cmp_pos(op, la, lb) = if la.ok == 0 or lb.ok == 0 then {ok: 0, hyps: Nil} else if op == ">=" then {ok: 1, hyps: Cons(cs_vlin_sub(la, lb), Nil)} else if op == ">" then {ok: 1, hyps: Cons(cs_vlin_sub(cs_vlin_sub(la, lb), cs_vlin_const(1)), Nil)} else if op == "<=" then {ok: 1, hyps: Cons(cs_vlin_sub(lb, la), Nil)} else if op == "<" then {ok: 1, hyps: Cons(cs_vlin_sub(cs_vlin_sub(lb, la), cs_vlin_const(1)), Nil)} else if op == "==" then {ok: 1, hyps: Cons(cs_vlin_sub(la, lb), Cons(cs_vlin_sub(lb, la), Nil))} else {ok: 0, hyps: Nil}
+fn cs_vcond_cmp_neg(op, la, lb) = if la.ok == 0 or lb.ok == 0 then {ok: 0, hyps: Nil} else if op == ">=" then cs_vcond_cmp_pos("<", la, lb) else if op == ">" then cs_vcond_cmp_pos("<=", la, lb) else if op == "<=" then cs_vcond_cmp_pos(">", la, lb) else if op == "<" then cs_vcond_cmp_pos(">=", la, lb) else if op == "!=" then cs_vcond_cmp_pos("==", la, lb) else {ok: 0, hyps: Nil}
+fn cs_vcond_pos(e, hyps, lenv, ft, d) = match e
+    Bin(op, a, b)   => if op == "and" then (let r1 = cs_vcond_pos(a, hyps, lenv, ft, d) in let r2 = cs_vcond_pos(b, hyps, lenv, ft, d) in if r1.ok == 1 and r2.ok == 1 then {ok: 1, hyps: cs_app(r1.hyps, r2.hyps)} else {ok: 0, hyps: Nil}) else cs_vcond_cmp_pos(op, cs_vlin_expr(a, hyps, lenv, ft, d), cs_vlin_expr(b, hyps, lenv, ft, d))
+    Call(cnm, args) => if cnm == "dec_eq" and cs_len(args) == 2 then cs_vcond_cmp_pos("==", cs_vlin_expr(cs_asthead(args), hyps, lenv, ft, d), cs_vlin_expr(cs_astsecond(args), hyps, lenv, ft, d)) else if cnm == "dec_ge" and cs_len(args) == 2 then cs_vcond_cmp_pos(">=", cs_vlin_expr(cs_asthead(args), hyps, lenv, ft, d), cs_vlin_expr(cs_astsecond(args), hyps, lenv, ft, d)) else if cnm == "dec_gt" and cs_len(args) == 2 then cs_vcond_cmp_pos(">", cs_vlin_expr(cs_asthead(args), hyps, lenv, ft, d), cs_vlin_expr(cs_astsecond(args), hyps, lenv, ft, d)) else if cnm == "dec_le" and cs_len(args) == 2 then cs_vcond_cmp_pos("<=", cs_vlin_expr(cs_asthead(args), hyps, lenv, ft, d), cs_vlin_expr(cs_astsecond(args), hyps, lenv, ft, d)) else if cnm == "dec_lt" and cs_len(args) == 2 then cs_vcond_cmp_pos("<", cs_vlin_expr(cs_asthead(args), hyps, lenv, ft, d), cs_vlin_expr(cs_astsecond(args), hyps, lenv, ft, d)) else {ok: 0, hyps: Nil}
+    _               => {ok: 0, hyps: Nil}
+fn cs_vcond_neg(e, hyps, lenv, ft, d) = match e
+    Bin(op, a, b)   => cs_vcond_cmp_neg(op, cs_vlin_expr(a, hyps, lenv, ft, d), cs_vlin_expr(b, hyps, lenv, ft, d))
+    Call(cnm, args) => if cnm == "dec_ge" and cs_len(args) == 2 then cs_vcond_cmp_neg(">=", cs_vlin_expr(cs_asthead(args), hyps, lenv, ft, d), cs_vlin_expr(cs_astsecond(args), hyps, lenv, ft, d)) else if cnm == "dec_gt" and cs_len(args) == 2 then cs_vcond_cmp_neg(">", cs_vlin_expr(cs_asthead(args), hyps, lenv, ft, d), cs_vlin_expr(cs_astsecond(args), hyps, lenv, ft, d)) else if cnm == "dec_le" and cs_len(args) == 2 then cs_vcond_cmp_neg("<=", cs_vlin_expr(cs_asthead(args), hyps, lenv, ft, d), cs_vlin_expr(cs_astsecond(args), hyps, lenv, ft, d)) else if cnm == "dec_lt" and cs_len(args) == 2 then cs_vcond_cmp_neg("<", cs_vlin_expr(cs_asthead(args), hyps, lenv, ft, d), cs_vlin_expr(cs_astsecond(args), hyps, lenv, ft, d)) else {ok: 0, hyps: Nil}
+    _               => {ok: 0, hyps: Nil}
+fn cs_vprove_reqs_hyps(reqs, lenv, ft) = match reqs
+    Nil        => {ok: 1, hyps: Nil}
+    Cons(h, t) => let r1 = cs_vcond_pos(h, Nil, lenv, ft, 0) in if r1.ok == 0 then {ok: 0, hyps: Nil} else let r2 = cs_vprove_reqs_hyps(t, lenv, ft) in if r2.ok == 0 then {ok: 0, hyps: Nil} else {ok: 1, hyps: cs_app(r1.hyps, r2.hyps)}
+fn cs_vprove_goal(g, hyps, lenv, ft, d) = match g
+    Num(n)          => if n != 0 then 1 else 0
+    LetIn(nm, v, b) => let lv = cs_vlin_expr(v, hyps, lenv, ft, d) in if lv.ok == 0 then 0 else cs_vprove_goal(b, hyps, Cons({k: nm, v: lv}, lenv), ft, d)
+    VarIn(nm, v, b) => let lv = cs_vlin_expr(v, hyps, lenv, ft, d) in if lv.ok == 0 then 0 else cs_vprove_goal(b, hyps, Cons({k: nm, v: lv}, lenv), ft, d)
+    DeferE(c, b)    => cs_vprove_goal(b, hyps, lenv, ft, d)
+    ErrDeferE(c, b) => cs_vprove_goal(b, hyps, lenv, ft, d)
+    If(c, t, e2)    => let rp = cs_vcond_pos(c, hyps, lenv, ft, d) in let rn = cs_vcond_neg(c, hyps, lenv, ft, d) in if rp.ok == 1 and cs_vprove_goal(t, cs_app(rp.hyps, hyps), lenv, ft, d) == 1 and (cs_vprove_goal(e2, hyps, lenv, ft, d) == 1 or (rn.ok == 1 and cs_vprove_goal(e2, cs_app(rn.hyps, hyps), lenv, ft, d) == 1)) then 1 else 0
+    Bin(op, a, b)   => if op == "and" then (if cs_vprove_goal(a, hyps, lenv, ft, d) == 1 and cs_vprove_goal(b, hyps, lenv, ft, d) == 1 then 1 else 0) else if op == "or" then (let rna = cs_vcond_neg(a, hyps, lenv, ft, d) in if rna.ok == 1 and cs_vprove_goal(b, cs_app(rna.hyps, hyps), lenv, ft, d) == 1 then 1 else let rnb = cs_vcond_neg(b, hyps, lenv, ft, d) in if rnb.ok == 1 and cs_vprove_goal(a, cs_app(rnb.hyps, hyps), lenv, ft, d) == 1 then 1 else 0) else if op == "==" then (if cs_vprove_goal(Bin(">=", a, b), hyps, lenv, ft, d) == 1 and cs_vprove_goal(Bin("<=", a, b), hyps, lenv, ft, d) == 1 then 1 else 0) else (let rn = cs_vcond_neg(g, hyps, lenv, ft, d) in if rn.ok == 1 then cs_vfm_check_unsat(cs_app(rn.hyps, hyps)) else 0)
+    Call(cnm, args) => if cnm == "dec_eq" and cs_len(args) == 2 then cs_vprove_goal(Bin("==", cs_asthead(args), cs_astsecond(args)), hyps, lenv, ft, d) else if cnm == "dec_ge" and cs_len(args) == 2 then cs_vprove_goal(Bin(">=", cs_asthead(args), cs_astsecond(args)), hyps, lenv, ft, d) else if cnm == "dec_gt" and cs_len(args) == 2 then cs_vprove_goal(Bin(">", cs_asthead(args), cs_astsecond(args)), hyps, lenv, ft, d) else if cnm == "dec_le" and cs_len(args) == 2 then cs_vprove_goal(Bin("<=", cs_asthead(args), cs_astsecond(args)), hyps, lenv, ft, d) else if cnm == "dec_lt" and cs_len(args) == 2 then cs_vprove_goal(Bin("<", cs_asthead(args), cs_astsecond(args)), hyps, lenv, ft, d) else 0
+    _               => 0
+fn cs_vprove_goals_all(enss, hyps, lenv, ft, d) = match enss
+    Nil        => 1
+    Cons(h, t) => if cs_vprove_goal(h, hyps, lenv, ft, d) == 1 then cs_vprove_goals_all(t, hyps, lenv, ft, d) else 0
+fn cs_vprove_body(body, hyps, lenv, enss, ft, d) = match body
+    LetIn(nm, v, b) => let lv = cs_vlin_expr(v, hyps, lenv, ft, d) in if lv.ok == 0 then 0 else cs_vprove_body(b, hyps, Cons({k: nm, v: lv}, lenv), enss, ft, d)
+    VarIn(nm, v, b) => let lv = cs_vlin_expr(v, hyps, lenv, ft, d) in if lv.ok == 0 then 0 else cs_vprove_body(b, hyps, Cons({k: nm, v: lv}, lenv), enss, ft, d)
+    DeferE(c, b)    => cs_vprove_body(b, hyps, lenv, enss, ft, d)
+    ErrDeferE(c, b) => cs_vprove_body(b, hyps, lenv, enss, ft, d)
+    If(c, t, e2)    => let rp = cs_vcond_pos(c, hyps, lenv, ft, d) in let rn = cs_vcond_neg(c, hyps, lenv, ft, d) in if rp.ok == 1 and rn.ok == 1 and cs_vprove_body(t, cs_app(rp.hyps, hyps), lenv, enss, ft, d) == 1 and cs_vprove_body(e2, cs_app(rn.hyps, hyps), lenv, enss, ft, d) == 1 then 1 else 0
+    _               => let lb = cs_vlin_expr(body, hyps, lenv, ft, d) in if lb.ok == 0 then 0 else let penv = Cons({k: "result", v: lb}, Cons({k: "ret", v: lb}, lenv)) in cs_vprove_goals_all(enss, hyps, penv, ft, d)
+fn cs_vqflia_prove_fn(ps, reqs, enss, body, ft) = if cs_isnil(enss) == 1 then 0 else let lenv = cs_vlin_init_env(ps) in let rh = cs_vprove_reqs_hyps(reqs, lenv, ft) in if rh.ok == 0 then 0 else cs_vprove_body(body, rh.hyps, lenv, enss, ft, 0)
+fn cs_vqflia_prove_law(ps, body, ft) = let lenv = cs_vlin_init_env(ps) in if cs_vprove_goal(body, Nil, lenv, ft, 0) == 1 then 1 else if cs_len(ps) == 1 then let p0 = cs_vlin_var(cs_phd(ps)) in let hneg = Cons(cs_vlin_sub(cs_vlin_const(0 - 1), p0), Nil) in let hpos = Cons(p0, Nil) in if cs_vprove_goal(body, hneg, lenv, ft, 0) == 1 and cs_vprove_goal(body, hpos, lenv, ft, 0) == 1 then 1 else 0 else 0
+fn cs_vneg_goal_hyps(g, hyps, lenv, ft, d) = match g
+    Bin(op, a, b) => if op == "and" then cs_app(cs_vneg_goal_hyps(a, hyps, lenv, ft, d), cs_vneg_goal_hyps(b, hyps, lenv, ft, d)) else if op == "==" then cs_app((cs_vcond_cmp_pos(">", cs_vlin_expr(a, hyps, lenv, ft, d), cs_vlin_expr(b, hyps, lenv, ft, d))).hyps, (cs_vcond_cmp_pos("<", cs_vlin_expr(a, hyps, lenv, ft, d), cs_vlin_expr(b, hyps, lenv, ft, d))).hyps) else (cs_vcond_neg(g, hyps, lenv, ft, d)).hyps
+    _             => Nil
+fn cs_vneg_goals_hyps(enss, hyps, penv, ft, d) = match enss
+    Nil        => Nil
+    Cons(g, r) => cs_app(cs_vneg_goal_hyps(g, hyps, penv, ft, d), cs_vneg_goals_hyps(r, hyps, penv, ft, d))
+fn cs_vcollect_body_hyps(body, hyps, lenv, enss, ft, d) = match body
+    LetIn(nm, v, b) => let lv = cs_vlin_expr(v, hyps, lenv, ft, d) in if lv.ok == 0 then hyps else cs_vcollect_body_hyps(b, hyps, Cons({k: nm, v: lv}, lenv), enss, ft, d)
+    VarIn(nm, v, b) => let lv = cs_vlin_expr(v, hyps, lenv, ft, d) in if lv.ok == 0 then hyps else cs_vcollect_body_hyps(b, hyps, Cons({k: nm, v: lv}, lenv), enss, ft, d)
+    DeferE(c, b)    => cs_vcollect_body_hyps(b, hyps, lenv, enss, ft, d)
+    ErrDeferE(c, b) => cs_vcollect_body_hyps(b, hyps, lenv, enss, ft, d)
+    If(c, t, e2)    => let rp = cs_vcond_pos(c, hyps, lenv, ft, d) in let rn = cs_vcond_neg(c, hyps, lenv, ft, d) in cs_app(cs_vcollect_body_hyps(t, cs_app(rp.hyps, hyps), lenv, enss, ft, d), cs_vcollect_body_hyps(e2, cs_app(rn.hyps, hyps), lenv, enss, ft, d))
+    _               => let lb = cs_vlin_expr(body, hyps, lenv, ft, d) in if lb.ok == 0 then hyps else let penv = Cons({k: "result", v: lb}, Cons({k: "ret", v: lb}, lenv)) in cs_app(cs_vneg_goals_hyps(enss, hyps, penv, ft, d), hyps)
+fn cs_vmem_int(x, xs) = match xs
+    Nil        => 0
+    Cons(h, t) => if h == x then 1 else cs_vmem_int(x, t)
+fn cs_vadd_int_uniq(x, xs) = if cs_vmem_int(x, xs) == 1 or cs_len(xs) >= 6 then xs else cs_app(xs, Cons(x, Nil))
+fn cs_vpts_from_hyps(p, hyps, acc) = match hyps
+    Nil        => acc
+    Cons(h, t) => let c = cs_vlin_coeff(p, h.cs) in if c == 0 then cs_vpts_from_hyps(p, t, acc) else let b = (0 - h.c0) / c in cs_vpts_from_hyps(p, t, cs_vadd_int_uniq(b + 1, cs_vadd_int_uniq(b, acc)))
+fn cs_vfm_trace_hyps(hyps, vars) = match vars
+    Nil        => hyps
+    Cons(v, r) => let next = cs_vfm_elim_var(v, hyps) in if cs_len(next) > 32 then hyps else cs_app(hyps, cs_vfm_trace_hyps(next, r))
+fn cs_vgen_envs_hyps(ps, idx, total, chyps) = match ps
+    Nil        => Cons(Nil, Nil)
+    Cons(p, r) => cs_vcross_p(p, cs_vpts_from_hyps(p, chyps, cs_vpts_for(idx, total)), cs_vgen_envs_hyps(r, idx + 1, total, chyps))
+
 fn cs_vprove_fn(nm, ps, body, mvs, ft) = match mvs
     Nil          => {proofs: Nil, diags: Nil}
-    Cons(vsg, r) => let pr = cs_vprove_envs(cs_vgen_envs(ps, 0, cs_len(ps)), vsg.reqs, vsg.enss, body, ft, 0) in let ob = cs_exprs_sexpr(vsg.reqs) + " => " + cs_exprs_sexpr(vsg.enss) in let pf = Cons({name: nm, kind: "contract", status: pr.status, obligation: ob, counterexample: pr.cex}, Nil) in let dg = if pr.status == "refuted" then Cons(cs_mkdiag("V0001", "contract", "contract error: cannot prove 'ensures' postcondition of '" + nm + "' — refuted with counterexample: " + pr.cex, "strengthen 'requires' precondition or fix implementation of '" + nm + "'"), Nil) else Nil in {proofs: pf, diags: dg}
+    Cons(vsg, r) => let lenv = cs_vlin_init_env(ps) in let raw_hyps = cs_vcollect_body_hyps(body, (cs_vprove_reqs_hyps(vsg.reqs, lenv, ft)).hyps, lenv, vsg.enss, ft, 0) in let chyps = cs_vfm_trace_hyps(raw_hyps, cs_vfm_vars(raw_hyps, Nil)) in let pr = cs_vprove_envs(cs_vgen_envs_hyps(ps, 0, cs_len(ps), chyps), vsg.reqs, vsg.enss, body, ft, 0) in let st = if pr.status == "refuted" then "refuted" else if cs_vqflia_prove_fn(ps, vsg.reqs, vsg.enss, body, ft) == 1 then "proven" else "runtime_checked" in let ob = cs_exprs_sexpr(vsg.reqs) + " => " + cs_exprs_sexpr(vsg.enss) in let pf = Cons({name: nm, kind: "contract", status: st, obligation: ob, counterexample: pr.cex}, Nil) in let dg = if st == "refuted" then Cons(cs_mkdiag("V0001", "contract", "contract error: cannot prove 'ensures' postcondition of '" + nm + "' — refuted with counterexample: " + pr.cex, "strengthen 'requires' precondition or fix implementation of '" + nm + "'"), Nil) else Nil in {proofs: pf, diags: dg}
 fn cs_vchk_call_req(cnm, args, fnm, mvs, ft) = match mvs
     Nil          => {proofs: Nil, diags: Nil}
     Cons(vsg, r) => if cs_isnil(vsg.reqs) == 1 then {proofs: Nil, diags: Nil} else let ra = cs_veval_args(args, Nil, Nil, ft, 0) in if ra.ok == 0 then {proofs: Nil, diags: Nil} else let env = cs_vbind_ps(vsg.ps, ra.vals) in let rq = cs_veval_all_true(vsg.reqs, env, env, ft) in if rq.ok == 1 and rq.hold == 0 then let cex = cs_vfmt_env(env) in {proofs: Cons({name: cnm, kind: "call_requires", status: "refuted", obligation: cs_exprs_sexpr(vsg.reqs), counterexample: cex}, Nil), diags: Cons(cs_mkdiag("V0001", "contract", "contract error: call to '" + cnm + "' in '" + fnm + "' violates 'requires' precondition with counterexample: " + cex, "ensure arguments passed to '" + cnm + "' satisfy its 'requires' contract"), Nil)} else {proofs: Nil, diags: Nil}
@@ -1036,7 +1189,7 @@ fn cs_vprove_stmts(prog, vsigs, invs, ft) = match prog
     Nil        => {proofs: Nil, diags: Nil}
     Cons(h, t) => cs_vprove_stmt1(h, t, vsigs, invs, ft)
 fn cs_vprove_stmt1(st, rest, vsigs, invs, ft) = match st
-    VLawDecl(nm, ps, body)      => let pr = cs_vprove_law_envs(cs_vgen_envs(ps, 0, cs_len(ps)), body, ft, 0) in let pf = Cons({name: nm, kind: "law", status: pr.status, obligation: cs_expr_sexpr(body), counterexample: pr.cex}, Nil) in let dg = if pr.status == "refuted" then Cons(cs_mkdiag("V0001", "law", "contract error: law '" + nm + "' refuted with counterexample: " + pr.cex, "fix the implementation or refine law '" + nm + "'"), Nil) else Nil in let rr = cs_vprove_stmts(rest, vsigs, invs, ft) in {proofs: cs_app(pf, rr.proofs), diags: cs_app(dg, rr.diags)}
+    VLawDecl(nm, ps, body)      => let lenv = cs_vlin_init_env(ps) in let chyps = cs_vcollect_body_hyps(body, Nil, lenv, Cons(body, Nil), ft, 0) in let pr = cs_vprove_law_envs(cs_vgen_envs_hyps(ps, 0, cs_len(ps), chyps), body, ft, 0) in let lst = if pr.status == "refuted" then "refuted" else if cs_vqflia_prove_law(ps, body, ft) == 1 then "proven" else "runtime_checked" in let pf = Cons({name: nm, kind: "law", status: lst, obligation: cs_expr_sexpr(body), counterexample: pr.cex}, Nil) in let dg = if lst == "refuted" then Cons(cs_mkdiag("V0001", "law", "contract error: law '" + nm + "' refuted with counterexample: " + pr.cex, "fix the implementation or refine law '" + nm + "'"), Nil) else Nil in let rr = cs_vprove_stmts(rest, vsigs, invs, ft) in {proofs: cs_app(pf, rr.proofs), diags: cs_app(dg, rr.diags)}
     VTypeInvariant(nm, fs, inv) => let pf = Cons({name: nm, kind: "invariant", status: "runtime_checked", obligation: cs_expr_sexpr(inv), counterexample: ""}, Nil) in let rr = cs_vprove_stmts(rest, vsigs, invs, ft) in {proofs: cs_app(pf, rr.proofs), diags: rr.diags}
     Fn(nm, ps, body)            => let r1 = cs_vprove_fn(nm, ps, body, cs_vsiglookup(nm, vsigs), ft) in let r2 = cs_vchk_expr_e(body, nm, vsigs, invs, ft) in let rr = cs_vprove_stmts(rest, vsigs, invs, ft) in {proofs: cs_app(r1.proofs, cs_app(r2.proofs, rr.proofs)), diags: cs_app(r1.diags, cs_app(r2.diags, rr.diags))}
     Print(v)                    => let r1 = cs_vchk_expr_e(v, "<main>", vsigs, invs, ft) in let rr = cs_vprove_stmts(rest, vsigs, invs, ft) in {proofs: cs_app(r1.proofs, rr.proofs), diags: cs_app(r1.diags, rr.diags)}
