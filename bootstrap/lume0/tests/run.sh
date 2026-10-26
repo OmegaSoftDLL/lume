@@ -474,6 +474,18 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_
     "$ntmp/lc" <"$ntmp/m1bad1.src" >"$ntmp/m1bad1.s" 2>"$ntmp/m1bad1.err"; m1b1=$?
     "$ntmp/lc" <"$ntmp/m1bad2.src" >"$ntmp/m1bad2.s" 2>"$ntmp/m1bad2.err"; m1b2=$?
     if [ "$m1b1" = 3 ] && [ ! -s "$ntmp/m1bad1.s" ] && grep -q "splice expects an AST constructor" "$ntmp/m1bad1.err" && [ "$m1b2" = 3 ] && [ ! -s "$ntmp/m1bad2.s" ] && grep -q "invalid AST node" "$ntmp/m1bad2.err"; then ok "phase-2 M1: invalid AST splice fails at compile time with a clear error (exit 3, no asm)"; else bad "phase-2 M1: invalid AST splice fails at compile time"; fi
+    # phase-2 M2: hygienic macros / quasiquote (`unquote(<expr>)` inside `quote(...)`, lexical variable capture avoidance).
+    "$ntmp/lc" <../../compiler/stage1/macro_hygiene.src >"$ntmp/mh.s" 2>/dev/null; "$ntmp/lasm" <"$ntmp/mh.s" >"$ntmp/mh.elf" 2>/dev/null; chmod +x "$ntmp/mh.elf"
+    m2_ok=1
+    "$ntmp/mh.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/macro_hygiene_asm.expected - >/dev/null || m2_ok=0
+    awk '/^_start:/{p=1} p{print}' "$ntmp/mh.s" >"$ntmp/mh_main.s"
+    grep -Eq 'call m_with_tmp|call m_wrap_tmp|call m_let_tmp|call m_linear|call m_if_pos' "$ntmp/mh_main.s" && m2_ok=0
+    if [ "$m2_ok" = 1 ]; then ok "phase-2 M2: hygienic macros / quasiquote (unquote interpolation + variable capture avoidance)"; else bad "phase-2 M2: hygienic macros / quasiquote"; fi
+    printf 'print unquote(1)\n' >"$ntmp/m2bad1.src"
+    printf 'print comptime(quote(unquote(1, 2)))\n' >"$ntmp/m2bad2.src"
+    "$ntmp/lc" <"$ntmp/m2bad1.src" >"$ntmp/m2bad1.s" 2>"$ntmp/m2bad1.err"; m2b1=$?
+    "$ntmp/lc" <"$ntmp/m2bad2.src" >"$ntmp/m2bad2.s" 2>"$ntmp/m2bad2.err"; m2b2=$?
+    if [ "$m2b1" = 3 ] && [ ! -s "$ntmp/m2bad1.s" ] && grep -q "'unquote' may only appear inside 'quote(...)'" "$ntmp/m2bad1.err" && [ "$m2b2" = 3 ] && [ ! -s "$ntmp/m2bad2.s" ] && grep -q "'unquote' expects exactly 1 argument" "$ntmp/m2bad2.err"; then ok "phase-2 M2: unquote outside quote or with wrong arity fails at compile time (exit 3, no asm)"; else bad "phase-2 M2: unquote outside quote or with wrong arity fails at compile time"; fi
     rm -rf "$ntmp"
 else
     ok "no-toolchain ELF pipeline (skipped: not linux/x86_64, or under ASan)"

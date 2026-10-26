@@ -1,4 +1,4 @@
-## --- comptime: evaluate `comptime <expr>`, `quote <expr>`, and `splice <expr>` at COMPILE TIME ---
+## --- comptime: evaluate `comptime <expr>`, `quote <expr>`, `unquote <expr>`, and `splice <expr>` at COMPILE TIME ---
 ## `comptime E` consumes ONE primary E (so `comptime(...)` folds the whole parenthesised expression). C1 folded
 ## in the parser; C2 DEFERS the fold to a post-parse pass (`cfold`, below) so that, by the time we evaluate, ALL
 ## `fn`s are known and a `comptime` may CALL pure user functions (recursion included).
@@ -7,6 +7,10 @@
 ## is a `Cons`/`Nil` list of AST values); `ceval` evaluates constructor expressions (`cv_ctor`), structural `==`/`!=`,
 ## and `match` pattern matching (`PWild`, `PInt`, `PStr`, `PBind`, `PCons`) at compile time; and `splice(e)` reflects
 ## a comptime-computed AST value back into a live compiler AST node that is compiled to native x86-64.
+## M2 adds quasiquotation (`unquote(e)` inside `quote(...)`) and automatic lexical hygiene: every `let` binding
+## introduced inside a `quote(...)` template is alpha-renamed with a fresh step-stamped gensym (`_hyg_<step>_<name>`)
+## while `unquote(e)` evaluates `e` in the outer comptime environment without capturing caller variables, and
+## `chygiene` canonicalises all `_hyg_` bindings across sibling/nested splices so slots never collide.
 fn cbudget() = 1000000
 fn cdmax() = 2000
 fn cv_int(n) = {kind: "int", i: n, s: "", items: Nil}
@@ -29,7 +33,7 @@ fn cstep(e, env, ft, f, cd) = match e
     Var(nm)         => cr(if isctor(nm) then cv_ctor(nm, Nil) else cevalvar(nm, env), f)
     Call(nm, args)  => if isctor(nm) then cctor(nm, args, env, ft, f, cd) else ccall(nm, args, env, ft, f, cd)
     CT(inner)       => ceval(inner, env, ft, f, cd)
-    Quote(inner)    => cr(creify(inner), f)
+    Quote(inner)    => cquasiquote(inner, Nil, env, ft, f, cd)
     Splice(inner)   => csplice(ceval(inner, env, ft, f, cd), env, ft, cd)
     Match(sc, arms) => cmatch(ceval(sc, env, ft, f, cd), arms, env, ft, cd)
     Rec(items)      => ctfail("lume: comptime error: record literal is not foldable at compile time\n")
@@ -78,18 +82,38 @@ fn ctnode(cv) = if cv.kind == "int" then Num(cv.i) else if cv.kind == "str" then
 fn ctnodelist(xs) = match xs
     Nil        => Nil
     Cons(h, t) => Cons(ctnode(h), ctnodelist(t))
-fn creify(e) = match e
-    Num(n)          => cv_ctor("Num", Cons(cv_int(n), Nil))
-    Str(v)          => cv_ctor("Str", Cons(cv_str(v), Nil))
-    Var(nm)         => cv_ctor("Var", Cons(cv_str(nm), Nil))
-    Bin(op, a, b)   => cv_ctor("Bin", Cons(cv_str(op), Cons(creify(a), Cons(creify(b), Nil))))
-    If(c, t, e2)    => cv_ctor("If", Cons(creify(c), Cons(creify(t), Cons(creify(e2), Nil))))
-    LetIn(nm, v, b) => cv_ctor("LetIn", Cons(cv_str(nm), Cons(creify(v), Cons(creify(b), Nil))))
-    Call(nm, args)  => cv_ctor("Call", Cons(cv_str(nm), Cons(creifylist(args), Nil)))
+fn cqvar(nm, qenv) = match qenv
+    Nil        => nm
+    Cons(h, t) => if h.k == nm then h.v else cqvar(nm, t)
+fn cqunquote(cv) = if cv.kind == "int" then cv_ctor("Num", Cons(cv, Nil)) else if cv.kind == "str" then cv_ctor("Str", Cons(cv, Nil)) else if cv.kind == "ctor" then cv else ctfail("lume: comptime error: unquote expects an AST, int, or str value\n")
+fn asthead(xs) = match xs
+    Nil        => Num(0)
+    Cons(h, t) => h
+fn cquasiquote(e, qenv, env, ft, f, cd) = if f <= 0 then ctfail("lume: comptime error: comptime evaluation exceeded " + str(cbudget()) + " steps (possible runaway comptime evaluation)\n") else cqstep(e, qenv, env, ft, f - 1, cd)
+fn cqstep(e, qenv, env, ft, f, cd) = match e
+    Num(n)          => cr(cv_ctor("Num", Cons(cv_int(n), Nil)), f)
+    Str(v)          => cr(cv_ctor("Str", Cons(cv_str(v), Nil)), f)
+    Var(nm)         => cr(cv_ctor("Var", Cons(cv_str(cqvar(nm, qenv)), Nil)), f)
+    Bin(op, a, b)   => cqbin(op, cquasiquote(a, qenv, env, ft, f, cd), b, qenv, env, ft, cd)
+    If(c, t, e2)    => cqif(cquasiquote(c, qenv, env, ft, f, cd), t, e2, qenv, env, ft, cd)
+    LetIn(nm, v, b) => cqlet(nm, cquasiquote(v, qenv, env, ft, f, cd), b, qenv, env, ft, cd)
+    Call(nm, args)  => if nm == "unquote" then cqunqcall(args, env, ft, f, cd) else cqcall(nm, cqlist(args, qenv, env, ft, f, cd))
     _               => ctfail("lume: comptime error: unsupported AST node in quote\n")
-fn creifylist(xs) = match xs
-    Nil        => cv_ctor("Nil", Nil)
-    Cons(h, t) => cv_ctor("Cons", Cons(creify(h), Cons(creifylist(t), Nil)))
+fn cqbin(op, ra, b, qenv, env, ft, cd) = cqbin2(op, ra.v, cquasiquote(b, qenv, env, ft, ra.f, cd))
+fn cqbin2(op, av, rb) = cr(cv_ctor("Bin", Cons(cv_str(op), Cons(av, Cons(rb.v, Nil)))), rb.f)
+fn cqif(rc, t, e2, qenv, env, ft, cd) = cqif2(rc.v, cquasiquote(t, qenv, env, ft, rc.f, cd), e2, qenv, env, ft, cd)
+fn cqif2(cv, rt, e2, qenv, env, ft, cd) = cqif3(cv, rt.v, cquasiquote(e2, qenv, env, ft, rt.f, cd))
+fn cqif3(cv, tv, re) = cr(cv_ctor("If", Cons(cv, Cons(tv, Cons(re.v, Nil)))), re.f)
+fn cqlet(nm, rv, b, qenv, env, ft, cd) = let hnm = "_hyg_" + str(cbudget() - rv.f) + "_" + nm in cqlet2(hnm, rv.v, cquasiquote(b, Cons({k: nm, v: hnm}, qenv), env, ft, rv.f, cd))
+fn cqlet2(hnm, vv, rb) = cr(cv_ctor("LetIn", Cons(cv_str(hnm), Cons(vv, Cons(rb.v, Nil)))), rb.f)
+fn cqunqcall(args, env, ft, f, cd) = if len(args) != 1 then ctfail("lume: comptime error: 'unquote' expects exactly 1 argument\n") else cqunqcall2(ceval(asthead(args), env, ft, f, cd))
+fn cqunqcall2(r) = cr(cqunquote(r.v), r.f)
+fn cqcall(nm, rl) = cr(cv_ctor("Call", Cons(cv_str(nm), Cons(rl.v, Nil))), rl.f)
+fn cqlist(xs, qenv, env, ft, f, cd) = match xs
+    Nil        => cr(cv_ctor("Nil", Nil), f)
+    Cons(h, t) => cqlist2(cquasiquote(h, qenv, env, ft, f, cd), t, qenv, env, ft, cd)
+fn cqlist2(rh, t, qenv, env, ft, cd) = cqlist3(rh.v, cqlist(t, qenv, env, ft, rh.f, cd))
+fn cqlist3(hv, rt) = cr(cv_ctor("Cons", Cons(hv, Cons(rt.v, Nil))), rt.f)
 fn isvalidbinop(op) = op == "+" or op == "-" or op == "*" or op == "/" or op == "%" or op == "==" or op == "!=" or op == "<" or op == ">" or op == "<=" or op == ">=" or op == "and" or op == "or"
 fn cunreify(cv) = if cv.kind != "ctor" then ctfail("lume: comptime error: splice expects an AST constructor value (Num, Str, Var, Bin, If, LetIn, Call)\n") else cunreifyctor(cv.s, cv.items)
 fn cunreifyctor(tag, xs) = if tag == "Num" and len(xs) == 1 and (cvhd(xs)).kind == "int" then Num((cvhd(xs)).i) else if tag == "Str" and len(xs) == 1 and (cvhd(xs)).kind == "str" then Str((cvhd(xs)).s) else if tag == "Var" and len(xs) == 1 and (cvhd(xs)).kind == "str" and count((cvhd(xs)).s) > 0 then Var((cvhd(xs)).s) else if tag == "Bin" and len(xs) == 3 and (cvhd(xs)).kind == "str" and isvalidbinop((cvhd(xs)).s) then Bin((cvhd(xs)).s, cunreify(cvhd(cvtl(xs))), cunreify(cvhd(cvtl(cvtl(xs))))) else if tag == "If" and len(xs) == 3 then If(cunreify(cvhd(xs)), cunreify(cvhd(cvtl(xs))), cunreify(cvhd(cvtl(cvtl(xs))))) else if tag == "LetIn" and len(xs) == 3 and (cvhd(xs)).kind == "str" and count((cvhd(xs)).s) > 0 then LetIn((cvhd(xs)).s, cunreify(cvhd(cvtl(xs))), cunreify(cvhd(cvtl(cvtl(xs))))) else if tag == "Call" and len(xs) == 2 and (cvhd(xs)).kind == "str" and count((cvhd(xs)).s) > 0 then Call((cvhd(xs)).s, cunreifylist(cvhd(cvtl(xs)))) else ctfail("lume: comptime error: invalid AST node '" + tag + "' in splice\n")
@@ -102,7 +126,7 @@ fn cpureprim(nm, ra) = cr(cpureprim2(nm, ra.vals), ra.f)
 fn cpureprim2(nm, vs) = if nm == "str" and len(vs) == 1 then (if (cvhd(vs)).kind == "int" then cv_str(str((cvhd(vs)).i)) else if (cvhd(vs)).kind == "str" then cvhd(vs) else ctfail("lume: comptime error: 'str' expects int or str at compile time\n")) else if nm == "count" and len(vs) == 1 and (cvhd(vs)).kind == "str" then cv_int(count((cvhd(vs)).s)) else if nm == "toint" and len(vs) == 1 and (cvhd(vs)).kind == "str" then cv_int(toint((cvhd(vs)).s)) else if nm == "ord" and len(vs) == 1 and (cvhd(vs)).kind == "str" then cv_int(ord((cvhd(vs)).s)) else if nm == "at" and len(vs) == 2 and (cvhd(vs)).kind == "str" and (cvhd(cvtl(vs))).kind == "int" then cv_str(at((cvhd(vs)).s, (cvhd(cvtl(vs))).i)) else if nm == "slice" and len(vs) == 3 and (cvhd(vs)).kind == "str" and (cvhd(cvtl(vs))).kind == "int" and (cvhd(cvtl(cvtl(vs)))).kind == "int" then cv_str(slice((cvhd(vs)).s, (cvhd(cvtl(vs))).i, (cvhd(cvtl(cvtl(vs)))).i)) else ctfail("lume: comptime error: invalid arguments to '" + nm + "' at compile time\n")
 fn ccall(nm, args, env, ft, f, cd) = ccall2(nm, lookupfn(nm, ft), args, env, ft, f, cd)
 fn ccall2(nm, mf, args, env, ft, f, cd) = match mf
-    Nil           => if ispureprim(nm) then cpureprim(nm, cargs(args, env, ft, f, cd)) else ctfail("lume: comptime error: cannot evaluate '" + nm + "' at compile time: not pure\n")
+    Nil           => if nm == "unquote" then ctfail("lume: comptime error: 'unquote' may only appear inside 'quote(...)'\n") else if ispureprim(nm) then cpureprim(nm, cargs(args, env, ft, f, cd)) else ctfail("lume: comptime error: cannot evaluate '" + nm + "' at compile time: not pure\n")
     Cons(fn0, rr) => ccall3(nm, fn0, args, env, ft, f, cd)
 fn ccall3(nm, fn0, args, env, ft, f, cd) = if cd >= cdmax() then ctfail("lume: comptime error: comptime evaluation exceeded " + str(cdmax()) + " call levels (possible infinite recursion in '" + nm + "')\n") else ccall4(fn0, cargs(args, env, ft, f, cd), ft, cd)
 fn ccall4(fn0, ra, ft, cd) = match fn0
@@ -131,6 +155,66 @@ fn parsesplice(t) = let r = prim(t) in {node: Splice(r.node), rest: r.rest}
 ## --- comptime fold pass (post-parse): with every `fn` known, replace each `CT`, `Quote`, and `Splice` node
 ## anywhere in the program. On a CT-free program (e.g. lumec.src itself) this is a faithful identity
 ## rebuild of the AST, so the self-host fixpoint is untouched. ---
+fn ishyg(nm) = count(nm) >= 5 and slice(nm, 0, 5) == "_hyg_"
+fn hashyg(e) = match e
+    LetIn(nm, v, b) => if ishyg(nm) then 1 else if hashyg(v) == 1 then 1 else hashyg(b)
+    Bin(op, a, b)   => if hashyg(a) == 1 then 1 else hashyg(b)
+    If(c, t, e2)    => if hashyg(c) == 1 then 1 else if hashyg(t) == 1 then 1 else hashyg(e2)
+    Call(nm, args)  => hashyglist(args)
+    Field(o, nm)    => hashyg(o)
+    Rec(items)      => hashygrec(items)
+    RecT(tn, items) => hashygrec(items)
+    Match(sc, arms) => if hashyg(sc) == 1 then 1 else hashygarms(arms)
+    _               => 0
+fn hashyglist(xs) = match xs
+    Nil        => 0
+    Cons(h, t) => if hashyg(h) == 1 then 1 else hashyglist(t)
+fn hashygrec(xs) = match xs
+    Nil        => 0
+    Cons(h, t) => if hashyg(h.val) == 1 then 1 else hashygrec(t)
+fn hashygarms(xs) = match xs
+    Nil        => 0
+    Cons(h, t) => if hashyg(h.body) == 1 then 1 else hashygarms(t)
+fn chygiene(e) = if hashyg(e) == 0 then e else (chyg(e, Nil, 1)).node
+fn chyg(e, renv, n) = match e
+    Var(nm)         => {node: Var(cqvar(nm, renv)), n: n}
+    LetIn(nm, v, b) => chyglet(nm, chyg(v, renv, n), b, renv)
+    Bin(op, a, b)   => chygbin(op, chyg(a, renv, n), b, renv)
+    If(c, t, e2)    => chygif(chyg(c, renv, n), t, e2, renv)
+    Call(nm, args)  => chygcall(nm, chyglist(args, renv, n))
+    Field(o, nm)    => chygfield(chyg(o, renv, n), nm)
+    Rec(items)      => chygrec(chygrecl(items, renv, n))
+    RecT(tn, items) => chygrect(tn, chygrecl(items, renv, n))
+    Match(sc, arms) => chygmatch(chyg(sc, renv, n), arms, renv)
+    _               => {node: e, n: n}
+fn chyglet(nm, rv, b, renv) = if ishyg(nm) then let nnm = "_hyg_" + str(rv.n) in chyglet2(nnm, rv.node, chyg(b, Cons({k: nm, v: nnm}, renv), rv.n + 1)) else chyglet2(nm, rv.node, chyg(b, Cons({k: nm, v: nm}, renv), rv.n))
+fn chyglet2(nm, vn, rb) = {node: LetIn(nm, vn, rb.node), n: rb.n}
+fn chygbin(op, ra, b, renv) = chygbin2(op, ra.node, chyg(b, renv, ra.n))
+fn chygbin2(op, an, rb) = {node: Bin(op, an, rb.node), n: rb.n}
+fn chygif(rc, t, e2, renv) = chygif2(rc.node, chyg(t, renv, rc.n), e2, renv)
+fn chygif2(cn, rt, e2, renv) = chygif3(cn, rt.node, chyg(e2, renv, rt.n))
+fn chygif3(cn, tn, re) = {node: If(cn, tn, re.node), n: re.n}
+fn chygcall(nm, rl) = {node: Call(nm, rl.items), n: rl.n}
+fn chyglist(xs, renv, n) = match xs
+    Nil        => {items: Nil, n: n}
+    Cons(h, t) => chyglist2(chyg(h, renv, n), t, renv)
+fn chyglist2(rh, t, renv) = chyglist3(rh.node, chyglist(t, renv, rh.n))
+fn chyglist3(hn, rt) = {items: Cons(hn, rt.items), n: rt.n}
+fn chygfield(ro, nm) = {node: Field(ro.node, nm), n: ro.n}
+fn chygrec(rl) = {node: Rec(rl.items), n: rl.n}
+fn chygrect(tn, rl) = {node: RecT(tn, rl.items), n: rl.n}
+fn chygrecl(xs, renv, n) = match xs
+    Nil        => {items: Nil, n: n}
+    Cons(h, t) => chygrecl2(h.key, chyg(h.val, renv, n), t, renv)
+fn chygrecl2(k, rv, t, renv) = chygrecl3(k, rv.node, chygrecl(t, renv, rv.n))
+fn chygrecl3(k, vn, rt) = {items: Cons({key: k, val: vn}, rt.items), n: rt.n}
+fn chygmatch(rsc, arms, renv) = chygmatch2(rsc.node, chygarms(arms, renv, rsc.n))
+fn chygmatch2(scn, ra) = {node: Match(scn, ra.items), n: ra.n}
+fn chygarms(xs, renv, n) = match xs
+    Nil        => {items: Nil, n: n}
+    Cons(h, t) => chygarms2(h.pat, chyg(h.body, renv, n), t, renv)
+fn chygarms2(p, rb, t, renv) = chygarms3(p, rb.node, chygarms(t, renv, rb.n))
+fn chygarms3(p, bn, rt) = {items: Cons({pat: p, body: bn}, rt.items), n: rt.n}
 fn cfold(prog) = cfoldstmts(prog, cbuildft(prog))
 fn cbuildft(prog) = match prog
     Nil        => Nil
@@ -142,19 +226,31 @@ fn cfoldstmts(prog, ft) = match prog
     Nil        => Nil
     Cons(h, t) => Cons(cfoldstmt(h, ft), cfoldstmts(t, ft))
 fn cfoldstmt(s0, ft) = match s0
-    Fn(nm, ps, body) => Fn(nm, ps, cfolde(body, ft))
-    Print(v)         => Print(cfolde(v, ft))
-    ExprS(v)         => ExprS(cfolde(v, ft))
+    Fn(nm, ps, body) => Fn(nm, ps, chygiene(cfolde(body, ft)))
+    Print(v)         => Print(chygiene(cfolde(v, ft)))
+    ExprS(v)         => ExprS(chygiene(cfolde(v, ft)))
     _                => s0
 fn cfoldct(r) = ctnode(r.v)
+fn cquotenode(e, qenv, ft) = match e
+    Num(n)          => Call("Num", Cons(Num(n), Nil))
+    Str(v)          => Call("Str", Cons(Str(v), Nil))
+    Var(nm)         => Call("Var", Cons(Str(cqvar(nm, qenv)), Nil))
+    Bin(op, a, b)   => Call("Bin", Cons(Str(op), Cons(cquotenode(a, qenv, ft), Cons(cquotenode(b, qenv, ft), Nil))))
+    If(c, t, e2)    => Call("If", Cons(cquotenode(c, qenv, ft), Cons(cquotenode(t, qenv, ft), Cons(cquotenode(e2, qenv, ft), Nil))))
+    LetIn(nm, v, b) => let hnm = "_hyg_0_" + nm in Call("LetIn", Cons(Str(hnm), Cons(cquotenode(v, qenv, ft), Cons(cquotenode(b, Cons({k: nm, v: hnm}, qenv), ft), Nil))))
+    Call(nm, args)  => if nm == "unquote" then (if len(args) != 1 then ctfail("lume: comptime error: 'unquote' expects exactly 1 argument\n") else cfolde(asthead(args), ft)) else Call("Call", Cons(Str(nm), Cons(cquotelist(args, qenv, ft), Nil)))
+    _               => ctfail("lume: comptime error: unsupported AST node in quote\n")
+fn cquotelist(xs, qenv, ft) = match xs
+    Nil        => Var("Nil")
+    Cons(h, t) => Call("Cons", Cons(cquotenode(h, qenv, ft), Cons(cquotelist(t, qenv, ft), Nil)))
 fn cfolde(e, ft) = match e
     CT(inner)       => cfoldct(ceval(inner, Nil, ft, cbudget(), 0))
-    Quote(inner)    => ctnode(creify(inner))
+    Quote(inner)    => cquotenode(inner, Nil, ft)
     Splice(inner)   => cfolde(cunreify((ceval(inner, Nil, ft, cbudget(), 0)).v), ft)
     Bin(op, a, b)   => Bin(op, cfolde(a, ft), cfolde(b, ft))
     If(c, t, e2)    => If(cfolde(c, ft), cfolde(t, ft), cfolde(e2, ft))
     LetIn(nm, v, b) => LetIn(nm, cfolde(v, ft), cfolde(b, ft))
-    Call(nm, args)  => Call(nm, cfoldeargs(args, ft))
+    Call(nm, args)  => if nm == "unquote" then ctfail("lume: comptime error: 'unquote' may only appear inside 'quote(...)'\n") else Call(nm, cfoldeargs(args, ft))
     Rec(items)      => Rec(cfolderec(items, ft))
     RecT(tn, items) => RecT(tn, cfolderec(items, ft))
     Field(o, nm)    => Field(cfolde(o, ft), nm)

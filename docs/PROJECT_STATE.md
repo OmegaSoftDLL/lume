@@ -125,7 +125,8 @@ subset; the triple self-build is not reached.
   no code. Not yet: `fn` param/return annotations + arg-type checks (F2), HM inference (F3). See `docs/12`.
 - Ownership/borrow, effects (parsed then discarded), contracts (runtime only, no `prove`/SMT)
   — all documented, none enforced.
-- Concurrency (`spawn`/`select`/`async`), `macro`, C interop, cross-compile — keywords only.
+- Concurrency (`spawn`/`select`/`async`), C interop, cross-compile — keywords only.
+- **Track M (first-class comptime AST + hygienic quasiquote macros) is done (M1 #129, M2)** in `compiler/stage1/lume/03_comptime.src`: `quote(<expr>)` reifies expressions into Lume-Core's own AST constructor vocabulary (`Num`, `Str`, `Var`, `Bin`, `If`, `LetIn`, `Call` over `Cons`/`Nil`), `ceval` evaluates constructors, structural `==`/`!=`, pure string/int builtins, and `match` patterns over AST trees, `unquote(<expr>)` interpolates comptime AST values (and auto-lifts `int`/`str` scalars) inside `quote(...)` with automatic lexical hygiene (`let` bindings inside `quote(...)` are alpha-renamed per expansion so caller variables passed into macros are never captured), and `splice(<expr>)` validates and splices the resulting AST into native code with zero runtime overhead. See `compiler/stage1/{ast_meta,macro_hygiene}.src`.
 - `comptime`: a **seed** exists (Phase 2, first brick). `lumec` folds `comptime(<expr>)` at compile time
   over the pure core (`Num`/`Str`/`Bin` with `+ - * / % == != < > <= >= and or`/`If`/`LetIn`/`Var` bound by a
   comptime `let`), emitting the result as a constant (`comptime(2 + 3 * 4)` emits the same asm as `14`); any
