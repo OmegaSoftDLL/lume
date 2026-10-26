@@ -47,7 +47,15 @@ getting stuck), one green PR with a regression test, and the **self-host fixpoin
   is byte-identical; a program that declares no types is still returned unchanged, so the self-host fixpoint is
   untouched. NOT yet (**F3b**): full Hindley–Milner — unification, type variables, let-polymorphism, and inferring
   argument types through a function body so anonymous records/field access are checked without annotation. *Ref: OCaml/Haskell, TypeScript gradual typing.*
-- **F3b** full Hindley–Milner inference in the core: unification + let-polymorphism; annotations optional but checked. *Ref: OCaml/Haskell.*
+- **F3b ✅ done (argument inference)** an argument that is a variable / operator / `let` / `if` whose type infers to
+  `int` or `str` is now checked against the parameter's type — but **only when the parameter is also int or str**, so
+  a decimal/record/list/table/generic parameter is never inspected and the existing decimal and D3/query code can
+  raise no new error. `fn bad(n: int) -> str = greet(n)` (greet expects str) now fails at compile time. It is purely
+  additive: `tchkarg`/`tcompat` and every existing checker path are byte-for-byte unchanged (a new `tchkinferargs`
+  reads the function's parameter env via `tt.lenv`), so the self-host fixpoint is untouched. *Ref: TypeScript/Rust
+  gradual argument typing.* NOT yet (**F3c**): full Hindley–Milner — unification, type variables, let-polymorphism,
+  and inference over decimal/record/list arguments.
+- **F3c** full Hindley–Milner inference: unification + type variables + let-polymorphism; annotations optional but checked. *Ref: OCaml/Haskell.*
 - **F4** unify the two front-ends (surface Lume vs ML-core) into one grammar/AST.
 
 ### C — comptime (FLAGSHIP)

@@ -86,7 +86,8 @@ fn tanydecl2(h, t) = match h
     TypeS(nm, k, items) => 1
     _                   => tanydecl(t)
 ## the type table {ctors, recs}: ctors is a flat list of {tag, ar} from every enum, recs a list of {rname, fields}
-fn tcollect(prog) = {ctors: tcollectc(prog), recs: tcollectr(prog), sigs: tcollects(prog), gsigs: tcollectg(prog), decl: tanydecl(prog)}
+fn tcollect(prog) = {ctors: tcollectc(prog), recs: tcollectr(prog), sigs: tcollects(prog), gsigs: tcollectg(prog), decl: tanydecl(prog), lenv: Nil}
+fn twithlenv(tt, lenv) = {ctors: tt.ctors, recs: tt.recs, sigs: tt.sigs, gsigs: tt.gsigs, decl: tt.decl, lenv: lenv}
 fn tcollectg(prog) = match prog
     Nil        => Nil
     Cons(h, t) => tcollectg2(h, t)
@@ -119,15 +120,22 @@ fn tchkstmts(prog, tt) = match prog
     Nil        => 0
     Cons(h, t) => tchkstmt(h, tt) + tchkstmts(t, tt)
 fn tchkstmt(s0, tt) = match s0
-    Fn(nm, ps, body) => tchke(body, tt) + tchkret(nm, body, tsiglookup(nm, tt.sigs), tt)
+    Fn(nm, ps, body) => tchkfn(nm, body, twithlenv(tt, tfnlenv(nm, tt)), tt)
     Print(v)         => tchke(v, tt)
     ExprS(v)         => tchke(v, tt)
     _                => 0
+## F3b: check a function body with the function's parameters bound in the local type env (tt.lenv), so argument
+## inference (tchkinferargs, below) can see each parameter's type. tfnlenv is that env (Nil when the fn has no sig).
+fn tchkfn(nm, body, ttl, tt) = tchke(body, ttl) + tchkret(nm, body, tsiglookup(nm, tt.sigs), ttl)
+fn tfnlenv(nm, tt) = tfnlenv2(tsiglookup(nm, tt.sigs))
+fn tfnlenv2(m) = match m
+    Nil         => Nil
+    Cons(sg, r) => tparamlenv(sg)
 fn tchke(e, tt) = match e
     Bin(op, a, b)   => tchke(a, tt) + tchke(b, tt)
     If(c, t, e2)    => tchke(c, tt) + tchke(t, tt) + tchke(e2, tt)
     LetIn(nm, v, b) => tchke(v, tt) + tchke(b, tt)
-    Call(nm, args)  => tchkquerycall(nm, args, tt) + tchkcall(nm, args, tt) + tchkeargsc(nm, args, tglookup(nm, tt.gsigs), tt)
+    Call(nm, args)  => tchkquerycall(nm, args, tt) + tchkcall(nm, args, tt) + tchkeargsc(nm, args, tglookup(nm, tt.gsigs), tt) + tchkinferargs(nm, args, tt)
     Var(nm)         => tchkvar(nm, tt)
     Rec(items)      => tchkerec(items, tt)
     RecT(tn, items) => tchkrect(tn, items, tt) + tchkerec(items, tt)
@@ -316,6 +324,34 @@ fn tparamlenv2(pns, pts) = match pns
 fn tparamlenv3(pn, pr, pts) = match pts
     Nil         => Nil
     Cons(ty, tr) => Cons({k: pn, v: tnarrow(ty)}, tparamlenv2(pr, tr))
+## --- F3b: argument inference (int/str only, additive) -------------------------------------------------------
+## For an ordinary call (NOT a constructor, query or generic), an argument that is a variable / operator / let /
+## if whose type INFERS (via tt.lenv + operator result types) to int or str is checked against the parameter's
+## type -- but ONLY when that parameter is also int or str. A decimal/record/list/table/generic parameter is
+## never inspected here, so the strict decimal/record equality and the D3/query code can raise NO new error.
+## This extends F2's literal-only argument check to inferred int/str arguments (the common AI type confusion),
+## leaving tchkarg/tcompat and every existing path byte-for-byte unchanged.
+fn tchkinferargs(nm, args, tt) = if isctor(nm) then 0 else if tqname(nm) then 0 else tchkinferargs2(nm, args, tglookup(nm, tt.gsigs), tt)
+fn tchkinferargs2(nm, args, g, tt) = match g
+    Cons(gg, r) => 0
+    Nil         => tchkinferargs3(nm, args, tsiglookup(nm, tt.sigs), tt)
+fn tchkinferargs3(nm, args, m, tt) = match m
+    Nil         => 0
+    Cons(sg, r) => tchkinferwalk(nm, 1, args, sg.pn, sg.pt, tt)
+fn tchkinferwalk(nm, i, args, pns, pts, tt) = match args
+    Nil         => 0
+    Cons(a, ar) => tchkinferwalk2(nm, i, a, ar, pns, pts, tt)
+fn tchkinferwalk2(nm, i, a, ar, pns, pts, tt) = match pts
+    Nil          => 0
+    Cons(ty, pr) => tchkinferone(nm, i, a, phd(pns), ty, tt) + tchkinferwalk(nm, i + 1, ar, ptl(pns), pr, tt)
+fn tchkinferone(nm, i, a, pn, ty, tt) = if tisinferable(a) == 1 then tchkinfercmp(nm, i, pn, ty, tnarrow(tknownl(a, tt, tt.lenv))) else 0
+fn tisinferable(a) = match a
+    Var(x)          => 1
+    Bin(op, l, r)   => 1
+    If(c, t, e2)    => 1
+    LetIn(x, v, b)  => 1
+    _               => 0
+fn tchkinfercmp(nm, i, pn, ty, k) = if (tisint(ty) == 1 or tisstr(ty) == 1) and (tisint(k) == 1 or tisstr(k) == 1) and tcompat(ty, k) == 0 then ctfail("lume: type error: argument " + str(i) + " of '" + nm + "' has type " + tystr(k) + " but parameter '" + pn + "' expects " + tystr(ty) + "\n") else 0
 fn tystr(t) = match t
     TyName(n) => n
     TyList(e) => "[" + tystr(e) + "]"

@@ -1,0 +1,6 @@
+## F3b: arguments whose type infers to int/str are checked against int/str parameters.
+## `n` (an int parameter) and `n + 1` (an int operator result) are passed to add's int
+## parameters -- both infer int, so this type-checks. use(10) = add(10, 11) = 21.
+fn add(a: int, b: int) -> int = a + b
+fn use(n: int) -> int = add(n, n + 1)
+print use(10)
