@@ -55,15 +55,12 @@ getting stuck), one green PR with a regression test, and the **self-host fixpoin
   reads the function's parameter env via `tt.lenv`), so the self-host fixpoint is untouched. *Ref: TypeScript/Rust
   gradual argument typing.* NOT yet (**F3c**): full Hindley–Milner — unification, type variables, let-polymorphism,
   and inference over decimal/record/list arguments.
-- **F3c** full Hindley–Milner inference: unification + type variables + let-polymorphism; annotations optional but checked. *Ref: OCaml/Haskell.*
-- **F4 (in progress) unify the two front-ends (surface Lume vs ML-core) into one grammar/AST.** The surface
-  language (`.lume`: indentation, `"{interp}"`, maps, named-field payloads) and Lume-Core (`.src`: layout-free)
-  converge on ONE grammar/AST, surface forms normalizing to the core AST (the vision's "one AST, two surface
-  forms"). **Slice 1 ✅ done:** the core parser now accepts the surface's **named enum payloads**
-  (`Leaf(value: int) | Node(left: Tree, right: Tree)`), normalizing the names away so the named and positional
-  forms lower to the same `{tag, ar}` AST and emit **byte-identical** assembly (proven in the suite); positional
-  payloads — every existing `.src`, `lumec.src` included — parse unchanged, so the fixpoint is untouched. Remaining
-  slices: layout/indentation form in the core, string interpolation, and one shared parser for both surfaces.
+- **F3c ✅ done (#154)** Hindley–Milner inference engine: unification (`hunify`), type variables (`TyVar`), substitution application (`happly`), and body inference (`tcollecti`/`tinfer`) for unannotated functions, plus anonymous-record structural field checking. *Ref: OCaml/Haskell.*
+- **F4 ✅ done** unify the two front-ends (surface Lume vs ML-core) into one grammar/AST (`docs/05-vision.md:224`, `docs/17-frontend-unification.md`).
+  - **Slice 1 ✅ done (#143):** named enum payloads (`Leaf(value: int)`) normalise to `{tag, ar}` (byte-identical codegen).
+  - **Slice 2 ✅ done:** string interpolation (`"hi {who()}, the answer is {answer()}!"` + `{{`/`}}` escaping) desugars into a left-associative `+` chain with `str(...)`, emitting byte-identical assembly to explicit concatenation.
+  - **Slice 3 ✅ done (#152):** `elif` chains desugar to nested `If` AST nodes.
+  - **Slice 4 ✅ done:** indented layout form (`f4_layout.src`), explicit-brace form (`f4_brace.src`), and inline Lume-Core form (`f4_core.src`) lower to the same AST, emit byte-identical assembly, and `lume fmt` normalises both surface forms to the canonical Lume-Core representation.
 
 ### C — comptime (FLAGSHIP)
 - **C1 ✅ done (#116)** `comptime <expr>` of the pure core folds to a constant in the binary; non-evaluable comptime fails the compiler loudly. *Ref: Zig `comptime`. Superior to C++ `constexpr`: deterministic, exact integers, legible errors.*

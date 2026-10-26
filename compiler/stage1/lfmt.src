@@ -74,27 +74,52 @@ fn dropkw(ts, kw) = if headtext(ts) == kw then droponce(ts) else ts
 fn skiprp(ts) = if headtext(ts) == ")" then droponce(ts) else ts
 fn skiprb(ts) = if headtext(ts) == "}" then droponce(ts) else ts
 fn skiprk(ts) = if headtext(ts) == "]" then droponce(ts) else ts
+fn isrecbody(ts) = headtext(ts) == "}" or headtext(droponce(ts)) == ":"
+fn dropin(ts) = if headtext(ts) == "in" or headtext(ts) == ";" then droponce(ts) else ts
+fn isfieldsep(ts) = headtext(ts) == "," or headtext(ts) == ";"
+fn isnextfield(ts) = headtext(ts) != "" and headtext(ts) != "}" and headtext(droponce(ts)) == ":"
 
 ## --- parser: types, expressions, records, calls, comptime, match ---
-fn parsetype1(ts) = if headtext(ts) == "[" then let r = parsetype1(droponce(ts)) in {ty: "[" + r.ty + "]", rest: skiprk(r.rest)} else {ty: headtext(ts), rest: droponce(ts)}
-fn parsetypelist(ts) = if headtext(ts) == ")" then {items: Nil, rest: droponce(ts)} else let r = parsetype1(ts) in if headtext(r.rest) == "," then let rr = parsetypelist(droponce(r.rest)) in {items: Cons(r.ty, rr.items), rest: rr.rest} else {items: Cons(r.ty, Nil), rest: skiprp(r.rest)}
-fn parsevariants(ts) = let tag = headtext(ts) in let t1 = droponce(ts) in let vp = if headtext(t1) == "(" then let a = parsetypelist(droponce(t1)) in {v: tag + "(" + joinsep(a.items, ", ") + ")", rest: a.rest} else {v: tag, rest: t1} in if headtext(vp.rest) == "|" then let rr = parsevariants(droponce(vp.rest)) in {items: Cons(vp.v, rr.items), rest: rr.rest} else {items: Cons(vp.v, Nil), rest: vp.rest}
-fn parsefields(ts) = let fnm = headtext(ts) in let r = parsetype1(dropkw(droponce(ts), ":")) in let fstr = fnm + ": " + r.ty in if headtext(r.rest) == "," then let rr = parsefields(droponce(r.rest)) in {items: Cons(fstr, rr.items), rest: rr.rest} else {items: Cons(fstr, Nil), rest: r.rest}
-fn parsetypedecl(t) = let nm = headtext(t) in let b = dropkw(droponce(t), "=") in if headtext(b) == "record" then let fs = parsefields(droponce(b)) in TypeD("type " + nm + " = record " + joinsep(fs.items, ", ")) else let vs = parsevariants(dropkw(b, "enum")) in TypeD("type " + nm + " = enum " + joinsep(vs.items, " | "))
+fn parsetype1(ts) = if headtext(ts) == "[" then let r = parsetype1(droponce(ts)) in {ty: "[" + r.ty + "]", rest: skiprk(r.rest)} else if headtext(ts) == "table" and headtext(droponce(ts)) == "[" then let r = parsetype1(droponce(droponce(ts))) in {ty: "table[" + r.ty + "]", rest: skiprk(r.rest)} else if headtext(ts) == "decimal" and headtext(droponce(ts)) == "(" then let p = headtext(droponce(droponce(ts))) in let s = headtext(droponce(droponce(droponce(droponce(ts))))) in {ty: "decimal(" + p + ", " + s + ")", rest: skiprp(droponce(droponce(droponce(droponce(droponce(ts))))))} else {ty: headtext(ts), rest: droponce(ts)}
+fn parsevpfield(ts) = if headtext(droponce(ts)) == ":" then parsetype1(droponce(droponce(ts))) else parsetype1(ts)
+fn parsetypelist(ts) = if headtext(ts) == ")" then {items: Nil, rest: droponce(ts)} else let r = parsevpfield(ts) in if headtext(r.rest) == "," then let rr = parsetypelist(droponce(r.rest)) in {items: Cons(r.ty, rr.items), rest: rr.rest} else {items: Cons(r.ty, Nil), rest: skiprp(r.rest)}
+fn parsevariants(ts) = let tag = headtext(ts) in let t1 = droponce(ts) in let vp = if headtext(t1) == "(" then let a = parsetypelist(droponce(t1)) in {v: tag + "(" + joinsep(a.items, ", ") + ")", rest: a.rest} else {v: tag, rest: t1} in if headtext(vp.rest) == "|" then let rr = parsevariants(droponce(vp.rest)) in {items: Cons(vp.v, rr.items), rest: rr.rest} else {items: Cons(vp.v, Nil), rest: skiprb(vp.rest)}
+fn parsefieldmore(fstr, r) = if isnextfield(r) then let rr = parsefields(r) in {items: Cons(fstr, rr.items), rest: rr.rest} else {items: Cons(fstr, Nil), rest: skiprb(r)}
+fn parsefields(ts) = let fnm = headtext(ts) in let r = parsetype1(dropkw(droponce(ts), ":")) in let fstr = fnm + ": " + r.ty in if isfieldsep(r.rest) then parsefieldmore(fstr, droponce(r.rest)) else parsefieldmore(fstr, r.rest)
+fn parsetypedecl(t) = let nm = headtext(t) in let b = dropkw(droponce(t), "=") in if headtext(b) == "record" then let fs = parsefields(dropkw(droponce(b), "{")) in TypeD("type " + nm + " = record " + joinsep(fs.items, ", ")) else let vs = parsevariants(dropkw(dropkw(dropkw(b, "enum"), "{"), "|")) in TypeD("type " + nm + " = enum " + joinsep(vs.items, " | "))
 fn parseuse(t) = UseD("use " + headtext(t))
 
 fn recentries(ts) = if headtext(ts) == "}" then {items: Nil, rest: droponce(ts)} else recmore(headtext(ts), expr(dropkw(droponce(ts), ":")))
 fn recmore(k, rv) = if headtext(rv.rest) == "," then let rr = recentries(droponce(rv.rest)) in {items: Cons({key: k, val: rv.node}, rr.items), rest: rr.rest} else {items: Cons({key: k, val: rv.node}, Nil), rest: skiprb(rv.rest)}
-fn parseif(t) = let rc = expr(t) in let tb = expr(dropkw(rc.rest, "then")) in let eb = expr(dropkw(tb.rest, "else")) in {node: If(rc.node, tb.node, eb.node), rest: eb.rest}
-fn parselet(t) = let nm = headtext(t) in let rv = expr(dropkw(droponce(t), "=")) in let rb = expr(dropkw(rv.rest, "in")) in {node: LetIn(nm, rv.node, rb.node), rest: rb.rest}
+fn parseifelse(c, tb, rest) = if headtext(rest) == "elif" then let r = parseif(droponce(rest)) in {node: If(c, tb, r.node), rest: r.rest} else let eb = expr(dropkw(rest, "else")) in {node: If(c, tb, eb.node), rest: eb.rest}
+fn parseif(t) = let rc = expr(t) in let tb = expr(dropkw(rc.rest, "then")) in parseifelse(rc.node, tb.node, dropkw(tb.rest, ";"))
+fn parselet(t) = let nm = headtext(t) in let rv = expr(dropkw(droponce(t), "=")) in let rb = expr(dropin(rv.rest)) in {node: LetIn(nm, rv.node, rb.node), rest: rb.rest}
 fn parsect(t) = let r = prim(t) in {node: CT(r.node), rest: r.rest}
 fn postloop(r) = if headtext(r.rest) == "." then postloop({node: Field(r.node, headtext(droponce(r.rest))), rest: droponce(droponce(r.rest))}) else r
 fn post(ts) = postloop(prim(ts))
 
-fn primid(name, t) = if headtext(t) == "(" then let a = arglist(droponce(t)) in {node: Call(name, a.items), rest: a.rest} else if headtext(t) == "{" then let a = recentries(droponce(t)) in {node: RecT(name, a.items), rest: a.rest} else {node: Var(name), rest: t}
+fn isbadholech(c) = c == ":" or c == "\"" or c == "\n" or c == "{" or c == "}"
+fn hasbadhole(s, i) = if i >= count(s) then 0 else if isbadholech(at(s, i)) then 1 else hasbadhole(s, i + 1)
+fn isholehead(c) = isalpha(c) or isdigit(c) or c == "("
+fn isvalidhole(s) = if count(s) == 0 then 0 else if isholehead(at(s, 0)) and hasbadhole(s, 0) == 0 then 1 else 0
+fn findcloseb(s, j) = if j >= count(s) then 0 - 1 else if at(s, j) == "}" then j else findcloseb(s, j + 1)
+fn findinterpbrace(s, i) = if i + 1 < count(s) and at(s, i + 1) == "{" then findinterp(s, i + 2) else let j = findcloseb(s, i + 1) in if j > i + 1 and isvalidhole(slice(s, i + 1, j)) == 1 then i else findinterp(s, i + 1)
+fn findinterp(s, i) = if i >= count(s) then 0 - 1 else if at(s, i) == "{" then findinterpbrace(s, i) else findinterp(s, i + 1)
+fn sjoin(acc, piece) = match acc
+    Nil => piece
+    _   => Bin("+", acc, piece)
+fn qstr(s) = Str("\"" + s + "\"")
+fn strinterptail(acc, s) = if count(s) == 0 then acc else sjoin(acc, qstr(s))
+fn strinterphole(acc, s, i) = let j = findcloseb(s, i + 1) in let pre = slice(s, 0, i) in let hole = Call("str", Cons((expr(lexall(slice(s, i + 1, j)))).node, Nil)) in let acc1 = if count(pre) == 0 then acc else sjoin(acc, qstr(pre)) in strinterploop(sjoin(acc1, hole), slice(s, j + 1, count(s)))
+fn strinterploop(acc, s) = let i = findinterp(s, 0) in if i < 0 then strinterptail(acc, s) else strinterphole(acc, s, i)
+fn strinterp(raw) = let s = slice(raw, 1, count(raw) - 1) in if findinterp(s, 0) < 0 then Str(raw) else strinterploop(Nil, s)
+
+fn primbrace(t) = if isrecbody(t) then let a = recentries(t) in {node: Rec(a.items), rest: a.rest} else let r = expr(t) in {node: r.node, rest: skiprb(r.rest)}
+fn primkw(kw, t) = if kw == "if" then parseif(t) else if kw == "let" then parselet(t) else if kw == "match" then parsematch(t) else if kw == "comptime" then parsect(t) else if kw == "do" then expr(t) else primid(kw, t)
+fn primid(name, t) = if headtext(t) == "(" then let a = arglist(droponce(t)) in {node: Call(name, a.items), rest: a.rest} else if headtext(t) == "{" and isrecbody(droponce(t)) then let a = recentries(droponce(t)) in {node: RecT(name, a.items), rest: a.rest} else {node: Var(name), rest: t}
 fn prim(ts) = match ts
     Nil        => {node: Num("0"), rest: Nil}
-    Cons(h, t) => if h.kind == "int" then {node: Num(h.text), rest: t} else if h.kind == "str" then {node: Str(h.text), rest: t} else if h.kind == "id" then (if h.text == "if" then parseif(t) else if h.text == "let" then parselet(t) else if h.text == "match" then parsematch(t) else if h.text == "comptime" then parsect(t) else primid(h.text, t)) else if h.text == "{" then let a = recentries(t) in {node: Rec(a.items), rest: a.rest} else if h.text == "(" then let r = expr(t) in {node: r.node, rest: skiprp(r.rest)} else {node: Num("0"), rest: t}
+    Cons(h, t) => if h.kind == "int" then {node: Num(h.text), rest: t} else if h.kind == "str" then {node: strinterp(h.text), rest: t} else if h.kind == "id" then primkw(h.text, t) else if h.text == "{" then primbrace(t) else if h.text == "(" then let r = expr(t) in {node: r.node, rest: skiprp(r.rest)} else {node: Num("0"), rest: t}
 fn arglist(ts) = if headtext(ts) == ")" then {items: Nil, rest: droponce(ts)} else argmore(expr(ts))
 fn argmore(r) = if headtext(r.rest) == "," then let rr = arglist(droponce(r.rest)) in {items: Cons(r.node, rr.items), rest: rr.rest} else {items: Cons(r.node, Nil), rest: skiprp(r.rest)}
 
@@ -110,10 +135,11 @@ fn orloop(r) = if headtext(r.rest) == "or" then let r2 = booland(droponce(r.rest
 fn expr(ts) = orloop(booland(ts))
 
 fn isarrow(ts) = headtext(ts) == "=" and headtext(droponce(ts)) == ">"
-fn parsematch(t) = let sc = expr(t) in let ar = parsearms(sc.rest) in {node: Match(sc.node, ar.items), rest: ar.rest}
-fn parsearms(ts) = armstart(ts, parsepat(ts))
+fn dropamsep(ts) = if headtext(ts) == "|" or headtext(ts) == "," or headtext(ts) == ";" then droponce(ts) else ts
+fn parsematch(t) = let sc = expr(t) in let hb = if headtext(sc.rest) == "{" then 1 else 0 in let ar = parsearms(dropkw(sc.rest, "{")) in {node: Match(sc.node, ar.items), rest: if hb == 1 then skiprb(ar.rest) else ar.rest}
+fn parsearms(ts) = armstart(ts, parsepat(dropkw(ts, "|")))
 fn armstart(ts, p) = if isarrow(p.rest) then armmore(p) else {items: Nil, rest: ts}
-fn armmore(p) = let b = expr(dropkw(dropkw(p.rest, "="), ">")) in let rr = parsearms(b.rest) in {items: Cons({pat: p.node, body: b.node}, rr.items), rest: rr.rest}
+fn armmore(p) = let b = expr(dropkw(dropkw(p.rest, "="), ">")) in let rr = parsearms(dropamsep(b.rest)) in {items: Cons({pat: p.node, body: b.node}, rr.items), rest: rr.rest}
 fn parsepat(ts) = match ts
     Nil        => {node: PWild, rest: Nil}
     Cons(h, t) => if h.kind == "int" then {node: PInt(h.text), rest: t} else if h.text == "_" then {node: PWild, rest: t} else if isctor(h.text) then patcons(h.text, t) else {node: PBind(h.text), rest: t}
@@ -198,7 +224,8 @@ fn fmtchunk(src) = fmtstmt(parseone(lexall(src)))
 
 ## --- line grouping: group continuation lines (indented lines or unindented match arms) with statement ---
 fn isarmline(tr) = if tr == "" or startswith(tr, "#") or startswith(tr, "fn ") or startswith(tr, "type ") or startswith(tr, "use ") or startswith(tr, "print ") then 0 else isarrow((parsepat(lexall(tr))).rest)
-fn iscont(raw, tr) = if tr == "" or startswith(tr, "#") then 0 else if isindented(raw) then 1 else isarmline(tr)
+fn isbracecont(tr) = startswith(tr, "}") or startswith(tr, "elif ") or startswith(tr, "else") or startswith(tr, "|")
+fn iscont(raw, tr) = if tr == "" or startswith(tr, "#") then 0 else if isindented(raw) then 1 else if isbracecont(tr) then 1 else isarmline(tr)
 
 fn takecont(lines) = match lines
     Nil        => {cont: Nil, rest: Nil}

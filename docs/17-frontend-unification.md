@@ -13,13 +13,24 @@ friendly surface": *"Grammar accepts an explicit-brace form that the formatter n
 the same AST"*). Lume-Core (`compiler/stage1/lume/*.src`) is the canonical AST; the richer surface
 (`.lume`) lowers to it.
 
-## What already shipped (additive slices)
+## What already shipped (all 4 slices complete)
 
 - **Slice 1 — named enum payloads (#143):** the core parser accepts `Leaf(value: int) | Node(left:
   Tree, right: Tree)` (surface named fields) and normalises the names away to the same `{tag, ar}`
   AST as the positional `Leaf(int) | Node(Tree, Tree)` — byte-identical codegen.
+- **Slice 2 — string interpolation (`compiler/stage1/interp.src`):** `"hi {who()}, the answer is
+  {answer()}!"` (with `{{`/`}}` escaping) desugars into a left-associative `+` chain with `str(...)`
+  on valid expression holes `{<expr>}` (containing no `:`, `"`, `\n`, `{`, `}`), producing the exact
+  same AST and byte-identical assembly as explicit concatenation while leaving record/JSON strings
+  in `lumec.src` untouched.
 - **Slice 3 — `elif` chains (#152):** `if c then t elif c2 then t2 ... else e` desugars to the core's
   nested `If` AST (`elif X` == `else if X`); the plain `else` path is byte-identical.
+- **Slice 4 — unified layout form, explicit-brace form (`docs/05-vision.md:224`), and `lume fmt`
+  normalisation (`f4_layout.src`, `f4_brace.src`, `f4_core.src`):** both `lumec` and `lfmt.src`
+  accept indented layout declarations/blocks (`type enum`, `type record`, `fn`, newline `let`,
+  `do`, `if`/`elif`/`else`) and explicit-brace declarations/blocks (`{ ... }`, `;`-separated `let`,
+  `match { ... }`), lowering all three forms to the exact same AST, emitting byte-identical x86-64
+  assembly, and normalising both surface forms into `f4_core.src` via `lume fmt`.
 
 Both worked because they add surface syntax that **`lumec.src` itself does not use**, so when the
 compiler compiles its own source, neither the self-hosted parser nor the frozen oracle parser ever

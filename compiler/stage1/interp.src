@@ -1,0 +1,5 @@
+## F4 slice 2: string interpolation. `"hi {who()}, the answer is {answer()}!"` desugars to a `+` chain with
+## each hole wrapped in str(...), so it means exactly `"hi " + str(who()) + ", the answer is " + str(answer()) + "!"`.
+fn who() -> str = "lume"
+fn answer() -> int = 42
+print "hi {who()}, the answer is {answer()}!"

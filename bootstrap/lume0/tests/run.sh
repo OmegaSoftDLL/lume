@@ -572,6 +572,30 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_
     { [ -x "$ntmp/el.elf" ] && "$ntmp/el.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/elif_ok_asm.expected - >/dev/null; } || el_ok=0
     cmp -s "$ntmp/el.s" "$ntmp/el_nested.s" || el_ok=0
     if [ "$el_ok" = 1 ]; then ok "phase-2 F4: elif chain and else-if nesting emit identical asm, and run"; else bad "phase-2 F4: elif desugaring"; cat "$ntmp/el.err"; fi
+    # phase-2 F4 (slice 2): string interpolation `"hi {who()}, the answer is {answer()}!"` desugars to a left-associative
+    # `+` chain with each hole wrapped in `str(...)`, emitting byte-identical assembly to explicit concatenation.
+    "$ntmp/lc" <../../compiler/stage1/interp.src >"$ntmp/ip.s" 2>"$ntmp/ip.err"; "$ntmp/lasm" <"$ntmp/ip.s" >"$ntmp/ip.elf" 2>/dev/null; chmod +x "$ntmp/ip.elf"
+    printf 'fn who() -> str = "lume"\nfn answer() -> int = 42\nprint "hi " + str(who()) + ", the answer is " + str(answer()) + "!"\n' >"$ntmp/ip_explicit.src"
+    "$ntmp/lc" <"$ntmp/ip_explicit.src" >"$ntmp/ipx.s" 2>/dev/null
+    ip_ok=1
+    { [ -x "$ntmp/ip.elf" ] && "$ntmp/ip.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/interp_asm.expected - >/dev/null; } || ip_ok=0
+    cmp -s "$ntmp/ip.s" "$ntmp/ipx.s" || ip_ok=0
+    if [ "$ip_ok" = 1 ]; then ok "phase-2 F4: string interpolation and explicit str-concatenation emit identical asm, and run"; else bad "phase-2 F4: string interpolation"; cat "$ntmp/ip.err"; fi
+    # phase-2 F4 (slice 4, full unification): indented layout form (`f4_layout.src`), explicit-brace form (`f4_brace.src`,
+    # docs/05-vision.md:224), and canonical inline Lume-Core form (`f4_core.src`) all lower to the exact same AST, emit
+    # byte-identical assembly, run natively, and `lume fmt` normalises both surface forms into `f4_core.src`.
+    "$ntmp/lc" <../../compiler/stage1/f4_layout.src >"$ntmp/f4l.s" 2>"$ntmp/f4l.err"; "$ntmp/lasm" <"$ntmp/f4l.s" >"$ntmp/f4l.elf" 2>/dev/null; chmod +x "$ntmp/f4l.elf"
+    "$ntmp/lc" <../../compiler/stage1/f4_brace.src >"$ntmp/f4b.s" 2>"$ntmp/f4b.err"
+    "$ntmp/lc" <../../compiler/stage1/f4_core.src >"$ntmp/f4c.s" 2>"$ntmp/f4c.err"
+    LUME_BIN_DIR="$ntmp" ../../lume fmt --stdout ../../compiler/stage1/f4_layout.src >"$ntmp/f4l_fmt.src" 2>/dev/null
+    LUME_BIN_DIR="$ntmp" ../../lume fmt --stdout ../../compiler/stage1/f4_brace.src >"$ntmp/f4b_fmt.src" 2>/dev/null
+    f4_ok=1
+    { [ -x "$ntmp/f4l.elf" ] && "$ntmp/f4l.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/f4_unify_asm.expected - >/dev/null; } || f4_ok=0
+    cmp -s "$ntmp/f4l.s" "$ntmp/f4b.s" || f4_ok=0
+    cmp -s "$ntmp/f4l.s" "$ntmp/f4c.s" || f4_ok=0
+    cmp -s "$ntmp/f4l_fmt.src" ../../compiler/stage1/f4_core.src || f4_ok=0
+    cmp -s "$ntmp/f4b_fmt.src" ../../compiler/stage1/f4_core.src || f4_ok=0
+    if [ "$f4_ok" = 1 ]; then ok "phase-2 F4: layout form, explicit-brace form, and inline core form emit byte-identical asm and normalise via lume fmt"; else bad "phase-2 F4: layout/brace/core front-end unification"; cat "$ntmp/f4l.err" "$ntmp/f4b.err" "$ntmp/f4c.err"; fi
     # phase-2 E1b: in-process compiler-as-a-service library (`use lcaas` + `lume agent` JSON query protocol).
     # 1. In-process library (`caas_demo.src` imports `use lcaas`, calls `caas_compile` on both valid F1/F2/C2/C3/M1/M2 code and 7-error code without aborting).
     if LUME_BIN_DIR="$ntmp" ../../lume run ../../compiler/stage1/caas_demo.src 2>/dev/null | diff -u ../../tests/conformance/stage1/caas_demo_asm.expected - >/dev/null; then ok "phase-2 E1b: compiler-as-a-service library (use lcaas: diagnostics/fixits/AST/expanded/symbols/asm/result in-memory)"; else bad "phase-2 E1b: compiler-as-a-service library (use lcaas)"; fi

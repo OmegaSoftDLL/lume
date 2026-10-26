@@ -69,8 +69,8 @@ fn parseprogram(s) = parseprog(lex(s, 0))
 ## `record` is parsed as an enum. Type expressions are kept (`TyName`/`TyList`); F2 checks them against call arguments.
 fn parsetype(t) = parsetypebody(headtext(t), dropkw(droponce(t), "="))
 fn parsetypebody(nm, t) = if headtext(t) == "record" then parserecordty(nm, droponce(t)) else parseenumty(nm, dropkw(t, "enum"))
-fn parseenumty(nm, t) = parseenumty2(nm, parsevariants(t))
-fn parseenumty2(nm, vs) = {node: TypeS(nm, "enum", vs.items), rest: vs.rest}
+fn parseenumty(nm, t) = let hb = if headtext(t) == "{" then 1 else 0 in parseenumty2(nm, hb, parsevariants(dropkw(dropkw(t, "{"), "|")))
+fn parseenumty2(nm, hb, vs) = {node: TypeS(nm, "enum", vs.items), rest: if hb == 1 then skiprb(vs.rest) else vs.rest}
 fn parsevariants(ts) = parsevariant(headtext(ts), droponce(ts))
 fn parsevariant(tag, ts) = if headtext(ts) == "(" then parsevariantp(tag, parsevpayload(droponce(ts))) else parsevariantend(tag, 0, ts)
 ## F4 (front-end unification, slice 1): an enum variant payload accepts BOTH the Lume-Core positional form
@@ -85,11 +85,13 @@ fn parsevpcons(n, rr) = {items: Cons(n, rr.items), rest: rr.rest}
 fn parsevariantp(tag, a) = parsevariantend(tag, len(a.items), a.rest)
 fn parsevariantend(tag, ar, ts) = if headtext(ts) == "|" then parsevariantcons(tag, ar, parsevariants(droponce(ts))) else {items: Cons({tag: tag, ar: ar}, Nil), rest: ts}
 fn parsevariantcons(tag, ar, rr) = {items: Cons({tag: tag, ar: ar}, rr.items), rest: rr.rest}
-fn parserecordty(nm, t) = parserecordty2(nm, parsefields(t))
-fn parserecordty2(nm, fs) = {node: TypeS(nm, "record", fs.items), rest: fs.rest}
+fn parserecordty(nm, t) = let hb = if headtext(t) == "{" then 1 else 0 in parserecordty2(nm, hb, parsefields(dropkw(t, "{")))
+fn parserecordty2(nm, hb, fs) = {node: TypeS(nm, "record", fs.items), rest: if hb == 1 then skiprb(fs.rest) else fs.rest}
 fn parsefields(ts) = parsefield(headtext(ts), dropkw(droponce(ts), ":"))
 fn parsefield(fname, ts) = parsefieldt(fname, parsetype1(ts))
-fn parsefieldt(fname, r) = if headtext(r.rest) == "," then parsefieldcons(fname, r.node, parsefields(droponce(r.rest))) else {items: Cons({fname: fname, fty: r.node}, Nil), rest: r.rest}
+fn isfieldsep(ts) = headtext(ts) == "," or headtext(ts) == ";"
+fn isnextfield(ts) = headtext(ts) != "" and headtext(ts) != "}" and headtext(droponce(ts)) == ":"
+fn parsefieldt(fname, r) = if isfieldsep(r.rest) then (if isnextfield(droponce(r.rest)) then parsefieldcons(fname, r.node, parsefields(droponce(r.rest))) else {items: Cons({fname: fname, fty: r.node}, Nil), rest: droponce(r.rest)}) else if isnextfield(r.rest) then parsefieldcons(fname, r.node, parsefields(r.rest)) else {items: Cons({fname: fname, fty: r.node}, Nil), rest: r.rest}
 fn parsefieldcons(fname, fty, rr) = {items: Cons({fname: fname, fty: fty}, rr.items), rest: rr.rest}
 fn parsetypelist(ts) = if headtext(ts) == ")" then {items: Nil, rest: droponce(ts)} else parsetypemore(parsetype1(ts))
 fn parsetypemore(r) = if headtext(r.rest) == "," then parsetypecons(r.node, parsetypelist(droponce(r.rest))) else {items: Cons(r.node, Nil), rest: skiprp(r.rest)}
