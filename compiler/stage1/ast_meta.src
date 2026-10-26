@@ -1,0 +1,61 @@
+## ast_meta.src -- Phase 2 M1 conformance: the AST as a first-class comptime value (quote, match over AST, splice).
+
+## 1. Inspect an AST at compile time: count nodes across Num, Str, Var, Bin, If, LetIn, Call.
+fn ast_nodes(t) = match t
+    Num(n)          => 1
+    Str(s)          => 1
+    Var(nm)         => 1
+    Bin(op, l, r)   => 1 + ast_nodes(l) + ast_nodes(r)
+    If(c, tb, eb)   => 1 + ast_nodes(c) + ast_nodes(tb) + ast_nodes(eb)
+    LetIn(nm, v, b) => 1 + ast_nodes(v) + ast_nodes(b)
+    Call(nm, args)  => 1 + ast_list_nodes(args)
+    _               => 0
+
+fn ast_list_nodes(xs) = match xs
+    Nil        => 0
+    Cons(h, t) => ast_nodes(h) + ast_list_nodes(t)
+
+## 2. Format a Lume AST as an S-expression string at compile time.
+fn ast_sexpr(t) = match t
+    Num(n)          => str(n)
+    Str(s)          => s
+    Var(nm)         => nm
+    Bin(op, l, r)   => "(" + op + " " + ast_sexpr(l) + " " + ast_sexpr(r) + ")"
+    If(c, tb, eb)   => "(if " + ast_sexpr(c) + " " + ast_sexpr(tb) + " " + ast_sexpr(eb) + ")"
+    LetIn(nm, v, b) => "(let " + nm + " " + ast_sexpr(v) + " " + ast_sexpr(b) + ")"
+    Call(nm, args)  => "(" + nm + ast_sexpr_args(args) + ")"
+    _               => "?"
+
+fn ast_sexpr_args(xs) = match xs
+    Nil        => ""
+    Cons(h, t) => " " + ast_sexpr(h) + ast_sexpr_args(t)
+
+## 3. Algebraic AST simplifier: pattern-match on Bin(op, l, r) with string and integer sub-patterns.
+fn simplify_rule(t) = match t
+    Bin("+", l, Num(0)) => l
+    Bin("+", Num(0), r) => r
+    Bin("-", l, Num(0)) => l
+    Bin("*", l, Num(1)) => l
+    Bin("*", Num(1), r) => r
+    Bin("*", l, Num(0)) => Num(0)
+    Bin("*", Num(0), r) => Num(0)
+    _                   => t
+
+fn simplify(t) = match t
+    Bin(op, l, r) => simplify_rule(Bin(op, simplify(l), simplify(r)))
+    If(c, tb, eb) => If(simplify(c), simplify(tb), simplify(eb))
+    _             => t
+
+## Spliced AST after compile-time algebraic simplification: compiles directly to `x + y` (zero +0, *1, -0 in asm).
+fn fast_linear(x, y) = splice(simplify(quote(((x + 0) * 1) + ((0 + y) - 0))))
+
+## 4. Synthesize an unrolled power expression tree `x * (x * (x * x))` from scratch at compile time and splice it.
+fn unroll_pow(v, n) = if n <= 1 then Var(v) else Bin("*", Var(v), unroll_pow(v, n - 1))
+
+fn pow4(x) = splice(unroll_pow("x", 4))
+
+print comptime(ast_nodes(quote((x + 1) * (y - 2))))
+print comptime(ast_sexpr(quote(if x > 0 then f(x, 1) else 0)))
+print comptime(simplify(quote((a + 0) * 1)))
+print fast_linear(18, 24)
+print pow4(3)

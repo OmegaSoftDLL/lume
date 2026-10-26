@@ -446,6 +446,29 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_
     if [ -x "$ntmp/tg.elf" ] && "$ntmp/tg.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/table_generic_asm.expected - >/dev/null; then ok "phase-2 D2: table[T] annotations type-check generic function results"; else bad "phase-2 D2: table[T] annotations type-check generic function results"; cat "$ntmp/tg.err"; fi
     "$ntmp/lc" <../../compiler/stage1/table_generic_bad.src >"$ntmp/tgbad.s" 2>"$ntmp/tgbad.err"; tgbad=$?
     if [ "$tgbad" = 3 ] && [ ! -s "$ntmp/tgbad.s" ] && grep -q "has type table\[str\] but parameter 'table' expects table\[int\]" "$ntmp/tgbad.err"; then ok "phase-2 D2: table[T] rejects a mismatched generic row type"; else bad "phase-2 D2: table[T] rejects a mismatched generic row type"; fi
+    # phase-2 M1: the AST as a first-class comptime value (`quote`, `match` over AST constructors + string/int patterns, `splice`).
+    "$ntmp/lc" <../../compiler/stage1/ast_meta.src >"$ntmp/am.s" 2>/dev/null; "$ntmp/lasm" <"$ntmp/am.s" >"$ntmp/am.elf" 2>/dev/null; chmod +x "$ntmp/am.elf"
+    m1_ok=1
+    "$ntmp/am.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/ast_meta_asm.expected - >/dev/null || m1_ok=0
+    # PROOF of zero-overhead AST transformation & splicing:
+    # 1. `fast_linear(x, y) = splice(simplify(quote(((x + 0) * 1) + ((0 + y) - 0))))` must emit ONLY `x + y` (`call addv`), with NO `imulq`, `subq %rcx`, or `$0` in its body.
+    awk '/^fast_linear:/{p=1} p{print} p&&/^    ret$/{exit}' "$ntmp/am.s" >"$ntmp/am_fl.s"
+    grep -q 'call addv' "$ntmp/am_fl.s" || m1_ok=0
+    grep -Eq 'imulq|subq %rcx|movq \$0,' "$ntmp/am_fl.s" && m1_ok=0
+    # 2. `pow4(x) = splice(unroll_pow("x", 4))` must emit inline `imulq` instructions with NO call to `unroll_pow` or recursive `call pow4`.
+    awk '/^pow4:/{p=1} p{print} p&&/^    ret$/{exit}' "$ntmp/am.s" >"$ntmp/am_p4.s"
+    grep -q 'imulq' "$ntmp/am_p4.s" || m1_ok=0
+    grep -Eq 'call unroll_pow|call pow4' "$ntmp/am_p4.s" && m1_ok=0
+    # 3. `comptime(ast_nodes(...))` folds to `movq $7, %rdi` in `_start` with NO call to `ast_nodes` or `ast_sexpr`.
+    awk '/^_start:/{p=1} p{print}' "$ntmp/am.s" >"$ntmp/am_main.s"
+    grep -q 'movq \$7, %rdi' "$ntmp/am_main.s" || m1_ok=0
+    grep -Eq 'call ast_nodes|call ast_sexpr' "$ntmp/am_main.s" && m1_ok=0
+    if [ "$m1_ok" = 1 ]; then ok "phase-2 M1: first-class comptime AST (quote, match over AST, algebraic simplify & unroll via splice)"; else bad "phase-2 M1: first-class comptime AST (quote, match, splice)"; fi
+    printf 'print splice(42)\n' >"$ntmp/m1bad1.src"
+    printf 'print splice(Bin("???", Num(1), Num(2)))\n' >"$ntmp/m1bad2.src"
+    "$ntmp/lc" <"$ntmp/m1bad1.src" >"$ntmp/m1bad1.s" 2>"$ntmp/m1bad1.err"; m1b1=$?
+    "$ntmp/lc" <"$ntmp/m1bad2.src" >"$ntmp/m1bad2.s" 2>"$ntmp/m1bad2.err"; m1b2=$?
+    if [ "$m1b1" = 3 ] && [ ! -s "$ntmp/m1bad1.s" ] && grep -q "splice expects an AST constructor" "$ntmp/m1bad1.err" && [ "$m1b2" = 3 ] && [ ! -s "$ntmp/m1bad2.s" ] && grep -q "invalid AST node" "$ntmp/m1bad2.err"; then ok "phase-2 M1: invalid AST splice fails at compile time with a clear error (exit 3, no asm)"; else bad "phase-2 M1: invalid AST splice fails at compile time"; fi
     rm -rf "$ntmp"
 else
     ok "no-toolchain ELF pipeline (skipped: not linux/x86_64, or under ASan)"

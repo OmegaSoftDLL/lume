@@ -64,7 +64,7 @@ getting stuck), one green PR with a regression test, and the **self-host fixpoin
 - **C4** `comptime assert`, precomputed tables, build-time data embedding.
 
 ### M — macros (metaprogramming)
-- **M1** the AST as a first-class comptime value (the compiler exposes the tree). *Ref: Lisp homoiconicity, Nim.*
+- **M1 ✅ done** the AST as a first-class comptime value (`compiler/stage1/lumec.src`): `quote(<expr>)` reifies any Lume-Core expression into first-class algebraic constructor values (`Num(n)`, `Str(s)`, `Var(nm)`, `Bin(op, l, r)`, `If(c, t, e2)`, `LetIn(nm, v, b)`, `Call(nm, args)` with `Cons`/`Nil` argument lists) — the **exact same constructor vocabulary** `lumec.src` uses internally. `ceval` now evaluates ADT constructors (`cv_ctor`), structural equality `==`/`!=` over AST/constructor trees, pure string/int builtins (`str`, `count`, `at`, `slice`, `toint`, `ord`), and **`match` pattern-matching at compile time** (`PWild`, `PInt`, `PStr`, `PBind`, `PCons`), and `splice(<expr>)` reflects a comptime-computed AST value back into a live compiler AST node (validated for arity and operator legality via `ctfail`) that is subsequently compiled to native x86-64 with zero runtime overhead. *Ref: Lisp homoiconicity, Nim. Superior to Lisp/Nim: typed algebraic AST constructors with full `match` pattern matching (including string/int sub-patterns like `Bin("+", l, Num(0)) => l`) and compile-time structural validation on `splice`.*
 - **M2** hygienic macros / quasiquote. *Ref: Scheme `syntax-case`, Rust, Nim.*
 
 ### D — data (pillar P7)
