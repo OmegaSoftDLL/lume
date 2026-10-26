@@ -1,0 +1,9 @@
+## C2 comptime: evaluate calls to PURE user functions at compile time (recursion + if + arithmetic).
+## Each `comptime(...)` below folds to a single constant in the binary -- no `call fib`/`call fact` at the
+## use site (the fib/fact functions themselves are still emitted and may be called at runtime elsewhere).
+fn fib(n) = if n < 2 then n else fib(n - 1) + fib(n - 2)
+fn fact(n) = if n < 2 then 1 else n * fact(n - 1)
+print comptime(fib(10))
+print comptime(fact(5))
+print comptime(fib(comptime(5 + 5)))
+print comptime(fact(fib(5)))

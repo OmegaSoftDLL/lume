@@ -21,7 +21,7 @@ getting stuck), one green PR with a regression test, and the **self-host fixpoin
 
 ### C — comptime (FLAGSHIP)
 - **C1 ✅ done (#116)** `comptime <expr>` of the pure core folds to a constant in the binary; non-evaluable comptime fails the compiler loudly. *Ref: Zig `comptime`. Superior to C++ `constexpr`: deterministic, exact integers, legible errors.*
-- **C2** compile-time calls to **pure user functions** (recursion, `match`), with a purity/termination guard. *Ref: Zig comptime fn, C++ `constexpr` fn, Lisp `eval`.*
+- **C2 ✅ done** compile-time calls to **pure user functions** (recursion + `if` + arithmetic), with a lazy purity guard (anything `ceval` cannot reduce — `read()`/builtins/undefined names — is a hard error) and an explicit termination guard (a step budget + a call-depth budget, so runaway recursion gives a legible error, never a hang or crash). `comptime(fib(10))` folds to `movq $55` with no `call fib`. The fold moved to a post-parse pass (all `fn`s known). `match`-over-constructors in comptime is deferred to C3 (fib/fact use `if`); a comptime that reaches `match` still fails with a clear error. *Ref: Zig comptime fn, C++ `constexpr` fn, Lisp `eval`. Superior to C++ constexpr: deterministic, exact 64-bit integers, legible errors, an explicit terminating guard.*
 - **C3** comptime **types** → generics via comptime (`fn(comptime T: type)`). Depends on F. *Ref: Zig generics-via-comptime.*
 - **C4** `comptime assert`, precomputed tables, build-time data embedding.
 
