@@ -1,0 +1,11 @@
+## F1 positive: named type/enum/record declarations, used correctly.
+## Enum with typed payloads (recursive ADT) + a record type, exercised end to end.
+type Expr = enum Lit(int) | Add(Expr, Expr) | Neg(Expr)
+type Point = record x: int, y: int
+fn ev(e) = match e
+    Lit(n)    => n
+    Add(a, b) => ev(a) + ev(b)
+    Neg(a)    => 0 - ev(a)
+fn sumpt(p) = p.x + p.y
+print ev(Add(Lit(2), Neg(Lit(5))))
+print sumpt(Point{x: 10, y: 32})
