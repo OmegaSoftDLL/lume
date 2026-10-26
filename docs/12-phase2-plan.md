@@ -45,7 +45,22 @@ getting stuck), one green PR with a regression test, and the **self-host fixpoin
 ### C — comptime (FLAGSHIP)
 - **C1 ✅ done (#116)** `comptime <expr>` of the pure core folds to a constant in the binary; non-evaluable comptime fails the compiler loudly. *Ref: Zig `comptime`. Superior to C++ `constexpr`: deterministic, exact integers, legible errors.*
 - **C2 ✅ done** compile-time calls to **pure user functions** (recursion + `if` + arithmetic), with a lazy purity guard (anything `ceval` cannot reduce — `read()`/builtins/undefined names — is a hard error) and an explicit termination guard (a step budget + a call-depth budget, so runaway recursion gives a legible error, never a hang or crash). `comptime(fib(10))` folds to `movq $55` with no `call fib`. The fold moved to a post-parse pass (all `fn`s known). `match`-over-constructors in comptime is deferred to C3 (fib/fact use `if`); a comptime that reaches `match` still fails with a clear error. *Ref: Zig comptime fn, C++ `constexpr` fn, Lisp `eval`. Superior to C++ constexpr: deterministic, exact 64-bit integers, legible errors, an explicit terminating guard.*
-- **C3** comptime **types** → generics via comptime (`fn(comptime T: type)`). Depends on F. *Ref: Zig generics-via-comptime.*
+- **C3 ✅ done** comptime **types** → generics via comptime (`fn(comptime T: type, x: T)`). A type name (`int`, `str`, a
+  declared type) is a comptime value; a parameter marked `comptime` receives one at compile time. The parameter is
+  **erased at runtime** (type erasure, the effect that PROVES the comptime happened): the parser keeps only the runtime
+  parameters in `Fn(name, params, body)` (so a comptime-free function's AST — and the self-host fixpoint — is byte-identical),
+  records the comptime parameters in a separate compile-time-only `GSig(name, plist, rettype)` statement (as F2 did with
+  `Sig`), a post-check `gerase` pass drops the comptime arguments from every call site (`id(int, 42)` emits the call
+  `id(42)` — the type argument is consumed at build time and never pushed), and codegen is untouched. This is
+  monomorphisation-lite: the runtime is dynamic/boxed so one erased body serves every instantiation; the win is the
+  checking plus the erasure, not specialised code. **Generic checking (reuses F2):** at a call the comptime type
+  argument binds the type parameter (`T := int`) in a type environment, and each remaining annotated argument has its
+  declared type substituted through that environment and checked with F2's inequivocal-only rule, so `id(int, "hi")`
+  is `type error: argument 2 of 'id' has type str but parameter 'x' expects int` (exit 3, no asm) while an argument of
+  unknown type is never flagged (zero false positives). Depends on F. *Ref: Zig generics-via-comptime. Superior to Zig:
+  gradual (annotations optional), AI-first (one clear message), zero false positives, and the fixpoint stays bit-identical.*
+  NOT yet (deferred to **C4**): generics over declared types / containers as the bound type argument, `comptime assert`,
+  and comptime tables / build-time data embedding.
 - **C4** `comptime assert`, precomputed tables, build-time data embedding.
 
 ### M — macros (metaprogramming)
@@ -71,7 +86,7 @@ getting stuck), one green PR with a regression test, and the **self-host fixpoin
 
 ## Recommended order
 C1✅ → C2 (deliver the flagship early) alongside F1 → F2 (foundation); E2✅ already protects `main`;
-then C3 (needs F), M1/M2, D1 → D3, T1 → T3, E1 → E3.
+then C3✅ (needs F), M1/M2, D1 → D3, T1 → T3, E1 → E3.
 
 Each brick: a green PR, a regression test, the fixpoint intact, verified by running it — and
 **superior to the language it borrows from**.

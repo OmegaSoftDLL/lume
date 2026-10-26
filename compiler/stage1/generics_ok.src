@@ -1,0 +1,12 @@
+## C3 positive: generic functions via comptime type parameters (Zig-style `fn(comptime T: type, x: T)`).
+## A `comptime T: type` parameter receives a type VALUE at compile time and is ERASED at runtime: the emitted
+## function takes only the runtime parameters, and every call drops the type argument. The checker binds the
+## type parameter to the argument's type and verifies the remaining annotated arguments (reusing the F2 gradual
+## checker). Superior to Zig: gradual (annotations optional), AI-first errors, zero false positives.
+fn id(comptime T: type, x: T) = x
+fn pair_fst(comptime A: type, comptime B: type, a: A, b: B) = a
+fn pair_snd(comptime A: type, comptime B: type, a: A, b: B) = b
+print id(int, 42)
+print id(str, "hi")
+print pair_fst(int, str, 10, "ten")
+print pair_snd(int, str, 10, "ten")
