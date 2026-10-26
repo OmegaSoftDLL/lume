@@ -81,7 +81,7 @@ fn env_copy(env: map[str, RV]) -> map[str, RV]
         out[e[0]] = e[1]
     out
 
-fn rv_entries_have(xs, key: str) -> bool
+fn rv_entries_have(xs: [RV], key: str) -> bool
     match xs
         Nil => false
         Cons(h, t) => h[0] == key or rv_entries_have(t, key)
@@ -133,7 +133,6 @@ fn decimal_eval_bin(op: str, left: RV, right: RV, env: map[str, RV], fns: [DStmt
                 let ls = rv_int(lf.get("scale") ?? VInt(n: 0))
                 let rc = rv_int(rf.get("coefficient") ?? VInt(n: 0))
                 let rs = rv_int(rf.get("scale") ?? VInt(n: 0))
-                io.println("decimal-debug " + str(lc) + "/" + str(ls) + " " + str(rc) + "/" + str(rs))
                 let scale = if ls >= rs then ls else rs
                 let la = decimal_eval_shift(lc, scale - ls)
                 let ra = decimal_eval_shift(rc, scale - rs)
