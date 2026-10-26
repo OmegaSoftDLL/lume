@@ -544,6 +544,15 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_
     printf 'fn wants_str(s: str) -> str = s\nfn bad(n: int) -> str = let y = n * 2 in wants_str(y)\nprint 0\n' >"$ntmp/f3let.src"
     "$ntmp/lc" <"$ntmp/f3let.src" >"$ntmp/f3let.s" 2>"$ntmp/f3let.err"; f3let=$?
     if [ "$f3let" = 3 ] && [ ! -s "$ntmp/f3let.s" ] && grep -q "argument 1 of 'wants_str' has type int but parameter 's' expects str" "$ntmp/f3let.err"; then ok "phase-2 F3: a let-bound int passed to a str parameter fails at compile time (exit 3, no asm)"; else bad "phase-2 F3: let-bound inferred argument mismatch fails"; fi
+    # phase-2 F4 (slice 1): the core grammar accepts the surface's NAMED enum payloads, normalizing to the same
+    # AST as the positional form -- proven by byte-identical emitted assembly, and the program runs.
+    "$ntmp/lc" <../../compiler/stage1/named_enum.src >"$ntmp/ne.s" 2>"$ntmp/ne.err"; "$ntmp/lasm" <"$ntmp/ne.s" >"$ntmp/ne.elf" 2>/dev/null; chmod +x "$ntmp/ne.elf"
+    printf 'type Tree = enum Leaf(int) | Node(Tree, Tree)\nfn sumt(t) = match t\n    Leaf(v)    => v\n    Node(l, r) => sumt(l) + sumt(r)\nprint sumt(Node(Leaf(3), Node(Leaf(4), Leaf(5))))\n' >"$ntmp/ne_pos.src"
+    "$ntmp/lc" <"$ntmp/ne_pos.src" >"$ntmp/ne_pos.s" 2>/dev/null
+    ne_ok=1
+    { [ -x "$ntmp/ne.elf" ] && "$ntmp/ne.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/named_enum_asm.expected - >/dev/null; } || ne_ok=0
+    cmp -s "$ntmp/ne.s" "$ntmp/ne_pos.s" || ne_ok=0
+    if [ "$ne_ok" = 1 ]; then ok "phase-2 F4: core accepts named enum payloads; named and positional forms emit identical asm"; else bad "phase-2 F4: named enum payload unification"; cat "$ntmp/ne.err"; fi
     rm -rf "$ntmp"
 else
     ok "no-toolchain ELF pipeline (skipped: not linux/x86_64, or under ASan)"
