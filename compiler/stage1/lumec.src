@@ -389,6 +389,17 @@ fn lsds(i, n) = if i >= n then Nil else Cons("_sd" + str(i), lsds(i + 1, n))
 fn lsetc(op) = if op == ">" then "    setg %al\n" else if op == "<=" then "    setle %al\n" else if op == ">=" then "    setge %al\n" else "    setl %al\n"
 fn lbintail(op) = if op == "==" then "    popq %rsi\n    popq %rdi\n    call eqv\n    movq %rax, %rdi\n    call mkint\n    pushq %rax\n" else if op == "!=" then "    popq %rsi\n    popq %rdi\n    call eqv\n    xorq $1, %rax\n    movq %rax, %rdi\n    call mkint\n    pushq %rax\n" else if op == "+" then "    popq %rsi\n    popq %rdi\n    call addv\n    pushq %rax\n" else if op == "<" or op == ">" or op == "<=" or op == ">=" then "    popq %rsi\n    popq %rdi\n    call cmpv\n    cmpq $0, %rax\n" + lsetc(op) + "    movzbq %al, %rax\n    movq %rax, %rdi\n    call mkint\n    pushq %rax\n" else "    popq %rcx\n    popq %rax\n    movq 8(%rax), %rax\n    movq 8(%rcx), %rcx\n" + abin(op) + "    movq %rax, %rdi\n    call mkint\n    pushq %rax\n"
 
+fn ldec_key(items, key) = match items
+    Nil        => 0
+    Cons(h, t) => if h.key == key then 1 else ldec_key(t, key)
+fn ldec_expr(e) = match e
+    Rec(items)    => len(items) == 2 and ldec_key(items, "coefficient") == 1 and ldec_key(items, "scale") == 1
+    Call(nm, args) => nm == "decimal_make" or nm == "decimal_parse" or nm == "decimal_cast" or nm == "decimal_div_exact" or nm == "decimal_add" or nm == "decimal_sub" or nm == "decimal_mul" or nm == "decimal_div"
+    If(c, t, e2) => ldec_expr(t) and ldec_expr(e2)
+    LetIn(nm, v, body) => ldec_expr(body)
+    _             => 0
+fn ldec_tail(op) = if op == "+" then "    popq %rsi\n    popq %rdi\n    call decimal_add\n    pushq %rax\n" else if op == "-" then "    popq %rsi\n    popq %rdi\n    call decimal_sub\n    pushq %rax\n" else if op == "*" then "    popq %rsi\n    popq %rdi\n    call decimal_mul\n    pushq %rax\n" else if op == "/" then "    popq %rsi\n    popq %rdi\n    call decimal_div\n    pushq %rax\n" else "    popq %rsi\n    popq %rdi\n    call decimal_compare\n    movq 8(%rax), %rax\n    cmpq $0, %rax\n" + (if op == "==" then "    sete %al\n" else if op == "!=" then "    setne %al\n" else lsetc(op)) + "    movzbq %al, %rax\n    movq %rax, %rdi\n    call mkint\n    pushq %rax\n"
+
 ## --- state and results ---
 ## The threaded state is the record {nl, ns, dt}: nl = next free code label, ns = next free string label,
 ## dt = rodata chunks emitted so far (newest first). Every result is {code, nl, ns, dt}, so a result IS the
@@ -464,7 +475,7 @@ fn lmarm(lab, i, acc, h, t, c2, bd) = lmarm2(lab, i, acc, h, t, c2, bd, latest(h
 fn lmarm2(lab, i, acc, h, t, c2, bd, ts) = let rest = lmarms(lab, i + 1, acc, t, c2, ts) in lres(".Lm" + lab + "_" + str(i) + ":\n" + ts.code + labind(h.pat, acc, c2.locals) + bd.code + "    jmp .Lm" + lab + "_end\n" + rest.code, rest)
 
 ## --- expressions: asm that leaves the value of `e` pushed; `s` is the threaded state ---
-fn lbin(op, lr, r, ctx) = let rr = laexpr(r, ctx, lr) in lres(lr.code + rr.code + lbintail(op), rr)
+fn lbin(op, l, lr, r, ctx) = let rr = laexpr(r, ctx, lr) in lres(lr.code + rr.code + (if ldec_expr(l) and ldec_expr(r) then ldec_tail(op) else lbintail(op)), rr)
 fn lif(lab, cr, t, e2, ctx) = let tr = laexpr(t, ctx, cr) in let er = laexpr(e2, ctx, tr) in lres(cr.code + "    popq %rax\n    movq 8(%rax), %rax\n    testq %rax, %rax\n    jz .Le" + lab + "\n" + tr.code + "    jmp .Lx" + lab + "\n.Le" + lab + ":\n" + er.code + ".Lx" + lab + ":\n", er)
 fn llet(nm, vr, b, ctx) = let inner = {locals: ctx.locals, bound: app(ctx.bound, Cons(nm, Nil)), depth: ctx.depth} in let br = laexpr(b, inner, vr) in lres(vr.code + "    popq %rax\n    movq %rax, " + lslot(lidxof(ctx.locals, nm)) + "(%rbp)\n" + br.code, br)
 fn lvar(nm, ctx, s) = if isctor(nm) then lctor(nm, Nil, ctx, s) else lres("    movq " + lslot(lidxof(ctx.locals, nm)) + "(%rbp), %rax\n    pushq %rax\n", s)
@@ -473,7 +484,7 @@ fn laexpr(e, ctx, s) = match e
     Num(n)         => lres("    movq $" + str(n) + ", %rdi\n    call mkint\n    pushq %rax\n", s)
     Str(v)         => lstr(lstrlabel(v, s))
     Var(nm)        => lvar(nm, ctx, s)
-    Bin(op, l, r)  => lbin(op, laexpr(l, ctx, s), r, ctx)
+    Bin(op, l, r)  => lbin(op, l, laexpr(l, ctx, s), r, ctx)
     If(c, t, e2)   => lif(str(s.nl), laexpr(c, ctx, lnext(s)), t, e2, ctx)
     LetIn(nm, v, b) => llet(nm, laexpr(v, ctx, s), b, ctx)
     Call(nm, args) => lcallx(nm, args, ctx, s)
