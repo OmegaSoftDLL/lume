@@ -68,7 +68,7 @@ getting stuck), one green PR with a regression test, and the **self-host fixpoin
 - **M2** hygienic macros / quasiquote. *Ref: Scheme `syntax-case`, Rust, Nim.*
 
 ### D — data (pillar P7)
-- **D1** `decimal(p, s)` exact decimal type + literals + arithmetic. *Ref: COBOL/dBase, SQL NUMERIC.*
+- **D1 ✅ done (#120)** `decimal(p, s)` exact decimal type + literals + arithmetic. Exact values carry a signed coefficient and scale; casts, operators, function signatures, and literal-context coercion reject inexact rescaling and overflow instead of rounding. *Ref: COBOL/dBase, SQL NUMERIC.*
 - **D2** `table[T]` typed in-memory relation + `read_csv`. *Ref: dBase/Clipper, pandas, Arrow.*
 - **D3** integrated `query` (where/order/join/group), type-checked. *Ref: LINQ (C#), SQL, Datalog.*
 
