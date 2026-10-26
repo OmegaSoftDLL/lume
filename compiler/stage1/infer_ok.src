@@ -1,0 +1,8 @@
+## F3a regression: the checker infers each function's return type from its annotated
+## parameters, its `let` bindings, and operator/`if` result types, and checks it against
+## the `-> R` annotation -- all gradual, with no runtime effect. half(10)=5, poly(3)=16,
+## pick(5)=10, so the program prints 31.
+fn half(n: int) -> int = n / 2
+fn poly(x: int) -> int = let y = x + 1 in y * y
+fn pick(b: int) -> int = if b > 0 then 10 else 20
+print half(10) + poly(3) + pick(5)

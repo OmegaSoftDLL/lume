@@ -39,7 +39,15 @@ getting stuck), one green PR with a regression test, and the **self-host fixpoin
   expects str`. Annotations alone (no `type` declaration) enable this checking but not F1's constructor/record declaration checks. Deferred to **F3**:
   checking arguments/returns whose type needs inference (variables, calls, operators), arity of plain calls, and validating annotation names.
   *Ref: TypeScript gradual typing, Rust param types. Superior: opt-in, AI-legible errors, zero false positives.*
-- **F3** Hindley–Milner inference in the core: annotations optional but checked. *Ref: OCaml/Haskell.*
+- **F3a ✅ done** local gradual inference of a function's **return type** from its annotated parameters, its `let`
+  bindings, and operator/`if` result types (`tknownl`), checked against the `-> R` annotation. `fn half(n: int) -> int = n / 2`
+  type-checks; `fn bad(n: int) -> str = n + 1` fails at compile time (exit 3, no asm) with `function 'bad' returns int
+  but is declared to return str`. It returns a concrete type only when certain (TyAny otherwise), so it adds real
+  checks with **zero false positives**, and `tknown` is preserved as `tknownl(·, Nil)` so every existing checker path
+  is byte-identical; a program that declares no types is still returned unchanged, so the self-host fixpoint is
+  untouched. NOT yet (**F3b**): full Hindley–Milner — unification, type variables, let-polymorphism, and inferring
+  argument types through a function body so anonymous records/field access are checked without annotation. *Ref: OCaml/Haskell, TypeScript gradual typing.*
+- **F3b** full Hindley–Milner inference in the core: unification + let-polymorphism; annotations optional but checked. *Ref: OCaml/Haskell.*
 - **F4** unify the two front-ends (surface Lume vs ML-core) into one grammar/AST.
 
 ### C — comptime (FLAGSHIP)
