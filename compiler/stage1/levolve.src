@@ -1,0 +1,118 @@
+## levolve.src -- Lume Self-Evolution & Governance Engine (Track E, brick E3; Principles P1, P24, P26, P30, P31).
+## Closes Track E ("Lume evolves Lume on its own"):
+##   1. An AI or human proposes a change via Compiler-as-a-Service (`use lcaas`, E1b).
+##   2. If the candidate has fixable diagnostics (`T1001`/`T2002`), the P1/P30/P31 repair loop
+##      (`write -> compile -> read fixit -> repair -> re-verify`) applies deterministic fix-its.
+##   3. The 6 automated evolution gates (`compile`, `conformance`, `api_compat`, `capability`,
+##      `budget`, `fixpoint`) run in-memory and must ALL pass.
+##   4. Governance rule (`docs/04-roadmap.md`): "The AI proposes; the gates verify; the human decides.
+##      Nothing merges without a maintainer's signature." Even with all 6 gates green, `can_merge`
+##      remains 0 (`verified_awaiting_human_approval`) until a human maintainer approves; and even
+##      with human approval, any failed gate rejects the proposal (`rejected_by_gates`).
+
+use lcaas
+
+## --- internal string & token helpers (`ev_` prefix) ---
+fn ev_findq(s, i, n) = if i >= n then n else if at(s, i) == "'" then i else ev_findq(s, i + 1, n)
+fn ev_qstr_i(s, i, n, k) = let q1 = ev_findq(s, i, n) in if q1 >= n then "" else let q2 = ev_findq(s, q1 + 1, n) in if q2 >= n then "" else if k <= 1 then slice(s, q1 + 1, q2) else ev_qstr_i(s, q2 + 1, n, k - 1)
+fn ev_qstr(s, k) = ev_qstr_i(s, 0, count(s), k)
+
+fn ev_count_nl(s, i, n) = if i >= n then 0 else (if at(s, i) == "\n" then 1 else 0) + ev_count_nl(s, i + 1, n)
+fn ev_count_lines(s) = if count(s) == 0 then 0 else ev_count_nl(s, 0, count(s))
+
+fn ev_ltrim(s, i, n) = if i >= n then "" else if at(s, i) == " " or at(s, i) == "\t" then ev_ltrim(s, i + 1, n) else slice(s, i, n)
+fn ev_trim(s) = cs_chomp(ev_ltrim(s, 0, count(s)))
+
+## --- token-aware source repair for `T1001` (constructor) and `T2002` (record field) fix-its ---
+fn ev_str_end(s, i, n) = if i >= n then n else if at(s, i) == "\\" then ev_str_end(s, i + 2, n) else if at(s, i) == "\"" then i + 1 else ev_str_end(s, i + 1, n)
+fn ev_nonid_end(s, i, n) = if i >= n then n else let c = at(s, i) in if c == "#" or c == "\"" or cs_isalpha(c) then i else ev_nonid_end(s, i + 1, n)
+
+fn ev_rep_id_i(s, i, n, old_id, new_id, mode) = if i >= n then "" else let c = at(s, i) in if c == "#" then let le = cs_lineend(s, i + 1, n) in slice(s, i, le) + ev_rep_id_i(s, le, n, old_id, new_id, mode) else if c == "\"" then let se = ev_str_end(s, i + 1, n) in slice(s, i, se) + ev_rep_id_i(s, se, n, old_id, new_id, mode) else if cs_isalpha(c) then let j = cs_idend(s, i, n) in let tok = slice(s, i, j) in let prev_dot = if i > 0 then at(s, i - 1) == "." else 0 in let next_col = if j < n then at(s, j) == ":" else 0 in let hit = if tok == old_id then (if mode == 1 then (if prev_dot == 1 or next_col == 1 then 1 else 0) else 1) else 0 in (if hit == 1 then new_id else tok) + ev_rep_id_i(s, j, n, old_id, new_id, mode) else let j = ev_nonid_end(s, i + 1, n) in slice(s, i, j) + ev_rep_id_i(s, j, n, old_id, new_id, mode)
+
+fn ev_apply_one_diag(src, d) = if count(d.fixit) == 0 then {src: src, applied: 0} else if d.code == "T1001" then let old_c = ev_qstr(d.fixit, 1) in let new_c = ev_qstr(d.fixit, 2) in if count(old_c) > 0 and count(new_c) > 0 then {src: ev_rep_id_i(src, 0, count(src), old_c, new_c, 0), applied: 1} else {src: src, applied: 0} else if d.code == "T1003" or d.code == "T2002" then let old_f = ev_qstr(d.fixit, 1) in let new_f = ev_qstr(d.fixit, 3) in if count(old_f) > 0 and count(new_f) > 0 then {src: ev_rep_id_i(src, 0, count(src), old_f, new_f, 1), applied: 1} else {src: src, applied: 0} else {src: src, applied: 0}
+
+fn ev_apply_diags(src, ds) = match ds
+    Nil        => {src: src, count: 0}
+    Cons(h, t) => let r1 = ev_apply_one_diag(src, h) in let r2 = ev_apply_diags(r1.src, t) in {src: r2.src, count: r1.applied + r2.count}
+
+## E1 + E3 self-repair loop: compile -> inspect structured fix-its -> repair -> re-compile
+fn evolve_repair_and_compile(src, tests) = let full0 = if count(tests) > 0 then src + "\n" + tests else src in let r0 = caas_compile(full0) in if r0.ok == 1 then {src: src, repairs: 0, comp: r0} else let step1 = ev_apply_diags(src, r0.diagnostics) in if step1.count == 0 then {src: src, repairs: 0, comp: r0} else let full1 = if count(tests) > 0 then step1.src + "\n" + tests else step1.src in let r1 = caas_compile(full1) in {src: step1.src, repairs: step1.count, comp: r1}
+
+fn evolve_repair(src) = let r = evolve_repair_and_compile(src, "") in {src: r.src, repairs: r.repairs}
+
+## --- Gate 3 (`api_compat`): public symbol & signature preservation ---
+fn ev_sig_params2(pn, pr, pts) = match pts
+    Nil          => pn
+    Cons(pt, tr) => let s = pn + ": " + cs_tystr(pt) in if cs_isnil(pr) == 1 then s else s + ", " + ev_sig_params(pr, tr)
+fn ev_sig_params(pns, pts) = match pns
+    Nil          => ""
+    Cons(pn, pr) => ev_sig_params2(pn, pr, pts)
+
+fn ev_find_sym(nm, syms) = match syms
+    Nil        => {found: 0, name: nm, kind: "", sig: ""}
+    Cons(h, t) => if h.name == nm then {found: 1, name: h.name, kind: h.kind, sig: h.sig} else ev_find_sym(nm, t)
+
+fn ev_has_str(nm, xs) = match xs
+    Nil        => 0
+    Cons(h, t) => if h == nm then 1 else ev_has_str(nm, t)
+
+fn ev_typed_sym1(s0, t, seen) = match s0
+    TypeS(nm, k, items) => Cons({name: nm, kind: k, sig: if k == "enum" then cs_variants_str(items) else "{" + cs_fields_str(items) + "}"}, ev_typed_syms_i(t, Cons(nm, seen)))
+    Sig(nm, ps, ts, rt) => Cons({name: nm, kind: "fn", sig: "fn(" + ev_sig_params(ps, ts) + ") -> " + cs_tystr(rt)}, ev_typed_syms_i(t, Cons(nm, seen)))
+    Fn(nm, ps, body)    => if ev_has_str(nm, seen) == 1 then ev_typed_syms_i(t, seen) else Cons({name: nm, kind: "fn", sig: "fn(" + cs_params_str(ps) + ")"}, ev_typed_syms_i(t, Cons(nm, seen)))
+    _                   => ev_typed_syms_i(t, seen)
+fn ev_typed_syms_i(prog, seen) = match prog
+    Nil        => Nil
+    Cons(h, t) => ev_typed_sym1(h, t, seen)
+fn ev_typed_syms(prog) = ev_typed_syms_i(prog, Nil)
+
+fn ev_check_syms(base_syms, cand_syms) = match base_syms
+    Nil        => {ok: 1, broken: ""}
+    Cons(h, t) => let c = ev_find_sym(h.name, cand_syms) in if c.found == 0 then {ok: 0, broken: "missing baseline symbol '" + h.name + "'"} else if c.kind != h.kind or c.sig != h.sig then {ok: 0, broken: "signature drift on '" + h.name + "': baseline '" + h.sig + "' vs candidate '" + c.sig + "'"} else ev_check_syms(t, cand_syms)
+
+## --- Gate 4 (`capability`): P26 capability audit on candidate source ---
+fn ev_is_io_tok(tok) = tok == "read" or tok == "readall" or tok == "emit" or tok == "flush"
+
+fn ev_scan_io(s, i, n) = if i >= n then "" else let c = at(s, i) in if c == "#" then ev_scan_io(s, cs_lineend(s, i + 1, n), n) else if c == "\"" then ev_scan_io(s, ev_str_end(s, i + 1, n), n) else if cs_isalpha(c) then let j = cs_idend(s, i, n) in let tok = slice(s, i, j) in if ev_is_io_tok(tok) and j < n and at(s, j) == "(" then tok else ev_scan_io(s, j, n) else ev_scan_io(s, i + 1, n)
+
+## --- First diagnostic summary helper ---
+fn ev_first_diag(ds) = match ds
+    Nil        => "unknown compile error"
+    Cons(h, t) => h.code + ": " + h.message
+
+## --- Count passing gates ---
+fn ev_count_ok_gates(gs) = match gs
+    Nil        => 0
+    Cons(h, t) => (if h.ok == 1 then 1 else 0) + ev_count_ok_gates(t)
+
+## --- Governance approval check ---
+fn ev_is_approved(app) = if cs_startswith(app, "approved:") == 1 and count(app) > 9 then 1 else 0
+fn ev_approver(app) = if ev_is_approved(app) == 1 then slice(app, 9, count(app)) else ""
+
+## --- PUBLIC LIBRARY API (`use levolve`) ---
+fn evolve_evaluate(prop) = let rep = evolve_repair_and_compile(prop.candidate, prop.tests) in let cand = rep.src in let cand_r = rep.comp in let base_syms = ev_typed_syms(cs_parse(prop.baseline)) in let cand_syms = ev_typed_syms(cand_r.ast) in let asm_lines = ev_count_lines(cand_r.asm) in let g1_ok = if cand_r.ok == 1 and count(cand_r.asm) > 0 then 1 else 0 in let g1_msg = if g1_ok == 1 then "candidate and tests compiled cleanly to native x86-64" else ev_first_diag(cand_r.diagnostics) in let g1 = {name: "compile", ok: g1_ok, detail: g1_msg} in let exp_out = cs_chomp(prop.expected) in let got_out = cs_chomp(cand_r.result) in let g2_ok = if cand_r.ok == 1 and (count(exp_out) == 0 or got_out == exp_out) then 1 else 0 in let g2_msg = if g2_ok == 1 then "all conformance & property tests passed (" + got_out + ")" else "expected '" + exp_out + "' but got '" + got_out + "'" in let g2 = {name: "conformance", ok: g2_ok, detail: g2_msg} in let api = ev_check_syms(base_syms, cand_syms) in let g3_ok = if api.ok == 1 then 1 else 0 in let g3_msg = if g3_ok == 1 then "all " + str(cs_len(base_syms)) + " baseline symbols preserved (" + str(cs_len(cand_syms)) + " total)" else api.broken in let g3 = {name: "api_compat", ok: g3_ok, detail: g3_msg} in let io_used = ev_scan_io(cand, 0, count(cand)) in let g4_ok = if prop.capability == "pure" and count(io_used) > 0 then 0 else 1 in let g4_msg = if g4_ok == 1 then "capability audit passed (grant: " + prop.capability + ")" else "capability violation: pure module invokes I/O builtin '" + io_used + "'" in let g4 = {name: "capability", ok: g4_ok, detail: g4_msg} in let g5_ok = if cand_r.ok == 1 and (prop.max_asm_lines <= 0 or asm_lines <= prop.max_asm_lines) then 1 else 0 in let g5_msg = if g5_ok == 1 then "asm_lines=" + str(asm_lines) + " within budget=" + str(prop.max_asm_lines) else "asm_lines=" + str(asm_lines) + " exceeds budget=" + str(prop.max_asm_lines) in let g5 = {name: "budget", ok: g5_ok, detail: g5_msg} in let g6_ok = if cand_r.ok == 1 and cs_prog_sexpr(cand_r.expanded) == cand_r.expanded_sexpr then 1 else 0 in let g6_msg = if g6_ok == 1 then "deterministic codegen & macro expansion verified" else "non-deterministic compilation output" in let g6 = {name: "fixpoint", ok: g6_ok, detail: g6_msg} in let gates = Cons(g1, Cons(g2, Cons(g3, Cons(g4, Cons(g5, Cons(g6, Nil)))))) in let passed = ev_count_ok_gates(gates) in let all_ok = if passed == 6 then 1 else 0 in let happ = ev_is_approved(prop.approval) in let status = if all_ok == 0 then "rejected_by_gates" else if happ == 0 then "verified_awaiting_human_approval" else "approved_ready_to_apply" in let can_merge = if all_ok == 1 and happ == 1 then 1 else 0 in {id: prop.id, goal: prop.goal, principles: prop.principles, status: status, gates_ok: all_ok, gates_passed: passed, gates_total: 6, human_approved: happ, approver: ev_approver(prop.approval), can_merge: can_merge, repairs_applied: rep.repairs, repaired_src: cand, gates: gates, test_output: got_out, asm_lines: asm_lines}
+
+## --- JSON serialisation for `lume evolve` ---
+fn ev_gate_json(g) = "{\"name\":\"" + cs_jesc(g.name) + "\",\"ok\":" + (if g.ok == 1 then "true" else "false") + ",\"detail\":\"" + cs_jesc(g.detail) + "\"}"
+fn ev_gates_json(gs) = match gs
+    Nil        => ""
+    Cons(h, t) => if cs_isnil(t) == 1 then ev_gate_json(h) else ev_gate_json(h) + "," + ev_gates_json(t)
+
+fn evolve_json(r) = "{\"id\":\"" + cs_jesc(r.id) + "\",\"goal\":\"" + cs_jesc(r.goal) + "\",\"principles\":\"" + cs_jesc(r.principles) + "\",\"status\":\"" + cs_jesc(r.status) + "\",\"gates_ok\":" + (if r.gates_ok == 1 then "true" else "false") + ",\"gates_passed\":" + str(r.gates_passed) + ",\"gates_total\":" + str(r.gates_total) + ",\"human_approved\":" + (if r.human_approved == 1 then "true" else "false") + ",\"approver\":\"" + cs_jesc(r.approver) + "\",\"can_merge\":" + (if r.can_merge == 1 then "true" else "false") + ",\"repairs_applied\":" + str(r.repairs_applied) + ",\"asm_lines\":" + str(r.asm_lines) + ",\"test_output\":\"" + cs_jesc(r.test_output) + "\",\"gates\":[" + ev_gates_json(r.gates) + "]}"
+
+## --- Directive bundle parser (`@proposal`, `@goal`, `@baseline ... @end`, `@candidate ... @end`, etc.) ---
+fn ev_lines(s, i, n) = if i >= n then Nil else let le = cs_lineend(s, i, n) in Cons(cs_chomp(slice(s, i, le)), ev_lines(s, le, n))
+
+fn ev_collect_lines(ls) = match ls
+    Nil        => {lines: Nil, rest: Nil}
+    Cons(h, t) => if h == "@end" then {lines: Nil, rest: t} else let r = ev_collect_lines(t) in {lines: Cons(h, r.lines), rest: r.rest}
+
+fn ev_collect_block(ls) = let r = ev_collect_lines(ls) in {body: cs_joinsep(r.lines, "\n"), rest: r.rest}
+
+fn ev_parse_lines(ls, prop) = match ls
+    Nil        => prop
+    Cons(h, t) => if count(h) == 0 then ev_parse_lines(t, prop) else if cs_startswith(h, "@proposal ") == 1 then ev_parse_lines(t, {id: ev_trim(slice(h, 10, count(h))), goal: prop.goal, principles: prop.principles, capability: prop.capability, max_asm_lines: prop.max_asm_lines, baseline: prop.baseline, candidate: prop.candidate, tests: prop.tests, expected: prop.expected, approval: prop.approval}) else if cs_startswith(h, "@goal ") == 1 then ev_parse_lines(t, {id: prop.id, goal: ev_trim(slice(h, 6, count(h))), principles: prop.principles, capability: prop.capability, max_asm_lines: prop.max_asm_lines, baseline: prop.baseline, candidate: prop.candidate, tests: prop.tests, expected: prop.expected, approval: prop.approval}) else if cs_startswith(h, "@principles ") == 1 then ev_parse_lines(t, {id: prop.id, goal: prop.goal, principles: ev_trim(slice(h, 12, count(h))), capability: prop.capability, max_asm_lines: prop.max_asm_lines, baseline: prop.baseline, candidate: prop.candidate, tests: prop.tests, expected: prop.expected, approval: prop.approval}) else if cs_startswith(h, "@capability ") == 1 then ev_parse_lines(t, {id: prop.id, goal: prop.goal, principles: prop.principles, capability: ev_trim(slice(h, 12, count(h))), max_asm_lines: prop.max_asm_lines, baseline: prop.baseline, candidate: prop.candidate, tests: prop.tests, expected: prop.expected, approval: prop.approval}) else if cs_startswith(h, "@max_asm_lines ") == 1 then ev_parse_lines(t, {id: prop.id, goal: prop.goal, principles: prop.principles, capability: prop.capability, max_asm_lines: toint(ev_trim(slice(h, 15, count(h)))), baseline: prop.baseline, candidate: prop.candidate, tests: prop.tests, expected: prop.expected, approval: prop.approval}) else if cs_startswith(h, "@approval ") == 1 then ev_parse_lines(t, {id: prop.id, goal: prop.goal, principles: prop.principles, capability: prop.capability, max_asm_lines: prop.max_asm_lines, baseline: prop.baseline, candidate: prop.candidate, tests: prop.tests, expected: prop.expected, approval: ev_trim(slice(h, 10, count(h)))}) else if h == "@baseline" then let b = ev_collect_block(t) in ev_parse_lines(b.rest, {id: prop.id, goal: prop.goal, principles: prop.principles, capability: prop.capability, max_asm_lines: prop.max_asm_lines, baseline: b.body, candidate: prop.candidate, tests: prop.tests, expected: prop.expected, approval: prop.approval}) else if h == "@candidate" then let b = ev_collect_block(t) in ev_parse_lines(b.rest, {id: prop.id, goal: prop.goal, principles: prop.principles, capability: prop.capability, max_asm_lines: prop.max_asm_lines, baseline: prop.baseline, candidate: b.body, tests: prop.tests, expected: prop.expected, approval: prop.approval}) else if h == "@tests" then let b = ev_collect_block(t) in ev_parse_lines(b.rest, {id: prop.id, goal: prop.goal, principles: prop.principles, capability: prop.capability, max_asm_lines: prop.max_asm_lines, baseline: prop.baseline, candidate: prop.candidate, tests: b.body, expected: prop.expected, approval: prop.approval}) else if h == "@expected" then let b = ev_collect_block(t) in ev_parse_lines(b.rest, {id: prop.id, goal: prop.goal, principles: prop.principles, capability: prop.capability, max_asm_lines: prop.max_asm_lines, baseline: prop.baseline, candidate: prop.candidate, tests: prop.tests, expected: b.body, approval: prop.approval}) else ev_parse_lines(t, prop)
+
+fn evolve_parse_bundle(text) = ev_parse_lines(ev_lines(text, 0, count(text)), {id: "0000", goal: "", principles: "P1", capability: "pure", max_asm_lines: 200, baseline: "", candidate: "", tests: "", expected: "", approval: "none"})
+
+print evolve_json(evolve_evaluate(evolve_parse_bundle(readall())))

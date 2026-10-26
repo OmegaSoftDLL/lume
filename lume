@@ -8,6 +8,8 @@
 #   lume doc   [--json] <file.src|file.lume>  extract module/item docs and contracts (Markdown or JSON)
 #   lume fmt   [--check] <file.src|file.lume> format source to canonical layout (or check with --check)
 #   lume pkg   <init|check|lock|verify|tree>  package manager: lume.toml manifest, capabilities & SHA-256 lume.lock
+#   lume agent [check|compile|ast|...] <file> in-process compiler-as-a-service JSON query (E1b)
+#   lume evolve <verify|approve|goals|...>    self-evolution & governance loop (E3)
 #   lume check [--json] <file.lume|file.src>  static lexical, parse, name, type and contract checks
 #   lume compile [--json] [--run] <file.src>  compile-as-a-service: {ok, diagnostics, asm, stdout} (E1, AI-first)
 #   lume describe [--json]                    emit machine-readable language self-description (AI-first)
@@ -33,6 +35,8 @@ usage:
   lume doc   [--json] <file.src|file.lume>  render module & item documentation + contracts (Markdown or JSON)
   lume fmt   [--check] <file>               format a Lume source file in place (or verify with --check)
   lume pkg   <init|check|lock|verify|tree>  manage lume.toml manifest, capabilities & SHA-256 lume.lock
+  lume agent [check|compile|ast|...] <file> query in-process compiler-as-a-service JSON protocol
+  lume evolve <verify|approve|goals|...>    run self-evolution gates and human governance loop
   lume check [--json] <file.lume|file.src>  run static semantic checks
   lume compile [--json] [--run] <file.src>  compile-as-a-service: structured {ok, diagnostics, asm, stdout}
   lume describe [--json]                    emit machine-readable language self-description for AI agents
@@ -85,29 +89,43 @@ ensure_native_toolchain() {
     fi
 }
 
-# Build a Lume-Core tool (e.g. ldoc, ltest, lfmt) to a native ELF using lumec + lasm.
+# Build a Lume-Core tool (e.g. ldoc, ltest, lfmt, levolve) to a native ELF using lumec + lasm.
 ensure_core_tool() {
-    _tool=$1
-    if [ -x "$BIN_DIR/$_tool" ]; then
+    if [ -x "$BIN_DIR/$1" ]; then
         return 0
     fi
     ensure_native_toolchain
-    "$LUMEC" < "$SRC_DIR/$_tool.src" > "$BIN_DIR/$_tool.s"
-    "$LASM" < "$BIN_DIR/$_tool.s" > "$BIN_DIR/$_tool"
-    chmod +x "$BIN_DIR/$_tool"
-    rm -f "$BIN_DIR/$_tool.s"
+    if [ "$1" = "lmod" ] || ! grep -Eq '^[ \t]*use[ \t]+' "$SRC_DIR/$1.src"; then
+        "$LUMEC" < "$SRC_DIR/$1.src" > "$BIN_DIR/$1.s"
+        "$LASM" < "$BIN_DIR/$1.s" > "$BIN_DIR/$1"
+        chmod +x "$BIN_DIR/$1"
+        rm -f "$BIN_DIR/$1.s"
+    else
+        ensure_core_tool lmod
+        _ect_bun=$(mktemp)
+        bundle_src_if_needed "$SRC_DIR/$1.src" "$_ect_bun"
+        "$LUMEC" < "$_ect_bun" > "$BIN_DIR/$1.s"
+        "$LASM" < "$BIN_DIR/$1.s" > "$BIN_DIR/$1"
+        chmod +x "$BIN_DIR/$1"
+        rm -f "$_ect_bun" "$BIN_DIR/$1.s"
+    fi
 }
 
 # Run a Lume-Core tool (<tool>.src) with $2 as its stdin file, writing to stdout.
 run_core_tool() {
-    _tool=$1
-    _input=$2
     if is_linux_x86_64 && [ -z "${LUME0_ASAN:-}" ]; then
-        ensure_core_tool "$_tool"
-        "$BIN_DIR/$_tool" < "$_input"
+        ensure_core_tool "$1"
+        "$BIN_DIR/$1" < "$2"
     else
         ensure_seed
-        "$L0" run "$SRC_DIR/compiler_in_core.lume" "$SRC_DIR/$_tool.src" "$_input"
+        if [ "$1" = "lmod" ] || ! grep -Eq '^[ \t]*use[ \t]+' "$SRC_DIR/$1.src"; then
+            "$L0" run "$SRC_DIR/compiler_in_core.lume" "$SRC_DIR/$1.src" "$2"
+        else
+            _rct_bun=$(mktemp)
+            bundle_src_if_needed "$SRC_DIR/$1.src" "$_rct_bun"
+            "$L0" run "$SRC_DIR/compiler_in_core.lume" "$_rct_bun" "$2"
+            rm -f "$_rct_bun"
+        fi
     fi
 }
 
@@ -676,6 +694,90 @@ cmd_agent() {
     rm -f "$_abun"
 }
 
+cmd_evolve() {
+    [ $# -ge 1 ] || usage
+    _eact=$1
+    shift
+    case "$_eact" in
+        goals)
+            cmd_run "$ROOT/evolve/goals.src"
+            return 0
+            ;;
+        budgets)
+            cmd_run "$ROOT/evolve/budgets.src"
+            return 0
+            ;;
+        verify|propose|check|status)
+            _efile=""
+            for _arg in "$@"; do
+                case "$_arg" in
+                    --json) ;;
+                    -*) usage ;;
+                    *) _efile=$_arg ;;
+                esac
+            done
+            [ -n "$_efile" ] || _efile="$ROOT/evolve/proposals/0001_math_clamp/proposal.bundle"
+            if [ -d "$_efile" ] && [ -f "$_efile/proposal.bundle" ]; then
+                _efile="$_efile/proposal.bundle"
+            fi
+            if [ ! -f "$_efile" ]; then
+                echo "lume evolve: cannot read $_efile" >&2
+                exit 66
+            fi
+            _ejson=$(run_core_tool levolve "$_efile")
+            printf '%s\n' "$_ejson"
+            case "$_ejson" in
+                *'"gates_ok":true'*) return 0 ;;
+                *) return 1 ;;
+            esac
+            ;;
+        approve)
+            _efile=""
+            _by="maintainer"
+            while [ $# -gt 0 ]; do
+                case "$1" in
+                    --by)
+                        [ $# -ge 2 ] || usage
+                        _by=$2
+                        shift 2
+                        ;;
+                    --json)
+                        shift
+                        ;;
+                    -*)
+                        usage
+                        ;;
+                    *)
+                        _efile=$1
+                        shift
+                        ;;
+                esac
+            done
+            [ -n "$_efile" ] || _efile="$ROOT/evolve/proposals/0001_math_clamp/proposal.bundle"
+            if [ -d "$_efile" ] && [ -f "$_efile/proposal.bundle" ]; then
+                _efile="$_efile/proposal.bundle"
+            fi
+            if [ ! -f "$_efile" ]; then
+                echo "lume evolve: cannot read $_efile" >&2
+                exit 66
+            fi
+            _etmp=$(mktemp)
+            cat "$_efile" > "$_etmp"
+            printf '\n@approval approved:%s\n' "$_by" >> "$_etmp"
+            _ejson=$(run_core_tool levolve "$_etmp")
+            rm -f "$_etmp"
+            printf '%s\n' "$_ejson"
+            case "$_ejson" in
+                *'"can_merge":true'*) return 0 ;;
+                *) return 1 ;;
+            esac
+            ;;
+        *)
+            usage
+            ;;
+    esac
+}
+
 [ $# -ge 1 ] || usage
 _sub=$1
 shift
@@ -707,6 +809,9 @@ case "$_sub" in
         ;;
     agent|service)
         cmd_agent "$@"
+        ;;
+    evolve)
+        cmd_evolve "$@"
         ;;
     check)
         cmd_check "$@"

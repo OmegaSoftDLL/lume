@@ -1,0 +1,9 @@
+## evolve/budgets.src -- Size, complexity, and capability budgets enforced by `lume evolve` (P24, P26).
+
+type EvolveBudget = record {scope: str, max_asm_lines: int, max_keywords: int, default_capability: str}
+
+fn std_module_budget() -> EvolveBudget = EvolveBudget{scope: "std_module", max_asm_lines: 120, max_keywords: 32, default_capability: "pure"}
+fn compiler_pass_budget() -> EvolveBudget = EvolveBudget{scope: "compiler_pass", max_asm_lines: 500, max_keywords: 32, default_capability: "pure"}
+
+print std_module_budget().scope + ": max_asm_lines=" + str(std_module_budget().max_asm_lines) + " capability=" + std_module_budget().default_capability
+print compiler_pass_budget().scope + ": max_asm_lines=" + str(compiler_pass_budget().max_asm_lines) + " capability=" + compiler_pass_budget().default_capability

@@ -1,0 +1,10 @@
+0001_clamp: status=verified_awaiting_human_approval gates=6/6 repairs=0 approved=0 can_merge=0
+compile=ok, conformance=ok, api_compat=ok, capability=ok, budget=ok, fixpoint=ok
+0001_clamp: status=approved_ready_to_apply gates=6/6 repairs=0 approved=1 can_merge=1
+approver=ricardo output=10,20,15
+0002_auto_repair: status=approved_ready_to_apply gates=6/6 repairs=2 approved=1 can_merge=1
+compile=ok, conformance=ok, api_compat=ok, capability=ok, budget=ok, fixpoint=ok
+0003_breaking_api: status=rejected_by_gates gates=5/6 repairs=0 approved=1 can_merge=0
+compile=ok, conformance=ok, api_compat=FAIL(signature drift on 'add': baseline 'fn(a: int, b: int) -> int' vs candidate 'fn(a: str, b: str) -> str'), capability=ok, budget=ok, fixpoint=ok
+0004_cap_violation: status=rejected_by_gates gates=5/6 repairs=0 approved=1 can_merge=0
+compile=ok, conformance=ok, api_compat=ok, capability=FAIL(capability violation: pure module invokes I/O builtin 'readall'), budget=ok, fixpoint=ok
