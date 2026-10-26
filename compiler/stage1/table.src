@@ -1,0 +1,91 @@
+## table.src — typed in-memory relations and strict CSV ingestion for ML-core.
+## A schema is a Cons-list of {name: str, type: "str" | "int" | "decimal"} records.
+## Rows are Cons-lists of tagged values, preserving the declared type of every column.
+
+fn table_error(message) = {ok: 0, error: message, schema: Nil, rows: Nil}
+fn table_success(schema, rows) = {ok: 1, error: "", schema: schema, rows: rows}
+
+fn list_len(xs) = match xs
+    Nil => 0
+    Cons(head, tail) => 1 + list_len(tail)
+fn list_reverse(xs) = list_reverse_acc(xs, Nil)
+fn list_reverse_acc(xs, acc) = match xs
+    Nil => acc
+    Cons(head, tail) => list_reverse_acc(tail, Cons(head, acc))
+fn list_head(xs) = match xs
+    Nil => Nil
+    Cons(head, tail) => head
+fn list_tail(xs) = match xs
+    Nil => Nil
+    Cons(head, tail) => tail
+
+fn csv_newline(s, i) = at(s, i) == "\n" or at(s, i) == "\r"
+fn csv_after_newline(s, i) = if at(s, i) == "\r" and at(s, i + 1) == "\n" then i + 2 else i + 1
+
+## A cell result carries the separator that ended it: comma=0, row boundary=1, EOF=2.
+## Quoted fields allow separators/newlines and doubled quotes. After a closing quote only
+## a separator, row boundary, or EOF is legal; malformed quoting is returned as an error.
+fn csv_cell(s, i) = if i < count(s) and at(s, i) == "\"" then csv_quoted(s, i + 1, "") else csv_plain(s, i, "")
+fn csv_plain(s, i, value) = if i >= count(s) then {ok: 1, value: value, pos: i, sep: 2} else if at(s, i) == "," then {ok: 1, value: value, pos: i + 1, sep: 0} else if csv_newline(s, i) then {ok: 1, value: value, pos: csv_after_newline(s, i), sep: 1} else if at(s, i) == "\"" then {ok: 0, value: "", pos: i, sep: 3} else csv_plain(s, i + 1, value + at(s, i))
+fn csv_quoted(s, i, value) = if i >= count(s) then {ok: 0, value: "", pos: i, sep: 3} else if at(s, i) == "\"" then csv_quote_end(s, i, value) else csv_quoted(s, i + 1, value + at(s, i))
+fn csv_quote_end(s, i, value) = if i + 1 < count(s) and at(s, i + 1) == "\"" then csv_quoted(s, i + 2, value + "\"") else csv_quote_sep(s, i + 1, value)
+fn csv_quote_sep(s, i, value) = if i >= count(s) then {ok: 1, value: value, pos: i, sep: 2} else if at(s, i) == "," then {ok: 1, value: value, pos: i + 1, sep: 0} else if csv_newline(s, i) then {ok: 1, value: value, pos: csv_after_newline(s, i), sep: 1} else {ok: 0, value: "", pos: i, sep: 3}
+
+fn csv_row(s, i, cells) = csv_row_step(s, csv_cell(s, i), cells)
+fn csv_row_step(s, cell, cells) = if cell.ok == 0 then {ok: 0, pos: cell.pos, cells: Nil} else if cell.sep == 0 then csv_row(s, cell.pos, Cons(cell.value, cells)) else {ok: 1, pos: cell.pos, cells: Cons(cell.value, cells)}
+fn csv_rows(s, i, rows) = if i >= count(s) then {ok: 1, rows: list_reverse(rows)} else csv_rows_step(s, csv_row(s, i, Nil), rows)
+fn csv_rows_step(s, row, rows) = if row.ok == 0 then {ok: 0, rows: Nil} else if row.pos == count(s) then {ok: 1, rows: list_reverse(Cons(list_reverse(row.cells), rows))} else csv_rows(s, row.pos, Cons(list_reverse(row.cells), rows))
+
+fn schema_names(schema) = match schema
+    Nil => Nil
+    Cons(column, rest) => Cons(column.name, schema_names(rest))
+fn schema_valid(schema) = schema_valid_seen(schema, Nil)
+fn schema_valid_seen(schema, seen) = match schema
+    Nil => 1
+    Cons(column, rest) => if column.name == "" or string_member(column.name, seen) == 1 then 0 else if column.type == "str" or column.type == "int" or column.type == "decimal" then schema_valid_seen(rest, Cons(column.name, seen)) else 0
+fn string_member(value, values) = match values
+    Nil => 0
+    Cons(head, tail) => if value == head then 1 else string_member(value, tail)
+fn same_strings(a, b) = match a
+    Nil => match b
+        Nil => 1
+        _ => 0
+    Cons(head, tail) => match b
+        Nil => 0
+        Cons(other, rest) => if head == other then same_strings(tail, rest) else 0
+
+fn csv_int_valid(s, i, digits) = if i >= count(s) then digits else if i == 0 and (at(s, i) == "-" or at(s, i) == "+") then csv_int_valid(s, i + 1, digits) else if at(s, i) >= "0" and at(s, i) <= "9" then csv_int_valid(s, i + 1, digits + 1) else 0
+fn csv_int_value(s) = if count(s) == 0 or csv_int_valid(s, 0, 0) == 0 or csv_int_valid(s, 0, 0) > 18 then {ok: 0, value: 0} else csv_int_value_valid(s, if at(s, 0) == "-" or at(s, 0) == "+" then 1 else 0, if at(s, 0) == "-" then 0 - 1 else 1)
+fn csv_int_value_valid(s, start, sign) = {ok: 1, value: sign * csv_int_digits(s, start, 0)}
+fn csv_int_digits(s, i, value) = if i >= count(s) then value else csv_int_digits(s, i + 1, value * 10 + toint(at(s, i)))
+fn csv_decimal_valid(s, i, point, digit) = if i >= count(s) then digit else if i == 0 and (at(s, i) == "-" or at(s, i) == "+") then csv_decimal_valid(s, i + 1, point, digit) else if at(s, i) >= "0" and at(s, i) <= "9" then csv_decimal_valid(s, i + 1, point, 1) else if at(s, i) == "." and point == 0 then csv_decimal_valid(s, i + 1, 1, digit) else 0
+fn csv_convert(value, kind) = if kind == "str" then {ok: 1, value: {kind: "str", value: value}} else if kind == "int" then csv_convert_int(csv_int_value(value)) else if kind == "decimal" then csv_convert_decimal(value, csv_decimal_valid(value, 0, 0, 0)) else {ok: 0, value: {kind: "error", value: "unsupported schema type"}}
+fn csv_convert_int(parsed) = if parsed.ok == 1 then {ok: 1, value: {kind: "int", value: parsed.value}} else {ok: 0, value: {kind: "error", value: "invalid integer"}}
+fn csv_convert_decimal(value, valid) = if valid == 1 then {ok: 1, value: {kind: "decimal", value: decimal_parse(value)}} else {ok: 0, value: {kind: "error", value: "invalid decimal"}}
+
+fn csv_typed_row(cells, schema, row_index, acc) = if list_len(cells) != list_len(schema) then {ok: 0, rows: Nil, error: "CSV row " + str(row_index + 1) + " has " + str(list_len(cells)) + " cells; schema expects " + str(list_len(schema))} else csv_typed_cells(cells, schema, row_index, acc)
+fn csv_typed_cells(cells, schema, row_index, acc) = match cells
+    Nil => {ok: 1, values: list_reverse(acc), error: ""}
+    Cons(cell, more_cells) => match schema
+        Nil => {ok: 0, values: Nil, error: "CSV row width does not match schema"}
+        Cons(column, more_schema) => csv_typed_cell(cell, more_cells, column, more_schema, row_index, acc, csv_convert(cell, column.type))
+fn csv_typed_cell(cell, more_cells, column, more_schema, row_index, acc, converted) = if converted.ok == 0 then {ok: 0, values: Nil, error: "CSV row " + str(row_index + 1) + ", column '" + column.name + "': " + converted.value.value} else csv_typed_cells(more_cells, more_schema, row_index, Cons(converted.value, acc))
+fn csv_typed_rows(rows, schema, acc) = match rows
+    Nil => {ok: 1, rows: list_reverse(acc), error: ""}
+    Cons(row, rest) => csv_typed_rows_step(rest, schema, list_len(acc), acc, csv_typed_row(row, schema, list_len(acc) + 1, Nil))
+fn csv_typed_rows_step(rest, schema, row_index, acc, typed) = if typed.ok == 0 then {ok: 0, rows: Nil, error: typed.error} else csv_typed_rows(rest, schema, Cons(typed.values, acc))
+
+## read_csv accepts CSV text and an explicit schema. It requires an exact header match,
+## rejects malformed quoting, wrong row widths, and invalid cells, and never guesses types.
+fn read_csv(text, schema) = if schema_valid(schema) == 0 then table_error("invalid CSV schema") else if count(text) == 0 then table_error("CSV input is empty") else read_csv_parsed(schema, csv_rows(text, 0, Nil))
+fn read_csv_parsed(schema, parsed) = if parsed.ok == 0 then table_error("malformed CSV quoting") else read_csv_header(schema, parsed.rows)
+fn read_csv_header(schema, rows) = match rows
+    Nil => table_error("CSV input has no header")
+    Cons(header, body) => if same_strings(header, schema_names(schema)) == 0 then table_error("CSV header does not match schema") else read_csv_body(schema, body, csv_typed_rows(body, schema, Nil))
+fn read_csv_body(schema, source_rows, converted) = if converted.ok == 0 then table_error(converted.error) else table_success(schema, converted.rows)
+
+fn table_row_count(table) = list_len(table.rows)
+fn table_column_count(table) = list_len(table.schema)
+fn table_cell(table, row, column) = if row < 0 or row >= table_row_count(table) or column < 0 or column >= table_column_count(table) then {ok: 0, error: "table index out of bounds", value: {kind: "error", value: "table index out of bounds"}} else table_cell_at(list_nth(table.rows, row), column)
+fn list_nth(xs, index) = if index <= 0 then list_head(xs) else list_nth(list_tail(xs), index - 1)
+fn table_cell_at(row, column) = if column <= 0 then {ok: 1, error: "", value: list_head(row)} else table_cell_at(list_tail(row), column - 1)

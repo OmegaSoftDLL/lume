@@ -1,0 +1,3 @@
+fn table_of(comptime T: type, row: T) -> table[T] = {value: row}
+fn read_int_table(table: table[int]) -> int = table.value
+print read_int_table(table_of(str, "wrong row type"))

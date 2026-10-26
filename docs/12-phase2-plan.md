@@ -68,8 +68,8 @@ getting stuck), one green PR with a regression test, and the **self-host fixpoin
 - **M2** hygienic macros / quasiquote. *Ref: Scheme `syntax-case`, Rust, Nim.*
 
 ### D — data (pillar P7)
-- **D1** `decimal(p, s)` exact decimal type + literals + arithmetic. *Ref: COBOL/dBase, SQL NUMERIC.*
-- **D2** `table[T]` typed in-memory relation + `read_csv`. *Ref: dBase/Clipper, pandas, Arrow.*
+- **D1 ✅ done (#120)** `decimal(p, s)` exact decimal type + literals + arithmetic. Exact values carry a signed coefficient and scale; casts, operators, function signatures, and literal-context coercion reject inexact rescaling and overflow instead of rounding. *Ref: COBOL/dBase, SQL NUMERIC.*
+- **D2 ✅ done (#127)** `table[T]` row-type annotations and schema-checked in-memory relations via `read_csv(text, schema)`. CSV validates headers, quoting, row widths, and explicitly typed `str`/`int`/`decimal` cells; `lumec` propagates `T` through generic returns and rejects known row-type mismatches. Schema reflection from nominal records and query operations remain future work. *Ref: dBase/Clipper, pandas, Arrow.*
 - **D3** integrated `query` (where/order/join/group), type-checked. *Ref: LINQ (C#), SQL, Datalog.*
 
 ### T — one tool
@@ -86,7 +86,7 @@ getting stuck), one green PR with a regression test, and the **self-host fixpoin
 
 ## Recommended order
 C1✅ → C2 (deliver the flagship early) alongside F1 → F2 (foundation); E2✅ already protects `main`;
-then C3✅ (needs F), M1/M2, D1 → D3, T1 → T3, E1 → E3.
+then C3✅ (needs F), M1/M2, D1 → D2 → D3, T1 → T3, E1 → E3.
 
 Each brick: a green PR, a regression test, the fixpoint intact, verified by running it — and
 **superior to the language it borrows from**.

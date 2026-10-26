@@ -1,0 +1,17 @@
+let schema = Cons({name: "id", type: "int"}, Cons({name: "amount", type: "decimal"}, Cons({name: "note", type: "str"}, Nil)))
+let parsed = read_csv("id,amount,note\r\n1,12.30,\"hello, world\"\r\n2,-0.50,plain\r\n3,1.00,\"say \"\"yes\"\"\"\r\n4,2.00,\"line1\nline2\"", schema)
+print parsed.ok
+print table_row_count(parsed)
+print table_column_count(parsed)
+print table_cell(parsed, 0, 0).value.value
+print decimal_format(table_cell(parsed, 0, 1).value.value)
+print table_cell(parsed, 0, 2).value.value
+print table_cell(parsed, 1, 0).value.value
+print decimal_format(table_cell(parsed, 1, 1).value.value)
+print table_cell(parsed, 2, 2).value.value
+print table_cell(parsed, 3, 2).value.value
+print read_csv("wrong,amount,note\n1,1.00,x", schema).ok
+print read_csv("id,amount,note\nnope,1.00,x", schema).ok
+print read_csv("id,amount,note\nnope,1.00,x", schema).error
+print read_csv("id,amount,note\n1,1.00,\"unterminated", schema).ok
+print read_csv("id,amount,note\n1,1.00", schema).ok

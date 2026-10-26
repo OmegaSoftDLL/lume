@@ -1,0 +1,4 @@
+## D2 compile-time row typing: a generic table return keeps its row type through calls.
+fn table_of(comptime T: type, row: T) -> table[T] = {value: row}
+fn read_int_table(table: table[int]) -> int = table.value
+print read_int_table(table_of(int, 42))

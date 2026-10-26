@@ -130,23 +130,27 @@ subset; the triple self-build is not reached.
   byte-identical), and the call site binds the type parameter and checks the remaining annotated arguments via the
   F2 checker (`id(int, "hi")` → clear type error, exit 3). NOT yet: generics over declared types/containers,
   `comptime assert`, comptime tables (C4). See `compiler/stage1/{ct,ct2,generics_ok}.src` and the `phase-2` tests.
-- Domain features (`table`/`query`, tensor/`grad`/`llm fn`) — docs only; `examples/future/*`
-  pass the lexer only. Track D's D1 implementation parses exact decimal literals as signed
-  integer coefficient + scale values in both the ML-core parser and self-hosted `lumec`.
+- Domain features (`table`/`query`, tensor/`grad`/`llm fn`) are still being built; `examples/future/*`
+  pass the lexer only. Track D1 (`#120`) parses exact decimal literals as signed integer
+  coefficient + scale values in both the ML-core parser and self-hosted `lumec`.
   `compiler/stage1/decimal.src` provides parsing, scale-preserving formatting, checked
   add/subtract/multiply, comparison, `decimal(p, s, value)` casts, exact division at a requested
-  scale, and shortest exact division for finite decimal results. Decimal records carry a
-  precision field after explicit casting; add/subtract preserve integral capacity,
-  multiplication combines input precision, and division derives a result precision. Decimal
-  arithmetic operators are lowered for literals, helper-call results, and variables initialized
-  from decimals (including local `let` bindings) in the ML-core parser and self-hosted compiler;
-  interpreter, C oracle, and native assembly agree on the regression suite. Coefficient digits
+  scale, and shortest exact division for finite decimal results. Decimal records carry a precision
+  field after explicit casting; add/subtract preserve integral capacity, multiplication combines
+  input precision, and division derives a result precision. Operators are lowered for literals,
+  helper-call results, local variables, and annotated function parameters/returns; function
+  signature context inserts checked casts for exactly representable literals. Coefficient digits
   and scale are capped at 18, and inexact rescaling, overflow, division by zero, or repeating
-  decimal division fail instead of rounding. `decimal(p, s)` is available on function
-  parameters and returns; the gradual checker verifies explicit decimal constructor arguments,
-  and the self-hosted compiler lowers arithmetic over annotated decimal parameters to the exact
-  helpers. D1 remains incomplete: decimal function return values and unannotated parameters are
-  not inferred for operator dispatch, and automatic literal-context inference is outstanding.
+  decimal division fail instead of rounding. Interpreter, C oracle, and native assembly agree on
+  the regression suite.
+  Track D2 (`#127`) is implemented in `compiler/stage1/table.src`: `read_csv(text, schema)` parses
+  CSV fields (including quoted delimiters, doubled quotes, CRLF, and multiline quoted fields),
+  requires an exact header/schema match, converts `str`, `int`, and `decimal` cells without type
+  guessing, and returns a relation with typed cell tags and explicit errors. `table_row_count`,
+  `table_column_count`, and checked `table_cell` access the relation. `lumec` accepts `table[T]`
+  function annotations and substitutes the row type through C3 generic return types, rejecting
+  known mismatches. The CSV runtime schema remains explicit and caller-supplied; reflecting a
+  nominal row record into a schema automatically and query operations remain future work.
 - **Track T (`lume` single CLI, `lfmt.src` canonical formatter, `lmod.src` + `lume pkg` modules & package manager) is done (T1 #118, T2 #122, T3)**: `./lume` provides `build`, `run`, `test`, `doc` (`--json`), `fmt` (`--check` / `--stdout`), `pkg` (`init`/`check`/`lock`/`verify`/`tree`), `check` (`--json`), and `describe` (`--json`), backed by native Lume-Core tools (`compiler/stage1/ldoc.src`, `compiler/stage1/ltest.src`, `compiler/stage1/lfmt.src`, and `compiler/stage1/lmod.src` compiled to ELF by `lumec` + `lasm`). `lfmt.src` proves idempotence and byte-for-byte codegen invariance; `lmod.src` + `lume pkg` provide topological `use` bundling, cycle detection, SHA-256 `lume.lock` verification (P32), and capability-scoped dependency auditing (P26). `lsp`, P34 LAWS, P35 mandatory tests — not built yet.
 - **Self-hosting `lumec` and the triple self-build: NOT done.** This is Phase 1's exit.
 
