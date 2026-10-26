@@ -58,8 +58,8 @@ getting stuck), one green PR with a regression test, and the **self-host fixpoin
 - **D3** integrated `query` (where/order/join/group), type-checked. *Ref: LINQ (C#), SQL, Datalog.*
 
 ### T — one tool
-- **T1 ✅ done** `lume` single CLI (`./lume`: `build`/`run`/`fmt`/`test`/`doc`/`check`/`describe`), backed by native Lume-Core tools (`compiler/stage1/ldoc.src` for Markdown + AI-first `--json` doc/signature/contract extraction, and `compiler/stage1/ltest.src` for zero-config `fn test_*()` discovery and native execution). *Ref: cargo, go.*
-- **T2** one canonical formatter. *Ref: gofmt, rustfmt.*
+- **T1 ✅ done (#118)** `lume` single CLI (`./lume`: `build`/`run`/`fmt`/`test`/`doc`/`check`/`describe`), backed by native Lume-Core tools (`compiler/stage1/ldoc.src` for Markdown + AI-first `--json` doc/signature/contract extraction, and `compiler/stage1/ltest.src` for zero-config `fn test_*()` discovery and native execution). *Ref: cargo, go.*
+- **T2 ✅ done** one canonical formatter (`compiler/stage1/lfmt.src`, compiled to native ELF by `lumec` + `lasm` and wired into `lume fmt` / `lume fmt --check`). Parses Lume-Core declarations and statements into an AST while preserving `##` doc comments and section blank lines, aligns `match` arm `=>` arrows vertically, and performs precedence-aware minimal parenthesisation (stripping redundant parens while preserving required ones), proving both idempotence (`lfmt(lfmt(x)) == lfmt(x)`, including `lfmt(lfmt.src) == lfmt.src`) and byte-for-byte codegen invariance (`lumec(lfmt(x)) == lumec(x)`). *Ref: gofmt, rustfmt.*
 - **T3** modules + package manager. *Ref: cargo, go modules.*
 
 ### E — self-evolution (`lume evolve`) — closes "Lume evolves Lume on its own"

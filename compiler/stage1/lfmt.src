@@ -1,0 +1,215 @@
+## lfmt.src -- Lume's canonical source formatter written in Lume-Core (Track T, brick T2).
+## Implements Principle P25 ("One canonical format; no style wars, no configuration knobs").
+## Reads a Lume-Core (.src) program from stdin, parses each top-level declaration/statement into
+## an AST while preserving `##` documentation/section comments and logical blank-line groupings,
+## and emits the unique canonical representation:
+##   - 4-space indented `match` arms with vertically aligned `=>` arrows
+##   - precedence-aware minimal parenthesisation (strips redundant parens like `(2 * 3) + 4`
+##     while preserving required parens like `(2 + 3) * 4` and right-nested `a - (b - c)`)
+##   - canonical single-space operator, comma, and record `{k: v}` layout
+##   - trailing whitespace stripped and multiple blank lines collapsed to at most one.
+## Guarantees both idempotence (`lfmt(lfmt(x)) == lfmt(x)`) and codegen invariance
+## (`lumec(lfmt(x)) == lumec(x)` byte-for-byte).
+
+## --- hot character classes & per-statement O(n) lexer (placed first for fast lookup) ---
+fn isws(c) = c == " " or c == "\t" or c == "\r"
+fn isdigit(c) = c >= "0" and c <= "9"
+fn isalpha(c) = c >= "a" and c <= "z" or c >= "A" and c <= "Z" or c == "_"
+fn isalnum(c) = isdigit(c) or isalpha(c)
+fn isctor(name) = if count(name) == 0 then 0 else let c = at(name, 0) in c >= "A" and c <= "Z"
+
+fn nlpos(s, n, i) = if i >= n then i else if at(s, i) == "\n" then i else nlpos(s, n, i + 1)
+fn skipws(s, i, n) = if i >= n then i else if isws(at(s, i)) then skipws(s, i + 1, n) else i
+fn rtrimend(s, e) = if e <= 0 then 0 else if isws(at(s, e - 1)) then rtrimend(s, e - 1) else e
+fn rtrim(s) = let n = count(s) in slicen(s, n, 0, rtrimend(s, n))
+fn ltrim(s) = let n = count(s) in let a = skipws(s, 0, n) in if a >= n then "" else slicen(s, n, a, n)
+fn startswith(s, p) = if count(s) < count(p) then 0 else slice(s, 0, count(p)) == p
+fn isindented(raw) = if count(raw) == 0 then 0 else isws(at(raw, 0))
+
+fn idend(s, i, n) = if i >= n then i else if isalnum(at(s, i)) then idend(s, i + 1, n) else i
+fn numend(s, i, n) = if i >= n then i else if isdigit(at(s, i)) then numend(s, i + 1, n) else i
+fn strend(s, i, n) = if i >= n then i else if at(s, i) == "\"" then i + 1 else if at(s, i) == "\\" then strend(s, i + 2, n) else strend(s, i + 1, n)
+
+fn two(s, i, n) = slicen(s, n, i, if i + 2 > n then n else i + 2)
+fn istwo(t) = t == "==" or t == "!=" or t == "<=" or t == ">="
+
+fn lex(s, i, n) = if i >= n then Nil else let c = at(s, i) in if isws(c) or c == "\n" then lex(s, i + 1, n) else if c == "#" then lex(s, nlpos(s, n, i), n) else if isdigit(c) then let e = numend(s, i, n) in Cons({kind: "int", text: slicen(s, n, i, e)}, lex(s, e, n)) else if isalpha(c) then let e = idend(s, i, n) in Cons({kind: "id", text: slicen(s, n, i, e)}, lex(s, e, n)) else if c == "\"" then let e = strend(s, i + 1, n) in Cons({kind: "str", text: slicen(s, n, i, e)}, lex(s, e, n)) else if istwo(two(s, i, n)) then Cons({kind: "op", text: two(s, i, n)}, lex(s, i + 2, n)) else Cons({kind: "op", text: c}, lex(s, i + 1, n))
+fn lexall(s) = lex(s, 0, count(s))
+
+## --- list & string helpers (O(n log k) pairwise join, O(n) length-threaded line split) ---
+fn app(xs, ys) = match xs
+    Nil        => ys
+    Cons(h, t) => Cons(h, app(t, ys))
+fn isnil(xs) = match xs
+    Nil        => 1
+    Cons(h, t) => 0
+fn imax(a, b) = if a > b then a else b
+fn pairs(xs) = match xs
+    Nil        => Nil
+    Cons(a, t) => pairs2(a, t)
+fn pairs2(a, t) = match t
+    Nil        => Cons(a, Nil)
+    Cons(b, r) => Cons(a + b, pairs(r))
+fn joinall(xs) = match xs
+    Nil        => ""
+    Cons(a, t) => if isnil(t) == 1 then a else joinall(pairs(xs))
+fn joinsep(xs, sep) = match xs
+    Nil        => ""
+    Cons(h, t) => if isnil(t) == 1 then h else h + sep + joinsep(t, sep)
+
+fn spaces(k) = if k <= 0 then "" else " " + spaces(k - 1)
+fn padright(s, w) = s + spaces(w - count(s))
+
+fn splitlinesn(s, n, i) = if i >= n then Nil else let e = nlpos(s, n, i) in Cons(slicen(s, n, i, e), splitlinesn(s, n, if e >= n then e else e + 1))
+fn splitlines(s) = splitlinesn(s, count(s), 0)
+
+## --- token-stream helpers ---
+fn headtext(ts) = match ts
+    Nil        => ""
+    Cons(h, t) => h.text
+fn droponce(ts) = match ts
+    Nil        => Nil
+    Cons(h, t) => t
+fn dropkw(ts, kw) = if headtext(ts) == kw then droponce(ts) else ts
+fn skiprp(ts) = if headtext(ts) == ")" then droponce(ts) else ts
+fn skiprb(ts) = if headtext(ts) == "}" then droponce(ts) else ts
+fn skiprk(ts) = if headtext(ts) == "]" then droponce(ts) else ts
+
+## --- parser: types, expressions, records, calls, comptime, match ---
+fn parsetype1(ts) = if headtext(ts) == "[" then let r = parsetype1(droponce(ts)) in {ty: "[" + r.ty + "]", rest: skiprk(r.rest)} else {ty: headtext(ts), rest: droponce(ts)}
+fn parsetypelist(ts) = if headtext(ts) == ")" then {items: Nil, rest: droponce(ts)} else let r = parsetype1(ts) in if headtext(r.rest) == "," then let rr = parsetypelist(droponce(r.rest)) in {items: Cons(r.ty, rr.items), rest: rr.rest} else {items: Cons(r.ty, Nil), rest: skiprp(r.rest)}
+fn parsevariants(ts) = let tag = headtext(ts) in let t1 = droponce(ts) in let vp = if headtext(t1) == "(" then let a = parsetypelist(droponce(t1)) in {v: tag + "(" + joinsep(a.items, ", ") + ")", rest: a.rest} else {v: tag, rest: t1} in if headtext(vp.rest) == "|" then let rr = parsevariants(droponce(vp.rest)) in {items: Cons(vp.v, rr.items), rest: rr.rest} else {items: Cons(vp.v, Nil), rest: vp.rest}
+fn parsefields(ts) = let fnm = headtext(ts) in let r = parsetype1(dropkw(droponce(ts), ":")) in let fstr = fnm + ": " + r.ty in if headtext(r.rest) == "," then let rr = parsefields(droponce(r.rest)) in {items: Cons(fstr, rr.items), rest: rr.rest} else {items: Cons(fstr, Nil), rest: r.rest}
+fn parsetypedecl(t) = let nm = headtext(t) in let b = dropkw(droponce(t), "=") in if headtext(b) == "record" then let fs = parsefields(droponce(b)) in TypeD("type " + nm + " = record " + joinsep(fs.items, ", ")) else let vs = parsevariants(dropkw(b, "enum")) in TypeD("type " + nm + " = enum " + joinsep(vs.items, " | "))
+
+fn recentries(ts) = if headtext(ts) == "}" then {items: Nil, rest: droponce(ts)} else recmore(headtext(ts), expr(dropkw(droponce(ts), ":")))
+fn recmore(k, rv) = if headtext(rv.rest) == "," then let rr = recentries(droponce(rv.rest)) in {items: Cons({key: k, val: rv.node}, rr.items), rest: rr.rest} else {items: Cons({key: k, val: rv.node}, Nil), rest: skiprb(rv.rest)}
+fn parseif(t) = let rc = expr(t) in let tb = expr(dropkw(rc.rest, "then")) in let eb = expr(dropkw(tb.rest, "else")) in {node: If(rc.node, tb.node, eb.node), rest: eb.rest}
+fn parselet(t) = let nm = headtext(t) in let rv = expr(dropkw(droponce(t), "=")) in let rb = expr(dropkw(rv.rest, "in")) in {node: LetIn(nm, rv.node, rb.node), rest: rb.rest}
+fn parsect(t) = let r = prim(t) in {node: CT(r.node), rest: r.rest}
+fn postloop(r) = if headtext(r.rest) == "." then postloop({node: Field(r.node, headtext(droponce(r.rest))), rest: droponce(droponce(r.rest))}) else r
+fn post(ts) = postloop(prim(ts))
+
+fn primid(name, t) = if headtext(t) == "(" then let a = arglist(droponce(t)) in {node: Call(name, a.items), rest: a.rest} else if headtext(t) == "{" then let a = recentries(droponce(t)) in {node: RecT(name, a.items), rest: a.rest} else {node: Var(name), rest: t}
+fn prim(ts) = match ts
+    Nil        => {node: Num("0"), rest: Nil}
+    Cons(h, t) => if h.kind == "int" then {node: Num(h.text), rest: t} else if h.kind == "str" then {node: Str(h.text), rest: t} else if h.kind == "id" then (if h.text == "if" then parseif(t) else if h.text == "let" then parselet(t) else if h.text == "match" then parsematch(t) else if h.text == "comptime" then parsect(t) else primid(h.text, t)) else if h.text == "{" then let a = recentries(t) in {node: Rec(a.items), rest: a.rest} else if h.text == "(" then let r = expr(t) in {node: r.node, rest: skiprp(r.rest)} else {node: Num("0"), rest: t}
+fn arglist(ts) = if headtext(ts) == ")" then {items: Nil, rest: droponce(ts)} else argmore(expr(ts))
+fn argmore(r) = if headtext(r.rest) == "," then let rr = arglist(droponce(r.rest)) in {items: Cons(r.node, rr.items), rest: rr.rest} else {items: Cons(r.node, Nil), rest: skiprp(r.rest)}
+
+fn mulloop(r) = let op = headtext(r.rest) in if op == "*" or op == "/" or op == "%" then let r2 = post(droponce(r.rest)) in mulloop({node: Bin(op, r.node, r2.node), rest: r2.rest}) else r
+fn mul(ts) = mulloop(post(ts))
+fn addloop(r) = let op = headtext(r.rest) in if op == "+" or op == "-" then let r2 = mul(droponce(r.rest)) in addloop({node: Bin(op, r.node, r2.node), rest: r2.rest}) else r
+fn add(ts) = addloop(mul(ts))
+fn cmploop(r) = let op = headtext(r.rest) in if op == "==" or op == "!=" or op == "<" or op == ">" or op == "<=" or op == ">=" then let r2 = add(droponce(r.rest)) in cmploop({node: Bin(op, r.node, r2.node), rest: r2.rest}) else r
+fn cmp(ts) = cmploop(add(ts))
+fn andloop(r) = if headtext(r.rest) == "and" then let r2 = cmp(droponce(r.rest)) in andloop({node: Bin("and", r.node, r2.node), rest: r2.rest}) else r
+fn booland(ts) = andloop(cmp(ts))
+fn orloop(r) = if headtext(r.rest) == "or" then let r2 = booland(droponce(r.rest)) in orloop({node: Bin("or", r.node, r2.node), rest: r2.rest}) else r
+fn expr(ts) = orloop(booland(ts))
+
+fn isarrow(ts) = headtext(ts) == "=" and headtext(droponce(ts)) == ">"
+fn parsematch(t) = let sc = expr(t) in let ar = parsearms(sc.rest) in {node: Match(sc.node, ar.items), rest: ar.rest}
+fn parsearms(ts) = armstart(ts, parsepat(ts))
+fn armstart(ts, p) = if isarrow(p.rest) then armmore(p) else {items: Nil, rest: ts}
+fn armmore(p) = let b = expr(dropkw(dropkw(p.rest, "="), ">")) in let rr = parsearms(b.rest) in {items: Cons({pat: p.node, body: b.node}, rr.items), rest: rr.rest}
+fn parsepat(ts) = match ts
+    Nil        => {node: PWild, rest: Nil}
+    Cons(h, t) => if h.kind == "int" then {node: PInt(h.text), rest: t} else if h.text == "_" then {node: PWild, rest: t} else if isctor(h.text) then patcons(h.text, t) else {node: PBind(h.text), rest: t}
+fn patcons(tag, t) = if headtext(t) == "(" then let a = patlist(droponce(t)) in {node: PCons(tag, a.items), rest: a.rest} else {node: PCons(tag, Nil), rest: t}
+fn patlist(ts) = if headtext(ts) == ")" then {items: Nil, rest: droponce(ts)} else patmore(parsepat(ts))
+fn patmore(r) = if headtext(r.rest) == "," then let rr = patlist(droponce(r.rest)) in {items: Cons(r.node, rr.items), rest: rr.rest} else {items: Cons(r.node, Nil), rest: skiprp(r.rest)}
+
+## --- parser: single statement (Fn, TypeD, Print, ExprS) ---
+fn parseparams(ts) = if headtext(ts) == ")" then {items: Nil, rest: droponce(ts)} else parseparam(headtext(ts), droponce(ts))
+fn parseparam(nm, ts) = if headtext(ts) == ":" then let r = parsetype1(droponce(ts)) in parammore(nm + ": " + r.ty, r.rest) else parammore(nm, ts)
+fn parammore(nm, ts) = if headtext(ts) == "," then let rr = parseparams(droponce(ts)) in {items: Cons(nm, rr.items), rest: rr.rest} else {items: Cons(nm, Nil), rest: skiprp(ts)}
+fn parseret(ts) = if headtext(ts) == "-" and headtext(droponce(ts)) == ">" then let r = parsetype1(droponce(droponce(ts))) in {ret: " -> " + r.ty, rest: r.rest} else {ret: "", rest: ts}
+fn parsefn(t) = let nm = headtext(t) in let ps = parseparams(dropkw(droponce(t), "(")) in let rt = parseret(ps.rest) in let b = expr(dropkw(rt.rest, "=")) in Fn(nm, ps.items, rt.ret, b.node)
+fn parseprint(t) = let e = expr(t) in Print(e.node)
+fn parseone(ts) = if headtext(ts) == "fn" then parsefn(droponce(ts)) else if headtext(ts) == "type" then parsetypedecl(droponce(ts)) else if headtext(ts) == "print" then parseprint(droponce(ts)) else ExprS((expr(ts)).node)
+
+## --- canonical pretty-printer (precedence-aware minimal parens + aligned match arms) ---
+fn opprec(op) = if op == "or" then 1 else if op == "and" then 2 else if op == "==" or op == "!=" or op == "<" or op == ">" or op == "<=" or op == ">=" then 3 else if op == "+" or op == "-" then 4 else if op == "*" or op == "/" or op == "%" then 5 else 6
+fn eprec(e) = match e
+    If(c, t, e2)    => 0
+    LetIn(nm, v, b) => 0
+    Match(sc, arms) => 0
+    Bin(op, l, r)   => opprec(op)
+    Var(nm)         => 7
+    Field(o, nm)    => 7
+    _               => 6
+
+fn fmtpat(p) = match p
+    PWild            => "_"
+    PInt(s)          => s
+    PBind(nm)        => nm
+    PCons(tag, subs) => if isnil(subs) == 1 then tag else tag + "(" + joinsep(fmtpats(subs), ", ") + ")"
+fn fmtpats(xs) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons(fmtpat(h), fmtpats(t))
+
+fn maxpatlen(arms) = match arms
+    Nil        => 0
+    Cons(h, t) => imax(count(fmtpat(h.pat)), maxpatlen(t))
+fn fmtarms(arms, w) = match arms
+    Nil        => Nil
+    Cons(h, t) => Cons("\n    " + padright(fmtpat(h.pat), w) + " => " + fmte(h.body), fmtarms(t, w))
+
+fn isif(e) = match e
+    If(c, t, e2) => 1
+    _            => 0
+fn wrapl(e, p) = if eprec(e) < p then "(" + fmte(e) + ")" else fmte(e)
+fn wrapr(e, p) = if eprec(e) <= p then "(" + fmte(e) + ")" else fmte(e)
+fn wrapf(e) = if eprec(e) < 7 then "(" + fmte(e) + ")" else fmte(e)
+fn wrapthen(e) = if isif(e) == 1 then "(" + fmte(e) + ")" else fmte(e)
+
+fn fmtes(xs) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons(fmte(h), fmtes(t))
+fn fmtrecs(xs) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons(h.key + ": " + fmte(h.val), fmtrecs(t))
+
+fn fmte(e) = match e
+    Num(s)          => s
+    Str(s)          => s
+    Var(nm)         => nm
+    Bin(op, l, r)   => let p = opprec(op) in wrapl(l, p) + " " + op + " " + wrapr(r, p)
+    If(c, t, e2)    => "if " + wrapthen(c) + " then " + wrapthen(t) + " else " + fmte(e2)
+    LetIn(nm, v, b) => "let " + nm + " = " + fmte(v) + " in " + fmte(b)
+    Call(nm, args)  => if isctor(nm) and isnil(args) == 1 then nm else nm + "(" + joinsep(fmtes(args), ", ") + ")"
+    CT(inner)       => "comptime(" + fmte(inner) + ")"
+    Rec(items)      => "{" + joinsep(fmtrecs(items), ", ") + "}"
+    RecT(nm, items) => nm + "{" + joinsep(fmtrecs(items), ", ") + "}"
+    Field(o, nm)    => wrapf(o) + "." + nm
+    Match(sc, arms) => "match " + fmte(sc) + joinall(fmtarms(arms, maxpatlen(arms)))
+    _               => "0"
+
+fn fmtstmt(s) = match s
+    Fn(nm, ps, rt, body) => "fn " + nm + "(" + joinsep(ps, ", ") + ")" + rt + " = " + fmte(body)
+    TypeD(line)          => line
+    Print(v)             => "print " + fmte(v)
+    ExprS(v)             => fmte(v)
+    _                    => ""
+fn fmtchunk(src) = fmtstmt(parseone(lexall(src)))
+
+## --- line grouping: group continuation lines (indented lines or unindented match arms) with statement ---
+fn isarmline(tr) = if tr == "" or startswith(tr, "#") or startswith(tr, "fn ") or startswith(tr, "type ") or startswith(tr, "print ") then 0 else isarrow((parsepat(lexall(tr))).rest)
+fn iscont(raw, tr) = if tr == "" or startswith(tr, "#") then 0 else if isindented(raw) then 1 else isarmline(tr)
+
+fn takecont(lines) = match lines
+    Nil        => {cont: Nil, rest: Nil}
+    Cons(h, t) => let raw = rtrim(h) in takecont1(raw, ltrim(raw), h, t)
+fn takecont1(raw, tr, h, t) = if iscont(raw, tr) == 1 then let r = takecont(t) in {cont: Cons(raw, r.cont), rest: r.rest} else {cont: Nil, rest: Cons(h, t)}
+
+fn skipempty(lines) = match lines
+    Nil        => Nil
+    Cons(h, t) => let raw = rtrim(h) in if ltrim(raw) == "" then skipempty(t) else Cons(raw, t)
+
+fn fmtlines(lines) = match lines
+    Nil        => Nil
+    Cons(h, t) => let raw = rtrim(h) in fmtline1(raw, ltrim(raw), t)
+fn fmtline1(raw, tr, t) = if tr == "" then let t2 = skipempty(t) in if isnil(t2) == 1 then Nil else Cons("", fmtlines(t2)) else if startswith(tr, "#") then Cons(raw, fmtlines(t)) else let c = takecont(t) in Cons(fmtchunk(joinsep(Cons(raw, c.cont), "\n")), fmtlines(c.rest))
+
+print joinsep(fmtlines(skipempty(splitlines(readall()))), "\n")

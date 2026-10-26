@@ -254,13 +254,18 @@ cmd_fmt() {
             exit 66
         fi
         _tmpfmt=$(mktemp)
-        if [ -f "$SRC_DIR/lfmt.src" ]; then
-            run_core_tool lfmt "$_file" > "$_tmpfmt"
-        else
-            # Canonical whitespace normalisation: strip CR and trailing spaces/tabs, collapse
-            # runs of 2+ blank lines to a single blank line, ensure a single trailing LF.
-            awk '{ sub(/[ \t\r]+$/, ""); if ($0 == "") { b++; if (b <= 1) print "" } else { b = 0; print $0 } }' "$_file" > "$_tmpfmt"
-        fi
+        case "$_file" in
+            *.src)
+                if [ -f "$SRC_DIR/lfmt.src" ]; then
+                    run_core_tool lfmt "$_file" > "$_tmpfmt"
+                else
+                    awk '{ sub(/[ \t\r]+$/, ""); if ($0 == "") { b++; if (b <= 1) print "" } else { b = 0; print $0 } }' "$_file" > "$_tmpfmt"
+                fi
+                ;;
+            *)
+                awk '{ sub(/[ \t\r]+$/, ""); if ($0 == "") { b++; if (b <= 1) print "" } else { b = 0; print $0 } }' "$_file" > "$_tmpfmt"
+                ;;
+        esac
         if [ "$_stdout" -eq 1 ]; then
             cat "$_tmpfmt"
         elif [ "$_check" -eq 1 ]; then
