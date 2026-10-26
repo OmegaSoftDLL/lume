@@ -26,9 +26,19 @@ getting stuck), one green PR with a regression test, and the **self-host fixpoin
   (anonymous `{...}` records are never checked — no false positives, and ad-hoc helper records stay legal). The checker
   catches the model's typos: undeclared constructor, wrong constructor arity, unknown record field — each a hard error
   with a legible message (exit 3, no asm), the same failure channel comptime uses. Type declarations emit **no code**
-  (compile-time only). NOT yet (deferred): type annotations on `fn` params/returns and arg-type checking (**F2**),
+  (compile-time only). NOT yet (deferred): ~~type annotations on `fn` params/returns and arg-type checking (**F2**)~~ (done in F2, below),
   Hindley–Milner inference so anonymous records/field access are checked without annotation (**F3**). *Ref: ML/Haskell ADTs, Rust `enum`/`struct`, TypeScript gradual typing. Superior: opt-in gradualism with zero false positives + AI-legible errors.*
-- **F2** type annotations on params/returns + a consistency checker (catches the model's mistakes — AI-first). *Ref: TypeScript gradual typing, Rust.*
+- **F2 ✅ done** optional type annotations on `fn` params and return: `fn greet(name: str, n: int) -> str = ...` (`T` is `int`, `str`, a declared
+  name or `[T]`, as in F1; every annotation is optional, so `fn f(x) = ...` is unchanged). The parser keeps `Fn(name, params, body)` byte-for-byte
+  and emits the annotations as a separate compile-time-only `Sig(name, paramnames, paramtypes, rettype)` statement just before an annotated `fn`
+  (none for an unannotated one, so the AST — and the self-host fixpoint — of annotation-free code is untouched; codegen ignores `Sig`). **Gradual
+  argument checking, zero false positives:** at a call `f(args)` only arguments whose type is INEQUIVOCAL without inference are checked — an integer
+  literal is `int`, a string literal `str`, a constructor of a declared enum (its unique owner) that enum, a nominal record literal that record;
+  a variable, a call result or an operator expression is unknown and never flagged. A function whose body is such a literal/constructor is also
+  checked against `-> R`. Errors share the F1 channel (exit 3, no asm), e.g. `type error: argument 1 of 'greet' has type int but parameter 'name'
+  expects str`. Annotations alone (no `type` declaration) enable this checking but not F1's constructor/record declaration checks. Deferred to **F3**:
+  checking arguments/returns whose type needs inference (variables, calls, operators), arity of plain calls, and validating annotation names.
+  *Ref: TypeScript gradual typing, Rust param types. Superior: opt-in, AI-legible errors, zero false positives.*
 - **F3** Hindley–Milner inference in the core: annotations optional but checked. *Ref: OCaml/Haskell.*
 - **F4** unify the two front-ends (surface Lume vs ML-core) into one grammar/AST.
 

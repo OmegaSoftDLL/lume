@@ -309,6 +309,37 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_
     printf 'fn ev(e) = match e\n    Zonk(n) => n\nprint ev(Zonk(7))\n' >"$ntmp/f1g.src"
     "$ntmp/lc" <"$ntmp/f1g.src" >"$ntmp/f1g.s" 2>/dev/null; "$ntmp/lasm" <"$ntmp/f1g.s" >"$ntmp/f1g.elf" 2>/dev/null; chmod +x "$ntmp/f1g.elf"
     if [ -x "$ntmp/f1g.elf" ] && [ "$("$ntmp/f1g.elf" 2>/dev/null)" = "7" ]; then ok "phase-2 F1: gradual -- no type decl => constructors stay free (untyped programs unchanged)"; else bad "phase-2 F1: gradual -- untyped program must still compile free"; fi
+    # phase-2 F2: optional type annotations on params/returns (`fn f(a: int, b: str) -> int`) + GRADUAL argument
+    # checking: only arguments whose type is inequivocal (literal / declared constructor) are checked; unknowns pass.
+    # POSITIVE: annot_ok.src uses annotated and unannotated fns correctly -> compiles and runs (annotations emit no code).
+    "$ntmp/lc" <../../compiler/stage1/annot_ok.src >"$ntmp/ao.s" 2>/dev/null; "$ntmp/lasm" <"$ntmp/ao.s" >"$ntmp/ao.elf" 2>/dev/null; chmod +x "$ntmp/ao.elf"
+    if [ -x "$ntmp/ao.elf" ] && "$ntmp/ao.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/annot_ok_asm.expected - >/dev/null; then ok "phase-2 F2: annotated fns compile + run (native, no C)"; else bad "phase-2 F2: annotated fns compile + run (native, no C)"; fi
+    # NEGATIVE 1: an int literal passed to a `str` parameter.
+    printf 'fn greet(name: str) -> str = name\nprint greet(42)\n' >"$ntmp/f2a.src"
+    "$ntmp/lc" <"$ntmp/f2a.src" >"$ntmp/f2a.s" 2>"$ntmp/f2a.err"; f2a=$?
+    if [ "$f2a" = 3 ] && [ ! -s "$ntmp/f2a.s" ] && grep -q "type error: argument 1 of 'greet' has type int but parameter 'name' expects str" "$ntmp/f2a.err"; then ok "phase-2 F2: int literal for a str parameter is a clear type error"; else bad "phase-2 F2: int literal for a str parameter is a clear type error"; fi
+    # NEGATIVE 2: a str literal passed to an `int` parameter (second argument).
+    printf 'fn add(a: int, b: int) -> int = a + b\nprint add(1, "x")\n' >"$ntmp/f2b.src"
+    "$ntmp/lc" <"$ntmp/f2b.src" >"$ntmp/f2b.s" 2>"$ntmp/f2b.err"; f2b=$?
+    if [ "$f2b" = 3 ] && [ ! -s "$ntmp/f2b.s" ] && grep -q "argument 2 of 'add' has type str but parameter 'b' expects int" "$ntmp/f2b.err"; then ok "phase-2 F2: str literal for an int parameter is a clear type error"; else bad "phase-2 F2: str literal for an int parameter is a clear type error"; fi
+    # NEGATIVE 3: a constructor of one enum passed to a parameter annotated with another enum.
+    printf 'type A = enum X | Y\ntype B = enum P | Q\nfn f(a: A) = 1\nprint f(P)\n' >"$ntmp/f2c.src"
+    "$ntmp/lc" <"$ntmp/f2c.src" >"$ntmp/f2c.s" 2>"$ntmp/f2c.err"; f2c=$?
+    if [ "$f2c" = 3 ] && [ ! -s "$ntmp/f2c.s" ] && grep -q "argument 1 of 'f' has type B but parameter 'a' expects A" "$ntmp/f2c.err"; then ok "phase-2 F2: constructor of the wrong enum is a clear type error"; else bad "phase-2 F2: constructor of the wrong enum is a clear type error"; fi
+    # NEGATIVE 4: a literal function body that contradicts `-> R`.
+    printf 'fn f() -> str = 5\nprint f()\n' >"$ntmp/f2d.src"
+    "$ntmp/lc" <"$ntmp/f2d.src" >"$ntmp/f2d.s" 2>"$ntmp/f2d.err"; f2d=$?
+    if [ "$f2d" = 3 ] && [ ! -s "$ntmp/f2d.s" ] && grep -q "function 'f' returns int but is declared to return str" "$ntmp/f2d.err"; then ok "phase-2 F2: literal body contradicting -> R is a clear type error"; else bad "phase-2 F2: literal body contradicting -> R is a clear type error"; fi
+    # GRADUAL (zero false positive): variables / fn-call results / operator expressions as arguments are NOT
+    # checked (F3 inference), and annotations alone do not turn on the F1 constructor checks (Zonk stays free).
+    printf 'fn f(a: int, b: str) = b\nfn g(z) = z\nprint f(g(1), g("s"))\nprint f(1 + 2, "q")\nfn h(k: int) = match k\n    Zonk(n) => n\nprint 0\n' >"$ntmp/f2e.src"
+    "$ntmp/lc" <"$ntmp/f2e.src" >"$ntmp/f2e.s" 2>"$ntmp/f2e.err"; f2e=$?
+    if [ "$f2e" = 0 ] && [ -s "$ntmp/f2e.s" ] && [ ! -s "$ntmp/f2e.err" ]; then ok "phase-2 F2: gradual -- unknown-typed arguments and annotation-only programs are never flagged"; else bad "phase-2 F2: gradual -- unknown-typed arguments are never flagged"; fi
+    # BACKWARD-COMPAT: unannotated sources compile to the same behaviour through the F2 compiler.
+    for prog in ev nfib; do
+        "$ntmp/lc" <../../compiler/stage1/$prog.src >"$ntmp/f2_$prog.s" 2>/dev/null; "$ntmp/lasm" <"$ntmp/f2_$prog.s" >"$ntmp/f2_$prog.elf" 2>/dev/null; chmod +x "$ntmp/f2_$prog.elf"
+        if [ -x "$ntmp/f2_$prog.elf" ] && "$ntmp/f2_$prog.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/${prog}_asm.expected - >/dev/null; then ok "phase-2 F2: backward-compat -- unannotated $prog.src unchanged"; else bad "phase-2 F2: backward-compat -- unannotated $prog.src unchanged"; fi
+    done
     rm -rf "$ntmp"
 else
     ok "no-toolchain ELF pipeline (skipped: not linux/x86_64, or under ASan)"

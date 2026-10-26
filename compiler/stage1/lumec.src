@@ -214,16 +214,39 @@ fn cfoldearms(xs, ft) = match xs
 ## `fn`/`print` are dispatched by keyword; anything else begins an expression statement. The program is a
 ## sequence of statements up to end of input (the `Nil` arm stops the recursion). Each top-level `<expr>` must
 ## consume at least one token (prim always advances on a non-empty stream), so progmore cannot loop forever.
-fn parseparams(ts) = if headtext(ts) == ")" then {items: Nil, rest: droponce(ts)} else parammore(headtext(ts), droponce(ts))
-fn parammore(nm, ts) = if headtext(ts) == "," then let rr = parseparams(droponce(ts)) in {items: Cons(nm, rr.items), rest: rr.rest} else {items: Cons(nm, Nil), rest: skiprp(ts)}
-fn parsefn(t) = let nm = headtext(t) in let ps = parseparams(dropkw(droponce(t), "(")) in let b = expr(dropkw(ps.rest, "=")) in {node: Fn(nm, ps.items, b.node), rest: b.rest}
+## F2: a parameter may carry an optional annotation `name: T` and the signature an optional `-> R` (T as in F1:
+## `int`, `str`, a declared name, `[T]`). `items` are the bare names (so `Fn(nm, ps, body)` is UNCHANGED and the
+## codegen never sees a type); `tys` is the parallel list of annotations, `TyAny` where a parameter has none.
+fn parseparams(ts) = if headtext(ts) == ")" then {items: Nil, tys: Nil, rest: droponce(ts)} else parseparam(headtext(ts), droponce(ts))
+fn parseparam(nm, ts) = if headtext(ts) == ":" then parseparamt(nm, parsetype1(droponce(ts))) else parammore(nm, TyAny, ts)
+fn parseparamt(nm, r) = parammore(nm, r.node, r.rest)
+fn parammore(nm, ty, ts) = if headtext(ts) == "," then let rr = parseparams(droponce(ts)) in {items: Cons(nm, rr.items), tys: Cons(ty, rr.tys), rest: rr.rest} else {items: Cons(nm, Nil), tys: Cons(ty, Nil), rest: skiprp(ts)}
+fn parseret(ts) = if headtext(ts) == "-" and headtext(droponce(ts)) == ">" then parseret2(parsetype1(droponce(droponce(ts)))) else {ty: TyAny, rest: ts}
+fn parseret2(r) = {ty: r.node, rest: r.rest}
+## `sg` is the annotation record of the function: `Nil` when nothing is annotated (the AST is then exactly the
+## pre-F2 one), else a `Sig(name, paramnames, paramtypes, rettype)` that parseprog places just before the `Fn`.
+fn parsefn(t) = parsefn2(headtext(t), parseparams(dropkw(droponce(t), "(")))
+fn parsefn2(nm, ps) = parsefn3(nm, ps, parseret(ps.rest))
+fn parsefn3(nm, ps, rt) = parsefn4(nm, ps, rt, expr(dropkw(rt.rest, "=")))
+fn parsefn4(nm, ps, rt, b) = {node: Fn(nm, ps.items, b.node), sg: mksig(nm, ps, rt.ty), rest: b.rest}
+fn isany(t) = match t
+    TyAny => 1
+    _     => 0
+fn anyann(tys) = match tys
+    Nil        => 0
+    Cons(h, t) => if isany(h) == 0 then 1 else anyann(t)
+fn mksig(nm, ps, rty) = if anyann(ps.tys) == 1 or isany(rty) == 0 then Sig(nm, ps.items, ps.tys, rty) else Nil
 fn parseprint(t) = let e = expr(t) in {node: Print(e.node), rest: e.rest}
 fn parsestmt(ts) = if headtext(ts) == "fn" then parsefn(droponce(ts)) else if headtext(ts) == "type" then parsetype(droponce(ts)) else parseprint(droponce(ts))
 fn progmore(r) = Cons(r.node, parseprog(r.rest))
+fn progfn(r) = progsig(r.sg, Cons(r.node, parseprog(r.rest)))
+fn progsig(sg, rest) = match sg
+    Nil              => rest
+    Sig(nm, ps, ts, rt) => Cons(sg, rest)
 fn lexprstmt(e) = {node: ExprS(e.node), rest: e.rest}
 fn parseprog(ts) = match ts
     Nil        => Nil
-    Cons(h, t) => if h.text == "fn" or h.text == "print" or h.text == "type" then progmore(parsestmt(ts)) else progmore(lexprstmt(expr(ts)))
+    Cons(h, t) => if h.text == "fn" then progfn(parsefn(droponce(ts))) else if h.text == "print" or h.text == "type" then progmore(parsestmt(ts)) else progmore(lexprstmt(expr(ts)))
 fn parseprogram(s) = parseprog(lex(s, 0))
 
 ## --- parser: named type declarations (F1) -----------------------------------------------------------------
@@ -237,7 +260,7 @@ fn parseprogram(s) = parseprog(lex(s, 0))
 ## (`fn` / `print` / `type` / an expression). A declaration lowers to a `TypeS(name, kind, items)` statement that
 ## emits NO code (compile-time information only); `kind` is "enum" (items are `{tag, ar}`) or "record" (items are
 ## `{fname, fty}`). The `enum` keyword is optional (so `type T = A | B` is accepted); anything that is not
-## `record` is parsed as an enum. Type expressions are kept (`TyName`/`TyList`) for F2/F3; F1 uses only the arity.
+## `record` is parsed as an enum. Type expressions are kept (`TyName`/`TyList`); F2 checks them against call arguments.
 fn parsetype(t) = parsetypebody(headtext(t), dropkw(droponce(t), "="))
 fn parsetypebody(nm, t) = if headtext(t) == "record" then parserecordty(nm, droponce(t)) else parseenumty(nm, dropkw(t, "enum"))
 fn parseenumty(nm, t) = parseenumty2(nm, parsevariants(t))
@@ -505,7 +528,22 @@ fn runtime_tail() = "alloc:\n    movq heap_cur(%rip), %rax\n    movq %rax, %r10\
 ## `{...}` are NEVER checked (they have no declared type without inference, which is F3), so opting in to types
 ## does not forbid ad-hoc helper records. tcheck returns the program UNCHANGED on success and aborts via `ctfail`
 ## (clear message to stderr, exit 3, no asm) on the first error -- the same failure channel comptime already uses.
-fn tcheck(prog) = if tanydecl(prog) == 0 then prog else tcheckforce(prog, tcollect(prog))
+##
+## F2 (gradual argument checking): `fn f(a: T1, b: T2) -> R = ...` annotations are optional. A call `f(args)` of an
+## annotated function checks ONLY the arguments whose type is INEQUIVOCAL without inference: an integer literal is
+## `int`, a string literal is `str`, a constructor of a declared enum (its UNIQUE owner) is that enum, a nominal
+## record literal of a declared record is that record. A variable, a call of a function, an operator expression --
+## anything not known -- is NEVER flagged (that is F3 inference). An unannotated parameter accepts anything. The
+## same rule checks a function body that is a bare literal/constructor against its `-> R`. Annotations alone
+## (no `type` declaration) enable argument checking but NOT the F1 constructor/record declaration checks, so a
+## program that only annotates `int`/`str` never gets a false "constructor not declared".
+fn tcheck(prog) = if tanydecl(prog) == 0 and tanysig(prog) == 0 then prog else tcheckforce(prog, tcollect(prog))
+fn tanysig(prog) = match prog
+    Nil        => 0
+    Cons(h, t) => tanysig2(h, t)
+fn tanysig2(h, t) = match h
+    Sig(nm, ps, ts, rt) => 1
+    _                   => tanysig(t)
 fn tcheckforce(prog, tt) = tforced(tchkstmts(prog, tt), prog)
 fn tforced(chk, prog) = prog
 fn tanydecl(prog) = match prog
@@ -515,12 +553,21 @@ fn tanydecl2(h, t) = match h
     TypeS(nm, k, items) => 1
     _                   => tanydecl(t)
 ## the type table {ctors, recs}: ctors is a flat list of {tag, ar} from every enum, recs a list of {rname, fields}
-fn tcollect(prog) = {ctors: tcollectc(prog), recs: tcollectr(prog)}
+fn tcollect(prog) = {ctors: tcollectc(prog), recs: tcollectr(prog), sigs: tcollects(prog), decl: tanydecl(prog)}
+fn tcollects(prog) = match prog
+    Nil        => Nil
+    Cons(h, t) => tcollects2(h, t)
+fn tcollects2(h, t) = match h
+    Sig(nm, ps, ts, rt) => Cons({fname: nm, pn: ps, pt: ts, rt: rt}, tcollects(t))
+    _                   => tcollects(t)
+fn townerize(nm, items) = match items
+    Nil        => Nil
+    Cons(h, t) => Cons({tag: h.tag, ar: h.ar, en: nm}, townerize(nm, t))
 fn tcollectc(prog) = match prog
     Nil        => Nil
     Cons(h, t) => tcollectc2(h, t)
 fn tcollectc2(h, t) = match h
-    TypeS(nm, k, items) => if k == "enum" then app(items, tcollectc(t)) else tcollectc(t)
+    TypeS(nm, k, items) => if k == "enum" then app(townerize(nm, items), tcollectc(t)) else tcollectc(t)
     _                   => tcollectc(t)
 fn tcollectr(prog) = match prog
     Nil        => Nil
@@ -533,7 +580,7 @@ fn tchkstmts(prog, tt) = match prog
     Nil        => 0
     Cons(h, t) => tchkstmt(h, tt) + tchkstmts(t, tt)
 fn tchkstmt(s0, tt) = match s0
-    Fn(nm, ps, body) => tchke(body, tt)
+    Fn(nm, ps, body) => tchke(body, tt) + tchkret(nm, body, tsiglookup(nm, tt.sigs), tt)
     Print(v)         => tchke(v, tt)
     ExprS(v)         => tchke(v, tt)
     _                => 0
@@ -566,18 +613,18 @@ fn tchkpatl(xs, tt) = match xs
     Cons(h, t) => tchkpat(h, tt) + tchkpatl(t, tt)
 ## a capitalised name is a constructor use; check it is declared and its arity matches
 fn tchkvar(nm, tt) = if isctor(nm) then tchkctor(nm, 0, tt) else 0
-fn tchkcall(nm, args, tt) = if isctor(nm) then tchkctor(nm, len(args), tt) else 0
-fn tchkctor(tag, ar, tt) = tchkctor2(tag, ar, tctorlookup(tag, tt.ctors))
-fn tchkctor2(tag, ar, m) = match m
-    Nil        => ctfail("lume: type error: constructor '" + tag + "' is not declared in any enum type (add it to a `type ... = enum ...` declaration)\n")
+fn tchkcall(nm, args, tt) = if isctor(nm) then tchkctor(nm, len(args), tt) else tchksig(nm, args, tsiglookup(nm, tt.sigs), tt)
+fn tchkctor(tag, ar, tt) = tchkctor2(tag, ar, tctorlookup(tag, tt.ctors), tt.decl)
+fn tchkctor2(tag, ar, m, dc) = match m
+    Nil        => if dc == 1 then ctfail("lume: type error: constructor '" + tag + "' is not declared in any enum type (add it to a `type ... = enum ...` declaration)\n") else 0
     Cons(v, r) => if v.ar == ar then 1 else ctfail("lume: type error: constructor '" + tag + "' expects " + str(v.ar) + " argument(s) but got " + str(ar) + "\n")
 fn tctorlookup(tag, cs) = match cs
     Nil        => Nil
     Cons(h, t) => if h.tag == tag then Cons(h, Nil) else tctorlookup(tag, t)
 ## a nominal record literal T{...}: T must be a declared record type and every key must be one of its fields
-fn tchkrect(tn, items, tt) = tchkrect2(tn, items, trecptypelookup(tn, tt.recs))
-fn tchkrect2(tn, items, m) = match m
-    Nil        => ctfail("lume: type error: record type '" + tn + "' is not declared (declare it with `type " + tn + " = record ...`)\n")
+fn tchkrect(tn, items, tt) = tchkrect2(tn, items, trecptypelookup(tn, tt.recs), tt.decl)
+fn tchkrect2(tn, items, m, dc) = match m
+    Nil        => if dc == 1 then ctfail("lume: type error: record type '" + tn + "' is not declared (declare it with `type " + tn + " = record ...`)\n") else 0
     Cons(rd, r) => tchkfields(tn, items, rd.fields)
 fn trecptypelookup(tn, rs) = match rs
     Nil        => Nil
@@ -589,6 +636,67 @@ fn tchkfield(tn, key, fields) = if tfieldhas(fields, key) == 1 then 1 else ctfai
 fn tfieldhas(fields, key) = match fields
     Nil        => 0
     Cons(f, r) => if f.fname == key then 1 else tfieldhas(r, key)
+
+## --- F2: signatures, the type an expression is KNOWN to have, and the argument/return checks ---
+fn tsiglookup(nm, ss) = match ss
+    Nil        => Nil
+    Cons(h, t) => if h.fname == nm then Cons(h, Nil) else tsiglookup(nm, t)
+fn tctorcnt(tag, cs) = match cs
+    Nil        => 0
+    Cons(h, t) => (if h.tag == tag then 1 else 0) + tctorcnt(tag, t)
+## tknown: TyName/TyList when the type is certain WITHOUT inference, else TyAny (= unknown, never an error)
+fn tknown(e, tt) = match e
+    Num(n)        => TyName("int")
+    Str(s)        => TyName("str")
+    Var(nm)       => tknownctor(nm, tt)
+    Call(nm, xs)  => tknownctor(nm, tt)
+    RecT(tn, its) => tknownrec(tn, trecptypelookup(tn, tt.recs))
+    _             => TyAny
+fn tknownctor(nm, tt) = if isctor(nm) then tknownctor2(tctorlookup(nm, tt.ctors), tctorcnt(nm, tt.ctors)) else TyAny
+fn tknownctor2(m, n) = if n != 1 then TyAny else tknownctor3(m)
+fn tknownctor3(m) = match m
+    Nil        => TyAny
+    Cons(v, r) => TyName(v.en)
+fn tknownrec(tn, m) = match m
+    Nil        => TyAny
+    Cons(rd, r) => TyName(tn)
+fn tystr(t) = match t
+    TyName(n) => n
+    TyList(e) => "[" + tystr(e) + "]"
+    _         => "?"
+## tcompat(expected, known): 1 unless both are known and differ
+fn tcompat(ex, k) = match ex
+    TyAny     => 1
+    TyName(n) => tcompatn(n, k)
+    TyList(e) => tcompatl(e, k)
+fn tcompatn(n, k) = match k
+    TyAny     => 1
+    TyName(m) => if n == m then 1 else 0
+    TyList(e) => 0
+fn tcompatl(e, k) = match k
+    TyAny     => 1
+    TyName(m) => 0
+    TyList(e2) => tcompat(e, e2)
+fn tchksig(nm, args, m, tt) = match m
+    Nil        => 0
+    Cons(sg, r) => tchkargs(nm, 1, args, sg.pn, sg.pt, tt)
+fn phd(xs) = match xs
+    Nil        => ""
+    Cons(h, t) => h
+fn ptl(xs) = match xs
+    Nil        => Nil
+    Cons(h, t) => t
+fn tchkargs(nm, i, args, pns, pts, tt) = match args
+    Nil        => 0
+    Cons(a, rest) => tchkargs2(nm, i, a, rest, pns, pts, tt)
+fn tchkargs2(nm, i, a, rest, pns, pts, tt) = match pts
+    Nil        => 0
+    Cons(ty, pr) => tchkarg(nm, i, phd(pns), ty, tknown(a, tt)) + tchkargs(nm, i + 1, rest, ptl(pns), pr, tt)
+fn tchkarg(nm, i, pn, ty, k) = if tcompat(ty, k) == 1 then 1 else ctfail("lume: type error: argument " + str(i) + " of '" + nm + "' has type " + tystr(k) + " but parameter '" + pn + "' expects " + tystr(ty) + "\n")
+fn tchkret(nm, body, m, tt) = match m
+    Nil        => 0
+    Cons(sg, r) => tchkret2(nm, sg.rt, tknown(body, tt))
+fn tchkret2(nm, rt, k) = if tcompat(rt, k) == 1 then 1 else ctfail("lume: type error: function '" + nm + "' returns " + tystr(k) + " but is declared to return " + tystr(rt) + "\n")
 
 ## --- driver: read the whole source from stdin, check it, and compile it ---
 print lgen(cfold(tcheck(parseprogram(readall()))))
