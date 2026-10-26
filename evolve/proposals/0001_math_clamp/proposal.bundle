@@ -1,0 +1,25 @@
+@proposal 0001_math_clamp
+@goal Add bounded clamp(x, lo, hi) helper to math module
+@principles P1,P7,P30,P31
+@capability pure
+@max_asm_lines 120
+@approval none
+@baseline
+fn add(a: int, b: int) -> int = a + b
+fn scale(x: int, k: int) -> int = x * k
+@end
+@candidate
+fn add(a: int, b: int) -> int = a + b
+fn scale(x: int, k: int) -> int = x * k
+fn clamp(x: int, lo: int, hi: int) -> int = if x < lo then lo else if x > hi then hi else x
+@end
+@tests
+print clamp(3, 10, 20)
+print clamp(25, 10, 20)
+print clamp(15, 10, 20)
+@end
+@expected
+10
+20
+15
+@end

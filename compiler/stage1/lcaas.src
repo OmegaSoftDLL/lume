@@ -29,9 +29,19 @@ fn cs_revacc(xs, acc) = match xs
     Nil        => acc
     Cons(h, t) => cs_revacc(t, Cons(h, acc))
 fn cs_rev(xs) = cs_revacc(xs, Nil)
-fn cs_joinsep(xs, sep) = match xs
+fn cs_pairs(xs) = match xs
+    Nil        => Nil
+    Cons(a, t) => cs_pairs2(a, t)
+fn cs_pairs2(a, t) = match t
+    Nil        => Cons(a, Nil)
+    Cons(b, r) => Cons(a + b, cs_pairs(r))
+fn cs_joinall(xs) = match xs
     Nil        => ""
-    Cons(h, t) => if cs_isnil(t) == 1 then h else h + sep + cs_joinsep(t, sep)
+    Cons(a, t) => if cs_isnil(t) == 1 then a else cs_joinall(cs_pairs(xs))
+fn cs_addsep(xs, sep) = match xs
+    Nil        => Nil
+    Cons(h, t) => if cs_isnil(t) == 1 then Cons(h, Nil) else Cons(h + sep, cs_addsep(t, sep))
+fn cs_joinsep(xs, sep) = cs_joinall(cs_addsep(xs, sep))
 fn cs_rtrimnl(s, e) = if e <= 0 then 0 else if at(s, e - 1) == "\n" or at(s, e - 1) == "\r" or at(s, e - 1) == " " then cs_rtrimnl(s, e - 1) else e
 fn cs_chomp(s) = slice(s, 0, cs_rtrimnl(s, count(s)))
 fn cs_startswith(s, p) = if count(s) < count(p) then 0 else slice(s, 0, count(p)) == p

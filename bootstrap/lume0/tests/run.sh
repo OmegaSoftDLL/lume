@@ -585,6 +585,23 @@ PY
     printf 'type Color = enum Red | Green\ntype Shape = enum Box | Line\nfn needc(c: Color) -> int = 1\nfn bad(s: Shape) -> int = needc(s)\nprint 0\n' >"$ntmp/f3nom.src"
     "$ntmp/lc" <"$ntmp/f3nom.src" >"$ntmp/f3nom.s" 2>"$ntmp/f3nom.err"; f3nom=$?
     if [ "$f3nom" = 3 ] && [ ! -s "$ntmp/f3nom.s" ] && grep -q "argument 1 of 'needc' has type Shape but parameter 'c' expects Color" "$ntmp/f3nom.err"; then ok "phase-2 F3: a variable of the wrong declared type passed as an argument fails at compile time (exit 3, no asm)"; else bad "phase-2 F3: nominal argument mismatch fails"; fi
+    # phase-2 E3: `lume evolve` self-evolution & governance loop (`use levolve`: AI repair via `lcaas` fix-its,
+    # 6 automated gates `compile`/`conformance`/`api_compat`/`capability`/`budget`/`fixpoint`, and mandatory human approval).
+    if LUME_BIN_DIR="$ntmp" ../../lume run ../../compiler/stage1/evolve_demo.src >"$ntmp/ev_demo.out" 2>"$ntmp/ev_demo.err" && diff -u ../../tests/conformance/stage1/evolve_demo_asm.expected "$ntmp/ev_demo.out" >/dev/null; then ok "phase-2 E3: in-process self-evolution & governance engine (use levolve: AI fix-it repair + 6 gates + human approval)"; else bad "phase-2 E3: in-process self-evolution & governance engine (use levolve)"; cat "$ntmp/ev_demo.err" "$ntmp/ev_demo.out"; fi
+    if command -v python3 >/dev/null 2>&1; then
+        LUME_BIN_DIR="$ntmp" ../../lume evolve verify ../../evolve/proposals/0001_math_clamp >"$ntmp/ev_verify.json" 2>"$ntmp/ev_v.err" || true
+        LUME_BIN_DIR="$ntmp" ../../lume evolve approve ../../evolve/proposals/0001_math_clamp --by ricardo >"$ntmp/ev_approve.json" 2>"$ntmp/ev_a.err" || true
+        if python3 - "$ntmp/ev_verify.json" "$ntmp/ev_approve.json" <<'PY' >/dev/null 2>&1
+import json, sys
+v = json.load(open(sys.argv[1]))
+a = json.load(open(sys.argv[2]))
+assert v["id"] == "0001_math_clamp" and v["gates_ok"] is True and v["gates_passed"] == 6 and v["gates_total"] == 6
+assert v["status"] == "verified_awaiting_human_approval" and v["human_approved"] is False and v["can_merge"] is False
+assert a["gates_ok"] is True and a["status"] == "approved_ready_to_apply" and a["human_approved"] is True
+assert a["approver"] == "ricardo" and a["can_merge"] is True
+PY
+        then ok "phase-2 E3: lume evolve verify/approve enforces 6 automated gates and human maintainer approval"; else bad "phase-2 E3: lume evolve CLI verify/approve JSON governance"; cat "$ntmp/ev_v.err" "$ntmp/ev_verify.json" "$ntmp/ev_a.err" "$ntmp/ev_approve.json"; fi
+    fi
     rm -rf "$ntmp"
 else
     ok "no-toolchain ELF pipeline (skipped: not linux/x86_64, or under ASan)"

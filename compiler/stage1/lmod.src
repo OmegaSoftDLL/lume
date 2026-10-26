@@ -50,9 +50,10 @@ fn pairs2(a, t) = match t
 fn joinall(xs) = match xs
     Nil        => ""
     Cons(a, t) => if isnil(t) == 1 then a else joinall(pairs(xs))
-fn joinsep(xs, sep) = match xs
-    Nil        => ""
-    Cons(h, t) => if isnil(t) == 1 then h else h + sep + joinsep(t, sep)
+fn addsep(xs, sep) = match xs
+    Nil        => Nil
+    Cons(h, t) => if isnil(t) == 1 then Cons(h, Nil) else Cons(h + sep, addsep(t, sep))
+fn joinsep(xs, sep) = joinall(addsep(xs, sep))
 
 fn splitlinesn(s, n, i) = if i >= n then Nil else let e = nlpos(s, n, i) in Cons(slicen(s, n, i, e), splitlinesn(s, n, if e >= n then e else e + 1))
 fn splitlines(s) = splitlinesn(s, count(s), 0)

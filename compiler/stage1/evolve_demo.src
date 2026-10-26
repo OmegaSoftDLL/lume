@@ -1,0 +1,44 @@
+## evolve_demo.src -- In-process self-evolution & governance loop test (`use levolve`, Track E / E3).
+## Verifies:
+##   1. Valid additive proposal passes all 6 automated gates (`compile`, `conformance`, `api_compat`,
+##      `capability`, `budget`, `fixpoint`), waiting for human approval (`can_merge == 0`).
+##   2. Human maintainer approval transitions a verified proposal to `approved_ready_to_apply` (`can_merge == 1`).
+##   3. AI self-repair loop (`write -> compile -> read fixit -> repair -> re-verify`) repairs both
+##      constructor (`T1001`) and record field (`T1003`) typos automatically via `lcaas` and passes all 6 gates.
+##   4. Breaking public API signatures (`api_compat`) and P26 capability violations (`capability`) are
+##      rejected by the automated gates even if human approval is present (`can_merge == 0`).
+
+use levolve
+
+fn show_gate(g) = g.name + "=" + (if g.ok == 1 then "ok" else "FAIL(" + g.detail + ")")
+fn show_gates(gs) = match gs
+    Nil        => ""
+    Cons(h, t) => if cs_isnil(t) == 1 then show_gate(h) else show_gate(h) + ", " + show_gates(t)
+
+fn show_eval(r) = r.id + ": status=" + r.status + " gates=" + str(r.gates_passed) + "/" + str(r.gates_total) + " repairs=" + str(r.repairs_applied) + " approved=" + str(r.human_approved) + " can_merge=" + str(r.can_merge)
+
+fn fmt_eval(r) = show_eval(r) + "\n" + show_gates(r.gates)
+fn fmt_approved(r) = show_eval(r) + "\napprover=" + r.approver + " output=" + cs_joinsep(ev_lines(r.test_output, 0, count(r.test_output)), ",")
+
+fn base_math() = "fn add(a: int, b: int) -> int = a + b\nfn scale(x: int, k: int) -> int = x * k\n"
+fn cand_math() = "fn add(a: int, b: int) -> int = a + b\nfn scale(x: int, k: int) -> int = x * k\nfn clamp(x: int, lo: int, hi: int) -> int = if x < lo then lo else if x > hi then hi else x\n"
+fn test_math() = "print clamp(3, 10, 20)\nprint clamp(25, 10, 20)\nprint clamp(15, 10, 20)\n"
+
+fn prop_1() = {id: "0001_clamp", goal: "Add bounded clamp helper", principles: "P1,P7,P30", capability: "pure", max_asm_lines: 120, baseline: base_math(), candidate: cand_math(), tests: test_math(), expected: "10\n20\n15", approval: "none"}
+fn prop_2() = {id: "0001_clamp", goal: "Add bounded clamp helper", principles: "P1,P7,P30", capability: "pure", max_asm_lines: 120, baseline: base_math(), candidate: cand_math(), tests: test_math(), expected: "10\n20\n15", approval: "approved:ricardo"}
+
+fn base_geom() = "type Val = enum Lit(int)\ntype Point = record x: int, y: int\n"
+fn cand_buggy() = "type Val = enum Lit(int)\ntype Point = record x: int, y: int\nfn eval_val(v) = match v\n    Lit(n) => n\nfn make_pt() -> Point = Point{z: 10, y: 5}\nfn total() -> int = eval_val(Litt(42)) + 10\n"
+fn prop_3() = {id: "0002_auto_repair", goal: "Add make_pt and total with AI fix-it repair", principles: "P1,P30,P31", capability: "pure", max_asm_lines: 120, baseline: base_geom(), candidate: cand_buggy(), tests: "print total()\n", expected: "52", approval: "approved:ricardo"}
+
+fn cand_break() = "fn add(a: str, b: str) -> str = a + b\nfn scale(x: int, k: int) -> int = x * k\n"
+fn prop_4() = {id: "0003_breaking_api", goal: "Change add signature", principles: "P1", capability: "pure", max_asm_lines: 120, baseline: base_math(), candidate: cand_break(), tests: "print add(\"a\", \"b\")\n", expected: "ab", approval: "approved:ricardo"}
+
+fn cand_io() = "fn add(a: int, b: int) -> int = a + b\nfn scale(x: int, k: int) -> int = x * k\nfn sneak() -> str = readall()\n"
+fn prop_5() = {id: "0004_cap_violation", goal: "Sneak I/O into pure module", principles: "P26", capability: "pure", max_asm_lines: 120, baseline: base_math(), candidate: cand_io(), tests: "print add(2, 3)\n", expected: "5", approval: "approved:ricardo"}
+
+print fmt_eval(evolve_evaluate(prop_1()))
+print fmt_approved(evolve_evaluate(prop_2()))
+print fmt_eval(evolve_evaluate(prop_3()))
+print fmt_eval(evolve_evaluate(prop_4()))
+print fmt_eval(evolve_evaluate(prop_5()))
