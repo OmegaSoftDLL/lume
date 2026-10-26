@@ -502,6 +502,19 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_
     "$ntmp/lc" <"$ntmp/m2bad1.src" >"$ntmp/m2bad1.s" 2>"$ntmp/m2bad1.err"; m2b1=$?
     "$ntmp/lc" <"$ntmp/m2bad2.src" >"$ntmp/m2bad2.s" 2>"$ntmp/m2bad2.err"; m2b2=$?
     if [ "$m2b1" = 3 ] && [ ! -s "$ntmp/m2bad1.s" ] && grep -q "'unquote' may only appear inside 'quote(...)'" "$ntmp/m2bad1.err" && [ "$m2b2" = 3 ] && [ ! -s "$ntmp/m2bad2.s" ] && grep -q "'unquote' expects exactly 1 argument" "$ntmp/m2bad2.err"; then ok "phase-2 M2: unquote outside quote or with wrong arity fails at compile time (exit 3, no asm)"; else bad "phase-2 M2: unquote outside quote or with wrong arity fails at compile time"; fi
+    # phase-2 C4: `comptime assert` -- a condition evaluated entirely at compile time that leaves no runtime check.
+    "$ntmp/lc" <../../compiler/stage1/comptime_assert.src >"$ntmp/ca.s" 2>"$ntmp/ca.err"; "$ntmp/lasm" <"$ntmp/ca.s" >"$ntmp/ca.elf" 2>/dev/null; chmod +x "$ntmp/ca.elf"
+    ca_ok=1
+    { [ -x "$ntmp/ca.elf" ] && "$ntmp/ca.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/comptime_assert_asm.expected - >/dev/null; } || ca_ok=0
+    # PROOF the passing asserts ran at compile time: the assert's `sq(5)` is folded away, so the only `call sq`
+    # left in the emitted assembly is the one from `print sq(7)`.
+    [ "$(grep -c 'call sq' "$ntmp/ca.s")" = 1 ] || ca_ok=0
+    if [ "$ca_ok" = 1 ]; then ok "phase-2 C4: comptime assert passes at compile time and leaves no runtime check (sq(5) folded)"; else bad "phase-2 C4: comptime assert (passing)"; cat "$ntmp/ca.err"; fi
+    printf 'comptime assert(1 == 2)\nprint 7\n' >"$ntmp/c4bad1.src"
+    printf 'comptime assert(3 > 9, "three is not greater than nine")\nprint 7\n' >"$ntmp/c4bad2.src"
+    "$ntmp/lc" <"$ntmp/c4bad1.src" >"$ntmp/c4bad1.s" 2>"$ntmp/c4bad1.err"; c4b1=$?
+    "$ntmp/lc" <"$ntmp/c4bad2.src" >"$ntmp/c4bad2.s" 2>"$ntmp/c4bad2.err"; c4b2=$?
+    if [ "$c4b1" = 3 ] && [ ! -s "$ntmp/c4bad1.s" ] && grep -q "comptime assertion failed" "$ntmp/c4bad1.err" && [ "$c4b2" = 3 ] && [ ! -s "$ntmp/c4bad2.s" ] && grep -q "comptime assertion failed: three is not greater than nine" "$ntmp/c4bad2.err"; then ok "phase-2 C4: a false comptime assert fails the build (exit 3, no asm) with a clear message"; else bad "phase-2 C4: false comptime assert fails at compile time"; fi
     rm -rf "$ntmp"
 else
     ok "no-toolchain ELF pipeline (skipped: not linux/x86_64, or under ASan)"

@@ -1,0 +1,8 @@
+## C4 regression: `comptime assert` runs its condition entirely at compile time and
+## leaves no check in the binary -- a passing assert folds to a constant. Here two
+## asserts (an arithmetic one and one over a pure user function, with a message)
+## both pass, so the program compiles and prints sq(7) = 49 with no runtime check.
+fn sq(n) = n * n
+comptime assert(2 + 2 == 4)
+comptime assert(sq(5) == 25, "sq(5) must be 25")
+print sq(7)
