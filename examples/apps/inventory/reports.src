@@ -1,0 +1,38 @@
+## reports.src — Deterministic executive, replenishment, invoice settlement, and regional
+## revenue reporting engine (Stage 2 Capstone).
+use decimal
+use table
+use query
+use catalog
+use invoicing
+
+## --- Row formatters for Catalog, Replenishment, Category & Regional Rollups ---
+fn format_catalog_row(products, row: int) -> str = product_sku(products, row) + " | " + product_name(products, row) + " | " + product_category(products, row) + " | $" + decimal_format(product_price(products, row)) + " | qty=" + str(product_on_hand(products, row)) + " | " + status_label(product_status(products, row))
+
+fn format_catalog_rows(products, row: int, n: int) -> str = if row >= n then "" else format_catalog_row(products, row) + (if row + 1 >= n then "" else "\n" + format_catalog_rows(products, row + 1, n))
+
+fn format_replenishment_row(low_tbl, row: int) -> str = let sku = product_sku(low_tbl, row) in let oh = product_on_hand(low_tbl, row) in let rp = product_reorder(low_tbl, row) in sku + " (" + product_name(low_tbl, row) + "): on_hand=" + str(oh) + ", reorder_pt=" + str(rp) + ", order_qty=" + str(restock_order_qty(oh, rp))
+
+fn format_replenishment_rows(low_tbl, row: int, n: int) -> str = if row >= n then "" else format_replenishment_row(low_tbl, row) + (if row + 1 >= n then "" else "\n" + format_replenishment_rows(low_tbl, row + 1, n))
+
+fn format_category_row(cat_tbl, row: int) -> str = cell_str(cat_tbl, row, 0) + ": skus=" + str(cell_int(cat_tbl, row, 1)) + ", units=" + str(cell_int(cat_tbl, row, 2))
+
+fn format_category_rows(cat_tbl, row: int, n: int) -> str = if row >= n then "" else format_category_row(cat_tbl, row) + (if row + 1 >= n then "" else "\n" + format_category_rows(cat_tbl, row + 1, n))
+
+fn format_region_row(reg_tbl, row: int) -> str = cell_str(reg_tbl, row, 0) + ": lines=" + str(cell_int(reg_tbl, row, 1)) + ", gross=$" + decimal_format(cell_dec(reg_tbl, row, 2))
+
+fn format_region_rows(reg_tbl, row: int, n: int) -> str = if row >= n then "" else format_region_row(reg_tbl, row) + (if row + 1 >= n then "" else "\n" + format_region_rows(reg_tbl, row + 1, n))
+
+## --- Customer invoice settlement formatter ---
+fn find_customer_subtotal(cust_rev_tbl, cid: int, row: int, n: int) = if row >= n then decimal_parse("0.00") else if cell_int(cust_rev_tbl, row, 0) == cid then cell_dec(cust_rev_tbl, row, 2) else find_customer_subtotal(cust_rev_tbl, cid, row + 1, n)
+
+fn format_customer_settlement_row(customers, cust_rev_tbl, row: int) -> str = let cid = customer_id_at(customers, row) in let name = customer_company_at(customers, row) in let tier = customer_tier_at(customers, row) in let reg = customer_region_at(customers, row) in let sub = find_customer_subtotal(cust_rev_tbl, cid, 0, table_row_count(cust_rev_tbl)) in let st = settle_invoice(sub, tier, reg) in "C" + str(cid) + " " + name + " [" + reg + ", tier=" + str(tier) + "]: gross=$" + decimal_format(st.subtotal) + ", disc=-$" + decimal_format(st.discount) + ", tax=+$" + decimal_format(st.tax) + ", net=$" + decimal_format(st.total) + " (ok=" + str(verify_settlement_conservation(st)) + ")"
+
+fn format_customer_settlement_rows(customers, cust_rev_tbl, row: int, n: int) -> str = if row >= n then "" else format_customer_settlement_row(customers, cust_rev_tbl, row) + (if row + 1 >= n then "" else "\n" + format_customer_settlement_rows(customers, cust_rev_tbl, row + 1, n))
+
+fn sum_settled_net_from(customers, cust_rev_tbl, row: int, n: int) = if row >= n then decimal(12, 2, decimal_make(0, 2)) else let cid = customer_id_at(customers, row) in let sub = find_customer_subtotal(cust_rev_tbl, cid, 0, table_row_count(cust_rev_tbl)) in let st = settle_invoice(sub, customer_tier_at(customers, row), customer_region_at(customers, row)) in decimal_add(st.total, sum_settled_net_from(customers, cust_rev_tbl, row + 1, n))
+
+fn total_settled_net(customers, cust_rev_tbl) = sum_settled_net_from(customers, cust_rev_tbl, 0, table_row_count(customers))
+
+## --- Top-level Executive Report Builder ---
+fn build_inventory_report() -> str = let products = default_catalog() in let customers = default_customers() in let lines = default_invoice_lines() in let low = query_low_stock_products(products) in let cats = query_stock_by_category(products) in let joined = query_customer_invoices(lines, customers) in let regions = query_revenue_by_region(joined) in let cust_rev = query_revenue_by_customer(lines) in "=== LUME STAGE 2 CAPSTONE: INVENTORY, INVOICING & REPORTS ===\n[1] Catalog (" + str(table_row_count(products)) + " SKUs, valuation=$" + decimal_format(total_inventory_value(products)) + ")\n" + format_catalog_rows(products, 0, table_row_count(products)) + "\n[2] Stock by Category\n" + format_category_rows(cats, 0, table_row_count(cats)) + "\n[3] Low-Stock Replenishment Queue (" + str(table_row_count(low)) + " alerts)\n" + format_replenishment_rows(low, 0, table_row_count(low)) + "\n[4] Customer Invoice Settlements (gross=$" + decimal_format(total_invoiced_subtotal(lines)) + ", net=$" + decimal_format(total_settled_net(customers, cust_rev)) + ")\n" + format_customer_settlement_rows(customers, cust_rev, 0, table_row_count(customers)) + "\n[5] Regional Revenue Rollup\n" + format_region_rows(regions, 0, table_row_count(regions))

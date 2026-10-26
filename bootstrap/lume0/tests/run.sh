@@ -427,6 +427,11 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_
     LUME_BIN_DIR="$ntmp" ../../lume build "$ntmp/pkgdemo/main.src" -o "$ntmp/pkgdemo/main.elf" 2>"$ntmp/pkgdemo/cap.err" && pkg_ok=0
     grep -q "capability error: module 'sneaky' uses I/O capability 'read' not granted by lume.toml" "$ntmp/pkgdemo/cap.err" || pkg_ok=0
     if [ "$pkg_ok" = 1 ]; then ok "phase-2 T3: lume pkg (lume.toml, SHA-256 lume.lock drift detection & P26 capability audit)"; else bad "phase-2 T3: lume pkg lockfile & capability audit"; fi
+    # phase-2 capstone (Stage 2 official exit criterion, docs/04-roadmap.md line 106): multi-module inventory,
+    # invoicing & reports app in examples/apps/inventory/ combining lume.toml + lume.lock, diamond `use`, exact
+    # decimal(10, 2), typed table[T] CSV ingestion, compile-time checked query (where/order/join/group), comptime
+    # functions/assertions/precomputed tables, hygienic quasiquote macros, and `lume test` (25 passed, 0 failed).
+    if LUME_BIN_DIR="$ntmp" ../../lume pkg verify ../../examples/apps/inventory >/dev/null 2>&1 && LUME_BIN_DIR="$ntmp" ../../lume run ../../examples/apps/inventory/main.src 2>/dev/null | diff -u ../../tests/conformance/stage1/inventory_app_asm.expected - >/dev/null && LUME_BIN_DIR="$ntmp" ../../lume test ../../examples/apps/inventory/main.src 2>/dev/null | grep -q "25 passed, 0 failed"; then ok "phase-2 capstone: examples/apps/inventory (lume pkg verify + lume run + lume test: 25 passed, 0 failed)"; else bad "phase-2 capstone: examples/apps/inventory (inventory + invoicing + reports)"; fi
     # phase-2 C3: generic functions via comptime type parameters (`fn id(comptime T: type, x: T)`). The comptime
     # parameter is ERASED at runtime (the function takes only the runtime params; each call drops the type arg),
     # the type parameter is bound at the call site and the remaining annotated args are checked (reusing F2).

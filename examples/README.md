@@ -11,6 +11,7 @@
 | `07_contracts_defer.lume` | 0 | `requires/ensures/invariant`, range types, `decimal`, `defer`, `assert` |
 | `08_shell_script.lume` | 1 | `std.sh` as a Bash replacement |
 | `09_stdlib.lume` | 0 | standard library: strings, lists, maps, math, higher-order functions |
+| `apps/inventory/` | 2 | **Stage 2 capstone app**: multi-module inventory, invoicing & reports (`use`, `decimal`, `table`, `query`, `comptime`, hygienic macros, `lume.toml`/`lume.lock`, `lume test`) |
 | `future/10_data_query.lume` | 2 | `table`, `index`, `query`, `persist` |
 | `future/11_concurrency.lume` | 3 | `scope`, `spawn`, channels, `select`, `par for` |
 | `future/12_model_training.lume` | 4 | `model`, `tensor` shapes, `grad` |

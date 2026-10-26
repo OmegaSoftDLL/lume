@@ -1,0 +1,22 @@
+=== LUME STAGE 2 CAPSTONE: INVENTORY, INVOICING & REPORTS ===
+[1] Catalog (5 SKUs, valuation=$6051.00)
+SKU-101 | Industrial Servo | Motion | $150.00 | qty=18 | IN_STOCK(18)
+SKU-102 | Optical Encoder | Sensors | $42.50 | qty=6 | LOW_STOCK(6<=10)
+SKU-103 | PLC Controller | Controls | $210.00 | qty=12 | IN_STOCK(12)
+SKU-104 | Kevlar Drive Belt | Motion | $18.75 | qty=0 | OUT_OF_STOCK
+SKU-105 | Thermal Safety Relay | Controls | $64.00 | qty=9 | LOW_STOCK(9<=10)
+[2] Stock by Category
+Motion: skus=2, units=18
+Sensors: skus=1, units=6
+Controls: skus=2, units=21
+[3] Low-Stock Replenishment Queue (3 alerts)
+SKU-104 (Kevlar Drive Belt): on_hand=0, reorder_pt=15, order_qty=35
+SKU-102 (Optical Encoder): on_hand=6, reorder_pt=10, order_qty=19
+SKU-105 (Thermal Safety Relay): on_hand=9, reorder_pt=10, order_qty=16
+[4] Customer Invoice Settlements (gross=$1620.00, net=$1612.02)
+C1 Apex Robotics [North, tier=3]: gross=$720.00, disc=-$72.00, tax=+$51.84, net=$699.84 (ok=1)
+C2 Boreal Photonics [South, tier=2]: gross=$640.00, disc=-$32.00, tax=+$30.40, net=$638.40 (ok=1)
+C3 Cobalt Automation [North, tier=1]: gross=$260.00, disc=-$6.50, tax=+$20.28, net=$273.78 (ok=1)
+[5] Regional Revenue Rollup
+North: lines=3, gross=$980.00
+South: lines=2, gross=$640.00

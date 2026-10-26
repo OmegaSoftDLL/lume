@@ -17,6 +17,7 @@ plainly, because the project's golden rule forbids claiming a milestone that is 
 | **F — type foundation** | F1 type/enum/record decls + gradual checker, F2 param/return annotations + gradual argument checks | ✅ complete |
 | **F3 — inference** | return types, arguments, `let` bindings, operator/`if` results; over **int/str**, **nominal enum/record** names, and **anonymous-record field access and field types** — all gradual, zero false positives | ✅ (gradual) |
 | **F4 — front-end unification** | slice 1: the core grammar accepts the surface's **named enum payloads**, normalized to the same AST (byte-identical codegen) | 🟡 started |
+| **Capstone — Stage 2 exit criterion** | `examples/apps/inventory/`: multi-module inventory, invoicing & executive reporting app (< 500 lines across `catalog.src`, `invoicing.src`, `reports.src`, `main.src`, `lume.toml`, `lume.lock`) combining `use`, `decimal`, `table[T]`/`read_csv`, `query`, `comptime`, hygienic macros, `lume pkg`, and `lume test` | ✅ complete |
 
 Plus a cross-cutting fix: the self-hosted lexer/parser recurse once per source character, so the
 growing (~117 KB) compiler needs a deep native stack — `make bootstrap`, `make zero-c`, the test

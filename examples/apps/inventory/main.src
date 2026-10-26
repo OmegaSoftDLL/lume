@@ -1,0 +1,33 @@
+## main.src — Stage 2 Exit Criterion Application entrypoint & unit test suite.
+## Combines `use` modules, `lume.toml`/`lume.lock`, exact `decimal(10, 2)`, typed `table[T]`
+## CSV ingestion, compile-time checked `query` (where/order/join/group), `comptime` functions,
+## assertions & precomputed tables, and hygienic quasiquote macros (`quote`/`unquote`/`splice`).
+use decimal
+use table
+use query
+use catalog
+use invoicing
+use reports
+
+## --- Unit tests discovered and executed by `lume test` (`compiler/stage1/ltest.src`) ---
+fn test_inventory_catalog_csv_loads() -> int = let p = default_catalog() in table_is_ready(Product, p) == 1 and table_row_count(p) == 5 and table_column_count(p) == 6
+
+fn test_inventory_stock_status_classification() -> int = status_label(classify_stock(18, 8)) == "IN_STOCK(18)" and status_label(classify_stock(6, 10)) == "LOW_STOCK(6<=10)" and status_label(classify_stock(0, 15)) == "OUT_OF_STOCK"
+
+fn test_inventory_valuation_exact_decimal() -> int = let p = default_catalog() in decimal_format(total_inventory_value(p)) == "6051.00"
+
+fn test_inventory_low_stock_query_and_order() -> int = let low = query_low_stock_products(default_catalog()) in table_row_count(low) == 3 and product_sku(low, 0) == "SKU-104" and product_sku(low, 1) == "SKU-102" and product_sku(low, 2) == "SKU-105"
+
+fn test_inventory_category_group_query() -> int = let cats = query_stock_by_category(default_catalog()) in table_row_count(cats) == 3 and cell_str(cats, 0, 0) == "Motion" and cell_int(cats, 0, 1) == 2 and cell_int(cats, 0, 2) == 18
+
+fn test_inventory_comptime_discount_table() -> int = lookup_tier_bps(0) == 0 and lookup_tier_bps(1) == 250 and lookup_tier_bps(2) == 500 and lookup_tier_bps(3) == 1000
+
+fn test_inventory_hygienic_macro_restock() -> int = target_stock_level(10) == 25 and restock_order_qty(6, 10) == 19 and restock_order_qty(30, 10) == 0
+
+fn test_inventory_invoice_penny_exact_math() -> int = let s1 = settle_invoice(decimal_parse("720.00"), 3, "North") in let s2 = settle_invoice(decimal_parse("640.00"), 2, "South") in decimal_format(s1.discount) == "72.00" and decimal_format(s1.tax) == "51.84" and decimal_format(s1.total) == "699.84" and verify_settlement_conservation(s1) == 1 and decimal_format(s2.discount) == "32.00" and decimal_format(s2.tax) == "30.40" and decimal_format(s2.total) == "638.40" and verify_settlement_conservation(s2) == 1
+
+fn test_inventory_customer_join_and_region_group() -> int = let lines = default_invoice_lines() in let custs = default_customers() in let joined = query_customer_invoices(lines, custs) in let regs = query_revenue_by_region(joined) in let high = query_high_value_lines(lines) in table_row_count(joined) == 5 and table_row_count(regs) == 2 and cell_str(regs, 0, 0) == "North" and decimal_format(cell_dec(regs, 0, 2)) == "980.00" and cell_str(regs, 1, 0) == "South" and decimal_format(cell_dec(regs, 1, 2)) == "640.00" and table_row_count(high) == 4 and line_invoice_id(high, 0) == 1002
+
+fn test_inventory_executive_report_totals() -> int = let custs = default_customers() in let lines = default_invoice_lines() in let crev = query_revenue_by_customer(lines) in decimal_format(total_invoiced_subtotal(lines)) == "1620.00" and decimal_format(total_settled_net(custs, crev)) == "1612.02"
+
+print build_inventory_report()

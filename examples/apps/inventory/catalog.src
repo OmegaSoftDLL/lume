@@ -1,0 +1,89 @@
+## catalog.src — Warehouse catalog, stock status ADT, comptime discount schedules,
+## hygienic restock macros, and typed CSV inventory ingestion (Stage 2 Capstone).
+use decimal
+use table
+use query
+
+## --- Domain ADTs & Records (Track F: F1/F4 named enum payloads + D1/D2 types) ---
+type StockStatus = enum InStock(qty: int) | LowStock(qty: int, reorder: int) | OutOfStock
+
+type Product = record sku: str, name: str, category: str, unit_price: decimal(10, 2), on_hand: int, reorder_point: int
+
+type CategoryStock = record category: str, count: int, sum: int
+
+## --- Comptime business rules & precomputed lookup tables (Track C: C1, C2, C3, C4a, C4b) ---
+fn tier_discount_bps(tier: int) -> int = if tier <= 0 then 0 else if tier == 1 then 250 else if tier == 2 then 500 else 1000
+
+fn discount_schedule_from(t: int) = if t > 3 then Nil else Cons(tier_discount_bps(t), discount_schedule_from(t + 1))
+
+fn nth_int(xs, idx: int) -> int = match xs
+    Nil        => 0
+    Cons(h, t) => if idx <= 0 then h else nth_int(t, idx - 1)
+
+## Compile-time invariant assertions (C4a): verified at build time, zero runtime cost.
+comptime assert(tier_discount_bps(0) == 0, "base tier must carry 0 bps discount")
+comptime assert(tier_discount_bps(2) == 500, "silver tier must carry 500 bps (5.00%) discount")
+comptime assert(tier_discount_bps(3) == 1000, "gold tier must carry 1000 bps (10.00%) discount")
+
+## Precomputed discount schedule table (C4b): `discount_schedule_from` is folded at compile time.
+fn lookup_tier_bps(tier: int) -> int = nth_int(comptime(discount_schedule_from(0)), tier)
+
+## Generic table validator (C3: comptime type parameter erased at runtime).
+fn table_is_ready(comptime T: type, tbl: table[T]) -> int = if tbl.ok == 1 and table_row_count(tbl) > 0 then 1 else 0
+
+## --- Hygienic quasiquote macros (Track M: M1/M2 quote, unquote, lexical hygiene, splice) ---
+## Computes target restock level `let tmp = reorder in tmp * mult + buffer` without capturing caller `tmp`.
+fn m_restock_target(reorder_ast, mult: int, buffer: int) = quote(let tmp = unquote(reorder_ast) in tmp * unquote(mult) + unquote(buffer))
+
+fn target_stock_level(tmp: int) -> int = splice(m_restock_target(quote(tmp), 2, 5))
+
+fn restock_order_qty(on_hand: int, reorder_point: int) -> int = let target = target_stock_level(reorder_point) in if on_hand >= target then 0 else target - on_hand
+
+## --- Typed query literal constructors (Track D: D2/D3) ---
+fn qint(n: int) = {kind: "int", value: n}
+fn qstr(s: str) = {kind: "str", value: s}
+fn qdec(s: str) = {kind: "decimal", value: decimal_parse(s)}
+
+## --- Catalog CSV schema & strict ingestion ---
+fn catalog_schema() = Cons({name: "sku", type: "str"}, Cons({name: "name", type: "str"}, Cons({name: "category", type: "str"}, Cons({name: "unit_price", type: "decimal"}, Cons({name: "on_hand", type: "int"}, Cons({name: "reorder_point", type: "int"}, Nil))))))
+
+fn catalog_csv_text() -> str = "sku,name,category,unit_price,on_hand,reorder_point\nSKU-101,Industrial Servo,Motion,150.00,18,8\nSKU-102,Optical Encoder,Sensors,42.50,6,10\nSKU-103,PLC Controller,Controls,210.00,12,5\nSKU-104,Kevlar Drive Belt,Motion,18.75,0,15\nSKU-105,Thermal Safety Relay,Controls,64.00,9,10"
+
+fn load_catalog(csv_text: str) -> table[Product] = read_csv(csv_text, catalog_schema())
+
+fn default_catalog() -> table[Product] = load_catalog(catalog_csv_text())
+
+## --- Typed cell extractors for Product rows ---
+fn cell_str(tbl, row: int, col: int) -> str = table_cell(tbl, row, col).value.value
+fn cell_int(tbl, row: int, col: int) -> int = table_cell(tbl, row, col).value.value
+fn cell_dec(tbl, row: int, col: int) = table_cell(tbl, row, col).value.value
+
+fn product_sku(tbl, row: int) -> str = cell_str(tbl, row, 0)
+fn product_name(tbl, row: int) -> str = cell_str(tbl, row, 1)
+fn product_category(tbl, row: int) -> str = cell_str(tbl, row, 2)
+fn product_price(tbl, row: int) = cell_dec(tbl, row, 3)
+fn product_on_hand(tbl, row: int) -> int = cell_int(tbl, row, 4)
+fn product_reorder(tbl, row: int) -> int = cell_int(tbl, row, 5)
+
+## --- Stock classification & valuation ---
+fn classify_stock(on_hand: int, reorder_point: int) -> StockStatus = if on_hand <= 0 then OutOfStock else if on_hand <= reorder_point then LowStock(on_hand, reorder_point) else InStock(on_hand)
+
+fn status_label(st: StockStatus) -> str = match st
+    InStock(q)       => "IN_STOCK(" + str(q) + ")"
+    LowStock(q, r)   => "LOW_STOCK(" + str(q) + "<=" + str(r) + ")"
+    OutOfStock       => "OUT_OF_STOCK"
+
+fn product_status(tbl, row: int) -> StockStatus = classify_stock(product_on_hand(tbl, row), product_reorder(tbl, row))
+
+fn row_inventory_value(tbl, row: int) = decimal_mul(decimal(12, 2, product_price(tbl, row)), decimal_make(product_on_hand(tbl, row), 0))
+
+fn sum_inventory_value_from(tbl, row: int, total: int) = if row >= table_row_count(tbl) then decimal(12, 2, decimal_make(0, 2)) else decimal_add(row_inventory_value(tbl, row), sum_inventory_value_from(tbl, row + 1, total))
+
+fn total_inventory_value(tbl) = sum_inventory_value_from(tbl, 0, table_row_count(tbl))
+
+## --- Compile-time checked catalog queries (D3) ---
+fn query_low_stock_products(products: table[Product]) -> table[Product] = query_order(Product, query_where(Product, products, "on_hand", "<=", qint(10)), "on_hand", "asc")
+
+fn query_motion_products(products: table[Product]) -> table[Product] = query_where(Product, products, "category", "==", qstr("Motion"))
+
+fn query_stock_by_category(products: table[Product]) -> table[CategoryStock] = query_group(Product, CategoryStock, products, "category", "on_hand")

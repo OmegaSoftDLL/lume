@@ -47,12 +47,14 @@ fn string_member(value, values) = match values
     Nil => 0
     Cons(head, tail) => if value == head then 1 else string_member(value, tail)
 fn same_strings(a, b) = match a
-    Nil => match b
-        Nil => 1
-        _ => 0
-    Cons(head, tail) => match b
-        Nil => 0
-        Cons(other, rest) => if head == other then same_strings(tail, rest) else 0
+    Nil => same_strings_nil(b)
+    Cons(head, tail) => same_strings_cons(head, tail, b)
+fn same_strings_nil(b) = match b
+    Nil => 1
+    _ => 0
+fn same_strings_cons(head, tail, b) = match b
+    Nil => 0
+    Cons(other, rest) => if head == other then same_strings(tail, rest) else 0
 
 fn csv_int_valid(s, i, digits) = if i >= count(s) then digits else if i == 0 and (at(s, i) == "-" or at(s, i) == "+") then csv_int_valid(s, i + 1, digits) else if at(s, i) >= "0" and at(s, i) <= "9" then csv_int_valid(s, i + 1, digits + 1) else 0
 fn csv_int_value(s) = if count(s) == 0 or csv_int_valid(s, 0, 0) == 0 or csv_int_valid(s, 0, 0) > 18 then {ok: 0, value: 0} else csv_int_value_valid(s, if at(s, 0) == "-" or at(s, 0) == "+" then 1 else 0, if at(s, 0) == "-" then 0 - 1 else 1)
@@ -66,10 +68,11 @@ fn csv_convert_decimal(value, valid) = if valid == 1 then {ok: 1, value: {kind: 
 fn csv_typed_row(cells, schema, row_index, acc) = if list_len(cells) != list_len(schema) then {ok: 0, rows: Nil, error: "CSV row " + str(row_index + 1) + " has " + str(list_len(cells)) + " cells; schema expects " + str(list_len(schema))} else csv_typed_cells(cells, schema, row_index, acc)
 fn csv_typed_cells(cells, schema, row_index, acc) = match cells
     Nil => {ok: 1, values: list_reverse(acc), error: ""}
-    Cons(cell, more_cells) => match schema
-        Nil => {ok: 0, values: Nil, error: "CSV row width does not match schema"}
-        Cons(column, more_schema) => csv_typed_cell(cell, more_cells, column, more_schema, row_index, acc, csv_convert(cell, column.type))
-fn csv_typed_cell(cell, more_cells, column, more_schema, row_index, acc, converted) = if converted.ok == 0 then {ok: 0, values: Nil, error: "CSV row " + str(row_index + 1) + ", column '" + column.name + "': " + converted.value.value} else csv_typed_cells(more_cells, more_schema, row_index, Cons(converted.value, acc))
+    Cons(cell, more_cells) => csv_typed_cells_cons(cell, more_cells, schema, row_index, acc)
+fn csv_typed_cells_cons(cell, more_cells, schema, row_index, acc) = match schema
+    Nil => {ok: 0, values: Nil, error: "CSV row width does not match schema"}
+    Cons(column, more_schema) => csv_typed_cell(more_cells, column, more_schema, row_index, acc, csv_convert(cell, column.type))
+fn csv_typed_cell(more_cells, column, more_schema, row_index, acc, converted) = if converted.ok == 0 then {ok: 0, values: Nil, error: "CSV row " + str(row_index + 1) + ", column '" + column.name + "': " + converted.value.value} else csv_typed_cells(more_cells, more_schema, row_index, Cons(converted.value, acc))
 fn csv_typed_rows(rows, schema, acc) = match rows
     Nil => {ok: 1, rows: list_reverse(acc), error: ""}
     Cons(row, rest) => csv_typed_rows_step(rest, schema, list_len(acc), acc, csv_typed_row(row, schema, list_len(acc) + 1, Nil))
