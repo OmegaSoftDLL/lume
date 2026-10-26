@@ -530,6 +530,14 @@ fi
 
 if ../../lume --version | grep -q "^lume " && ../../lume check ../../examples/01_hello.lume >/dev/null 2>&1 && ../../lume test ../../examples/01_hello.lume | grep -q "1 passed, 0 failed"; then ok "phase-2 T1: lume CLI (--version, check, test on surface .lume)"; else bad "phase-2 T1: lume CLI (--version, check, test on surface .lume)"; fi
 
+if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_ASAN:-}" ]; then
+    _e1ok=$(../../lume compile --json --run ../../compiler/stage1/e1_sample.src 2>/dev/null)
+    _e1bad=$(../../lume compile --json ../../compiler/stage1/e1_bad.src 2>/dev/null)
+    if printf '%s' "$_e1ok" | grep -q '"ok":true' && printf '%s' "$_e1ok" | grep -q '"ran":true' && printf '%s' "$_e1ok" | grep -q '"run_exit":0' && printf '%s' "$_e1ok" | grep -q 'stdout":"42' && printf '%s' "$_e1bad" | grep -q '"ok":false' && printf '%s' "$_e1bad" | grep -q 'assertion failed'; then ok "phase-2 E1: lume compile --json emits a structured {ok, asm_lines, stdout} result and reports errors"; else bad "phase-2 E1: compile-as-a-service (lume compile --json)"; fi
+else
+    ok "phase-2 E1: compile-as-a-service (skipped: not linux/x86_64, or under ASan)"
+fi
+
 echo "== AI-first: `lume0 describe` emits valid JSON"
 if command -v python3 >/dev/null 2>&1; then
     if $BIN describe | python3 -c 'import json,sys; json.load(sys.stdin)' 2>/dev/null; then ok "describe --json"; else bad "describe --json"; fi

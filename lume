@@ -9,6 +9,7 @@
 #   lume fmt   [--check] <file.src|file.lume> format source to canonical layout (or check with --check)
 #   lume pkg   <init|check|lock|verify|tree>  package manager: lume.toml manifest, capabilities & SHA-256 lume.lock
 #   lume check [--json] <file.lume|file.src>  static lexical, parse, name, type and contract checks
+#   lume compile [--json] [--run] <file.src>  compile-as-a-service: {ok, diagnostics, asm, stdout} (E1, AI-first)
 #   lume describe [--json]                    emit machine-readable language self-description (AI-first)
 #   lume --version | --help
 set -eu
@@ -33,6 +34,7 @@ usage:
   lume fmt   [--check] <file>               format a Lume source file in place (or verify with --check)
   lume pkg   <init|check|lock|verify|tree>  manage lume.toml manifest, capabilities & SHA-256 lume.lock
   lume check [--json] <file.lume|file.src>  run static semantic checks
+  lume compile [--json] [--run] <file.src>  compile-as-a-service: structured {ok, diagnostics, asm, stdout}
   lume describe [--json]                    emit machine-readable language self-description for AI agents
   lume --version                            print version
 EOF
@@ -275,6 +277,91 @@ cmd_run() {
             "$L0" run "$_file" "$@"
             ;;
     esac
+}
+
+# JSON-escape the contents of a file to a single string body (no surrounding quotes).
+json_escape() {
+    awk 'BEGIN { ORS = "" } { gsub(/\\/, "\\\\"); gsub(/"/, "\\\""); gsub(/\t/, "\\t"); gsub(/\r/, "\\r"); if (NR > 1) printf "\\n"; printf "%s", $0 }' "$1"
+}
+
+# E1 — compiler-as-a-service: compile a .src and report a machine-readable result
+# (ok, exit, asm line count, diagnostics, and with --run the native stdout). This is
+# the programmatic surface the self-evolution loop (E3) and AI agents consume; the
+# compiler itself is unchanged (source in -> diagnostics / asm / result out).
+cmd_compile() {
+    _json=0
+    _run=0
+    _file=""
+    for _arg in "$@"; do
+        case "$_arg" in
+            --json) _json=1 ;;
+            --run) _run=1 ;;
+            -*) usage ;;
+            *) _file=$_arg ;;
+        esac
+    done
+    [ -n "$_file" ] || usage
+    if [ ! -f "$_file" ]; then
+        echo "lume compile: cannot read $_file" >&2
+        exit 66
+    fi
+    case "$_file" in
+        *.src) : ;;
+        *) echo "lume compile: expects a .src Lume-Core file" >&2; exit 64 ;;
+    esac
+    _bundled=$(mktemp)
+    if ! bundle_src_if_needed "$_file" "$_bundled"; then
+        rm -f "$_bundled"
+        exit 1
+    fi
+    _asm=$(mktemp)
+    _diag=$(mktemp)
+    _exit=0
+    if is_linux_x86_64 && [ -z "${LUME0_ASAN:-}" ]; then
+        ensure_native_toolchain
+        "$LUMEC" < "$_bundled" > "$_asm" 2> "$_diag" || _exit=$?
+    else
+        ensure_seed
+        "$L0" run "$SRC_DIR/data_asm_cc.lume" "$_bundled" "$_asm" > "$_diag" 2>&1 || _exit=$?
+    fi
+    _asmlines=$(wc -l < "$_asm" | tr -d ' ')
+    _didrun=0
+    _ranexit=0
+    _runout=$(mktemp)
+    _bin=$(mktemp)
+    if [ "$_exit" -eq 0 ] && [ "$_run" -eq 1 ]; then
+        _didrun=1
+        if is_linux_x86_64 && [ -z "${LUME0_ASAN:-}" ]; then
+            ensure_native_toolchain
+            "$LASM" < "$_asm" > "$_bin" 2>/dev/null; chmod +x "$_bin"
+        else
+            ensure_seed
+            "$L0" asm "$_asm" "$_bin" >/dev/null 2>&1; chmod +x "$_bin"
+        fi
+        "$_bin" > "$_runout" 2>/dev/null || _ranexit=$?
+    fi
+    if [ "$_json" -eq 1 ]; then
+        printf '{'
+        if [ "$_exit" -eq 0 ]; then printf '"ok":true'; else printf '"ok":false'; fi
+        printf ',"exit":%s,"asm_lines":%s,"diagnostics":"' "$_exit" "$_asmlines"
+        json_escape "$_diag"
+        printf '"'
+        if [ "$_didrun" -eq 1 ]; then
+            printf ',"ran":true,"run_exit":%s,"stdout":"' "$_ranexit"
+            json_escape "$_runout"
+            printf '"'
+        else
+            printf ',"ran":false'
+        fi
+        printf '}\n'
+    elif [ "$_exit" -eq 0 ]; then
+        echo "lume compile: $_file OK ($_asmlines asm lines)" >&2
+        cat "$_asm"
+    else
+        cat "$_diag" >&2
+    fi
+    rm -f "$_bundled" "$_asm" "$_diag" "$_runout" "$_bin"
+    return $_exit
 }
 
 cmd_doc() {
@@ -594,6 +681,9 @@ case "$_sub" in
         ;;
     check)
         cmd_check "$@"
+        ;;
+    compile)
+        cmd_compile "$@"
         ;;
     describe)
         ensure_seed
