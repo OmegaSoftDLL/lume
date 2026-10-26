@@ -95,6 +95,7 @@ fn deval(e: DExpr, env: map[str, RV], fns: [DStmt]) -> RV
                         if not found and fname == name
                             ## top-level lets are visible inside functions (the "$g" snapshot)
                             var env2 = {}
+                            env2["$in"] = env.get("$in") ?? VStr(s: "/dev/stdin")
                             match env.get("$g") ?? VInt(n: 0)
                                 VRec(gm) => do
                                     for e in gm.entries()
@@ -109,6 +110,8 @@ fn deval(e: DExpr, env: map[str, RV], fns: [DStmt]) -> RV
                     DLet(n2, v2) => do
                         let _ = 0
                     DPrint(v2) => do
+                        let _ = 0
+                    DExprS(v2) => do
                         let _ = 0
             if not found and name == "count"
                 let cv = deval(args[0], env, fns)
@@ -128,8 +131,26 @@ fn deval(e: DExpr, env: map[str, RV], fns: [DStmt]) -> RV
                     result = VStr(s: "")
             if not found and name == "slice"
                 let ssv = rv_str(deval(args[0], env, fns))
-                let sa = rv_int(deval(args[1], env, fns))
-                let sb = rv_int(deval(args[2], env, fns))
+                var sa = rv_int(deval(args[1], env, fns))
+                var sb = rv_int(deval(args[2], env, fns))
+                if sa < 0
+                    sa = 0
+                if sb > ssv.len()
+                    sb = ssv.len()
+                if sb < sa
+                    sb = sa
+                result = VStr(s: ssv[sa..sb])
+            if not found and name == "slicen"
+                let ssv = rv_str(deval(args[0], env, fns))
+                let sln = rv_int(deval(args[1], env, fns))
+                var sa = rv_int(deval(args[2], env, fns))
+                var sb = rv_int(deval(args[3], env, fns))
+                if sa < 0
+                    sa = 0
+                if sb > sln
+                    sb = sln
+                if sb < sa
+                    sb = sa
                 result = VStr(s: ssv[sa..sb])
             if not found and name == "toint"
                 result = VInt(n: rv_str(deval(args[0], env, fns)).parse_int() ?? 0)
@@ -143,6 +164,11 @@ fn deval(e: DExpr, env: map[str, RV], fns: [DStmt]) -> RV
                 while rk < rin.len() and rin[rk..rk + 1] != "\n"
                     rk = rk + 1
                 result = VStr(s: rin[0..rk])
+            if not found and name == "readall"
+                let rpath = rv_str(env.get("$in") ?? VStr(s: "/dev/stdin"))
+                result = VStr(s: io.read_file(rpath))
+            if not found and name == "ctfail"
+                panic rv_str(deval(args[0], env, fns))
             if not found and name == "nl"
                 result = VStr(s: "\n")
             if not found and name == "dq"
@@ -236,7 +262,12 @@ fn run_data(prog: [DStmt])
                 let _ = 0
             DPrint(v) => do
                 let _ = 0
+            DExprS(v) => do
+                let _ = 0
+    let cargs = env.args()
+    let inpath = if cargs.len() >= 2 then cargs[1] else "/dev/stdin"
     var env = {}
+    env["$in"] = VStr(s: inpath)
     for s in prog
         match s
             DLet(name, v) => do
@@ -252,5 +283,7 @@ fn run_data(prog: [DStmt])
                 env["$g"] = VRec(fields: gm)
             DPrint(v) => do
                 io.println(rv_show(deval(v, env, fns)))
+            DExprS(v) => do
+                let _ = deval(v, env, fns)
             DFnS(n, p, b) => do
                 let _ = 0

@@ -1,0 +1,359 @@
+#!/bin/sh
+# lume — single command-line tool for the Lume programming language (P28, Track T / T1).
+#
+# Subcommands:
+#   lume build <file.src> [-o <out>]          compile Lume source to a native ELF binary (no C, no as/ld)
+#   lume run   <file.src|file.lume> [args...] compile & run native (.src) or interpret (.lume/.lbe)
+#   lume test  <file.src|file.lume>...        discover and run unit tests (fn test_*() and contracts)
+#   lume doc   [--json] <file.src|file.lume>  extract module/item docs and contracts (Markdown or JSON)
+#   lume fmt   [--check] <file.src|file.lume> format source to canonical layout (or check with --check)
+#   lume check [--json] <file.lume|file.src>  static lexical, parse, name, type and contract checks
+#   lume describe [--json]                    emit machine-readable language self-description (AI-first)
+#   lume --version | --help
+set -eu
+
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+SRC_DIR="$ROOT/compiler/stage1"
+L0="$ROOT/bootstrap/lume0/lume0"
+if [ ! -x "$L0" ] && [ -x "$ROOT/bootstrap/lume0/lume0.exe" ]; then
+    L0="$ROOT/bootstrap/lume0/lume0.exe"
+fi
+BIN_DIR="${LUME_BIN_DIR:-$ROOT/build/bin}"
+
+usage() {
+    cat >&2 <<'EOF'
+lume 0.2.0 — the AI-first programming language (edition 2026)
+
+usage:
+  lume build <file.src> [-o <out>]          compile to a standalone native ELF executable (no C, no as/ld)
+  lume run   <file.src|file.lume> [args...] run a Lume program (native ELF for .src, interpreter for .lume/.lbe)
+  lume test  <file.src|file.lume>...        discover and run unit tests (`fn test_*()` and runtime contracts)
+  lume doc   [--json] <file.src|file.lume>  render module & item documentation + contracts (Markdown or JSON)
+  lume fmt   [--check] <file>               format a Lume source file in place (or verify with --check)
+  lume check [--json] <file.lume|file.src>  run static semantic checks
+  lume describe [--json]                    emit machine-readable language self-description for AI agents
+  lume --version                            print version
+EOF
+    exit 64
+}
+
+ensure_seed() {
+    if [ ! -x "$L0" ]; then
+        make -s -C "$ROOT/bootstrap/lume0"
+    fi
+}
+
+is_linux_x86_64() {
+    [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ]
+}
+
+# Locate or build the native self-hosted compiler (lumec) and assembler (lasm).
+ensure_native_toolchain() {
+    mkdir -p "$BIN_DIR"
+    if [ -x "$BIN_DIR/lc" ]; then
+        LUMEC="$BIN_DIR/lc"
+    elif [ -x "$BIN_DIR/lumec" ]; then
+        LUMEC="$BIN_DIR/lumec"
+    elif [ -x "$ROOT/build/bootstrap/lumec3" ]; then
+        LUMEC="$ROOT/build/bootstrap/lumec3"
+    else
+        ensure_seed
+        "$L0" run "$SRC_DIR/data_asm_cc.lume" "$SRC_DIR/lumec.src" "$BIN_DIR/lumec.s" >/dev/null 2>&1
+        "$L0" asm "$BIN_DIR/lumec.s" "$BIN_DIR/lumec" >/dev/null 2>&1
+        chmod +x "$BIN_DIR/lumec"
+        rm -f "$BIN_DIR/lumec.s"
+        LUMEC="$BIN_DIR/lumec"
+    fi
+
+    if [ -x "$BIN_DIR/lasm" ]; then
+        LASM="$BIN_DIR/lasm"
+    elif [ -x "$ROOT/build/bootstrap/lasm3" ]; then
+        LASM="$ROOT/build/bootstrap/lasm3"
+    else
+        ensure_seed
+        "$LUMEC" < "$SRC_DIR/lasm.src" > "$BIN_DIR/lasm.s"
+        "$L0" asm "$BIN_DIR/lasm.s" "$BIN_DIR/lasm" >/dev/null 2>&1
+        chmod +x "$BIN_DIR/lasm"
+        rm -f "$BIN_DIR/lasm.s"
+        LASM="$BIN_DIR/lasm"
+    fi
+}
+
+# Build a Lume-Core tool (e.g. ldoc, ltest, lfmt) to a native ELF using lumec + lasm.
+ensure_core_tool() {
+    _tool=$1
+    if [ -x "$BIN_DIR/$_tool" ]; then
+        return 0
+    fi
+    ensure_native_toolchain
+    "$LUMEC" < "$SRC_DIR/$_tool.src" > "$BIN_DIR/$_tool.s"
+    "$LASM" < "$BIN_DIR/$_tool.s" > "$BIN_DIR/$_tool"
+    chmod +x "$BIN_DIR/$_tool"
+    rm -f "$BIN_DIR/$_tool.s"
+}
+
+# Run a Lume-Core tool (<tool>.src) with $2 as its stdin file, writing to stdout.
+run_core_tool() {
+    _tool=$1
+    _input=$2
+    if is_linux_x86_64 && [ -z "${LUME0_ASAN:-}" ]; then
+        ensure_core_tool "$_tool"
+        "$BIN_DIR/$_tool" < "$_input"
+    else
+        ensure_seed
+        "$L0" run "$SRC_DIR/compiler_in_core.lume" "$SRC_DIR/$_tool.src" "$_input"
+    fi
+}
+
+cmd_build() {
+    _src=""
+    _out=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -o)
+                [ $# -ge 2 ] || usage
+                _out=$2
+                shift 2
+                ;;
+            -*)
+                usage
+                ;;
+            *)
+                [ -z "$_src" ] || usage
+                _src=$1
+                shift
+                ;;
+        esac
+    done
+    [ -n "$_src" ] || usage
+    if [ ! -f "$_src" ]; then
+        echo "lume build: cannot read $_src" >&2
+        exit 66
+    fi
+    if [ -z "$_out" ]; then
+        _out="${_src%.src}"
+        if [ "$_out" = "$_src" ]; then
+            _out="$_src.out"
+        fi
+    fi
+    ensure_native_toolchain
+    _tmps=$(mktemp)
+    if ! "$LUMEC" < "$_src" > "$_tmps"; then
+        rm -f "$_tmps" "$_out"
+        exit 1
+    fi
+    "$LASM" < "$_tmps" > "$_out"
+    chmod +x "$_out"
+    rm -f "$_tmps"
+}
+
+cmd_run() {
+    [ $# -ge 1 ] || usage
+    _file=$1
+    shift
+    if [ ! -f "$_file" ]; then
+        echo "lume run: cannot read $_file" >&2
+        exit 66
+    fi
+    case "$_file" in
+        *.src)
+            if is_linux_x86_64 && [ -z "${LUME0_ASAN:-}" ]; then
+                _tmpbin=$(mktemp)
+                cmd_build "$_file" -o "$_tmpbin"
+                _rc=0
+                "$_tmpbin" "$@" || _rc=$?
+                rm -f "$_tmpbin"
+                return $_rc
+            else
+                ensure_seed
+                "$L0" run "$SRC_DIR/compiler_in_core.lume" "$_file" "$@"
+            fi
+            ;;
+        *)
+            ensure_seed
+            "$L0" run "$_file" "$@"
+            ;;
+    esac
+}
+
+cmd_doc() {
+    _json=0
+    _file=""
+    for _arg in "$@"; do
+        case "$_arg" in
+            --json) _json=1 ;;
+            -*) usage ;;
+            *) _file=$_arg ;;
+        esac
+    done
+    [ -n "$_file" ] || usage
+    if [ ! -f "$_file" ]; then
+        echo "lume doc: cannot read $_file" >&2
+        exit 66
+    fi
+    if [ "$_json" -eq 1 ]; then
+        _tmpin=$(mktemp)
+        printf '@json\n' > "$_tmpin"
+        cat "$_file" >> "$_tmpin"
+        run_core_tool ldoc "$_tmpin"
+        rm -f "$_tmpin"
+    else
+        run_core_tool ldoc "$_file"
+    fi
+}
+
+cmd_test() {
+    [ $# -ge 1 ] || usage
+    _overall=0
+    for _file in "$@"; do
+        if [ ! -f "$_file" ]; then
+            echo "lume test: cannot read $_file" >&2
+            exit 66
+        fi
+        case "$_file" in
+            *.src)
+                _tmpsrc=$(mktemp "${TMPDIR:-/tmp}/lume_test_XXXXXX.src")
+                run_core_tool ltest "$_file" > "$_tmpsrc"
+                if ! cmd_run "$_tmpsrc"; then
+                    _overall=1
+                fi
+                rm -f "$_tmpsrc"
+                ;;
+            *)
+                ensure_seed
+                if "$L0" check "$_file" >/dev/null 2>&1 && "$L0" run "$_file" >/dev/null 2>&1; then
+                    printf '  ok   %s\n1 passed, 0 failed\n' "$_file"
+                else
+                    printf '  FAIL %s\n0 passed, 1 failed\n' "$_file"
+                    _overall=1
+                fi
+                ;;
+        esac
+    done
+    return $_overall
+}
+
+cmd_fmt() {
+    _check=0
+    _stdout=0
+    _files=""
+    for _arg in "$@"; do
+        case "$_arg" in
+            --check) _check=1 ;;
+            --stdout) _stdout=1 ;;
+            -*) usage ;;
+            *) _files="$_files $_arg" ;;
+        esac
+    done
+    set -- $_files
+    [ $# -ge 1 ] || usage
+    _rc=0
+    for _file in "$@"; do
+        if [ ! -f "$_file" ]; then
+            echo "lume fmt: cannot read $_file" >&2
+            exit 66
+        fi
+        _tmpfmt=$(mktemp)
+        if [ -f "$SRC_DIR/lfmt.src" ]; then
+            run_core_tool lfmt "$_file" > "$_tmpfmt"
+        else
+            # Canonical whitespace normalisation: strip CR and trailing spaces/tabs, collapse
+            # runs of 2+ blank lines to a single blank line, ensure a single trailing LF.
+            awk '{ sub(/[ \t\r]+$/, ""); if ($0 == "") { b++; if (b <= 1) print "" } else { b = 0; print $0 } }' "$_file" > "$_tmpfmt"
+        fi
+        if [ "$_stdout" -eq 1 ]; then
+            cat "$_tmpfmt"
+        elif [ "$_check" -eq 1 ]; then
+            if ! cmp -s "$_file" "$_tmpfmt"; then
+                echo "lume fmt: $_file is not canonically formatted" >&2
+                _rc=1
+            fi
+        else
+            if ! cmp -s "$_file" "$_tmpfmt"; then
+                cp "$_tmpfmt" "$_file"
+            fi
+        fi
+        rm -f "$_tmpfmt"
+    done
+    return $_rc
+}
+
+cmd_check() {
+    _json=""
+    _file=""
+    for _arg in "$@"; do
+        case "$_arg" in
+            --json) _json="--json" ;;
+            -*) usage ;;
+            *) _file=$_arg ;;
+        esac
+    done
+    [ -n "$_file" ] || usage
+    if [ ! -f "$_file" ]; then
+        echo "lume check: cannot read $_file" >&2
+        exit 66
+    fi
+    case "$_file" in
+        *.src)
+            if is_linux_x86_64 && [ -z "${LUME0_ASAN:-}" ]; then
+                ensure_native_toolchain
+                "$LUMEC" < "$_file" > /dev/null
+                if [ -z "$_json" ]; then
+                    echo "$_file: OK (Lume-Core parsed and checked)" >&2
+                fi
+            else
+                ensure_seed
+                "$L0" run "$SRC_DIR/data_asm_cc.lume" "$_file" /dev/null >/dev/null
+                if [ -z "$_json" ]; then
+                    echo "$_file: OK (Lume-Core parsed and checked)" >&2
+                fi
+            fi
+            ;;
+        *)
+            ensure_seed
+            if [ -n "$_json" ]; then
+                "$L0" check "$_file" --json
+            else
+                "$L0" check "$_file"
+            fi
+            ;;
+    esac
+}
+
+[ $# -ge 1 ] || usage
+_sub=$1
+shift
+
+case "$_sub" in
+    --version|version)
+        echo "lume 0.2.0 (edition 2026)"
+        ;;
+    --help|-h|help)
+        usage
+        ;;
+    build)
+        cmd_build "$@"
+        ;;
+    run)
+        cmd_run "$@"
+        ;;
+    doc)
+        cmd_doc "$@"
+        ;;
+    test)
+        cmd_test "$@"
+        ;;
+    fmt)
+        cmd_fmt "$@"
+        ;;
+    check)
+        cmd_check "$@"
+        ;;
+    describe)
+        ensure_seed
+        "$L0" describe "$@"
+        ;;
+    *)
+        usage
+        ;;
+esac

@@ -1,0 +1,118 @@
+## ldoc.src -- Lume documentation & contract extractor written in Lume-Core (Track T, brick T1).
+## Reads a .src or .lume source file from stdin and extracts module-level and item-level `##` doc
+## comments, clean item signatures (fn/type/const/trait/let without implementation bodies), and
+## attached `requires`/`ensures`/`invariant` contracts (Principle P15: contracts are documentation).
+## Output modes:
+##   - default: clean Markdown specification
+##   - JSON (when line 1 of stdin is `@json`, used by `lume doc --json`): machine-readable JSON
+##     for the AI-first workflow (Principle P1).
+## Compiled to a standalone native ELF by `lumec` + `lasm` with zero C in the loop.
+
+## --- list & string helpers (O(n log k) pairwise join, O(n) length-aware line split) ---
+fn app(xs, ys) = match xs
+    Nil        => ys
+    Cons(h, t) => Cons(h, app(t, ys))
+fn isnil(xs) = match xs
+    Nil        => 1
+    Cons(h, t) => 0
+fn revacc(xs, acc) = match xs
+    Nil        => acc
+    Cons(h, t) => revacc(t, Cons(h, acc))
+fn rev(xs) = revacc(xs, Nil)
+fn pairs(xs) = match xs
+    Nil        => Nil
+    Cons(a, t) => pairs2(a, t)
+fn pairs2(a, t) = match t
+    Nil        => Cons(a, Nil)
+    Cons(b, r) => Cons(a + b, pairs(r))
+fn joinall(xs) = match xs
+    Nil        => ""
+    Cons(a, t) => if isnil(t) == 1 then a else joinall(pairs(xs))
+fn joinsep(xs, sep) = match xs
+    Nil        => ""
+    Cons(h, t) => if isnil(t) == 1 then h else h + sep + joinsep(t, sep)
+
+fn nlpos(s, n, i) = if i >= n then i else if at(s, i) == "\n" then i else nlpos(s, n, i + 1)
+fn splitlinesn(s, n, i) = if i >= n then Nil else let e = nlpos(s, n, i) in Cons(slicen(s, n, i, e), splitlinesn(s, n, if e >= n then e else e + 1))
+fn splitlines(s) = splitlinesn(s, count(s), 0)
+
+fn isws(c) = c == " " or c == "\t" or c == "\r"
+fn skipws(s, i) = if i >= count(s) then i else if isws(at(s, i)) then skipws(s, i + 1) else i
+fn rtrimend(s, e) = if e <= 0 then 0 else if isws(at(s, e - 1)) then rtrimend(s, e - 1) else e
+fn rtrim(s) = slice(s, 0, rtrimend(s, count(s)))
+fn trim(s) = let a = skipws(s, 0) in let b = rtrimend(s, count(s)) in if a >= b then "" else slice(s, a, b)
+fn startswith(s, p) = if count(s) < count(p) then 0 else slice(s, 0, count(p)) == p
+
+## --- character classification & identifier scanning ---
+fn isdigit(c) = c >= "0" and c <= "9"
+fn isalpha(c) = (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or c == "_"
+fn isalnum(c) = isdigit(c) or isalpha(c)
+fn idend(s, i) = if i >= count(s) then i else if isalnum(at(s, i)) then idend(s, i + 1) else i
+
+## --- doc comment stripping: `## text` -> `text` (ignore `## ---` section dividers) ---
+fn isdocline(t) = if startswith(t, "##") then startswith(t, "## ---") == 0 else 0
+fn doctext(t) = let r = slice(t, 2, count(t)) in if startswith(r, " ") then slice(r, 1, count(r)) else r
+
+## --- top-level item detection & signature extraction ---
+fn stripvis(s) = if startswith(s, "pub ") then trim(slice(s, 4, count(s))) else s
+fn itemkind(raw) = if count(raw) == 0 then "" else if isws(at(raw, 0)) then "" else itemkind2(stripvis(raw))
+fn itemkind2(s) = if startswith(s, "fn ") then "fn" else if startswith(s, "type ") then "type" else if startswith(s, "const ") then "const" else if startswith(s, "trait ") then "trait" else if startswith(s, "let ") then "let" else ""
+
+## Find top-level `=` (at paren/bracket depth 0, not part of == != <= >= =>) to strip function bodies
+fn isprevcmp(s, i) = if i <= 0 then 0 else let c = at(s, i - 1) in c == "=" or c == "!" or c == "<" or c == ">"
+fn isnextcmp(s, i, n) = if i + 1 >= n then 0 else let c = at(s, i + 1) in c == "=" or c == ">"
+fn iscmpop(s, i, n) = isprevcmp(s, i) or isnextcmp(s, i, n)
+fn findeq(s, i, n, d) = if i >= n then n else let c = at(s, i) in if c == "(" or c == "[" then findeq(s, i + 1, n, d + 1) else if c == ")" or c == "]" then findeq(s, i + 1, n, if d > 0 then d - 1 else 0) else if c == "=" and d == 0 and iscmpop(s, i, n) == 0 then i else findeq(s, i + 1, n, d)
+fn itemsig(raw, k) = let clean = rtrim(raw) in if k == "fn" or k == "let" then rtrim(slice(clean, 0, findeq(clean, 0, count(clean), 0))) else clean
+
+fn afterkw(s) = let s2 = stripvis(s) in let sp = skipws(s2, idend(s2, 0)) in slice(s2, sp, idend(s2, sp))
+fn itemname(sig) = afterkw(sig)
+
+## --- contract extraction: indented `requires ...`, `ensures ...`, `invariant ...` lines following an item ---
+fn iscontract(t) = startswith(t, "requires ") or startswith(t, "ensures ") or startswith(t, "invariant ")
+fn isindented(raw) = if count(raw) == 0 then 0 else isws(at(raw, 0))
+fn scancontracts(lines) = match lines
+    Nil        => Nil
+    Cons(h, t) => scancontracts1(rtrim(h), trim(h), t)
+fn scancontracts1(raw, tr, t) = if tr == "" or startswith(tr, "#") or startswith(tr, "\"\"\"") then scancontracts(t) else if isindented(raw) and iscontract(tr) then Cons(tr, scancontracts(t)) else Nil
+
+## --- single-pass document scanner over lines ---
+## State threaded: curdoc (reversed list of doc lines), moddoc (string), seen (1 after first item or blank after moddoc).
+fn scanlines(lines, curdoc, moddoc, seen) = match lines
+    Nil        => {moddoc: moddoc, items: Nil}
+    Cons(h, t) => scanline(rtrim(h), trim(h), t, curdoc, moddoc, seen)
+fn scanline(raw, tr, rest, curdoc, moddoc, seen) = if isdocline(tr) then scanlines(rest, Cons(doctext(tr), curdoc), moddoc, seen) else if tr == "" then scanblank(rest, curdoc, moddoc, seen) else scanother(raw, rest, curdoc, moddoc, seen, itemkind(raw))
+fn scanblank(rest, curdoc, moddoc, seen) = if seen == 0 and moddoc == "" and isnil(curdoc) == 0 then scanlines(rest, Nil, joinsep(rev(curdoc), "\n"), 1) else scanlines(rest, Nil, moddoc, seen)
+fn scanother(raw, rest, curdoc, moddoc, seen, k) = if k == "" then scanlines(rest, Nil, moddoc, seen) else scanitem(raw, rest, curdoc, moddoc, k)
+fn scanitem(raw, rest, curdoc, moddoc, k) = let sig = itemsig(raw, k) in let it = {kind: k, name: itemname(sig), sig: sig, doc: joinsep(rev(curdoc), "\n"), contracts: scancontracts(rest)} in let r = scanlines(rest, Nil, moddoc, 1) in {moddoc: r.moddoc, items: Cons(it, r.items)}
+
+## --- Markdown renderer ---
+fn mdcontracts(cs) = match cs
+    Nil        => ""
+    Cons(h, t) => "\n- **contract:** `" + h + "`" + mdcontracts(t)
+fn mditem(it) = "## `" + it.sig + "`\n" + (if it.doc == "" then "" else "\n" + it.doc + "\n") + (if isnil(it.contracts) == 1 then "" else mdcontracts(it.contracts) + "\n")
+fn mditems(xs) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons(mditem(h), mditems(t))
+fn rendermd(res) = let head = if res.moddoc == "" then "" else "# Module documentation\n\n" + res.moddoc + "\n\n" in head + joinsep(mditems(res.items), "\n")
+
+## --- JSON renderer (AI-first) ---
+fn jesc1(c) = if c == "\"" then "\\\"" else if c == "\\" then "\\\\" else if c == "\n" then "\\n" else if c == "\t" then "\\t" else if c == "\r" then "\\r" else c
+fn jescl(s, i, n) = if i >= n then Nil else Cons(jesc1(at(s, i)), jescl(s, i + 1, n))
+fn jesc(s) = joinall(jescl(s, 0, count(s)))
+fn jstr(s) = "\"" + jesc(s) + "\""
+fn jstrs(xs) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons(jstr(h), jstrs(t))
+fn jitem(it) = "{\"kind\":" + jstr(it.kind) + ",\"name\":" + jstr(it.name) + ",\"signature\":" + jstr(it.sig) + ",\"doc\":" + jstr(it.doc) + ",\"contracts\":[" + joinsep(jstrs(it.contracts), ",") + "]}"
+fn jitems(xs) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons(jitem(h), jitems(t))
+fn renderjson(res) = "{\"module_doc\":" + jstr(res.moddoc) + ",\"items\":[" + joinsep(jitems(res.items), ",") + "]}"
+
+## --- entry point: detect optional `@json` header line on stdin ---
+fn run_ldoc(lines) = match lines
+    Nil        => ""
+    Cons(h, t) => if rtrim(h) == "@json" then renderjson(scanlines(t, Nil, "", 0)) else rendermd(scanlines(lines, Nil, "", 0))
+
+print rtrim(run_ldoc(splitlines(readall())))

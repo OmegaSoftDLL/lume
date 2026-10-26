@@ -35,7 +35,7 @@ getting stuck), one green PR with a regression test, and the **self-host fixpoin
 - **D3** integrated `query` (where/order/join/group), type-checked. *Ref: LINQ (C#), SQL, Datalog.*
 
 ### T — one tool
-- **T1** `lume` single CLI (build/run/fmt/test/doc). *Ref: cargo, go.*
+- **T1 ✅ done** `lume` single CLI (`./lume`: `build`/`run`/`fmt`/`test`/`doc`/`check`/`describe`), backed by native Lume-Core tools (`compiler/stage1/ldoc.src` for Markdown + AI-first `--json` doc/signature/contract extraction, and `compiler/stage1/ltest.src` for zero-config `fn test_*()` discovery and native execution). *Ref: cargo, go.*
 - **T2** one canonical formatter. *Ref: gofmt, rustfmt.*
 - **T3** modules + package manager. *Ref: cargo, go modules.*
 

@@ -122,7 +122,7 @@ subset; the triple self-build is not reached.
   comptime over types, `comptime` blocks/params. See `compiler/stage1/ct.src` and the `phase-2 comptime` tests.
 - Domain features (`table`/`query`, tensor/`grad`/`llm fn`) — docs only; `examples/future/*`
   pass the lexer only.
-- `lume fmt`/`test`/`lsp`/`pkg`, P34 LAWS, P35 mandatory tests, content-addressed defs — not built.
+- **T1 (`lume` single CLI) is done**: `./lume` provides `build`, `run`, `test`, `doc` (`--json`), `fmt` (`--check`), `check` (`--json`), and `describe` (`--json`), backed by native Lume-Core tools (`compiler/stage1/ldoc.src` and `compiler/stage1/ltest.src` compiled to ELF by `lumec` + `lasm`). Full AST-canonical `lfmt.src` (T2), `lume pkg` (T3), `lsp`, P34 LAWS, P35 mandatory tests, content-addressed defs — not built yet.
 - **Self-hosting `lumec` and the triple self-build: NOT done.** This is Phase 1's exit.
 
 ## 7. Genuine differentiators (real, with evidence)

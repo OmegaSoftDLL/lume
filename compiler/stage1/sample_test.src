@@ -1,0 +1,8 @@
+## sample_test.src -- unit test fixture for `lume test` (Track T, brick T1).
+fn sq(x) = x * x
+fn fib(n) = if n < 2 then n else fib(n - 1) + fib(n - 2)
+fn test_helper(x) = x + 1
+
+fn test_sq() = sq(5) == 25 and sq(0 - 4) == 16
+fn test_fib() = fib(0) == 0 and fib(1) == 1 and fib(10) == 55
+fn test_arith() = 2 + 3 * 4 == 14 and test_helper(41) == 42

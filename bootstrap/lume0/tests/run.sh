@@ -279,10 +279,20 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_
     printf 'fn loopy(n) = loopy(n) + 1\nprint comptime(loopy(1))\n' >"$ntmp/ctinf.src"
     timeout 60 "$ntmp/lc" <"$ntmp/ctinf.src" >"$ntmp/ctinf.s" 2>"$ntmp/ctinf.err"; ctinf_code=$?
     if [ "$ctinf_code" = 3 ] && [ ! -s "$ntmp/ctinf.s" ] && grep -q "exceeded" "$ntmp/ctinf.err"; then ok "phase-2 C2: infinite comptime recursion hits the step/depth budget (clean error, no hang/crash)"; else bad "phase-2 C2: infinite comptime recursion hits the step/depth budget"; fi
+    # phase-2 T1: `lume` single CLI (build, run, doc, test, fmt, check, describe) backed by native Lume-Core tools (ldoc.src, ltest.src)
+    if LUME_BIN_DIR="$ntmp" ../../lume build ../../compiler/stage1/nfib.src -o "$ntmp/cli_nfib" >/dev/null 2>&1 && [ -x "$ntmp/cli_nfib" ] && "$ntmp/cli_nfib" 2>/dev/null | diff -u ../../tests/conformance/stage1/nfib_asm.expected - >/dev/null && LUME_BIN_DIR="$ntmp" ../../lume run ../../compiler/stage1/nfib.src 2>/dev/null | diff -u ../../tests/conformance/stage1/nfib_asm.expected - >/dev/null; then ok "phase-2 T1: lume build & lume run compile and execute .src natively (no C)"; else bad "phase-2 T1: lume build & lume run compile and execute .src natively (no C)"; fi
+    if LUME_BIN_DIR="$ntmp" ../../lume doc ../../compiler/stage1/doc_sample.src 2>/dev/null | diff -u ../../tests/conformance/stage1/ldoc_md_asm.expected - >/dev/null && LUME_BIN_DIR="$ntmp" ../../lume doc --json ../../compiler/stage1/doc_sample.src 2>/dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["module_doc"].startswith("Math") and len(d["items"])==3 and d["items"][2]["contracts"]==["requires lo <= hi","ensures result >= lo and result <= hi"]' 2>/dev/null; then ok "phase-2 T1: lume doc (native ldoc.src) extracts docs, signatures & contracts (Markdown + JSON)"; else bad "phase-2 T1: lume doc (native ldoc.src) extracts docs, signatures & contracts"; fi
+    printf 'fn test_ok() = 2 + 2 == 4\nfn test_broken() = 2 + 2 == 5\n' >"$ntmp/bad_test.src"
+    LUME_BIN_DIR="$ntmp" ../../lume test "$ntmp/bad_test.src" >"$ntmp/bt.out" 2>"$ntmp/bt.err"; bt_code=$?
+    if LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/sample_test.src 2>/dev/null | diff -u ../../tests/conformance/stage1/ltest_pass_asm.expected - >/dev/null && [ "$bt_code" != 0 ] && grep -q "FAIL test_broken" "$ntmp/bt.out" && grep -q "1 passed, 1 failed" "$ntmp/bt.out"; then ok "phase-2 T1: lume test (native ltest.src) discovers fn test_*(), passes valid suite and fails broken suite"; else bad "phase-2 T1: lume test (native ltest.src) discovers and runs fn test_*()"; fi
+    printf 'fn f(x) = x + 1   \n\n\nprint f(41)  \n' >"$ntmp/unfmt.src"
+    if ! LUME_BIN_DIR="$ntmp" ../../lume fmt --check "$ntmp/unfmt.src" >/dev/null 2>&1 && LUME_BIN_DIR="$ntmp" ../../lume fmt "$ntmp/unfmt.src" >/dev/null 2>&1 && LUME_BIN_DIR="$ntmp" ../../lume fmt --check "$ntmp/unfmt.src" >/dev/null 2>&1; then ok "phase-2 T1: lume fmt & lume fmt --check normalise and verify source formatting"; else bad "phase-2 T1: lume fmt & lume fmt --check"; fi
     rm -rf "$ntmp"
 else
     ok "no-toolchain ELF pipeline (skipped: not linux/x86_64, or under ASan)"
 fi
+
+if ../../lume --version | grep -q "^lume " && ../../lume check ../../examples/01_hello.lume >/dev/null 2>&1 && ../../lume test ../../examples/01_hello.lume | grep -q "1 passed, 0 failed"; then ok "phase-2 T1: lume CLI (--version, check, test on surface .lume)"; else bad "phase-2 T1: lume CLI (--version, check, test on surface .lume)"; fi
 
 echo "== AI-first: `lume0 describe` emits valid JSON"
 if command -v python3 >/dev/null 2>&1; then
