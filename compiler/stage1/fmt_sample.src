@@ -1,0 +1,19 @@
+## fmt_sample.src -- unformatted Lume-Core fixture for lfmt.src (Track T, brick T2).   
+
+
+
+## List length with unaligned arms and irregular spacing.   
+fn   len( xs )=match xs
+    Nil=>0
+    Cons( h , t )=>1+len( t )
+
+
+## Arithmetic with redundant and required parentheses.
+fn   calc( a , b , c ) = ((a * b)) + (c) - (a - (b - c)) + ((a + b) * c)
+fn   in_range( x , lo , hi ) = (x >= lo) and (x <= hi) or (x == 0)
+fn   mkpair( x , y ) = {fst:x,snd:y}
+fn   sum_pair( p ) = let a=p.fst in let b=(mkpair(p.snd,0)).fst in (if a>b then a else b)+comptime((2*3)+4)
+
+print   len( Cons( 10 , Cons( 20 , Nil ) ) )
+print   calc( 2 , 3 , 4 )
+print   sum_pair( mkpair( 5 , 12 ) )

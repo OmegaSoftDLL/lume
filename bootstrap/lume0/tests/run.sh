@@ -340,6 +340,14 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_
         "$ntmp/lc" <../../compiler/stage1/$prog.src >"$ntmp/f2_$prog.s" 2>/dev/null; "$ntmp/lasm" <"$ntmp/f2_$prog.s" >"$ntmp/f2_$prog.elf" 2>/dev/null; chmod +x "$ntmp/f2_$prog.elf"
         if [ -x "$ntmp/f2_$prog.elf" ] && "$ntmp/f2_$prog.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/${prog}_asm.expected - >/dev/null; then ok "phase-2 F2: backward-compat -- unannotated $prog.src unchanged"; else bad "phase-2 F2: backward-compat -- unannotated $prog.src unchanged"; fi
     done
+    # phase-2 T2: one canonical AST formatter in Lume-Core (`compiler/stage1/lfmt.src`, compiled to native ELF by lumec + lasm).
+    # Proves: (1) canonical AST layout (aligned match `=>`, minimal precedence-aware parens, comment & blank-line preservation),
+    # (2) idempotence (`lfmt(lfmt(x)) == lfmt(x)` and `lfmt(lfmt.src) == lfmt.src`), and (3) codegen invariance (`lumec(fmt_sample) == lumec(lfmt(fmt_sample))` bit-for-bit).
+    LUME_BIN_DIR="$ntmp" ../../lume fmt --stdout ../../compiler/stage1/fmt_sample.src >"$ntmp/fmt1.src" 2>/dev/null
+    LUME_BIN_DIR="$ntmp" ../../lume fmt --stdout "$ntmp/fmt1.src" >"$ntmp/fmt2.src" 2>/dev/null
+    "$ntmp/lc" <../../compiler/stage1/fmt_sample.src >"$ntmp/fs_orig.s" 2>/dev/null
+    "$ntmp/lc" <"$ntmp/fmt1.src" >"$ntmp/fs_fmt.s" 2>/dev/null
+    if diff -u ../../tests/conformance/stage1/lfmt_asm.expected "$ntmp/fmt1.src" >/dev/null && cmp -s "$ntmp/fmt1.src" "$ntmp/fmt2.src" && LUME_BIN_DIR="$ntmp" ../../lume fmt --check ../../compiler/stage1/lfmt.src >/dev/null 2>&1 && cmp -s "$ntmp/fs_orig.s" "$ntmp/fs_fmt.s"; then ok "phase-2 T2: native lfmt.src canonical AST formatter (idempotent, self-canonical & codegen-invariant)"; else bad "phase-2 T2: native lfmt.src canonical AST formatter"; fi
     rm -rf "$ntmp"
 else
     ok "no-toolchain ELF pipeline (skipped: not linux/x86_64, or under ASan)"
