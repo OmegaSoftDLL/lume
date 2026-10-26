@@ -287,6 +287,28 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_
     if LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/sample_test.src 2>/dev/null | diff -u ../../tests/conformance/stage1/ltest_pass_asm.expected - >/dev/null && [ "$bt_code" != 0 ] && grep -q "FAIL test_broken" "$ntmp/bt.out" && grep -q "1 passed, 1 failed" "$ntmp/bt.out"; then ok "phase-2 T1: lume test (native ltest.src) discovers fn test_*(), passes valid suite and fails broken suite"; else bad "phase-2 T1: lume test (native ltest.src) discovers and runs fn test_*()"; fi
     printf 'fn f(x) = x + 1   \n\n\nprint f(41)  \n' >"$ntmp/unfmt.src"
     if ! LUME_BIN_DIR="$ntmp" ../../lume fmt --check "$ntmp/unfmt.src" >/dev/null 2>&1 && LUME_BIN_DIR="$ntmp" ../../lume fmt "$ntmp/unfmt.src" >/dev/null 2>&1 && LUME_BIN_DIR="$ntmp" ../../lume fmt --check "$ntmp/unfmt.src" >/dev/null 2>&1; then ok "phase-2 T1: lume fmt & lume fmt --check normalise and verify source formatting"; else bad "phase-2 T1: lume fmt & lume fmt --check"; fi
+    # phase-2 F1: named type/enum/record declarations + a GRADUAL, AI-first checker (native lumec, no C).
+    # POSITIVE: types_ok.src declares an enum (typed, recursive payloads) and a record type, uses both correctly,
+    # and must compile via lumec -> lasm -> native and print the expected values (type decls emit NO code).
+    "$ntmp/lc" <../../compiler/stage1/types_ok.src >"$ntmp/to.s" 2>/dev/null; "$ntmp/lasm" <"$ntmp/to.s" >"$ntmp/to.elf" 2>/dev/null; chmod +x "$ntmp/to.elf"
+    if [ -x "$ntmp/to.elf" ] && "$ntmp/to.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/types_ok_asm.expected - >/dev/null; then ok "phase-2 F1: type/enum/record decls compile + run (native, no C)"; else bad "phase-2 F1: type/enum/record decls compile + run (native, no C)"; fi
+    # NEGATIVE 1: a constructor used but NOT declared (once the program opts in to types) is a hard error.
+    printf 'type Expr = enum Lit(int) | Add(Expr, Expr)\nprint Litt(5)\n' >"$ntmp/f1u.src"
+    "$ntmp/lc" <"$ntmp/f1u.src" >"$ntmp/f1u.s" 2>"$ntmp/f1u.err"; f1u=$?
+    if [ "$f1u" = 3 ] && [ ! -s "$ntmp/f1u.s" ] && grep -q "type error:" "$ntmp/f1u.err" && grep -q "not declared" "$ntmp/f1u.err"; then ok "phase-2 F1: undeclared constructor is a clear type error (no bad output)"; else bad "phase-2 F1: undeclared constructor is a clear type error"; fi
+    # NEGATIVE 2: a constructor applied with the wrong ARITY vs its declaration is a hard error.
+    printf 'type Expr = enum Lit(int) | Add(Expr, Expr)\nprint Add(Lit(1))\n' >"$ntmp/f1a.src"
+    "$ntmp/lc" <"$ntmp/f1a.src" >"$ntmp/f1a.s" 2>"$ntmp/f1a.err"; f1a=$?
+    if [ "$f1a" = 3 ] && [ ! -s "$ntmp/f1a.s" ] && grep -q "expects 2 argument" "$ntmp/f1a.err"; then ok "phase-2 F1: wrong constructor arity is a clear type error"; else bad "phase-2 F1: wrong constructor arity is a clear type error"; fi
+    # NEGATIVE 3: a nominal record literal T{...} naming a field the record type does not have is a hard error.
+    printf 'type Point = record x: int, y: int\nprint (Point{x: 1, z: 2}).x\n' >"$ntmp/f1f.src"
+    "$ntmp/lc" <"$ntmp/f1f.src" >"$ntmp/f1f.s" 2>"$ntmp/f1f.err"; f1f=$?
+    if [ "$f1f" = 3 ] && [ ! -s "$ntmp/f1f.s" ] && grep -q "has no field 'z'" "$ntmp/f1f.err"; then ok "phase-2 F1: unknown record field is a clear type error"; else bad "phase-2 F1: unknown record field is a clear type error"; fi
+    # GRADUAL (backward-compat): a program that declares NO type leaves constructors FREE -- it must still
+    # compile and run exactly as before, so the checker never regresses an existing untyped program.
+    printf 'fn ev(e) = match e\n    Zonk(n) => n\nprint ev(Zonk(7))\n' >"$ntmp/f1g.src"
+    "$ntmp/lc" <"$ntmp/f1g.src" >"$ntmp/f1g.s" 2>/dev/null; "$ntmp/lasm" <"$ntmp/f1g.s" >"$ntmp/f1g.elf" 2>/dev/null; chmod +x "$ntmp/f1g.elf"
+    if [ -x "$ntmp/f1g.elf" ] && [ "$("$ntmp/f1g.elf" 2>/dev/null)" = "7" ]; then ok "phase-2 F1: gradual -- no type decl => constructors stay free (untyped programs unchanged)"; else bad "phase-2 F1: gradual -- untyped program must still compile free"; fi
     rm -rf "$ntmp"
 else
     ok "no-toolchain ELF pipeline (skipped: not linux/x86_64, or under ASan)"

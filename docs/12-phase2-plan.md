@@ -14,7 +14,20 @@ getting stuck), one green PR with a regression test, and the **self-host fixpoin
 ## Tracks and bricks
 
 ### F — Type foundation (everything else depends on it)
-- **F1** named `type`/`enum`/`record` declarations with typed fields in the self-hosted parser. *Ref: ML/Haskell ADTs, Rust `enum`/`struct`.*
+- **F1 ✅ done** named `type`/`enum`/`record` declarations with typed fields in the self-hosted parser (`lumec.src`),
+  plus a **gradual, AI-first checker**. Inline, layout-free syntax (the lexer is indentation-blind, so the README's
+  indented form is adapted): `type Dept = enum Sales | IT | Finance`, `type Node = enum Nil | Cons(int, Node)`
+  (typed positional payloads), `type Point = record x: int, y: int`; a type `T` is `int`, `str`, a declared name,
+  or `[T]`. Parts are delimited by lookahead (variants by `|`, fields by `,`), like `match`. **Gradual rule**
+  (TypeScript/Zig spirit): a program that declares no `type` is unchecked — constructors stay free, so every existing
+  `.src` and `lumec.src` itself compile byte-identically and the self-host fixpoint is untouched. The moment a program
+  declares any `type` it opts in: every constructor used (expression or pattern) must resolve to a declared enum variant
+  with the right **arity**, and every field in a **nominal** record literal `T{...}` must belong to record type `T`
+  (anonymous `{...}` records are never checked — no false positives, and ad-hoc helper records stay legal). The checker
+  catches the model's typos: undeclared constructor, wrong constructor arity, unknown record field — each a hard error
+  with a legible message (exit 3, no asm), the same failure channel comptime uses. Type declarations emit **no code**
+  (compile-time only). NOT yet (deferred): type annotations on `fn` params/returns and arg-type checking (**F2**),
+  Hindley–Milner inference so anonymous records/field access are checked without annotation (**F3**). *Ref: ML/Haskell ADTs, Rust `enum`/`struct`, TypeScript gradual typing. Superior: opt-in gradualism with zero false positives + AI-legible errors.*
 - **F2** type annotations on params/returns + a consistency checker (catches the model's mistakes — AI-first). *Ref: TypeScript gradual typing, Rust.*
 - **F3** Hindley–Milner inference in the core: annotations optional but checked. *Ref: OCaml/Haskell.*
 - **F4** unify the two front-ends (surface Lume vs ML-core) into one grammar/AST.

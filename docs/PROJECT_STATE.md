@@ -110,7 +110,12 @@ subset; the triple self-build is not reached.
 
 - No lexical scoping in the checker yet (resolution is flat per module: use-before-def and
   out-of-scope are not caught).
-- No real type system: inference, call arity, match exhaustiveness, operator types.
+- No real type system: inference, call arity, match exhaustiveness, operator types. **(Phase 2 F1 ✅)** the
+  self-hosted `lumec.src` now parses named `type`/`enum`/`record` declarations (inline, layout-free) and runs a
+  **gradual** checker: a program with no `type` is unchecked (constructors free — backward-compatible, fixpoint
+  intact); once it declares a `type`, every constructor use/pattern must match a declared enum variant + arity and
+  every nominal `T{...}` field must belong to record type `T`, else a clear compile-time error (exit 3). Decls emit
+  no code. Not yet: `fn` param/return annotations + arg-type checks (F2), HM inference (F3). See `docs/12`.
 - Ownership/borrow, effects (parsed then discarded), contracts (runtime only, no `prove`/SMT)
   — all documented, none enforced.
 - Concurrency (`spawn`/`select`/`async`), `macro`, C interop, cross-compile — keywords only.
