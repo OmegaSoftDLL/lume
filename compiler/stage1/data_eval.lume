@@ -84,6 +84,12 @@ fn env_copy(env: map[str, RV]) -> map[str, RV]
 fn deval(e: DExpr, env: map[str, RV], fns: [DStmt]) -> RV
     match e
         DInt(n)       => VInt(n: n)
+        DDecimal(coefficient, scale) => do
+            var fields = {}
+            fields["coefficient"] = VInt(n: coefficient)
+            fields["scale"] = VInt(n: scale)
+            fields["precision"] = VInt(n: 0)
+            VRec(fields: fields)
         DVar(name)    => env.get(name) ?? VInt(n: 0)
         DCons(tag, args) => VObj(tag: tag, fields: args.map(|a| deval(a, env, fns)))
         DCall(name, args) => do

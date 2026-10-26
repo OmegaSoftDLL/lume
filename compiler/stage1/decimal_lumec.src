@@ -1,0 +1,25 @@
+print decimal_format(0.10)
+print decimal_format(0.10 + 0.2)
+print decimal_format(1.23 - 0.7)
+print decimal_format(1.25 * 0.4)
+print decimal_format(0.50 / 0.2)
+print 1.20 == 1.2
+print 1.21 > 1.2
+print decimal_format(decimal(4, 2, 1.2))
+print decimal(4, 2, 1.2).precision
+print decimal_format(decimal(4, 2, 1.2) + 0.30)
+print decimal_format(decimal_add(0.10, 0.2))
+print decimal_format(decimal_sub(1.23, 0.7))
+print decimal_format(decimal_mul(1.25, 0.4))
+print decimal_compare(1.20, 1.2)
+print decimal_format(decimal_parse("-12.340"))
+print decimal_format(decimal_div_exact(0.50, 0.2, 2))
+print decimal_format(-0.10)
+print decimal_format(0.000000000000000001)
+print decimal_format(let local_decimal = 0.10 in local_decimal + 0.20)
+print let local_decimal = 1 in local_decimal + 2
+fn decimal_sum(left: decimal(4, 2), right: decimal(4, 2)) -> decimal(4, 2) = left + right
+print decimal_format(decimal_sum(0.1, 0.20))
+fn decimal_cent() -> decimal(4, 2) = 0.1
+print decimal_format(decimal_cent())
+print decimal_format(decimal_cent() + decimal_cent())

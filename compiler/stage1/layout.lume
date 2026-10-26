@@ -78,7 +78,13 @@ fn lex_layout(src: str) -> [Token]
             var j = i
             while j < n and ld_is_digit(src[j])
                 j += 1
-            toks.push(Token(kind: Int, text: src[i..j], line: line, col: i + 1))
+            if j + 1 < n and src[j] == '.' and ld_is_digit(src[j + 1])
+                j += 1
+                while j < n and ld_is_digit(src[j])
+                    j += 1
+                toks.push(Token(kind: Decimal, text: src[i..j], line: line, col: i + 1))
+            else
+                toks.push(Token(kind: Int, text: src[i..j], line: line, col: i + 1))
             i = j
         elif ld_is_alpha(c)
             var j = i
