@@ -1,0 +1,5 @@
+## F3c field-type inference: the type of a let-bound record's field flows into argument checks.
+## p.x is int (from {x: 10, ...}), so addone(p.x) type-checks. mk() = addone(10) = 11.
+fn addone(n: int) -> int = n + 1
+fn mk() -> int = let p = {x: 10, label: "hi"} in addone(p.x)
+print mk()
