@@ -575,6 +575,10 @@ assert "replace 'Litt' with declared constructor 'Lit'" in bad_d["diagnostics"][
 PY
         then ok "phase-2 E1b: lume agent emits valid structured JSON (symbols, multi-error diagnostics + fix-its, result)"; else bad "phase-2 E1b: lume agent structured JSON"; fi
     fi
+    # phase-2 F2/F3 hardening: a valid program mixing annotated/unannotated params, lets, operator- and
+    # call-result arguments, int/str, and an unknown-typed argument must type-check with ZERO false positives.
+    "$ntmp/lc" <../../compiler/stage1/typecheck_robust.src >"$ntmp/tr.s" 2>"$ntmp/tr.err"; "$ntmp/lasm" <"$ntmp/tr.s" >"$ntmp/tr.elf" 2>/dev/null; chmod +x "$ntmp/tr.elf"
+    if [ -x "$ntmp/tr.elf" ] && "$ntmp/tr.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/typecheck_robust_asm.expected - >/dev/null; then ok "phase-2 F2/F3: a valid mixed-annotation program type-checks with zero false positives and runs"; else bad "phase-2 F2/F3: zero-false-positive hardening"; cat "$ntmp/tr.err"; fi
     rm -rf "$ntmp"
 else
     ok "no-toolchain ELF pipeline (skipped: not linux/x86_64, or under ASan)"
