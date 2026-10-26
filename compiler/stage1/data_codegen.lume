@@ -106,6 +106,7 @@ fn pat_binds(p: Pat, path: str) -> str
 fn cexpr(e: DExpr) -> str
     match e
         DInt(n)   => "mkint(" + str(n) + ")"
+        DDecimal(coefficient, scale) => "mkrec(2, (const char*[]){{\"coefficient\", \"scale\"}}, (Value*[]){{mkint(" + str(coefficient) + "), mkint(" + str(scale) + ")}})"
         DStr(v)   => "mkstr(\"" + cesc(v) + "\")"
         DVar(nm)  => nm
         DCons(tag, args) => do
@@ -114,7 +115,7 @@ fn cexpr(e: DExpr) -> str
             else
                 "mkctor(\"" + tag + "\", " + str(args.len()) + ", (Value*[]){{" + args.map(cexpr).join(", ") + "}})"
         DCall(nm, args) => nm + "(" + args.map(cexpr).join(", ") + ")"
-        DBin(op, l, r) => cbin(op, cexpr(l), cexpr(r))
+        DBin(op, l, r) => if decimal_expr(l) and decimal_expr(r) then cdecimal_bin(op, cexpr(l), cexpr(r)) else cbin(op, cexpr(l), cexpr(r))
         DIf(c, t, e2)  => "(truthy(" + cexpr(c) + ") ? " + cexpr(t) + " : " + cexpr(e2) + ")"
         DLetIn(nm, v, body) => "({{ Value* " + nm + " = " + cexpr(v) + "; " + cexpr(body) + "; }})"
         DMatch(scrut, arms) => cmatch(scrut, arms)
@@ -132,6 +133,26 @@ fn cexpr(e: DExpr) -> str
             else
                 "mklist(" + str(xs.len()) + ", (Value*[]){{" + xs.map(cexpr).join(", ") + "}})"
         DIndex(c, i) => "lidx(" + cexpr(c) + ", " + cexpr(i) + ")"
+
+fn decimal_expr(e: DExpr) -> bool
+    match e
+        DDecimal(coefficient, scale) => true
+        DCall(name, args) => name == "decimal_make" or name == "decimal_parse" or name == "decimal_cast" or name == "decimal_div_exact" or name == "decimal_add" or name == "decimal_sub" or name == "decimal_mul"
+        DIf(cond, then_value, else_value) => decimal_expr(then_value) and decimal_expr(else_value)
+        DLetIn(name, value, body) => decimal_expr(body)
+        _ => false
+
+fn cdecimal_bin(op: str, left: str, right: str) -> str
+    if op == "+" then "decimal_add(" + left + ", " + right + ")"
+    elif op == "-" then "decimal_sub(" + left + ", " + right + ")"
+    elif op == "*" then "decimal_mul(" + left + ", " + right + ")"
+    elif op == "==" then "mkint(decimal_compare(" + left + ", " + right + ")->i == 0)"
+    elif op == "!=" then "mkint(decimal_compare(" + left + ", " + right + ")->i != 0)"
+    elif op == "<" then "mkint(decimal_compare(" + left + ", " + right + ")->i < 0)"
+    elif op == ">" then "mkint(decimal_compare(" + left + ", " + right + ")->i > 0)"
+    elif op == "<=" then "mkint(decimal_compare(" + left + ", " + right + ")->i <= 0)"
+    elif op == ">=" then "mkint(decimal_compare(" + left + ", " + right + ")->i >= 0)"
+    else "mkint(0)"
 
 fn cmatch(scrut: DExpr, arms: [Arm]) -> str
     var out = "({{ Value* _s = " + cexpr(scrut) + "; Value* _r = 0; "

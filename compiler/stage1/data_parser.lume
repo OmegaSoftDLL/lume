@@ -18,6 +18,22 @@ fn dnl(p: mut DP)
 
 fn is_upper(s: str) -> bool = s.len() > 0 and s[0] >= 'A' and s[0] <= 'Z'
 
+fn ddecimal_scan(text: str, index: int, coefficient: int, scale: int, past_point: int, digits: int)
+    if index >= text.len()
+        {coefficient: coefficient, scale: scale}
+    elif text[index] == '.'
+        ddecimal_scan(text, index + 1, coefficient, scale, 1, digits)
+    else
+        let digit = text[index..index + 1].parse_int() ?? 0
+        if past_point == 1 and scale >= 18
+            ctfail("lume: decimal scale exceeds the 18 digit limit\n")
+        elif coefficient == 0 and digit == 0
+            ddecimal_scan(text, index + 1, 0, scale + past_point, past_point, digits)
+        elif digits >= 18
+            ctfail("lume: decimal coefficient exceeds the 18 digit limit\n")
+        else
+            ddecimal_scan(text, index + 1, coefficient * 10 + digit, scale + past_point, past_point, digits + 1)
+
 fn dlbp(op: str) -> int
     if op == "or"
         2
@@ -52,6 +68,11 @@ fn dpat(p: mut DP) -> Pat
         PBind(name: t.text)
 
 fn datom(p: mut DP) -> DExpr
+    if dcur(p).kind == Op and dcur(p).text == "-" and p.pos + 1 < p.toks.len() and p.toks[p.pos + 1].kind == Decimal
+        deat(p)
+        let t = deat(p)
+        let d = ddecimal_scan(t.text, 0, 0, 0, 0, 0)
+        return DDecimal(coefficient: 0 - d.coefficient, scale: d.scale)
     if dcur(p).kind == Kw and dcur(p).text == "let"
         deat(p)
         let lname = deat(p).text
@@ -90,6 +111,9 @@ fn datom(p: mut DP) -> DExpr
     let t = deat(p)
     if t.kind == Int
         DInt(n: t.text.parse_int() ?? 0)
+    elif t.kind == Decimal
+        let d = ddecimal_scan(t.text, 0, 0, 0, 0, 0)
+        DDecimal(coefficient: d.coefficient, scale: d.scale)
     elif t.kind == Str
         DStr(value: t.text[1..t.text.len() - 1])
     elif t.kind == Op and t.text == "("

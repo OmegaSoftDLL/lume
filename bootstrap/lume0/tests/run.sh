@@ -83,6 +83,9 @@ if command -v cc >/dev/null 2>&1; then
     if cc -o "$cgtmp/calc2" "$cgtmp/calc2.c" 2>/dev/null && "$cgtmp/calc2" 2>/dev/null | diff -u ../../tests/conformance/stage1/calc_core_native.expected - >/dev/null; then ok "core compiler (records+fields+builtins) -> C -> native binary"; else bad "core compiler -> C -> native"; fi
     $BIN run ../../compiler/stage1/data_cc.lume ../../compiler/stage1/list.src "$cgtmp/list.c" >/dev/null 2>&1
     if cc -o "$cgtmp/list" "$cgtmp/list.c" 2>/dev/null && "$cgtmp/list" 2>/dev/null | diff -u ../../tests/conformance/stage1/list_core_native.expected - >/dev/null; then ok "ML-core lists + indexing -> C -> native binary"; else bad "ML-core lists + indexing -> C -> native"; fi
+    cat ../../compiler/stage1/decimal.src ../../compiler/stage1/decimal_native.src >"$cgtmp/decimal.src"
+    $BIN run ../../compiler/stage1/data_cc.lume "$cgtmp/decimal.src" "$cgtmp/decimal.c" >/dev/null 2>&1
+    if cc -o "$cgtmp/decimal" "$cgtmp/decimal.c" 2>/dev/null && "$cgtmp/decimal" 2>/dev/null | diff -u ../../tests/conformance/stage1/decimal_native.expected - >/dev/null; then ok "phase-2 D1: exact decimal literals + arithmetic agree in C backend"; else bad "phase-2 D1: decimal C backend"; fi
     rm -rf "$cgtmp"
 fi
 
@@ -140,6 +143,8 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_
         $BIN asm "$ntmp/$prog.s" "$ntmp/$prog" >/dev/null 2>&1
         if [ -x "$ntmp/$prog" ] && "$ntmp/$prog" 2>/dev/null | diff -u ../../tests/conformance/stage1/$exp.expected - >/dev/null; then ok "no-toolchain: $prog.src -> lume0 asm -> native (NO as/ld/cc)"; else bad "no-toolchain: $prog.src -> lume0 asm -> native"; fi
     done
+    cat ../../compiler/stage1/decimal.src ../../compiler/stage1/decimal_native.src >"$ntmp/decimal.src"
+    if $BIN run ../../compiler/stage1/compiler_in_core.lume "$ntmp/decimal.src" 2>/dev/null | diff -u ../../tests/conformance/stage1/decimal_native.expected - >/dev/null && $BIN run ../../compiler/stage1/data_asm_cc.lume "$ntmp/decimal.src" "$ntmp/decimal.s" >/dev/null 2>&1 && $BIN asm "$ntmp/decimal.s" "$ntmp/decimal" >/dev/null 2>&1 && [ -x "$ntmp/decimal" ] && "$ntmp/decimal" 2>/dev/null | diff -u ../../tests/conformance/stage1/decimal_native.expected - >/dev/null; then ok "phase-2 D1: exact decimal literals + scale-aware arithmetic agree in interpreter and native"; else bad "phase-2 D1: exact decimal literals + scale-aware arithmetic"; fi
     $BIN run ../../compiler/stage1/data_asm_cc.lume ../../compiler/stage1/sh_rpn.src "$ntmp/sh_rpn.s" >/dev/null 2>&1; $BIN asm "$ntmp/sh_rpn.s" "$ntmp/sh_rpn" >/dev/null 2>&1; if [ -x "$ntmp/sh_rpn" ] && "$ntmp/sh_rpn" 2>/dev/null | diff -u ../../tests/conformance/stage1/sh_rpn_asm.expected - >/dev/null; then ok "no-toolchain stress: sh_rpn.src -> lume0 asm -> native"; else bad "no-toolchain stress: sh_rpn.src -> lume0 asm -> native"; fi
     $BIN run ../../compiler/stage1/data_asm_cc.lume ../../compiler/stage1/sh_tree.src "$ntmp/sh_tree.s" >/dev/null 2>&1; $BIN asm "$ntmp/sh_tree.s" "$ntmp/sh_tree" >/dev/null 2>&1; if [ -x "$ntmp/sh_tree" ] && "$ntmp/sh_tree" 2>/dev/null | diff -u ../../tests/conformance/stage1/sh_tree_asm.expected - >/dev/null; then ok "no-toolchain stress: sh_tree.src -> lume0 asm -> native"; else bad "no-toolchain stress: sh_tree.src -> lume0 asm -> native"; fi
     $BIN run ../../compiler/stage1/data_asm_cc.lume ../../compiler/stage1/sh_stackvm.src "$ntmp/sh_stackvm.s" >/dev/null 2>&1; $BIN asm "$ntmp/sh_stackvm.s" "$ntmp/sh_stackvm" >/dev/null 2>&1; if [ -x "$ntmp/sh_stackvm" ] && "$ntmp/sh_stackvm" 2>/dev/null | diff -u ../../tests/conformance/stage1/sh_stackvm_asm.expected - >/dev/null; then ok "no-toolchain stress: sh_stackvm.src -> lume0 asm -> native"; else bad "no-toolchain stress: sh_stackvm.src -> lume0 asm -> native"; fi
@@ -188,6 +193,7 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_
         if ! ( $BIN asm "$ntmp/lc.s" "$ntmp/lc" >/dev/null 2>&1 && cat "../../compiler/stage1/${pr%%:*}.src" | "$ntmp/lc" >"$ntmp/lcout.s" 2>/dev/null && $BIN asm "$ntmp/lcout.s" "$ntmp/lcout" >/dev/null 2>&1 && "$ntmp/lcout" 2>/dev/null | diff -u "../../tests/conformance/stage1/${pr##*:}.expected" - >/dev/null ); then c6=0; echo "  R6c mismatch: ${pr%%:*}"; fi
     done
     if [ "$c6" = 1 ]; then ok "self-host R6c: lumec (native) reads stdin, compiles {nfib,ev,strtest,modtest,bigints} to native, no C"; else bad "self-host R6c: lumec (native) reads stdin, compiles {nfib,ev,strtest,modtest,bigints} to native, no C"; fi
+    if "$ntmp/lc" <"$ntmp/decimal.src" >"$ntmp/decimal_lumec.s" 2>/dev/null && $BIN asm "$ntmp/decimal_lumec.s" "$ntmp/decimal_lumec" >/dev/null 2>&1 && [ -x "$ntmp/decimal_lumec" ] && "$ntmp/decimal_lumec" 2>/dev/null | diff -u ../../tests/conformance/stage1/decimal_native.expected - >/dev/null; then ok "phase-2 D1: lumec parses exact decimal literals and builds decimal arithmetic natively"; else bad "phase-2 D1: lumec decimal literal/arithmetic pipeline"; fi
     # escape decoding: lumec (native) must decode string-literal escapes exactly like the oracle (data_asm_cc)
     printf 'fn f() = "a\\nb"\nprint f()' >"$ntmp/esc.src"
     $BIN run ../../compiler/stage1/data_asm_cc.lume "$ntmp/esc.src" "$ntmp/esc_o.s" >/dev/null 2>&1
@@ -285,6 +291,23 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_
     printf 'fn test_ok() = 2 + 2 == 4\nfn test_broken() = 2 + 2 == 5\n' >"$ntmp/bad_test.src"
     LUME_BIN_DIR="$ntmp" ../../lume test "$ntmp/bad_test.src" >"$ntmp/bt.out" 2>"$ntmp/bt.err"; bt_code=$?
     if LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/sample_test.src 2>/dev/null | diff -u ../../tests/conformance/stage1/ltest_pass_asm.expected - >/dev/null && [ "$bt_code" != 0 ] && grep -q "FAIL test_broken" "$ntmp/bt.out" && grep -q "1 passed, 1 failed" "$ntmp/bt.out"; then ok "phase-2 T1: lume test (native ltest.src) discovers fn test_*(), passes valid suite and fails broken suite"; else bad "phase-2 T1: lume test (native ltest.src) discovers and runs fn test_*()"; fi
+    if LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/decimal.src 2>/dev/null | grep -q "10 passed, 0 failed"; then ok "phase-2 D1: decimal coefficient/scale helper regressions pass through native lume test"; else bad "phase-2 D1: decimal coefficient/scale helper regressions"; fi
+    cat ../../compiler/stage1/decimal.src >"$ntmp/decimal_bad.src"
+    printf 'print decimal_format(decimal_cast(decimal_parse("1.234"), 4, 2))\n' >>"$ntmp/decimal_bad.src"
+    if LUME_BIN_DIR="$ntmp" ../../lume build "$ntmp/decimal_bad.src" -o "$ntmp/decimal_bad" >/dev/null 2>&1; then
+        "$ntmp/decimal_bad" >"$ntmp/decimal_bad.out" 2>"$ntmp/decimal_bad.err"; decimal_bad_code=$?
+    else
+        decimal_bad_code=0
+    fi
+    if [ "$decimal_bad_code" = 3 ] && [ ! -s "$ntmp/decimal_bad.out" ] && grep -q "decimal rescale would discard nonzero digits" "$ntmp/decimal_bad.err"; then ok "phase-2 D1: decimal cast rejects inexact scale reduction without rounding"; else bad "phase-2 D1: decimal cast rejects inexact scale reduction"; fi
+    cat ../../compiler/stage1/decimal.src >"$ntmp/decimal_div_bad.src"
+    printf 'print decimal_div_exact(decimal_parse("1"), decimal_parse("3"), 2)\n' >>"$ntmp/decimal_div_bad.src"
+    if LUME_BIN_DIR="$ntmp" ../../lume build "$ntmp/decimal_div_bad.src" -o "$ntmp/decimal_div_bad" >/dev/null 2>&1; then
+        "$ntmp/decimal_div_bad" >"$ntmp/decimal_div_bad.out" 2>"$ntmp/decimal_div_bad.err"; decimal_div_bad_code=$?
+    else
+        decimal_div_bad_code=0
+    fi
+    if [ "$decimal_div_bad_code" = 3 ] && [ ! -s "$ntmp/decimal_div_bad.out" ] && grep -q "decimal division is inexact at requested scale" "$ntmp/decimal_div_bad.err"; then ok "phase-2 D1: exact division rejects a repeating result at the requested scale"; else bad "phase-2 D1: exact division rejects inexact results"; fi
     printf 'fn f(x) = x + 1   \n\n\nprint f(41)  \n' >"$ntmp/unfmt.src"
     if ! LUME_BIN_DIR="$ntmp" ../../lume fmt --check "$ntmp/unfmt.src" >/dev/null 2>&1 && LUME_BIN_DIR="$ntmp" ../../lume fmt "$ntmp/unfmt.src" >/dev/null 2>&1 && LUME_BIN_DIR="$ntmp" ../../lume fmt --check "$ntmp/unfmt.src" >/dev/null 2>&1; then ok "phase-2 T1: lume fmt & lume fmt --check normalise and verify source formatting"; else bad "phase-2 T1: lume fmt & lume fmt --check"; fi
     # phase-2 F1: named type/enum/record declarations + a GRADUAL, AI-first checker (native lumec, no C).
