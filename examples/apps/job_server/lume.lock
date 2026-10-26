@@ -2,7 +2,7 @@
 version = 1
 manifest = {"name":"job_server","version":"0.3.0","edition":"2026","capabilities":"io"}
 manifest_sha256 = "c017e348e709eb172b3a12c59e0fe37b56295d410ec00eff400fff913c825d22"
-module "engine.src" sha256 = "d879b79436273ee896321450ae52e494fda259b29ad7b5971364e5e96cbb48d4"
+module "engine.src" sha256 = "b974be505a3c26514e424bff12beae062680d30fc42d4e5e4ef4251018aad4a8"
 module "main.src" sha256 = "3e37e5d6ff67e3f5fc2bf1550de2a31d33d28bf46de76b78e596b0c6f6e7e2aa"
 module "protocol.src" sha256 = "540071208acc8b472af6955b386d2097b33032ccc3617328d79c77f4587b0ed2"
 module "workers.src" sha256 = "2e5c7eec739515b2ee08817846fb5b59becf2800081185bb9af7c19d3d5fc33c"

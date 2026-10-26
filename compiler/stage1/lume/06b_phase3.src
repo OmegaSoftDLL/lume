@@ -555,6 +555,8 @@ fn ais_dec_bin(op, l, r, ps, guarded) = match l
 
 fn ais_dec_arg(arg, ps, subvars, guarded) = match arg
     Var(v)        => omem(v, subvars)
+    OwnE(inner)   => ais_dec_arg(inner, ps, subvars, guarded)
+    MutE(inner)   => ais_dec_arg(inner, ps, subvars, guarded)
     Bin(op, l, r) => ais_dec_bin(op, l, r, ps, guarded)
     _             => 0
 

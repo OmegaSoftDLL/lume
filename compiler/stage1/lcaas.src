@@ -135,7 +135,7 @@ fn cs_scope(t) = if cs_hdtext(cs_drop1(t)) == "in" or cs_hdtext(cs_drop1(t)) == 
 fn cs_spawn(t) = if cs_hdtext(t) == "(" then let a = cs_arglist(cs_drop1(t)) in {node: SpawnE(cs_asthead(a.items)), rest: a.rest} else let r = cs_expr(t) in {node: SpawnE(r.node), rest: r.rest}
 
 fn cs_ispatstart(ts) = if cs_hdkind(ts) == "NM" or cs_hdkind(ts) == "ST" then 1 else if cs_hdkind(ts) == "ID" then cs_ispatid(cs_hdtext(ts)) else 0
-fn cs_ispatid(s) = if s == "fn" or s == "print" or s == "type" or s == "let" or s == "if" or s == "then" or s == "else" or s == "in" or s == "match" or s == "and" or s == "or" then 0 else 1
+fn cs_ispatid(s) = if s == "fn" or s == "pub" or s == "total" or s == "llm" or s == "effect" or s == "law" or s == "resource" or s == "print" or s == "type" or s == "let" or s == "var" or s == "if" or s == "then" or s == "else" or s == "in" or s == "match" or s == "and" or s == "or" then 0 else 1
 fn cs_pat(ts) = if cs_hdkind(ts) == "NM" then {pat: PInt(toint(cs_hdtext(ts))), rest: cs_drop1(ts)} else if cs_hdkind(ts) == "ST" then {pat: PStr(cs_hdtext(ts)), rest: cs_drop1(ts)} else if cs_hdtext(ts) == "_" then {pat: PWild, rest: cs_drop1(ts)} else cs_patid(cs_hdtext(ts), cs_drop1(ts))
 fn cs_patid(nm, ts) = if cs_isupper(at(nm, 0)) then cs_patctor(nm, ts) else {pat: PBind(nm), rest: ts}
 fn cs_patctor(nm, ts) = if cs_hdtext(ts) == "(" then cs_patargs(nm, cs_patlist(cs_drop1(ts))) else {pat: PCons(nm, Nil), rest: ts}
@@ -728,6 +728,8 @@ fn cs_is_dec_bin(op, l, r, ps, guarded) = match l
     _      => 0
 fn cs_is_dec_arg(arg, ps, subvars, guarded) = match arg
     Var(v)        => cs_omem(v, subvars)
+    OwnE(inner)   => cs_is_dec_arg(inner, ps, subvars, guarded)
+    MutE(inner)   => cs_is_dec_arg(inner, ps, subvars, guarded)
     Bin(op, l, r) => cs_is_dec_bin(op, l, r, ps, guarded)
     _             => 0
 fn cs_has_dec_arg(args, ps, subvars, guarded) = match args
