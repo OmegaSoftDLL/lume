@@ -1,0 +1,89 @@
+## invoicing.src — Customer master, invoice line pricing, penny-exact decimal tax & tier
+## discounts, and compile-time checked equijoin + grouped revenue rollups (Stage 2 Capstone).
+use decimal
+use table
+use query
+use catalog
+
+## --- Domain Records for Customers, Invoice Lines & Joined/Grouped Query Views ---
+type Customer = record customer_id: int, company: str, tier: int, region: str
+
+type InvoiceLine = record invoice_id: int, customer_id: int, sku: str, qty: int, unit_price: decimal(10, 2), line_subtotal: decimal(10, 2)
+
+type CustomerInvoiceRow = record lines_invoice_id: int, lines_customer_id: int, lines_sku: str, lines_qty: int, lines_unit_price: decimal(10, 2), lines_line_subtotal: decimal(10, 2), customers_customer_id: int, customers_company: str, customers_tier: int, customers_region: str
+
+type RegionRevenue = record customers_region: str, count: int, sum: decimal(10, 2)
+
+type CustomerRevenue = record customer_id: int, count: int, sum: decimal(10, 2)
+
+## --- Comptime regional tax schedule (Track C: C1, C2, C4a) ---
+fn region_tax_bps(region_code: int) -> int = if region_code == 1 then 800 else if region_code == 2 then 500 else 0
+
+comptime assert(region_tax_bps(1) == 800, "North region tax rate must be 800 bps (8.00%)")
+comptime assert(region_tax_bps(2) == 500, "South region tax rate must be 500 bps (5.00%)")
+
+fn region_tax_bps_by_name(region: str) -> int = if region == "North" then comptime(region_tax_bps(1)) else if region == "South" then comptime(region_tax_bps(2)) else 0
+
+## --- Hygienic quasiquote macro for basis-point fee calculation (Track M: M1/M2) ---
+fn m_bps_numer(amount_ast, bps_ast) = quote(let tmp = unquote(amount_ast) in decimal_mul(tmp, decimal_make(unquote(bps_ast), 0)))
+
+fn compute_bps_amount(tmp, bps: int) = decimal(12, 2, decimal_div_exact(splice(m_bps_numer(quote(tmp), quote(bps))), decimal_parse("10000"), 2))
+
+## --- Penny-exact invoice settlement math (Track D: D1 decimal(10, 2)) ---
+fn calc_line_subtotal(unit_price, qty: int) = decimal(12, 2, decimal_mul(decimal(12, 2, unit_price), decimal_make(qty, 0)))
+
+fn calc_tier_discount(subtotal, tier: int) = compute_bps_amount(decimal(12, 2, subtotal), lookup_tier_bps(tier))
+
+fn calc_taxable_net(subtotal, discount) = decimal(12, 2, decimal_sub(decimal(12, 2, subtotal), discount))
+
+fn calc_regional_tax(taxable_net, region: str) = compute_bps_amount(taxable_net, region_tax_bps_by_name(region))
+
+fn calc_invoice_grand_total(taxable_net, tax) = decimal(12, 2, decimal_add(taxable_net, tax))
+
+fn settle_invoice(subtotal, tier: int, region: str) = let sub = decimal(12, 2, subtotal) in let disc = calc_tier_discount(sub, tier) in let net = calc_taxable_net(sub, disc) in let tax = calc_regional_tax(net, region) in let grand = calc_invoice_grand_total(net, tax) in {subtotal: sub, discount: disc, taxable: net, tax: tax, total: grand}
+
+## Accounting conservation invariant: `subtotal - discount + tax == total` to the exact cent.
+fn verify_settlement_conservation(s) -> int = let lhs = decimal_add(decimal_sub(s.subtotal, s.discount), s.tax) in if decimal_compare(lhs, s.total) == 0 then 1 else 0
+
+## --- Customer & Invoice Line CSV schemas and sample ledgers (Track D: D2) ---
+fn customer_schema() = Cons({name: "customer_id", type: "int"}, Cons({name: "company", type: "str"}, Cons({name: "tier", type: "int"}, Cons({name: "region", type: "str"}, Nil))))
+
+fn customers_csv_text() -> str = "customer_id,company,tier,region\n1,Apex Robotics,3,North\n2,Boreal Photonics,2,South\n3,Cobalt Automation,1,North"
+
+fn load_customers(csv_text: str) -> table[Customer] = read_csv(csv_text, customer_schema())
+
+fn default_customers() -> table[Customer] = load_customers(customers_csv_text())
+
+fn invoice_line_schema() = Cons({name: "invoice_id", type: "int"}, Cons({name: "customer_id", type: "int"}, Cons({name: "sku", type: "str"}, Cons({name: "qty", type: "int"}, Cons({name: "unit_price", type: "decimal"}, Cons({name: "line_subtotal", type: "decimal"}, Nil))))))
+
+fn invoice_lines_csv_text() -> str = "invoice_id,customer_id,sku,qty,unit_price,line_subtotal\n1001,1,SKU-101,2,150.00,300.00\n1002,1,SKU-103,2,210.00,420.00\n1003,2,SKU-102,8,42.50,340.00\n1004,3,SKU-105,5,52.00,260.00\n1005,2,SKU-101,2,150.00,300.00"
+
+fn load_invoice_lines(csv_text: str) -> table[InvoiceLine] = read_csv(csv_text, invoice_line_schema())
+
+fn default_invoice_lines() -> table[InvoiceLine] = load_invoice_lines(invoice_lines_csv_text())
+
+## --- Typed cell extractors for Customer, InvoiceLine, and Grouped rows ---
+fn customer_id_at(tbl, row: int) -> int = cell_int(tbl, row, 0)
+fn customer_company_at(tbl, row: int) -> str = cell_str(tbl, row, 1)
+fn customer_tier_at(tbl, row: int) -> int = cell_int(tbl, row, 2)
+fn customer_region_at(tbl, row: int) -> str = cell_str(tbl, row, 3)
+
+fn line_invoice_id(tbl, row: int) -> int = cell_int(tbl, row, 0)
+fn line_customer_id(tbl, row: int) -> int = cell_int(tbl, row, 1)
+fn line_sku(tbl, row: int) -> str = cell_str(tbl, row, 2)
+fn line_qty(tbl, row: int) -> int = cell_int(tbl, row, 3)
+fn line_unit_price(tbl, row: int) = cell_dec(tbl, row, 4)
+fn line_subtotal_at(tbl, row: int) = cell_dec(tbl, row, 5)
+
+fn sum_invoice_subtotals_from(tbl, row: int, n: int) = if row >= n then decimal(12, 2, decimal_make(0, 2)) else decimal_add(decimal(12, 2, line_subtotal_at(tbl, row)), sum_invoice_subtotals_from(tbl, row + 1, n))
+
+fn total_invoiced_subtotal(tbl) = sum_invoice_subtotals_from(tbl, 0, table_row_count(tbl))
+
+## --- Compile-time checked invoicing queries (Track D: D3 where, order, join, group) ---
+fn query_high_value_lines(lines: table[InvoiceLine]) -> table[InvoiceLine] = query_order(InvoiceLine, query_where(InvoiceLine, lines, "line_subtotal", ">=", qdec("300.00")), "line_subtotal", "desc")
+
+fn query_customer_invoices(lines: table[InvoiceLine], customers: table[Customer]) -> table[CustomerInvoiceRow] = query_join(InvoiceLine, Customer, CustomerInvoiceRow, lines, customers, "lines", "customers", "customer_id", "customer_id")
+
+fn query_revenue_by_region(joined: table[CustomerInvoiceRow]) -> table[RegionRevenue] = query_group(CustomerInvoiceRow, RegionRevenue, joined, "customers_region", "lines_line_subtotal")
+
+fn query_revenue_by_customer(lines: table[InvoiceLine]) -> table[CustomerRevenue] = query_group(InvoiceLine, CustomerRevenue, lines, "customer_id", "line_subtotal")
