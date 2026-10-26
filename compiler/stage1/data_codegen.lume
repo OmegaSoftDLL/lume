@@ -79,7 +79,7 @@ fn cbin(op: str, a: str, b: str) -> str
 fn decimal_expr(e: DExpr) -> bool
     match e
         DDecimal(coefficient, scale) => true
-        DCall(name, args) => name == "decimal_make" or name == "decimal_parse" or name == "decimal_cast" or name == "decimal_div_exact" or name == "decimal_add" or name == "decimal_sub" or name == "decimal_mul" or name == "decimal_div"
+        DCall(name, args) => name == "decimal" or name == "decimal_make" or name == "decimal_parse" or name == "decimal_cast" or name == "decimal_div_exact" or name == "decimal_add" or name == "decimal_sub" or name == "decimal_mul" or name == "decimal_div"
         DIf(cond, then_value, else_value) => decimal_expr(then_value) and decimal_expr(else_value)
         DLetIn(name, value, body) => decimal_expr(body)
         _ => false

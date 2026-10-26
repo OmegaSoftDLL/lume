@@ -295,7 +295,7 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_
     printf 'fn test_ok() = 2 + 2 == 4\nfn test_broken() = 2 + 2 == 5\n' >"$ntmp/bad_test.src"
     LUME_BIN_DIR="$ntmp" ../../lume test "$ntmp/bad_test.src" >"$ntmp/bt.out" 2>"$ntmp/bt.err"; bt_code=$?
     if LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/sample_test.src 2>/dev/null | diff -u ../../tests/conformance/stage1/ltest_pass_asm.expected - >/dev/null && [ "$bt_code" != 0 ] && grep -q "FAIL test_broken" "$ntmp/bt.out" && grep -q "1 passed, 1 failed" "$ntmp/bt.out"; then ok "phase-2 T1: lume test (native ltest.src) discovers fn test_*(), passes valid suite and fails broken suite"; else bad "phase-2 T1: lume test (native ltest.src) discovers and runs fn test_*()"; fi
-    if LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/decimal.src 2>/dev/null | grep -q "10 passed, 0 failed"; then ok "phase-2 D1: decimal coefficient/scale helper regressions pass through native lume test"; else bad "phase-2 D1: decimal coefficient/scale helper regressions"; fi
+    if LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/decimal.src 2>/dev/null | grep -q "12 passed, 0 failed"; then ok "phase-2 D1: decimal coefficient/scale helper regressions pass through native lume test"; else bad "phase-2 D1: decimal coefficient/scale helper regressions"; fi
     cat ../../compiler/stage1/decimal.src >"$ntmp/decimal_bad.src"
     printf 'print decimal_format(decimal_cast(decimal_parse("1.234"), 4, 2))\n' >>"$ntmp/decimal_bad.src"
     if LUME_BIN_DIR="$ntmp" ../../lume build "$ntmp/decimal_bad.src" -o "$ntmp/decimal_bad" >/dev/null 2>&1; then

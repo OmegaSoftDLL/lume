@@ -394,7 +394,7 @@ fn ldec_key(items, key) = match items
     Cons(h, t) => if h.key == key then 1 else ldec_key(t, key)
 fn ldec_expr(e) = match e
     Rec(items)    => len(items) == 2 and ldec_key(items, "coefficient") == 1 and ldec_key(items, "scale") == 1
-    Call(nm, args) => nm == "decimal_make" or nm == "decimal_parse" or nm == "decimal_cast" or nm == "decimal_div_exact" or nm == "decimal_add" or nm == "decimal_sub" or nm == "decimal_mul" or nm == "decimal_div"
+    Call(nm, args) => nm == "decimal" or nm == "decimal_make" or nm == "decimal_parse" or nm == "decimal_cast" or nm == "decimal_div_exact" or nm == "decimal_add" or nm == "decimal_sub" or nm == "decimal_mul" or nm == "decimal_div"
     If(c, t, e2) => ldec_expr(t) and ldec_expr(e2)
     LetIn(nm, v, body) => ldec_expr(body)
     _             => 0

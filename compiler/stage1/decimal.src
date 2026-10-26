@@ -38,6 +38,8 @@ fn decimal_rescale(value, target) = if value.scale <= target then decimal_make(d
 
 fn decimal_cast(value, precision, scale) = if precision < 1 or precision > 18 or scale < 0 or scale > precision then ctfail("lume: decimal precision/scale must satisfy 1 <= p <= 18 and 0 <= s <= p\n") else let scaled = decimal_rescale(value, scale) in let magnitude = if scaled.coefficient < 0 then 0 - scaled.coefficient else scaled.coefficient in if count(str(magnitude)) > precision then ctfail("lume: decimal precision overflow\n") else scaled
 
+fn decimal(precision, scale, value) = decimal_cast(value, precision, scale)
+
 fn decimal_div_exact(left, right, target_scale) = if right.coefficient == 0 then ctfail("lume: decimal division by zero\n") else let numerator = decimal_shift(left.coefficient, right.scale + target_scale) in let denominator = decimal_shift(right.coefficient, left.scale) in if numerator % denominator != 0 then ctfail("lume: decimal division is inexact at requested scale\n") else decimal_cast(decimal_make(numerator / denominator, target_scale), 18, target_scale)
 
 fn decimal_trim(value) = if value.scale > 0 and value.coefficient % 10 == 0 then decimal_trim(decimal_make(value.coefficient / 10, value.scale - 1)) else value
@@ -67,3 +69,7 @@ fn test_decimal_division_is_exact_at_requested_scale() = let result = decimal_di
 fn test_decimal_parse_accepts_precision18_scale18() = let result = decimal_parse("0.000000000000000001") in result.coefficient == 1 and result.scale == 18
 
 fn test_decimal_compare_handles_extreme_scale_gap() = decimal_compare(decimal_make(999999999999999999, 0), decimal_make(1, 18)) == 1
+
+fn test_decimal_constructor_applies_precision_and_scale() = let result = decimal(4, 2, decimal_parse("1.2")) in result.coefficient == 120 and result.scale == 2
+
+fn test_decimal_division_uses_shortest_exact_scale() = let result = decimal_div(decimal_parse("0.50"), decimal_parse("0.2")) in result.coefficient == 25 and result.scale == 1
