@@ -40,6 +40,8 @@ fn isws(c) = c == " " or c == "\t" or c == "\r"
 fn skipws(s, i) = if i >= count(s) then i else if isws(at(s, i)) then skipws(s, i + 1) else i
 fn rtrimend(s, e) = if e <= 0 then 0 else if isws(at(s, e - 1)) then rtrimend(s, e - 1) else e
 fn rtrim(s) = slice(s, 0, rtrimend(s, count(s)))
+fn rtrimnl(s, e) = if e <= 0 then 0 else if at(s, e - 1) == "\n" or isws(at(s, e - 1)) then rtrimnl(s, e - 1) else e
+fn chomp(s) = slice(s, 0, rtrimnl(s, count(s)))
 fn trim(s) = let a = skipws(s, 0) in let b = rtrimend(s, count(s)) in if a >= b then "" else slice(s, a, b)
 fn startswith(s, p) = if count(s) < count(p) then 0 else slice(s, 0, count(p)) == p
 
@@ -115,4 +117,4 @@ fn run_ldoc(lines) = match lines
     Nil        => ""
     Cons(h, t) => if rtrim(h) == "@json" then renderjson(scanlines(t, Nil, "", 0)) else rendermd(scanlines(lines, Nil, "", 0))
 
-print rtrim(run_ldoc(splitlines(readall())))
+print chomp(run_ldoc(splitlines(readall())))
