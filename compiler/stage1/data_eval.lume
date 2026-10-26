@@ -93,6 +93,8 @@ fn rv_is_decimal(v: RV) -> bool
 
 fn decimal_eval_abs(value: int) -> int = if value < 0 then 0 - value else value
 
+fn decimal_eval_power10(n: int) -> int = if n <= 0 then 1 else 10 * decimal_eval_power10(n - 1)
+
 fn decimal_eval_shift(value: int, places: int) -> int
     if value == 0
         0
