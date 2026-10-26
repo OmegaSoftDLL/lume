@@ -503,9 +503,20 @@ fn cs_recfield(items, nm) = match items
     Nil        => cs_cv_err("comptime error: unknown record field '" + nm + "'", "check field name '" + nm + "'")
     Cons(h, t) => if h.key == nm then cs_cv_ok(h.val) else cs_recfield(t, nm)
 
-fn cs_vadd_hops_ft(hs, ft) = match hs
+fn cs_vsubst_hop(e, ps, env) = match e
+    Var(nm)         => if cs_omem(nm, ps) == 1 then e else let lk = cs_envlookup(nm, env) in if lk.ok == 1 then cs_ctnode(lk.v) else e
+    Bin(op, a, b)   => Bin(op, cs_vsubst_hop(a, ps, env), cs_vsubst_hop(b, ps, env))
+    If(c, t, e2)    => If(cs_vsubst_hop(c, ps, env), cs_vsubst_hop(t, ps, env), cs_vsubst_hop(e2, ps, env))
+    LetIn(nm, v, b) => LetIn(nm, cs_vsubst_hop(v, ps, env), cs_vsubst_hop(b, Cons(nm, ps), env))
+    VarIn(nm, v, b) => VarIn(nm, cs_vsubst_hop(v, ps, env), cs_vsubst_hop(b, Cons(nm, ps), env))
+    Call(nm, args)  => Call(nm, cs_vsubst_hop_args(args, ps, env))
+    _               => e
+fn cs_vsubst_hop_args(xs, ps, env) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons(cs_vsubst_hop(h, ps, env), cs_vsubst_hop_args(t, ps, env))
+fn cs_vadd_hops_ft(hs, env, ft) = match hs
     Nil        => ft
-    Cons(h, t) => Cons(Fn(h.op, h.ps, h.body), cs_vadd_hops_ft(t, ft))
+    Cons(h, t) => Cons(Fn(h.op, h.ps, cs_vsubst_hop(h.body, h.ps, env)), cs_vadd_hops_ft(t, env, ft))
 
 fn cs_ceval(e, env, ft, cd) = if cd > 64 then cs_cv_err("comptime error: comptime evaluation exceeded 64 call levels", "ensure comptime recursion has a terminating base case") else cs_ceval1(e, env, ft, cd)
 fn cs_ceval1(e, env, ft, cd) = match e
@@ -516,7 +527,7 @@ fn cs_ceval1(e, env, ft, cd) = match e
     VarIn(nm, v, b)         => let rv = cs_ceval(v, env, ft, cd) in if rv.ok == 0 then rv else cs_ceval(b, Cons({k: nm, v: rv.v}, env), ft, cd)
     OwnE(inner)             => cs_ceval(inner, env, ft, cd)
     MutE(inner)             => cs_ceval(inner, env, ft, cd)
-    WithHandlerE(en, hs, b) => cs_ceval(b, env, cs_vadd_hops_ft(hs, ft), cd)
+    WithHandlerE(en, hs, b) => cs_ceval(b, env, cs_vadd_hops_ft(hs, env, ft), cd)
     ScopeE(snm, b)          => cs_ceval(b, Cons({k: snm, v: cs_cv_int(1)}, env), ft, cd)
     SpawnE(inner)           => cs_ceval(inner, env, ft, cd)
     If(c, t, e2)            => let rc = cs_ceval(c, env, ft, cd) in if rc.ok == 0 then rc else if rc.v.i != 0 then cs_ceval(t, env, ft, cd) else cs_ceval(e2, env, ft, cd)

@@ -860,7 +860,7 @@ printf 'effect Clock { fn now_tick() -> int }\npub fn step(c: int) -> int / {Clo
 if ../../lume agent eval "$_k2x_tmp" 2>/dev/null | grep -q '"result":"210"'; then ok "phase-3 K2 (#167): cross-platform inter-procedural effect handler dispatch (step(c) + step(c) == 210)"; else bad "phase-3 K2 (#167): cross-platform inter-procedural effect handler dispatch"; fi
 rm -f "$_k2x_tmp"
 
-if ../../lume agent eval ../../compiler/stage1/compiler_effects_ok.src 2>/dev/null | grep -q '"result":"108\\n219"'; then ok "inflection Stage C: cross-platform CompilerIO driver effect & / pure pipeline passes"; else bad "inflection Stage C: cross-platform CompilerIO driver effect & / pure pipeline passes"; fi
+if ../../lume agent eval ../../compiler/stage1/compiler_effects_ok.src 2>/dev/null | grep -q '"result":"108\\n244"'; then ok "inflection Stage C: cross-platform CompilerIO driver effect & / pure pipeline passes"; else bad "inflection Stage C: cross-platform CompilerIO driver effect & / pure pipeline passes"; fi
 
 _sb1_tmp=$(mktemp)
 _sb2_tmp=$(mktemp)
