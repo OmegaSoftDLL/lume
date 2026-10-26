@@ -530,6 +530,14 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_
     "$ntmp/lc" <"$ntmp/f3bad1.src" >"$ntmp/f3bad1.s" 2>"$ntmp/f3bad1.err"; f3b1=$?
     "$ntmp/lc" <"$ntmp/f3bad2.src" >"$ntmp/f3bad2.s" 2>"$ntmp/f3bad2.err"; f3b2=$?
     if [ "$f3b1" = 3 ] && [ ! -s "$ntmp/f3bad1.s" ] && grep -q "returns int but is declared to return str" "$ntmp/f3bad1.err" && [ "$f3b2" = 3 ] && [ ! -s "$ntmp/f3bad2.s" ] && grep -q "returns int but is declared to return str" "$ntmp/f3bad2.err"; then ok "phase-2 F3a: an inferred return type that contradicts -> R fails at compile time (exit 3, no asm)"; else bad "phase-2 F3a: inferred return-type mismatch fails"; fi
+    # phase-2 F3b: argument inference -- an argument that infers to int/str is checked against an int/str parameter.
+    "$ntmp/lc" <../../compiler/stage1/arg_infer_ok.src >"$ntmp/ai.s" 2>"$ntmp/ai.err"; "$ntmp/lasm" <"$ntmp/ai.s" >"$ntmp/ai.elf" 2>/dev/null; chmod +x "$ntmp/ai.elf"
+    if [ -x "$ntmp/ai.elf" ] && "$ntmp/ai.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/arg_infer_ok_asm.expected - >/dev/null; then ok "phase-2 F3b: inferred int/str arguments type-check against parameters and run"; else bad "phase-2 F3b: argument inference (passing)"; cat "$ntmp/ai.err"; fi
+    printf 'fn greet(name: str) -> str = name\nfn bad(n: int) -> str = greet(n)\nprint 0\n' >"$ntmp/f3bb1.src"
+    printf 'fn wants(s: str) -> str = s\nfn bad2(a: int, b: int) -> str = wants(a + b)\nprint 0\n' >"$ntmp/f3bb2.src"
+    "$ntmp/lc" <"$ntmp/f3bb1.src" >"$ntmp/f3bb1.s" 2>"$ntmp/f3bb1.err"; f3bb1=$?
+    "$ntmp/lc" <"$ntmp/f3bb2.src" >"$ntmp/f3bb2.s" 2>"$ntmp/f3bb2.err"; f3bb2=$?
+    if [ "$f3bb1" = 3 ] && [ ! -s "$ntmp/f3bb1.s" ] && grep -q "argument 1 of 'greet' has type int but parameter 'name' expects str" "$ntmp/f3bb1.err" && [ "$f3bb2" = 3 ] && [ ! -s "$ntmp/f3bb2.s" ] && grep -q "argument 1 of 'wants' has type int but parameter 's' expects str" "$ntmp/f3bb2.err"; then ok "phase-2 F3b: an inferred int argument passed to a str parameter fails at compile time (exit 3, no asm)"; else bad "phase-2 F3b: inferred argument mismatch fails"; fi
     rm -rf "$ntmp"
 else
     ok "no-toolchain ELF pipeline (skipped: not linux/x86_64, or under ASan)"
