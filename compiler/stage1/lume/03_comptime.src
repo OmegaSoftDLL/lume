@@ -250,7 +250,7 @@ fn cfolde(e, ft) = match e
     Bin(op, a, b)   => Bin(op, cfolde(a, ft), cfolde(b, ft))
     If(c, t, e2)    => If(cfolde(c, ft), cfolde(t, ft), cfolde(e2, ft))
     LetIn(nm, v, b) => LetIn(nm, cfolde(v, ft), cfolde(b, ft))
-    Call(nm, args)  => if nm == "unquote" then ctfail("lume: comptime error: 'unquote' may only appear inside 'quote(...)'\n") else Call(nm, cfoldeargs(args, ft))
+    Call(nm, args)  => if nm == "unquote" and isnil(lookupfn(nm, ft)) == 1 then ctfail("lume: comptime error: 'unquote' may only appear inside 'quote(...)'\n") else Call(nm, cfoldeargs(args, ft))
     Rec(items)      => Rec(cfolderec(items, ft))
     RecT(tn, items) => RecT(tn, cfolderec(items, ft))
     Field(o, nm)    => Field(cfolde(o, ft), nm)
