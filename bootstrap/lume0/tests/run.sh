@@ -614,6 +614,12 @@ PY
     printf 'fn mkpt() -> int = let p = {x: 3, y: 4} in p.z\nprint mkpt()\n' >"$ntmp/f3cbad.src"
     "$ntmp/lc" <"$ntmp/f3cbad.src" >"$ntmp/f3cbad.s" 2>"$ntmp/f3cbad.err"; f3c=$?
     if [ "$f3c" = 3 ] && [ ! -s "$ntmp/f3cbad.s" ] && grep -q "record 'p' has no field 'z'" "$ntmp/f3cbad.err"; then ok "phase-2 F3c: accessing a field an anonymous record lacks fails at compile time (exit 3, no asm)"; else bad "phase-2 F3c: unknown field access fails"; fi
+    # phase-2 F3c (field-type inference): a record field's inferred type flows into argument checks.
+    "$ntmp/lc" <../../compiler/stage1/field_type_ok.src >"$ntmp/ft.s" 2>"$ntmp/ft.err"; "$ntmp/lasm" <"$ntmp/ft.s" >"$ntmp/ft.elf" 2>/dev/null; chmod +x "$ntmp/ft.elf"
+    if [ -x "$ntmp/ft.elf" ] && "$ntmp/ft.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/field_type_ok_asm.expected - >/dev/null; then ok "phase-2 F3c: a record field's type is inferred and type-checks as an argument, and runs"; else bad "phase-2 F3c: field-type inference (passing)"; cat "$ntmp/ft.err"; fi
+    printf 'fn needs(s: str) -> str = s\nfn mk() -> int = let p = {x: 10} in let u = needs(p.x) in 0\nprint mk()\n' >"$ntmp/f3ctbad.src"
+    "$ntmp/lc" <"$ntmp/f3ctbad.src" >"$ntmp/f3ctbad.s" 2>"$ntmp/f3ctbad.err"; f3ct=$?
+    if [ "$f3ct" = 3 ] && [ ! -s "$ntmp/f3ctbad.s" ] && grep -q "argument 1 of 'needs' has type int but parameter 's' expects str" "$ntmp/f3ctbad.err"; then ok "phase-2 F3c: a record field of the wrong type passed as an argument fails at compile time (exit 3, no asm)"; else bad "phase-2 F3c: field-type argument mismatch fails"; fi
     rm -rf "$ntmp"
 else
     ok "no-toolchain ELF pipeline (skipped: not linux/x86_64, or under ASan)"

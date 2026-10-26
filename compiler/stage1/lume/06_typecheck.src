@@ -94,13 +94,13 @@ fn twithlenv(tt, lenv) = twith(tt, lenv, tt.recenv)
 ## does not have is a compile-time error. Only a direct record literal gives a known field set (a call/unknown
 ## leaves the variable unchecked, so zero false positives). Checker-only, so lumec.src and the fixpoint are
 ## untouched. This is the first structural piece of full Hindley-Milner inference (F3c).
-fn tletbind(tt, nm, v) = twith(tt, Cons({k: nm, v: tnarrow(tknownl(v, tt, tt.lenv))}, tt.lenv), trecbind(nm, v, tt.recenv))
-fn trecbind(nm, v, renv) = match v
-    Rec(items) => Cons({k: nm, fields: reckeys(items)}, renv)
-    _          => renv
-fn reckeys(items) = match items
+fn tletbind(tt, nm, v) = twith(tt, Cons({k: nm, v: tnarrow(tknownl(v, tt, tt.lenv))}, tt.lenv), trecbind(nm, v, tt))
+fn trecbind(nm, v, tt) = match v
+    Rec(items) => Cons({k: nm, fields: recfields(items, tt)}, tt.recenv)
+    _          => tt.recenv
+fn recfields(items, tt) = match items
     Nil        => Nil
-    Cons(h, t) => Cons(h.key, reckeys(t))
+    Cons(h, t) => Cons({fname: h.key, fty: tnarrow(tknownl(h.val, tt, tt.lenv))}, recfields(t, tt))
 fn tchkfieldaccess(o, nm, tt) = match o
     Var(x) => tchkfieldv(x, nm, trecenvlookup(x, tt.recenv))
     _      => 0
@@ -112,7 +112,18 @@ fn tchkfieldv(x, nm, m) = match m
     Cons(r, rest) => if tfieldname(r.fields, nm) == 1 then 1 else ctfail("lume: type error: record '" + x + "' has no field '" + nm + "'\n")
 fn tfieldname(fields, nm) = match fields
     Nil        => 0
-    Cons(f, t) => if f == nm then 1 else tfieldname(t, nm)
+    Cons(f, t) => if f.fname == nm then 1 else tfieldname(t, nm)
+## F3c field-type inference: `<var>.<field>` on a known let-bound record has the field's inferred type, so it
+## flows into the argument/return checks (a record field of one type used where another is expected is caught).
+fn tfieldtype(o, nm, tt) = match o
+    Var(x) => tfieldtype2(nm, trecenvlookup(x, tt.recenv))
+    _      => TyAny
+fn tfieldtype2(nm, m) = match m
+    Nil           => TyAny
+    Cons(r, rest) => tfieldtylook(r.fields, nm)
+fn tfieldtylook(fields, nm) = match fields
+    Nil        => TyAny
+    Cons(f, t) => if f.fname == nm then f.fty else tfieldtylook(t, nm)
 fn tcollectg(prog) = match prog
     Nil        => Nil
     Cons(h, t) => tcollectg2(h, t)
@@ -321,6 +332,7 @@ fn tknownl(e, tt, lenv) = match e
     Bin(op, a, b)   => tknownlbin(op, tknownl(a, tt, lenv), tknownl(b, tt, lenv))
     If(c, t, e2)    => tknownlif(tknownl(t, tt, lenv), tknownl(e2, tt, lenv))
     LetIn(nm, v, b) => tknownl(b, tt, Cons({k: nm, v: tnarrow(tknownl(v, tt, lenv))}, lenv))
+    Field(o, nm)    => tfieldtype(o, nm, tt)
     _               => tknown(e, tt)
 ## F3a infers only int/str (the unambiguous, high-value subset); decimal/record/list/apply fall back to TyAny
 ## (unchecked, as before), so the strict decimal/record equality can never produce a NEW false positive.
@@ -383,6 +395,7 @@ fn tisinferable(a) = match a
     Bin(op, l, r)   => 1
     If(c, t, e2)    => 1
     LetIn(x, v, b)  => 1
+    Field(o, nm)    => 1
     _               => 0
 fn tchkinfercmp(nm, i, pn, ty, k) = if tisname(ty) == 1 and tisname(k) == 1 and tcompat(ty, k) == 0 then ctfail("lume: type error: argument " + str(i) + " of '" + nm + "' has type " + tystr(k) + " but parameter '" + pn + "' expects " + tystr(ty) + "\n") else 0
 fn tystr(t) = match t
