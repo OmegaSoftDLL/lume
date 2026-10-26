@@ -579,6 +579,12 @@ PY
     # call-result arguments, int/str, and an unknown-typed argument must type-check with ZERO false positives.
     "$ntmp/lc" <../../compiler/stage1/typecheck_robust.src >"$ntmp/tr.s" 2>"$ntmp/tr.err"; "$ntmp/lasm" <"$ntmp/tr.s" >"$ntmp/tr.elf" 2>/dev/null; chmod +x "$ntmp/tr.elf"
     if [ -x "$ntmp/tr.elf" ] && "$ntmp/tr.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/typecheck_robust_asm.expected - >/dev/null; then ok "phase-2 F2/F3: a valid mixed-annotation program type-checks with zero false positives and runs"; else bad "phase-2 F2/F3: zero-false-positive hardening"; cat "$ntmp/tr.err"; fi
+    # phase-2 F3 (nominal inference): a variable of a declared enum/record type is inferred and checked by exact name.
+    "$ntmp/lc" <../../compiler/stage1/nom_infer_ok.src >"$ntmp/no.s" 2>"$ntmp/no.err"; "$ntmp/lasm" <"$ntmp/no.s" >"$ntmp/no.elf" 2>/dev/null; chmod +x "$ntmp/no.elf"
+    if [ -x "$ntmp/no.elf" ] && "$ntmp/no.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/nom_infer_ok_asm.expected - >/dev/null; then ok "phase-2 F3: a nominal (enum) variable is inferred and type-checks across functions, and runs"; else bad "phase-2 F3: nominal inference (passing)"; cat "$ntmp/no.err"; fi
+    printf 'type Color = enum Red | Green\ntype Shape = enum Box | Line\nfn needc(c: Color) -> int = 1\nfn bad(s: Shape) -> int = needc(s)\nprint 0\n' >"$ntmp/f3nom.src"
+    "$ntmp/lc" <"$ntmp/f3nom.src" >"$ntmp/f3nom.s" 2>"$ntmp/f3nom.err"; f3nom=$?
+    if [ "$f3nom" = 3 ] && [ ! -s "$ntmp/f3nom.s" ] && grep -q "argument 1 of 'needc' has type Shape but parameter 'c' expects Color" "$ntmp/f3nom.err"; then ok "phase-2 F3: a variable of the wrong declared type passed as an argument fails at compile time (exit 3, no asm)"; else bad "phase-2 F3: nominal argument mismatch fails"; fi
     rm -rf "$ntmp"
 else
     ok "no-toolchain ELF pipeline (skipped: not linux/x86_64, or under ASan)"
