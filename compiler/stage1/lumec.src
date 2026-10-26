@@ -464,18 +464,7 @@ fn lmarm(lab, i, acc, h, t, c2, bd) = lmarm2(lab, i, acc, h, t, c2, bd, latest(h
 fn lmarm2(lab, i, acc, h, t, c2, bd, ts) = let rest = lmarms(lab, i + 1, acc, t, c2, ts) in lres(".Lm" + lab + "_" + str(i) + ":\n" + ts.code + labind(h.pat, acc, c2.locals) + bd.code + "    jmp .Lm" + lab + "_end\n" + rest.code, rest)
 
 ## --- expressions: asm that leaves the value of `e` pushed; `s` is the threaded state ---
-fn decimal_items(items) = match items
-    Cons(a, Cons(b, Nil)) => a.key == "coefficient" and b.key == "scale"
-    _ => false
-fn decimal_expr(e) = match e
-    Rec(items) => decimal_items(items)
-    Call(nm, args) => nm == "decimal_make" or nm == "decimal_parse" or nm == "decimal_cast" or nm == "decimal_div_exact" or nm == "decimal_add" or nm == "decimal_sub" or nm == "decimal_mul"
-    If(c, a, b) => decimal_expr(a) and decimal_expr(b)
-    LetIn(nm, v, b) => decimal_expr(b)
-    _ => false
-fn decimal_cmp_bin(op, lr, rr) = let setc = if op == "==" then "    sete %al\n" else if op == "!=" then "    setne %al\n" else if op == "<" then "    setl %al\n" else if op == ">" then "    setg %al\n" else if op == "<=" then "    setle %al\n" else "    setge %al\n" in lres(lr.code + rr.code + "    popq %rsi\n    popq %rdi\n    call decimal_compare\n    movq 8(%rax), %rax\n    cmpq $0, %rax\n" + setc + "    movzbq %al, %rax\n    movq %rax, %rdi\n    call mkint\n    pushq %rax\n", rr)
-fn decimal_bin(op, lr, rr) = if op == "+" then lres(lr.code + rr.code + "    popq %rsi\n    popq %rdi\n    call decimal_add\n    pushq %rax\n", rr) else if op == "-" then lres(lr.code + rr.code + "    popq %rsi\n    popq %rdi\n    call decimal_sub\n    pushq %rax\n", rr) else if op == "*" then lres(lr.code + rr.code + "    popq %rsi\n    popq %rdi\n    call decimal_mul\n    pushq %rax\n", rr) else if op == "==" or op == "!=" or op == "<" or op == ">" or op == "<=" or op == ">=" then decimal_cmp_bin(op, lr, rr) else lres(lr.code + rr.code + lbintail(op), rr)
-fn lbin(op, l, lr, r, ctx) = let rr = laexpr(r, ctx, lr) in if decimal_expr(l) and decimal_expr(r) then decimal_bin(op, lr, rr) else lres(lr.code + rr.code + lbintail(op), rr)
+fn lbin(op, lr, r, ctx) = let rr = laexpr(r, ctx, lr) in lres(lr.code + rr.code + lbintail(op), rr)
 fn lif(lab, cr, t, e2, ctx) = let tr = laexpr(t, ctx, cr) in let er = laexpr(e2, ctx, tr) in lres(cr.code + "    popq %rax\n    movq 8(%rax), %rax\n    testq %rax, %rax\n    jz .Le" + lab + "\n" + tr.code + "    jmp .Lx" + lab + "\n.Le" + lab + ":\n" + er.code + ".Lx" + lab + ":\n", er)
 fn llet(nm, vr, b, ctx) = let inner = {locals: ctx.locals, bound: app(ctx.bound, Cons(nm, Nil)), depth: ctx.depth} in let br = laexpr(b, inner, vr) in lres(vr.code + "    popq %rax\n    movq %rax, " + lslot(lidxof(ctx.locals, nm)) + "(%rbp)\n" + br.code, br)
 fn lvar(nm, ctx, s) = if isctor(nm) then lctor(nm, Nil, ctx, s) else lres("    movq " + lslot(lidxof(ctx.locals, nm)) + "(%rbp), %rax\n    pushq %rax\n", s)
@@ -484,7 +473,7 @@ fn laexpr(e, ctx, s) = match e
     Num(n)         => lres("    movq $" + str(n) + ", %rdi\n    call mkint\n    pushq %rax\n", s)
     Str(v)         => lstr(lstrlabel(v, s))
     Var(nm)        => lvar(nm, ctx, s)
-    Bin(op, l, r)  => lbin(op, l, laexpr(l, ctx, s), r, ctx)
+    Bin(op, l, r)  => lbin(op, laexpr(l, ctx, s), r, ctx)
     If(c, t, e2)   => lif(str(s.nl), laexpr(c, ctx, lnext(s)), t, e2, ctx)
     LetIn(nm, v, b) => llet(nm, laexpr(v, ctx, s), b, ctx)
     Call(nm, args) => lcallx(nm, args, ctx, s)

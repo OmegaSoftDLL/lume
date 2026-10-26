@@ -81,54 +81,6 @@ fn env_copy(env: map[str, RV]) -> map[str, RV]
         out[e[0]] = e[1]
     out
 
-fn entries_have(xs, key: str) -> bool
-    match xs
-        Nil => false
-        Cons(h, t) => h[0] == key or entries_have(t, key)
-
-fn rv_is_decimal(v: RV) -> bool
-    match v
-        VRec(fields) => entries_have(fields.entries(), "coefficient") and entries_have(fields.entries(), "scale")
-        _ => false
-
-fn decimal_eval_power10(n: int) -> int = if n <= 0 then 1 else 10 * decimal_eval_power10(n - 1)
-
-fn decimal_eval_align(coefficient: int, from_scale: int, to_scale: int) -> int = if from_scale >= to_scale then coefficient else coefficient * decimal_eval_power10(to_scale - from_scale)
-
-fn decimal_eval_bin(op: str, left: RV, right: RV) -> RV
-    match left
-        VRec(lf) => match right
-            VRec(rf) => do
-                let lc = rv_int(lf.get("coefficient") ?? VInt(n: 0))
-                let ls = rv_int(lf.get("scale") ?? VInt(n: 0))
-                let rc = rv_int(rf.get("coefficient") ?? VInt(n: 0))
-                let rs = rv_int(rf.get("scale") ?? VInt(n: 0))
-                let scale = if ls >= rs then ls else rs
-                let la = decimal_eval_align(lc, ls, scale)
-                let ra = decimal_eval_align(rc, rs, scale)
-                if op == "+"
-                    VRec(fields: {"coefficient": VInt(n: la + ra), "scale": VInt(n: scale)})
-                elif op == "-"
-                    VRec(fields: {"coefficient": VInt(n: la - ra), "scale": VInt(n: scale)})
-                elif op == "*"
-                    VRec(fields: {"coefficient": VInt(n: lc * rc), "scale": VInt(n: ls + rs)})
-                elif op == "=="
-                    VInt(n: if la == ra then 1 else 0)
-                elif op == "!="
-                    VInt(n: if la != ra then 1 else 0)
-                elif op == "<"
-                    VInt(n: if la < ra then 1 else 0)
-                elif op == ">"
-                    VInt(n: if la > ra then 1 else 0)
-                elif op == "<="
-                    VInt(n: if la <= ra then 1 else 0)
-                elif op == ">="
-                    VInt(n: if la >= ra then 1 else 0)
-                else
-                    VInt(n: 0)
-            _ => VInt(n: 0)
-        _ => VInt(n: 0)
-
 fn deval(e: DExpr, env: map[str, RV], fns: [DStmt]) -> RV
     match e
         DInt(n)       => VInt(n: n)
@@ -269,8 +221,6 @@ fn deval(e: DExpr, env: map[str, RV], fns: [DStmt]) -> RV
                     return VInt(n: if sl <= sr then 1 else 0)
                 if op == ">="
                     return VInt(n: if sl >= sr then 1 else 0)
-            if rv_is_decimal(lv) and rv_is_decimal(rv)
-                return decimal_eval_bin(op, lv, rv)
             let a = rv_int(lv)
             let b = rv_int(rv)
             match op
