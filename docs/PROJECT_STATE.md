@@ -143,7 +143,7 @@ subset; the triple self-build is not reached.
   and scale are capped at 18, and inexact rescaling, overflow, division by zero, or repeating
   decimal division fail instead of rounding. Interpreter, C oracle, and native assembly agree on
   the regression suite.
-  Track D2 is being implemented in `compiler/stage1/table.src`: `read_csv(text, schema)` parses
+  Track D2 (`#127`) is implemented in `compiler/stage1/table.src`: `read_csv(text, schema)` parses
   CSV fields (including quoted delimiters, doubled quotes, CRLF, and multiline quoted fields),
   requires an exact header/schema match, converts `str`, `int`, and `decimal` cells without type
   guessing, and returns a relation with typed cell tags and explicit errors. `table_row_count`,
