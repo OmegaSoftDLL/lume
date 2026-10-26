@@ -16,6 +16,10 @@
 #   lume --version | --help
 set -eu
 
+# The self-hosted lexer/parser recurse per source character; raise the stack so compiling a
+# large Lume source does not overflow the default 8 MB stack.
+ulimit -s unlimited 2>/dev/null || ulimit -s 524288 2>/dev/null || true
+
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 SRC_DIR="$ROOT/compiler/stage1"
 L0="$ROOT/bootstrap/lume0/lume0"

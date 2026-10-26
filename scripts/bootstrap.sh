@@ -14,6 +14,12 @@
 # from which the Lume-built tools reproduce themselves exactly.
 set -eu
 cd "$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+
+# The self-hosted lexer/parser recurse once per source character, so compiling the
+# ~117 KB compiler consumes a deep native stack. Raise the stack limit so a growing
+# compiler source does not overflow the default 8 MB stack (a SIGSEGV in stage 1).
+ulimit -s unlimited 2>/dev/null || ulimit -s 524288 2>/dev/null || true
+
 SRC=compiler/stage1
 L0=bootstrap/lume0/lume0
 OUT=${1:-build/bootstrap}

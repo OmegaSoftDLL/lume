@@ -18,6 +18,9 @@
 set -eu
 cd "$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 
+# Deep per-character recursion in the self-hosted lexer/parser needs a large stack.
+ulimit -s unlimited 2>/dev/null || ulimit -s 524288 2>/dev/null || true
+
 SRC=compiler/stage1
 L0=bootstrap/lume0/lume0
 OUT=${1:-build/zero-c}
