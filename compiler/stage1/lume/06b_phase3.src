@@ -39,6 +39,9 @@ fn oany(prog) = match prog
 fn oanystmt(st) = match st
     OSig(nm, pubf, freef, pl, rty, fromp) => 1
     OType(nm, k)                          => 1
+    KEffSig(nm, effs)                     => 1
+    KEffectDecl(enm, ops)                 => 1
+    KCapGrant(effs)                       => 1
     Sig(nm, ps, ts, rt)                   => if ohas_unverified_tys(ts) == 1 or ois_unverified_ty(rt) == 1 then 1 else 0
     Fn(nm, ps, body)                      => oanye(body)
     Print(v)                              => oanye(v)
@@ -46,23 +49,28 @@ fn oanystmt(st) = match st
     _                                     => 0
 
 fn oanye(e) = match e
-    Var(nm)           => ais_hole_name(nm)
-    VarIn(nm, v, b)   => 1
-    OwnE(inner)       => 1
-    MutE(inner)       => 1
-    DeferE(c, b)      => 1
-    ErrDeferE(c, b)   => 1
-    WithAllocE(a, b)  => 1
-    LetIn(nm, v, b)   => if oanye(v) == 1 then 1 else oanye(b)
-    If(c, t, e2)      => if oanye(c) == 1 then 1 else if oanye(t) == 1 then 1 else oanye(e2)
-    Bin(op, l, r)     => if oanye(l) == 1 then 1 else oanye(r)
-    Call(nm, args)    => if nm == "borrow" or nm == "borrow_mut" or nm == "move" or nm == "clone" or nm == "verify" or nm == "law_check" or nm == "evolve_approve" or nm == "llm_complete" or nm == "prob_sample" then 1 else oanyargs(args)
-    Field(o, fld)     => oanye(o)
-    Rec(items)        => oanyrec(items)
-    RecT(tn, items)   => oanyrec(items)
-    Match(sc, arms)   => if oanye(sc) == 1 then 1 else oanyarms(arms)
-    CT(inner)         => oanye(inner)
-    _                 => 0
+    Var(nm)                 => ais_hole_name(nm)
+    VarIn(nm, v, b)         => 1
+    OwnE(inner)             => 1
+    MutE(inner)             => 1
+    DeferE(c, b)            => 1
+    ErrDeferE(c, b)         => 1
+    WithAllocE(a, b)        => 1
+    WithHandlerE(en, hs, b) => 1
+    LetIn(nm, v, b)         => if oanye(v) == 1 then 1 else oanye(b)
+    If(c, t, e2)            => if oanye(c) == 1 then 1 else if oanye(t) == 1 then 1 else oanye(e2)
+    Bin(op, l, r)           => if oanye(l) == 1 then 1 else oanye(r)
+    Call(nm, args)          => if nm == "borrow" or nm == "borrow_mut" or nm == "move" or nm == "clone" or nm == "verify" or nm == "law_check" or nm == "evolve_approve" or nm == "llm_complete" or nm == "prob_sample" then 1 else oanyargs(args)
+    Field(o, fld)           => oanye(o)
+    Rec(items)              => oanyrec(items)
+    RecT(tn, items)         => oanyrec(items)
+    Match(sc, arms)         => if oanye(sc) == 1 then 1 else oanyarms(arms)
+    CT(inner)               => oanye(inner)
+    _                       => 0
+
+fn oanyhops(xs) = match xs
+    Nil        => 0
+    Cons(h, t) => if oanye(h.body) == 1 then 1 else oanyhops(t)
 
 fn oanyargs(xs) = match xs
     Nil        => 0
@@ -108,6 +116,106 @@ fn ocollectfnms(prog) = match prog
 fn ocollectfnms1(st, rest) = match st
     Fn(nm, ps, body) => Cons(nm, rest)
     _                => rest
+
+fn kcollect_effsigs(prog) = match prog
+    Nil        => Nil
+    Cons(h, t) => kcollect_effsig1(h, kcollect_effsigs(t))
+
+fn kcollect_effsig1(st, rest) = match st
+    KEffSig(nm, effs) => Cons({nm: nm, effs: effs}, rest)
+    _                 => rest
+
+fn kcollect_effdecls(prog) = match prog
+    Nil        => Nil
+    Cons(h, t) => kcollect_effdecl1(h, kcollect_effdecls(t))
+
+fn kcollect_effdecl1(st, rest) = match st
+    KEffectDecl(enm, ops) => Cons({enm: enm, ops: ops}, rest)
+    _                     => rest
+
+fn kcollect_caps(prog) = match prog
+    Nil        => Nil
+    Cons(h, t) => kcollect_cap1(h, kcollect_caps(t))
+
+fn kcollect_cap1(st, rest) = match st
+    KCapGrant(effs) => app(effs, rest)
+    _               => rest
+
+fn keffsig_lookup(nm, ksigs) = match ksigs
+    Nil        => Nil
+    Cons(h, t) => if h.nm == nm then Cons(h, Nil) else keffsig_lookup(nm, t)
+
+fn kop_effect(opnm, edecls) = match edecls
+    Nil        => ""
+    Cons(d, r) => if kop_in_ops(opnm, d.ops) == 1 then d.enm else kop_effect(opnm, r)
+
+fn kop_in_ops(opnm, ops) = match ops
+    Nil        => 0
+    Cons(o, r) => if o.op == opnm then 1 else kop_in_ops(opnm, r)
+
+fn keff_add(eff, xs) = if eff == "" or eff == "pure" or omem(eff, xs) == 1 then xs else Cons(eff, xs)
+
+fn keff_union(xs, ys) = match xs
+    Nil        => ys
+    Cons(h, t) => keff_union(t, keff_add(h, ys))
+
+fn keff_diff(xs, ys) = match xs
+    Nil        => Nil
+    Cons(h, t) => if h == "pure" or omem(h, ys) == 1 then keff_diff(t, ys) else Cons(h, keff_diff(t, ys))
+
+fn keff_join(xs) = match xs
+    Nil        => ""
+    Cons(h, t) => if isnil(t) == 1 then h else h + ", " + keff_join(t)
+
+fn kprim_eff(cnm) = if cnm == "io_write" or cnm == "io_read" or cnm == "println" or cnm == "read" or cnm == "readall" or cnm == "emit" or cnm == "flush" then "io" else if cnm == "fs_read" or cnm == "fs_write" or cnm == "fs_open" then "fs" else if cnm == "net_send" or cnm == "net_recv" or cnm == "net_connect" or cnm == "db_exec" then "net" else if cnm == "rc_new" or cnm == "arc_new" or cnm == "alloc_heap" or cnm == "table_new" or cnm == "box_new" then "alloc" else if cnm == "rand_int" or cnm == "prob_sample" or cnm == "llm_complete" then "rand" else if cnm == "time_now" or cnm == "clock_now" or cnm == "sleep_ms" then "time" else if cnm == "fail_err" or cnm == "raise_err" then "fail" else if cnm == "panic_msg" then "panic" else if cnm == "async_await" or cnm == "spawn_task" then "async" else ""
+
+fn kinfer_call_effs(cnm, ksigs, edecls, fns, d) = let pe = kprim_eff(cnm) in let ue = kop_effect(cnm, edecls) in let base = keff_add(pe, keff_add(ue, Nil)) in let mks = keffsig_lookup(cnm, ksigs) in match mks
+    Cons(ks, r) => keff_union(base, keff_diff(ks.effs, Cons("pure", Nil)))
+    Nil         => if d <= 0 then base else keff_union(base, kinfer_fn_lookup(cnm, fns, ksigs, edecls, d - 1))
+
+fn kinfer_fn_lookup(cnm, fns, ksigs, edecls, d) = match fns
+    Nil        => Nil
+    Cons(f, r) => if f.nm == cnm then kinfer_effs_e(f.body, ksigs, edecls, fns, d) else kinfer_fn_lookup(cnm, r, ksigs, edecls, d)
+
+fn kinfer_effs_e(e, ksigs, edecls, fns, d) = match e
+    Bin(op, l, r)           => keff_union(kinfer_effs_e(l, ksigs, edecls, fns, d), kinfer_effs_e(r, ksigs, edecls, fns, d))
+    If(c, t, e2)            => keff_union(kinfer_effs_e(c, ksigs, edecls, fns, d), keff_union(kinfer_effs_e(t, ksigs, edecls, fns, d), kinfer_effs_e(e2, ksigs, edecls, fns, d)))
+    LetIn(nm, v, b)         => keff_union(kinfer_effs_e(v, ksigs, edecls, fns, d), kinfer_effs_e(b, ksigs, edecls, fns, d))
+    VarIn(nm, v, b)         => keff_union(kinfer_effs_e(v, ksigs, edecls, fns, d), kinfer_effs_e(b, ksigs, edecls, fns, d))
+    OwnE(inner)             => kinfer_effs_e(inner, ksigs, edecls, fns, d)
+    MutE(inner)             => kinfer_effs_e(inner, ksigs, edecls, fns, d)
+    DeferE(c, b)            => keff_union(kinfer_effs_e(c, ksigs, edecls, fns, d), kinfer_effs_e(b, ksigs, edecls, fns, d))
+    ErrDeferE(c, b)         => keff_union(kinfer_effs_e(c, ksigs, edecls, fns, d), kinfer_effs_e(b, ksigs, edecls, fns, d))
+    WithAllocE(a, b)        => keff_union(kinfer_effs_e(a, ksigs, edecls, fns, d), orem("alloc", kinfer_effs_e(b, ksigs, edecls, fns, d)))
+    WithHandlerE(en, hs, b) => keff_union(kinfer_hops(hs, ksigs, edecls, fns, d), orem(en, kinfer_effs_e(b, ksigs, edecls, fns, d)))
+    Call(cnm, args)         => keff_union(kinfer_call_effs(cnm, ksigs, edecls, fns, d), kinfer_args(args, ksigs, edecls, fns, d))
+    Match(sc, arms)         => keff_union(kinfer_effs_e(sc, ksigs, edecls, fns, d), kinfer_arms(arms, ksigs, edecls, fns, d))
+    Field(o, fld)           => kinfer_effs_e(o, ksigs, edecls, fns, d)
+    Rec(items)              => kinfer_rec(items, ksigs, edecls, fns, d)
+    RecT(tn, items)         => kinfer_rec(items, ksigs, edecls, fns, d)
+    _                       => Nil
+
+fn kinfer_hops(hs, ksigs, edecls, fns, d) = match hs
+    Nil        => Nil
+    Cons(h, t) => keff_union(kinfer_effs_e(h.body, ksigs, edecls, fns, d), kinfer_hops(t, ksigs, edecls, fns, d))
+
+fn kinfer_args(xs, ksigs, edecls, fns, d) = match xs
+    Nil        => Nil
+    Cons(h, t) => keff_union(kinfer_effs_e(h, ksigs, edecls, fns, d), kinfer_args(t, ksigs, edecls, fns, d))
+
+fn kinfer_arms(xs, ksigs, edecls, fns, d) = match xs
+    Nil        => Nil
+    Cons(h, t) => keff_union(kinfer_effs_e(h.body, ksigs, edecls, fns, d), kinfer_arms(t, ksigs, edecls, fns, d))
+
+fn kinfer_rec(xs, ksigs, edecls, fns, d) = match xs
+    Nil        => Nil
+    Cons(h, t) => keff_union(kinfer_effs_e(h.val, ksigs, edecls, fns, d), kinfer_rec(t, ksigs, edecls, fns, d))
+
+fn kchk_fn_effs(nm, pubf, body, ot) = let inf = kinfer_effs_e(body, ot.ksigs, ot.edecls, ot.fns, 4) in let mks = keffsig_lookup(nm, ot.ksigs) in let dec = kget_dec_effs(mks) in let missing_pub = if pubf == 1 and isnil(mks) == 1 then inf else keff_diff(inf, dec) in if (pubf == 1 or isnil(mks) == 0) and isnil(missing_pub) == 0 then ctfail("lume: effect error [E0200]: function '" + nm + "' performs undeclared effect '{" + keff_join(missing_pub) + "}' (fix-it: add '/ {" + keff_join(keff_union(dec, inf)) + "}' to the signature of '" + nm + "' or handle it with 'with handler')\n") else if isnil(ot.caps) == 0 and isnil(keff_diff(inf, ot.caps)) == 0 then let uncap = keff_diff(inf, ot.caps) in ctfail("lume: capability error [E0200]: function '" + nm + "' requires capability '{" + keff_join(uncap) + "}' not granted to this module (fix-it: add '@capability " + ohd_s(uncap, "io") + "' or declare it in lume.toml)\n") else 1
+
+fn kget_dec_effs(mks) = match mks
+    Nil         => Nil
+    Cons(ks, r) => ks.effs
 
 fn osiglookup(nm, osigs) = match osigs
     Nil        => Nil
@@ -298,6 +406,7 @@ fn ochke(e, ctx, moved) = match e
     DeferE(c, b) => let rb = ochke(b, ctx, moved) in let rc = ochke(c, ctx, rb.moved) in {moved: rc.moved, origin: rb.origin}
     ErrDeferE(c, b) => let rb = ochke(b, ctx, moved) in let rc = ochke(c, ctx, rb.moved) in {moved: rc.moved, origin: rb.origin}
     WithAllocE(a, b) => let ra = ochke(a, ctx, moved) in ochke(b, octx_with_alloc(ctx), ra.moved)
+    WithHandlerE(en, hs, b) => let mvh = ochkhops(hs, ctx, moved) in ochke(b, ctx, mvh)
     Bin(op, l, r) => let rl = ochke(l, ctx, moved) in let rr = ochke(r, ctx, rl.moved) in {moved: rr.moved, origin: ""}
     If(c, t, e2) => let rc = ochke(c, ctx, moved) in let rt = ochke(t, ctx, rc.moved) in let re = ochke(e2, ctx, rc.moved) in {moved: app(rt.moved, re.moved), origin: if rt.origin != "" then rt.origin else re.origin}
     Rec(items) => {moved: ochkrec(items, ctx, moved), origin: ""}
@@ -306,6 +415,10 @@ fn ochke(e, ctx, moved) = match e
     CT(inner) => ochke(inner, ctx, moved)
     Call(nm, args) => ochkcall(nm, args, ctx, moved)
     _ => {moved: moved, origin: ""}
+
+fn ochkhops(hs, ctx, moved) = match hs
+    Nil        => moved
+    Cons(h, t) => let r = ochke(h.body, ctx, moved) in ochkhops(t, ctx, r.moved)
 
 fn ochkrec(items, ctx, moved) = match items
     Nil        => moved
@@ -582,8 +695,8 @@ fn aget_fn_lenv(msig) = match msig
 fn ochkfn(nm, ps, body, ot) = ochkfn2(nm, ps, body, osiglookup(nm, ot.osigs), tsiglookup(nm, ot.sigs), ot)
 
 fn ochkfn2(nm, ps, body, mosig, msig, ot) = match mosig
-    Nil          => let rty = aget_sig_rty(msig) in let lenv = aget_fn_lenv(msig) in let zh = achk_holes_e(body, rty, lenv, {fnm: nm, pubf: 0, sigs: ot.sigs}) in let zp = achk_prov_e(body, nm, auinit_from_sig(msig), ot) in let ctx = {fnm: nm, pubf: 0, freef: 0, halloc: 0, bparams: ps, mvars: Nil, pnames: ps, locals: Nil, origins: oinit_origins(ps), osigs: ot.osigs, otypes: ot.otypes} in let rb = ochke(body, ctx, Nil) in ochk_ret_origin(nm, 0, "", rty, ps, rb.origin)
-    Cons(sg, sr) => if sg.pubf == 1 and oisgctype(sg.rty, ot.otypes) == 1 then ctfail("lume: ownership error [O0030]: public function '" + nm + "' cannot expose '@gc' region type across a public module boundary\n") else let rty = aget_fn_rty(msig, mosig) in let lenv = aget_fn_lenv(msig) in let zh = achk_holes_e(body, rty, lenv, {fnm: nm, pubf: sg.pubf, sigs: ot.sigs}) in let zt = (if ois_total(sg.freef) == 1 then achk_total_e(body, {fnm: nm, ps: ps, fns: ot.fns, osigs: ot.osigs}, Nil, Nil) else 0) in let tret = achk_prov_e(body, nm, auinit_from_sig(msig), ot) in if sg.pubf == 1 and ois_llm(sg.freef) == 0 and ois_unverified_ty(rty) == 0 and tret == 1 then ctfail("lume: provenance error [A0003]: unverified AI/probabilistic value cannot be returned from trusted 'pub fn " + nm + "' without verification (fix-it: wrap the return value in 'verify(val, <contract>)' or validate with a contract guard before returning)\n") else let bparams = if isnil(sg.pl) == 1 then ps else obparams_pl(sg.pl) in let mvars = omvars_pl(sg.pl) in let ctx = {fnm: nm, pubf: sg.pubf, freef: sg.freef, halloc: 0, bparams: bparams, mvars: mvars, pnames: ps, locals: Nil, origins: oinit_origins(ps), osigs: ot.osigs, otypes: ot.otypes} in let rb = ochke(body, ctx, Nil) in ochk_ret_origin(nm, sg.pubf, sg.fromp, rty, ps, rb.origin)
+    Nil          => let rty = aget_sig_rty(msig) in let lenv = aget_fn_lenv(msig) in let zk = kchk_fn_effs(nm, 0, body, ot) in let zh = achk_holes_e(body, rty, lenv, {fnm: nm, pubf: 0, sigs: ot.sigs}) in let zp = achk_prov_e(body, nm, auinit_from_sig(msig), ot) in let ctx = {fnm: nm, pubf: 0, freef: 0, halloc: 0, bparams: ps, mvars: Nil, pnames: ps, locals: Nil, origins: oinit_origins(ps), osigs: ot.osigs, otypes: ot.otypes} in let rb = ochke(body, ctx, Nil) in ochk_ret_origin(nm, 0, "", rty, ps, rb.origin)
+    Cons(sg, sr) => if sg.pubf == 1 and oisgctype(sg.rty, ot.otypes) == 1 then ctfail("lume: ownership error [O0030]: public function '" + nm + "' cannot expose '@gc' region type across a public module boundary\n") else let rty = aget_fn_rty(msig, mosig) in let lenv = aget_fn_lenv(msig) in let zk = kchk_fn_effs(nm, sg.pubf, body, ot) in let zh = achk_holes_e(body, rty, lenv, {fnm: nm, pubf: sg.pubf, sigs: ot.sigs}) in let zt = (if ois_total(sg.freef) == 1 then achk_total_e(body, {fnm: nm, ps: ps, fns: ot.fns, osigs: ot.osigs}, Nil, Nil) else 0) in let tret = achk_prov_e(body, nm, auinit_from_sig(msig), ot) in if sg.pubf == 1 and ois_llm(sg.freef) == 0 and ois_unverified_ty(rty) == 0 and tret == 1 then ctfail("lume: provenance error [A0003]: unverified AI/probabilistic value cannot be returned from trusted 'pub fn " + nm + "' without verification (fix-it: wrap the return value in 'verify(val, <contract>)' or validate with a contract guard before returning)\n") else let bparams = if isnil(sg.pl) == 1 then ps else obparams_pl(sg.pl) in let mvars = omvars_pl(sg.pl) in let ctx = {fnm: nm, pubf: sg.pubf, freef: sg.freef, halloc: 0, bparams: bparams, mvars: mvars, pnames: ps, locals: Nil, origins: oinit_origins(ps), osigs: ot.osigs, otypes: ot.otypes} in let rb = ochke(body, ctx, Nil) in ochk_ret_origin(nm, sg.pubf, sg.fromp, rty, ps, rb.origin)
 
 fn ochkstmts(prog, ot, moved) = match prog
     Nil        => 1
@@ -595,65 +708,106 @@ fn ochkstmt1(st, rest, ot, moved) = match st
     ExprS(v)         => let zp = achk_prov_e(v, "<main>", Nil, ot) in let ctx = {fnm: "<main>", pubf: 0, freef: 0, halloc: 0, bparams: Nil, mvars: Nil, pnames: Nil, locals: Nil, origins: Nil, osigs: ot.osigs, otypes: ot.otypes} in let r = ochke(v, ctx, moved) in ochkstmts(rest, ot, r.moved)
     _                => ochkstmts(rest, ot, moved)
 
-## --- lower Track O & Track A surface AST nodes into canonical Lume-Core (`LetIn`/`If`) ---
+## --- lower Track O, Track A & Track K surface AST nodes into canonical Lume-Core (`LetIn`/`If`) ---
 fn ois_intrinsic(nm, ufns) = if (nm == "borrow" or nm == "borrow_mut" or nm == "move" or nm == "clone" or nm == "evolve_approve") and omem(nm, ufns) == 0 then 1 else 0
 
 fn ois_verify_call(nm, ufns) = if (nm == "verify" or nm == "law_check") and omem(nm, ufns) == 0 then 1 else 0
 
-fn olower_verify(args, ufns, d) = if len(args) == 1 then olowere(ohd_e(args), ufns, d) else if len(args) >= 2 then let val_e = ohd_e(args) in let cond_e = ohd_e(ptl(args)) in let vn = "_v_val_" + str(d) in LetIn(vn, olowere(val_e, ufns, d + 1), If(olowere(cond_e, ufns, d + 2), Var(vn), Call("ctfail", Cons(Str("lume: runtime verification failed for unverified value\n"), Nil)))) else Num(0)
+fn olower_verify(args, lctx, d) = if len(args) == 1 then olowere(ohd_e(args), lctx, d) else if len(args) >= 2 then let val_e = ohd_e(args) in let cond_e = ohd_e(ptl(args)) in let vn = "_v_val_" + str(d) in LetIn(vn, olowere(val_e, lctx, d + 1), If(olowere(cond_e, lctx, d + 2), Var(vn), Call("ctfail", Cons(Str("lume: runtime verification failed for unverified value\n"), Nil)))) else Num(0)
 
 fn ois_str_expr(e) = match e
     Str(s) => 1
     _      => 0
 
-fn olowere(e, ufns, d) = match e
-    Var(nm)          => if ais_hole_name(nm) == 1 then Num(0) else Var(nm)
-    VarIn(nm, v, b)  => LetIn(nm, olowere(v, ufns, d), olowere(b, ufns, d + 1))
-    OwnE(inner)      => olowere(inner, ufns, d)
-    MutE(inner)      => olowere(inner, ufns, d)
-    DeferE(c, b)     => let vn = "_d_val_" + str(d) in let rn = "_d_run_" + str(d) in LetIn(vn, olowere(b, ufns, d + 1), LetIn(rn, olowere(c, ufns, d + 2), Var(vn)))
-    ErrDeferE(c, b)  => let vn = "_ed_val_" + str(d) in let rn = "_ed_run_" + str(d) in LetIn(vn, olowere(b, ufns, d + 1), If(Bin("<", Var(vn), Num(0)), LetIn(rn, olowere(c, ufns, d + 2), Var(vn)), Var(vn)))
-    WithAllocE(a, b) => LetIn("_alloc_ctx_" + str(d), olowere(a, ufns, d + 1), olowere(b, ufns, d + 2))
-    LetIn(nm, v, b)  => LetIn(nm, olowere(v, ufns, d), olowere(b, ufns, d + 1))
-    If(c, t, e2)     => If(olowere(c, ufns, d), olowere(t, ufns, d + 1), olowere(e2, ufns, d + 2))
-    Bin(op, l, r)    => olowerbin(op, l, r, ufns, d)
-    Call(nm, args)   => if ois_intrinsic(nm, ufns) == 1 and len(args) == 1 then olowere(ohd_e(args), ufns, d) else if ois_verify_call(nm, ufns) == 1 then olower_verify(args, ufns, d) else Call(nm, olowerargs(args, ufns, d))
-    Field(o, fld)    => Field(olowere(o, ufns, d), fld)
-    Rec(items)       => Rec(olowerrec(items, ufns, d))
-    RecT(tn, items)  => RecT(tn, olowerrec(items, ufns, d))
-    Match(sc, arms)  => Match(olowere(sc, ufns, d), olowerarms(arms, ufns, d + 1))
-    CT(inner)        => CT(olowere(inner, ufns, d))
-    _                => e
+fn khop_lookup(nm, hops) = match hops
+    Nil        => Nil
+    Cons(h, t) => if h.op == nm then Cons(h, Nil) else khop_lookup(nm, t)
 
-fn olowerbin(op, l, r, ufns, d) = if op == "+" and ois_str_expr(l) == 1 and ois_hole_expr(r) == 1 then Bin(op, olowere(l, ufns, d), Str("")) else if op == "+" and ois_hole_expr(l) == 1 and ois_str_expr(r) == 1 then Bin(op, Str(""), olowere(r, ufns, d + 1)) else Bin(op, olowere(l, ufns, d), olowere(r, ufns, d + 1))
+fn kbind_hop_args(ps, args, body, lctx, d) = match ps
+    Nil        => olowere(body, lctx, d)
+    Cons(p, r) => kbind_hop_arg1(p, r, args, body, lctx, d)
+
+fn kbind_hop_arg1(p, r, args, body, lctx, d) = match args
+    Nil         => LetIn(p, Num(0), kbind_hop_args(r, Nil, body, lctx, d + 1))
+    Cons(a, ar) => LetIn(p, olowere(a, lctx, d), kbind_hop_args(r, ar, body, lctx, d + 1))
+
+fn ktry_perceus_arm(sc_v, pat, body, lctx, d) = match pat
+    PCons(ptag, psubs) => let ar = len(psubs) in if ar == 1 or ar == 2 then ktry_perceus_body(sc_v, ptag, ar, body, lctx, d) else olowere(body, lctx, d)
+    _                  => olowere(body, lctx, d)
+
+fn ktry_perceus_body(sc_v, ptag, ar, body, lctx, d) = match body
+    Call(ctag, cargs) => if ctag == ptag and len(cargs) == ar and omentions_args(sc_v, cargs) == 0 then Call("__perceus_reuse_" + str(ar), Cons(Var(sc_v), olowerargs(cargs, lctx, d))) else olowere(body, lctx, d)
+    LetIn(nm, v, b)   => if nm == sc_v or omentions_var(sc_v, v) == 1 then olowere(body, lctx, d) else LetIn(nm, olowere(v, lctx, d), ktry_perceus_body(sc_v, ptag, ar, b, lctx, d + 1))
+    _                 => olowere(body, lctx, d)
+
+fn ksc_own_var(sc, ownps) = match sc
+    Var(x) => if omem(x, ownps) == 1 then x else ""
+    _      => ""
+
+fn olowere(e, lctx, d) = match e
+    Var(nm)                 => if ais_hole_name(nm) == 1 then Num(0) else Var(nm)
+    VarIn(nm, v, b)         => LetIn(nm, olowere(v, lctx, d), olowere(b, lctx, d + 1))
+    OwnE(inner)             => olowere(inner, lctx, d)
+    MutE(inner)             => olowere(inner, lctx, d)
+    DeferE(c, b)            => let vn = "_d_val_" + str(d) in let rn = "_d_run_" + str(d) in LetIn(vn, olowere(b, lctx, d + 1), LetIn(rn, olowere(c, lctx, d + 2), Var(vn)))
+    ErrDeferE(c, b)         => let vn = "_ed_val_" + str(d) in let rn = "_ed_run_" + str(d) in LetIn(vn, olowere(b, lctx, d + 1), If(Bin("<", Var(vn), Num(0)), LetIn(rn, olowere(c, lctx, d + 2), Var(vn)), Var(vn)))
+    WithAllocE(a, b)        => LetIn("_alloc_ctx_" + str(d), olowere(a, lctx, d + 1), olowere(b, lctx, d + 2))
+    WithHandlerE(en, hs, b) => olowere(b, {ufns: lctx.ufns, hops: app(hs, lctx.hops), ownps: lctx.ownps}, d + 1)
+    LetIn(nm, v, b)         => LetIn(nm, olowere(v, lctx, d), olowere(b, {ufns: lctx.ufns, hops: lctx.hops, ownps: orem(nm, lctx.ownps)}, d + 1))
+    If(c, t, e2)            => If(olowere(c, lctx, d), olowere(t, lctx, d + 1), olowere(e2, lctx, d + 2))
+    Bin(op, l, r)           => olowerbin(op, l, r, lctx, d)
+    Call(nm, args)          => olowercall(nm, args, khop_lookup(nm, lctx.hops), lctx, d)
+    Field(o, fld)           => Field(olowere(o, lctx, d), fld)
+    Rec(items)              => Rec(olowerrec(items, lctx, d))
+    RecT(tn, items)         => RecT(tn, olowerrec(items, lctx, d))
+    Match(sc, arms)         => Match(olowere(sc, lctx, d), olowerarms(arms, ksc_own_var(sc, lctx.ownps), lctx, d + 1))
+    CT(inner)               => CT(olowere(inner, lctx, d))
+    _                       => e
+
+fn olowercall(nm, args, mhop, lctx, d) = match mhop
+    Cons(hop, r) => kbind_hop_args(hop.ps, args, hop.body, lctx, d)
+    Nil          => if ois_intrinsic(nm, lctx.ufns) == 1 and len(args) == 1 then olowere(ohd_e(args), lctx, d) else if ois_verify_call(nm, lctx.ufns) == 1 then olower_verify(args, lctx, d) else Call(nm, olowerargs(args, lctx, d))
+
+fn olowerbin(op, l, r, lctx, d) = if op == "+" and ois_str_expr(l) == 1 and ois_hole_expr(r) == 1 then Bin(op, olowere(l, lctx, d), Str("")) else if op == "+" and ois_hole_expr(l) == 1 and ois_str_expr(r) == 1 then Bin(op, Str(""), olowere(r, lctx, d + 1)) else Bin(op, olowere(l, lctx, d), olowere(r, lctx, d + 1))
 
 fn ois_hole_expr(e) = match e
     Var(nm) => ais_hole_name(nm)
     _       => 0
 
-fn olowerargs(xs, ufns, d) = match xs
+fn olowerargs(xs, lctx, d) = match xs
     Nil        => Nil
-    Cons(h, t) => Cons(olowere(h, ufns, d), olowerargs(t, ufns, d + 1))
+    Cons(h, t) => Cons(olowere(h, lctx, d), olowerargs(t, lctx, d + 1))
 
-fn olowerrec(xs, ufns, d) = match xs
+fn olowerrec(xs, lctx, d) = match xs
     Nil        => Nil
-    Cons(h, t) => Cons({key: h.key, val: olowere(h.val, ufns, d)}, olowerrec(t, ufns, d + 1))
+    Cons(h, t) => Cons({key: h.key, val: olowere(h.val, lctx, d)}, olowerrec(t, lctx, d + 1))
 
-fn olowerarms(xs, ufns, d) = match xs
+fn olowerarms(xs, sc_v, lctx, d) = match xs
     Nil        => Nil
-    Cons(h, t) => Cons({pat: h.pat, body: olowere(h.body, ufns, d)}, olowerarms(t, ufns, d + 1))
+    Cons(h, t) => Cons({pat: h.pat, body: if sc_v != "" then ktry_perceus_arm(sc_v, h.pat, h.body, lctx, d) else olowere(h.body, lctx, d)}, olowerarms(t, sc_v, lctx, d + 1))
 
-fn olowerprog(prog, ufns) = match prog
+fn kfn_ownps(nm, osigs) = match osiglookup(nm, osigs)
+    Nil          => Nil
+    Cons(osg, r) => kownps_pl(osg.pl)
+
+fn kownps_pl(pl) = match pl
     Nil        => Nil
-    Cons(h, t) => olowerstmt(h, olowerprog(t, ufns), ufns)
+    Cons(p, r) => if p.cf == 2 then Cons(p.pn, kownps_pl(r)) else kownps_pl(r)
 
-fn olowerstmt(st, rest, ufns) = match st
+fn olowerprog(prog, ufns, osigs) = match prog
+    Nil        => Nil
+    Cons(h, t) => olowerstmt(h, olowerprog(t, ufns, osigs), ufns, osigs)
+
+fn olowerstmt(st, rest, ufns, osigs) = match st
     OSig(nm, pubf, freef, pl, rty, fromp) => rest
     OType(nm, k)                          => rest
-    Fn(nm, ps, body)                      => Cons(Fn(nm, ps, olowere(body, ufns, 0)), rest)
-    Print(v)                              => Cons(Print(olowere(v, ufns, 0)), rest)
-    ExprS(v)                              => Cons(ExprS(olowere(v, ufns, 0)), rest)
+    KEffSig(nm, effs)                     => rest
+    KEffectDecl(enm, ops)                 => rest
+    KCapGrant(effs)                       => rest
+    Fn(nm, ps, body)                      => Cons(Fn(nm, ps, olowere(body, {ufns: ufns, hops: Nil, ownps: kfn_ownps(nm, osigs)}, 0)), rest)
+    Print(v)                              => Cons(Print(olowere(v, {ufns: ufns, hops: Nil, ownps: Nil}, 0)), rest)
+    ExprS(v)                              => Cons(ExprS(olowere(v, {ufns: ufns, hops: Nil, ownps: Nil}, 0)), rest)
     _                                     => Cons(st, rest)
 
 fn ocheck(prog) = if oany(prog) == 0 then prog else ocheckforce(prog)
-fn ocheckforce(prog) = let raw_osigs = ocollects(prog) in let fns = ocollectf(prog) in let osigs = oinfer_priv_osigs(fns, raw_osigs) in let otypes = ocollectt(prog) in let sigs = tcollects(prog) in let ufns = ocollectfnms(prog) in let z = ochkstmts(prog, {osigs: osigs, otypes: otypes, sigs: sigs, fns: fns}, Nil) in olowerprog(prog, ufns)
+fn ocheckforce(prog) = let raw_osigs = ocollects(prog) in let fns = ocollectf(prog) in let osigs = oinfer_priv_osigs(fns, raw_osigs) in let otypes = ocollectt(prog) in let sigs = tcollects(prog) in let ksigs = kcollect_effsigs(prog) in let edecls = kcollect_effdecls(prog) in let caps = kcollect_caps(prog) in let ufns = ocollectfnms(prog) in let z = ochkstmts(prog, {osigs: osigs, otypes: otypes, sigs: sigs, fns: fns, ksigs: ksigs, edecls: edecls, caps: caps}, Nil) in olowerprog(prog, ufns, osigs)

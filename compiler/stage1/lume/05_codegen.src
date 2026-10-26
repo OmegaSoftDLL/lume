@@ -197,7 +197,9 @@ fn lbin(op, l, lr, r, ctx) = let rr = laexpr(r, ctx, lr) in lres(lr.code + rr.co
 fn lif(lab, cr, t, e2, ctx) = let tr = laexpr(t, ctx, cr) in let er = laexpr(e2, ctx, tr) in lres(cr.code + "    popq %rax\n    movq 8(%rax), %rax\n    testq %rax, %rax\n    jz .Le" + lab + "\n" + tr.code + "    jmp .Lx" + lab + "\n.Le" + lab + ":\n" + er.code + ".Lx" + lab + ":\n", er)
 fn llet(nm, v, vr, b, ctx) = let inner = {locals: ctx.locals, bound: app(ctx.bound, Cons(nm, Nil)), dvars: if ldec_expr(v, ctx.dvars) then Cons(nm, ldec_remove(ctx.dvars, nm)) else ldec_remove(ctx.dvars, nm), depth: ctx.depth} in let br = laexpr(b, inner, vr) in lres(vr.code + "    popq %rax\n    movq %rax, " + lslot(lidxof(ctx.locals, nm)) + "(%rbp)\n" + br.code, br)
 fn lvar(nm, ctx, s) = if isctor(nm) then lctor(nm, Nil, ctx, s) else lres("    movq " + lslot(lidxof(ctx.locals, nm)) + "(%rbp), %rax\n    pushq %rax\n", s)
-fn lcallx(nm, args, ctx, s) = if isctor(nm) then lctor(nm, args, ctx, s) else lcall(nm, args, ctx, s)
+fn lreuse1(args, ctx, s) = let ar = lstackargs(args, ctx, s) in lres(ar.code + "    popq %rsi\n    popq %rax\n    movq 24(%rax), %rcx\n    movq %rsi, 0(%rcx)\n    pushq %rax\n", ar)
+fn lreuse2(args, ctx, s) = let ar = lstackargs(args, ctx, s) in lres(ar.code + "    popq %rdx\n    popq %rsi\n    popq %rax\n    movq 24(%rax), %rcx\n    movq %rsi, 0(%rcx)\n    movq %rdx, 8(%rcx)\n    pushq %rax\n", ar)
+fn lcallx(nm, args, ctx, s) = if isctor(nm) then lctor(nm, args, ctx, s) else if nm == "__perceus_reuse_2" then lreuse2(args, ctx, s) else if nm == "__perceus_reuse_1" then lreuse1(args, ctx, s) else lcall(nm, args, ctx, s)
 fn laexpr(e, ctx, s) = match e
     Num(n)         => lres("    movq $" + str(n) + ", %rdi\n    call mkint\n    pushq %rax\n", s)
     Str(v)         => lstr(lstrlabel(v, s))

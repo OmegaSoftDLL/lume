@@ -1,0 +1,37 @@
+## Phase 3 Track K3 (`perceus_ok.src`) — Perceus Reuse Analysis & In-Place Functional But-In-Place (FBIP) Mutation.
+## Matching an `own` constructor parameter `xs` and constructing the same variant in tail position
+## reuses the 40-byte constructor cell and its payload buffer in place (`__perceus_reuse_1` / `__perceus_reuse_2`)
+## with zero `call alloc` and zero `call mkctor` instructions on the reused path.
+
+type IntList = enum Nil | Cons(int, IntList)
+type Box1 = enum Boxed(int)
+
+pub fn unbox_inc_inplace(own b: Box1, delta: int) -> Box1 = match b
+    Boxed(v) => Boxed(v + delta)
+
+pub fn map_inc_inplace(own xs: IntList, delta: int) -> IntList = match xs
+    Nil        => Nil
+    Cons(h, t) =>
+        let nh = h + delta in
+        let nt = map_inc_inplace(own t, delta) in
+        Cons(nh, nt)
+
+pub fn sum_list(xs: IntList) -> int = match xs
+    Nil        => 0
+    Cons(h, t) => h + sum_list(t)
+
+pub fn box_val(b: Box1) -> int = match b
+    Boxed(v) => v
+
+pub fn run_box() -> int =
+    let b0 = Boxed(35) in
+    let b1 = unbox_inc_inplace(own b0, 7) in
+    box_val(b1)
+
+pub fn run_list() -> int =
+    let l0 = Cons(10, Cons(20, Cons(30, Nil))) in
+    let l1 = map_inc_inplace(own l0, 5) in
+    sum_list(l1)
+
+print run_box()
+print run_list()

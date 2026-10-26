@@ -97,7 +97,10 @@ fn cs_reccons(k, v, rr) = cs_reccons2(k, v, rr.node, rr.rest)
 fn cs_reccons2(k, v, nd, rest) = match nd
     Rec(items) => {node: Rec(Cons({key: k, val: v}, items)), rest: rest}
     _          => {node: nd, rest: rest}
-fn cs_postfix(r) = if cs_hdtext(r.rest) == "." then cs_postfix({node: Field(r.node, cs_hdtext(cs_drop1(r.rest))), rest: cs_drop1(cs_drop1(r.rest))}) else r
+fn cs_postdotcall(nd, mnm, a) = match nd
+    Var(enm) => {node: Call(mnm, a.items), rest: a.rest}
+    _        => {node: Call(mnm, Cons(nd, a.items)), rest: a.rest}
+fn cs_postfix(r) = if cs_hdtext(r.rest) == "." then (let t1 = cs_drop1(r.rest) in let mnm = cs_hdtext(t1) in let t2 = cs_drop1(t1) in if cs_hdtext(t2) == "(" then cs_postfix(cs_postdotcall(r.node, mnm, cs_arglist(cs_drop1(t2)))) else cs_postfix({node: Field(r.node, mnm), rest: t2})) else r
 
 fn cs_ct(ts) = let r = cs_prim(ts) in {node: CT(r.node), rest: r.rest}
 fn cs_quote(ts) = let r = cs_prim(ts) in {node: Quote(r.node), rest: r.rest}
@@ -124,7 +127,10 @@ fn cs_owne(ts) = let r = cs_prim(ts) in {node: OwnE(r.node), rest: r.rest}
 fn cs_mute(ts) = let r = cs_prim(ts) in {node: MutE(r.node), rest: r.rest}
 fn cs_defer(ts) = let c = cs_expr(ts) in let b = cs_expr(cs_dropin(c.rest)) in {node: DeferE(c.node, b.node), rest: b.rest}
 fn cs_errdefer(ts) = let c = cs_expr(ts) in let b = cs_expr(cs_dropin(c.rest)) in {node: ErrDeferE(c.node, b.node), rest: b.rest}
-fn cs_with(ts) = if cs_hdtext(ts) == "alloc" then let a = cs_expr(cs_dropkw(cs_drop1(ts), "=")) in let b = cs_expr(cs_dropin(a.rest)) in {node: WithAllocE(a.node, b.node), rest: b.rest} else cs_expr(ts)
+fn cs_parsehop(ts) = let opnm = cs_hdtext(cs_drop1(ts)) in let ps = cs_pparams(cs_dropkw(cs_drop1(cs_drop1(ts)), "(")) in let rt = cs_pret(ps.rest) in let b = cs_expr(cs_dropkw(rt.rest, "=")) in {op: {op: opnm, ps: ps.items, body: b.node}, rest: cs_dropkw(b.rest, ";")}
+fn cs_parsehops(ts) = if cs_hdtext(ts) == "fn" then let r = cs_parsehop(ts) in let rr = cs_parsehops(r.rest) in {items: Cons(r.op, rr.items), rest: rr.rest} else {items: Nil, rest: ts}
+fn cs_withhandler(t) = let enm = cs_hdtext(t) in let hs = cs_parsehops(cs_dropkw(cs_drop1(t), "{")) in let b = cs_expr(cs_dropin(cs_dropkw(hs.rest, "}"))) in {node: WithHandlerE(enm, hs.items, b.node), rest: b.rest}
+fn cs_with(ts) = if cs_hdtext(ts) == "alloc" then let a = cs_expr(cs_dropkw(cs_drop1(ts), "=")) in let b = cs_expr(cs_dropin(a.rest)) in {node: WithAllocE(a.node, b.node), rest: b.rest} else if cs_hdtext(ts) == "handler" then cs_withhandler(cs_drop1(ts)) else cs_expr(ts)
 
 fn cs_ispatstart(ts) = if cs_hdkind(ts) == "NM" or cs_hdkind(ts) == "ST" then 1 else if cs_hdkind(ts) == "ID" then cs_ispatid(cs_hdtext(ts)) else 0
 fn cs_ispatid(s) = if s == "fn" or s == "print" or s == "type" or s == "let" or s == "if" or s == "then" or s == "else" or s == "in" or s == "match" or s == "and" or s == "or" then 0 else 1
@@ -157,8 +163,10 @@ fn cs_pparamt(nm, ct, r) = cs_pmore(nm, r.node, ct, r.rest)
 fn cs_pmore(nm, ty, ct, ts) = if cs_hdtext(ts) == "," then cs_pmcons(nm, ty, ct, cs_pparams(cs_drop1(ts))) else cs_pmend(nm, ty, ct, cs_skiprp(ts))
 fn cs_pmcons(nm, ty, ct, rr) = {items: if ct != 1 then Cons(nm, rr.items) else rr.items, tys: Cons(ty, rr.tys), plist: Cons({cf: ct, pn: nm, pt: ty}, rr.plist), rest: rr.rest}
 fn cs_pmend(nm, ty, ct, rest) = {items: if ct != 1 then Cons(nm, Nil) else Nil, tys: Cons(ty, Nil), plist: Cons({cf: ct, pn: nm, pt: ty}, Nil), rest: rest}
-fn cs_pret(ts) = if cs_hdtext(ts) == "-" and cs_hdtext(cs_drop1(ts)) == ">" then cs_pret2(cs_ptype1(cs_drop1(cs_drop1(ts)))) else {ty: TyAny, fromp: "", rest: ts}
-fn cs_pret2(r) = if cs_hdtext(r.rest) == "from" then {ty: r.node, fromp: cs_hdtext(cs_drop1(r.rest)), rest: cs_drop1(cs_drop1(r.rest))} else {ty: r.node, fromp: "", rest: r.rest}
+fn cs_peffitems(ts) = if cs_hdtext(ts) == "}" then {items: Nil, rest: cs_drop1(ts)} else let enm = cs_hdtext(ts) in let t1 = cs_drop1(ts) in if cs_hdtext(t1) == "," then let rr = cs_peffitems(cs_drop1(t1)) in {items: Cons(enm, rr.items), rest: rr.rest} else {items: Cons(enm, Nil), rest: cs_dropkw(t1, "}")}
+fn cs_peffrow(ts) = if cs_hdtext(ts) == "/" then (let t1 = cs_drop1(ts) in if cs_hdtext(t1) == "{" then cs_peffitems(cs_drop1(t1)) else {items: Cons(cs_hdtext(t1), Nil), rest: cs_drop1(t1)}) else {items: Nil, rest: ts}
+fn cs_pret(ts) = if cs_hdtext(ts) == "-" and cs_hdtext(cs_drop1(ts)) == ">" then cs_pret2(cs_ptype1(cs_drop1(cs_drop1(ts)))) else let er = cs_peffrow(ts) in {ty: TyAny, fromp: "", effs: er.items, rest: er.rest}
+fn cs_pret2(r) = if cs_hdtext(r.rest) == "from" then let rest2 = cs_drop1(cs_drop1(r.rest)) in let er = cs_peffrow(rest2) in {ty: r.node, fromp: cs_hdtext(cs_drop1(r.rest)), effs: er.items, rest: er.rest} else let er = cs_peffrow(r.rest) in {ty: r.node, fromp: "", effs: er.items, rest: er.rest}
 fn cs_isany(t) = match t
     TyAny => 1
     _     => 0
@@ -173,7 +181,8 @@ fn cs_anyownp(pl) = match pl
     Cons(p, r) => if p.cf >= 2 then 1 else cs_anyownp(r)
 fn cs_mksig(nm, ps, rty) = if cs_ganyct(ps.plist) == 1 then GSig(nm, ps.plist, rty) else if cs_anyann(ps.tys) == 1 or cs_isany(rty) == 0 then Sig(nm, ps.items, ps.tys, rty) else Nil
 fn cs_mkosig(nm, pubf, freef, pl, rty, fromp) = if pubf == 1 or freef > 0 or cs_anyownp(pl) == 1 or fromp != "" then OSig(nm, pubf, freef, pl, rty, fromp) else Nil
-fn cs_pfnp(ts, pubf, freef) = let nm = cs_hdtext(ts) in let ps = cs_pparams(cs_dropkw(cs_drop1(ts), "(")) in let rt = cs_pret(ps.rest) in let b = cs_expr(cs_dropkw(rt.rest, "=")) in {node: Fn(nm, ps.items, b.node), sg: cs_mksig(nm, ps, rt.ty), osg: cs_mkosig(nm, pubf, freef, ps.plist, rt.ty, rt.fromp), rest: b.rest}
+fn cs_mkksig(nm, effs) = if cs_isnil(effs) == 0 then KEffSig(nm, effs) else Nil
+fn cs_pfnp(ts, pubf, freef) = let nm = cs_hdtext(ts) in let ps = cs_pparams(cs_dropkw(cs_drop1(ts), "(")) in let rt = cs_pret(ps.rest) in let b = cs_expr(cs_dropkw(rt.rest, "=")) in {node: Fn(nm, ps.items, b.node), sg: cs_mksig(nm, ps, rt.ty), osg: cs_mkosig(nm, pubf, freef, ps.plist, rt.ty, rt.fromp), ksg: cs_mkksig(nm, rt.effs), rest: b.rest}
 fn cs_pfn(ts) = cs_pfnp(ts, 0, 0)
 
 fn cs_ptype(ts) = let nm = cs_hdtext(ts) in let rest = cs_dropkw(cs_drop1(ts), "=") in if cs_hdtext(rest) == "record" then cs_precordty(nm, cs_drop1(rest)) else cs_penumty(nm, cs_dropkw(rest, "enum"))
@@ -188,13 +197,17 @@ fn cs_tdeclname(nd) = match nd
     TypeS(nm, k, items) => nm
     _                   => ""
 fn cs_progtyped(kind, r) = Cons(OType(cs_tdeclname(r.node), kind), Cons(r.node, cs_pprog(r.rest)))
+fn cs_peffop(ts) = let opnm = cs_hdtext(cs_drop1(ts)) in let ps = cs_pparams(cs_dropkw(cs_drop1(cs_drop1(ts)), "(")) in let rt = cs_pret(ps.rest) in {op: {op: opnm, ps: ps.items, pt: ps.tys, rt: rt.ty}, rest: cs_dropkw(rt.rest, ";")}
+fn cs_peffops(ts) = if cs_hdtext(ts) == "fn" then let r = cs_peffop(ts) in let rr = cs_peffops(r.rest) in {items: Cons(r.op, rr.items), rest: rr.rest} else {items: Nil, rest: ts}
+fn cs_peffect(t) = let enm = cs_hdtext(t) in let ops = cs_peffops(cs_dropkw(cs_drop1(t), "{")) in {node: KEffectDecl(enm, ops.items), rest: cs_dropkw(ops.rest, "}")}
+fn cs_pcapat(t) = let t1 = cs_drop1(t) in let er = if cs_hdtext(t1) == "{" then cs_peffitems(cs_drop1(t1)) else if cs_hdtext(t1) == "(" then let nm = cs_hdtext(cs_drop1(t1)) in {items: Cons(nm, Nil), rest: cs_skiprp(cs_drop1(cs_drop1(t1)))} else {items: Cons(cs_hdtext(t1), Nil), rest: cs_drop1(t1)} in Cons(KCapGrant(er.items), cs_pprog(er.rest))
 fn cs_progfree(ts) = if cs_hdtext(ts) == "pub" then cs_pprogfn(cs_pfnp(cs_drop1(cs_drop1(ts)), 1, 1)) else cs_pprogfn(cs_pfnp(cs_drop1(ts), 0, 1))
-fn cs_progat(t) = if cs_hdtext(t) == "freestanding" then cs_progfree(cs_drop1(t)) else if cs_hdtext(t) == "gc" then cs_progtyped("gc", cs_ptype(cs_drop1(cs_drop1(t)))) else cs_pprog(cs_drop1(t))
-fn cs_progpub(t) = if cs_hdtext(t) == "total" and cs_hdtext(cs_drop1(t)) == "fn" then cs_pprogfn(cs_pfnp(cs_drop1(cs_drop1(t)), 1, 2)) else if cs_hdtext(t) == "llm" and cs_hdtext(cs_drop1(t)) == "fn" then cs_pprogfn(cs_pfnp(cs_drop1(cs_drop1(t)), 1, 4)) else cs_pprogfn(cs_pfnp(cs_drop1(t), 1, 0))
+fn cs_progat(t) = if cs_hdtext(t) == "freestanding" then cs_progfree(cs_drop1(t)) else if cs_hdtext(t) == "gc" then cs_progtyped("gc", cs_ptype(cs_drop1(cs_drop1(t)))) else if cs_hdtext(t) == "capability" or cs_hdtext(t) == "grant" then cs_pcapat(t) else cs_pprog(cs_drop1(t))
+fn cs_progpub(t) = if cs_hdtext(t) == "total" and cs_hdtext(cs_drop1(t)) == "fn" then cs_pprogfn(cs_pfnp(cs_drop1(cs_drop1(t)), 1, 2)) else if cs_hdtext(t) == "llm" and cs_hdtext(cs_drop1(t)) == "fn" then cs_pprogfn(cs_pfnp(cs_drop1(cs_drop1(t)), 1, 4)) else if cs_hdtext(t) == "effect" then let r = cs_peffect(cs_drop1(t)) in Cons(r.node, cs_pprog(r.rest)) else cs_pprogfn(cs_pfnp(cs_drop1(t), 1, 0))
 fn cs_pprog(ts) = match ts
     Nil        => Nil
-    Cons(h, t) => if h.text == "fn" then cs_pprogfn(cs_pfn(cs_drop1(ts))) else if h.text == "pub" and (cs_hdtext(t) == "fn" or cs_hdtext(t) == "total" or cs_hdtext(t) == "llm") then cs_progpub(t) else if h.text == "total" and cs_hdtext(t) == "fn" then cs_pprogfn(cs_pfnp(cs_drop1(t), 0, 2)) else if h.text == "llm" and cs_hdtext(t) == "fn" then cs_pprogfn(cs_pfnp(cs_drop1(t), 0, 4)) else if h.text == "@" then cs_progat(t) else if h.text == "resource" and cs_hdtext(t) == "type" then cs_progtyped("resource", cs_ptype(cs_drop1(t))) else if h.text == "type" then let r = cs_ptype(cs_drop1(ts)) in Cons(r.node, cs_pprog(r.rest)) else if h.text == "print" then let r = cs_expr(cs_drop1(ts)) in Cons(Print(r.node), cs_pprog(r.rest)) else let r = cs_expr(ts) in Cons(ExprS(r.node), cs_pprog(r.rest))
-fn cs_pprogfn(r) = cs_pprogfn2(r.osg, cs_pprogfn2(r.sg, Cons(r.node, cs_pprog(r.rest))))
+    Cons(h, t) => if h.text == "fn" then cs_pprogfn(cs_pfn(cs_drop1(ts))) else if h.text == "pub" and (cs_hdtext(t) == "fn" or cs_hdtext(t) == "total" or cs_hdtext(t) == "llm" or cs_hdtext(t) == "effect") then cs_progpub(t) else if h.text == "total" and cs_hdtext(t) == "fn" then cs_pprogfn(cs_pfnp(cs_drop1(t), 0, 2)) else if h.text == "llm" and cs_hdtext(t) == "fn" then cs_pprogfn(cs_pfnp(cs_drop1(t), 0, 4)) else if h.text == "effect" then let r = cs_peffect(t) in Cons(r.node, cs_pprog(r.rest)) else if h.text == "@" then cs_progat(t) else if h.text == "resource" and cs_hdtext(t) == "type" then cs_progtyped("resource", cs_ptype(cs_drop1(t))) else if h.text == "type" then let r = cs_ptype(cs_drop1(ts)) in Cons(r.node, cs_pprog(r.rest)) else if h.text == "print" then let r = cs_expr(cs_drop1(ts)) in Cons(Print(r.node), cs_pprog(r.rest)) else let r = cs_expr(ts) in Cons(ExprS(r.node), cs_pprog(r.rest))
+fn cs_pprogfn(r) = cs_pprogfn2(r.ksg, cs_pprogfn2(r.osg, cs_pprogfn2(r.sg, Cons(r.node, cs_pprog(r.rest)))))
 fn cs_pprogfn2(sg, rest) = match sg
     Nil => rest
     _   => Cons(sg, rest)
@@ -760,17 +773,83 @@ fn cs_achk_prov_args(args, fnm, uvars, osigs, sigs) = match args
     Cons(h, t) => let r1 = cs_achk_prov_e(h, fnm, uvars, osigs, sigs) in let r2 = cs_achk_prov_args(t, fnm, uvars, osigs, sigs) in {taint: if r1.taint == 1 or r2.taint == 1 then 1 else 0, diags: cs_app(r1.diags, r2.diags)}
 fn cs_achk_prov_call(cnm, args, fnm, uvars, osigs, sigs) = if cnm == "verify" or cnm == "law_check" or cnm == "evolve_approve" then let ra = cs_achk_prov_args(args, fnm, uvars, osigs, sigs) in {taint: 0, diags: ra.diags} else let ra = cs_achk_prov_args(args, fnm, uvars, osigs, sigs) in let d_sink = if cs_is_sink(cnm, osigs) == 1 and ra.taint == 1 then Cons(cs_mkdiag("A0003", "provenance", "provenance error: unverified AI/probabilistic value in '" + fnm + "' cannot flow into trusted sink '" + cnm + "' without verification", "validate with 'verify(x, <contract>)' before calling '" + cnm + "'"), Nil) else Nil in {taint: if cs_is_unv_fn(cnm, osigs, sigs) == 1 or ra.taint == 1 then 1 else 0, diags: cs_app(ra.diags, d_sink)}
 
-fn cs_ochk_fn(nm, ps, body, msig, osigs, sigs) = match msig
-    Nil          => let rp = cs_achk_prov_e(body, nm, cs_uinit_sig(cs_siglookup(nm, sigs)), osigs, sigs) in let ctx = {fnm: nm, pubf: 0, freef: 0, halloc: 0, bparams: ps, mvars: Nil, origins: cs_oinit_orgs(ps), osigs: osigs} in let rb = cs_ochke(body, ctx, Nil) in cs_app(rp.diags, cs_app(rb.diags, cs_ochk_ret(nm, 0, "", rb.origin)))
-    Cons(sg, sr) => let dtot = if cs_ois_total(sg.freef) == 1 then cs_achk_total_e(body, nm, ps, Nil, Nil) else Nil in let rp = cs_achk_prov_e(body, nm, cs_uinit_sig(cs_siglookup(nm, sigs)), osigs, sigs) in let dret = if sg.pubf == 1 and cs_ois_llm(sg.freef) == 0 and cs_is_unv_ty(sg.rty) == 0 and rp.taint == 1 then Cons(cs_mkdiag("A0003", "provenance", "provenance error: unverified AI/probabilistic value cannot be returned from trusted 'pub fn " + nm + "' without verification", "wrap the return value in 'verify(val, <contract>)'"), Nil) else Nil in let bparams = if cs_isnil(sg.pl) == 1 then ps else cs_obparams(sg.pl) in let ctx = {fnm: nm, pubf: sg.pubf, freef: sg.freef, halloc: 0, bparams: bparams, mvars: cs_omvars(sg.pl), origins: cs_oinit_orgs(ps), osigs: osigs} in let rb = cs_ochke(body, ctx, Nil) in cs_app(dtot, cs_app(rp.diags, cs_app(dret, cs_app(rb.diags, cs_ochk_ret(nm, sg.pubf, sg.fromp, rb.origin)))))
-fn cs_odiagnose_stmts(prog, osigs, sigs, moved) = match prog
+fn cs_kcollect_effsigs(prog) = match prog
     Nil        => Nil
-    Cons(h, t) => cs_odiagnose_stmt1(h, t, osigs, sigs, moved)
-fn cs_odiagnose_stmt1(s0, rest, osigs, sigs, moved) = match s0
-    Fn(nm, ps, body) => cs_app(cs_ochk_fn(nm, ps, body, cs_osiglookup(nm, osigs), osigs, sigs), cs_odiagnose_stmts(rest, osigs, sigs, moved))
-    Print(v)         => let r = cs_ochke(v, {fnm: "<main>", pubf: 0, freef: 0, halloc: 0, bparams: Nil, mvars: Nil, origins: Nil, osigs: osigs}, moved) in cs_app(r.diags, cs_odiagnose_stmts(rest, osigs, sigs, r.moved))
-    ExprS(v)         => let r = cs_ochke(v, {fnm: "<main>", pubf: 0, freef: 0, halloc: 0, bparams: Nil, mvars: Nil, origins: Nil, osigs: osigs}, moved) in cs_app(r.diags, cs_odiagnose_stmts(rest, osigs, sigs, r.moved))
-    _                => cs_odiagnose_stmts(rest, osigs, sigs, moved)
+    Cons(h, t) => cs_kcollect_effsig1(h, cs_kcollect_effsigs(t))
+fn cs_kcollect_effsig1(st, rest) = match st
+    KEffSig(nm, effs) => Cons({nm: nm, effs: effs}, rest)
+    _                 => rest
+fn cs_kcollect_effdecls(prog) = match prog
+    Nil        => Nil
+    Cons(h, t) => cs_kcollect_effdecl1(h, cs_kcollect_effdecls(t))
+fn cs_kcollect_effdecl1(st, rest) = match st
+    KEffectDecl(enm, ops) => Cons({enm: enm, ops: ops}, rest)
+    _                     => rest
+fn cs_kcollect_caps(prog) = match prog
+    Nil        => Nil
+    Cons(h, t) => cs_kcollect_cap1(h, cs_kcollect_caps(t))
+fn cs_kcollect_cap1(st, rest) = match st
+    KCapGrant(effs) => cs_app(effs, rest)
+    _               => rest
+fn cs_keffsig_lookup(nm, ksigs) = match ksigs
+    Nil        => Nil
+    Cons(h, t) => if h.nm == nm then Cons(h, Nil) else cs_keffsig_lookup(nm, t)
+fn cs_kop_effect(opnm, edecls) = match edecls
+    Nil        => ""
+    Cons(d, r) => if cs_kop_in_ops(opnm, d.ops) == 1 then d.enm else cs_kop_effect(opnm, r)
+fn cs_kop_in_ops(opnm, ops) = match ops
+    Nil        => 0
+    Cons(o, r) => if o.op == opnm then 1 else cs_kop_in_ops(opnm, r)
+fn cs_keff_add(eff, xs) = if eff == "" or eff == "pure" or cs_omem(eff, xs) == 1 then xs else Cons(eff, xs)
+fn cs_keff_union(xs, ys) = match xs
+    Nil        => ys
+    Cons(h, t) => cs_keff_union(t, cs_keff_add(h, ys))
+fn cs_keff_diff(xs, ys) = match xs
+    Nil        => Nil
+    Cons(h, t) => if h == "pure" or cs_omem(h, ys) == 1 then cs_keff_diff(t, ys) else Cons(h, cs_keff_diff(t, ys))
+fn cs_kprim_eff(cnm) = if cnm == "io_write" or cnm == "io_read" or cnm == "println" or cnm == "read" or cnm == "readall" or cnm == "emit" or cnm == "flush" then "io" else if cnm == "fs_read" or cnm == "fs_write" or cnm == "fs_open" then "fs" else if cnm == "net_send" or cnm == "net_recv" or cnm == "net_connect" or cnm == "db_exec" then "net" else if cnm == "rc_new" or cnm == "arc_new" or cnm == "alloc_heap" or cnm == "table_new" or cnm == "box_new" then "alloc" else if cnm == "rand_int" or cnm == "prob_sample" or cnm == "llm_complete" then "rand" else if cnm == "time_now" or cnm == "clock_now" or cnm == "sleep_ms" then "time" else if cnm == "fail_err" or cnm == "raise_err" then "fail" else if cnm == "panic_msg" then "panic" else if cnm == "async_await" or cnm == "spawn_task" then "async" else ""
+fn cs_kinfer_call_effs(cnm, ksigs, edecls) = let pe = cs_kprim_eff(cnm) in let ue = cs_kop_effect(cnm, edecls) in let base = cs_keff_add(pe, cs_keff_add(ue, Nil)) in match cs_keffsig_lookup(cnm, ksigs)
+    Cons(ks, r) => cs_keff_union(base, cs_keff_diff(ks.effs, Cons("pure", Nil)))
+    Nil         => base
+fn cs_kinfer_effs_e(e, ksigs, edecls) = match e
+    Bin(op, l, r)           => cs_keff_union(cs_kinfer_effs_e(l, ksigs, edecls), cs_kinfer_effs_e(r, ksigs, edecls))
+    If(c, t, e2)            => cs_keff_union(cs_kinfer_effs_e(c, ksigs, edecls), cs_keff_union(cs_kinfer_effs_e(t, ksigs, edecls), cs_kinfer_effs_e(e2, ksigs, edecls)))
+    LetIn(nm, v, b)         => cs_keff_union(cs_kinfer_effs_e(v, ksigs, edecls), cs_kinfer_effs_e(b, ksigs, edecls))
+    VarIn(nm, v, b)         => cs_keff_union(cs_kinfer_effs_e(v, ksigs, edecls), cs_kinfer_effs_e(b, ksigs, edecls))
+    OwnE(inner)             => cs_kinfer_effs_e(inner, ksigs, edecls)
+    MutE(inner)             => cs_kinfer_effs_e(inner, ksigs, edecls)
+    DeferE(c, b)            => cs_keff_union(cs_kinfer_effs_e(c, ksigs, edecls), cs_kinfer_effs_e(b, ksigs, edecls))
+    ErrDeferE(c, b)         => cs_keff_union(cs_kinfer_effs_e(c, ksigs, edecls), cs_kinfer_effs_e(b, ksigs, edecls))
+    WithAllocE(a, b)        => cs_keff_union(cs_kinfer_effs_e(a, ksigs, edecls), cs_orem("alloc", cs_kinfer_effs_e(b, ksigs, edecls)))
+    WithHandlerE(en, hs, b) => cs_keff_union(cs_kinfer_hops(hs, ksigs, edecls), cs_orem(en, cs_kinfer_effs_e(b, ksigs, edecls)))
+    Call(cnm, args)         => cs_keff_union(cs_kinfer_call_effs(cnm, ksigs, edecls), cs_kinfer_args(args, ksigs, edecls))
+    Match(sc, arms)         => cs_keff_union(cs_kinfer_effs_e(sc, ksigs, edecls), cs_kinfer_arms(arms, ksigs, edecls))
+    _                       => Nil
+fn cs_kinfer_hops(hs, ksigs, edecls) = match hs
+    Nil        => Nil
+    Cons(h, t) => cs_keff_union(cs_kinfer_effs_e(h.body, ksigs, edecls), cs_kinfer_hops(t, ksigs, edecls))
+fn cs_kinfer_args(xs, ksigs, edecls) = match xs
+    Nil        => Nil
+    Cons(h, t) => cs_keff_union(cs_kinfer_effs_e(h, ksigs, edecls), cs_kinfer_args(t, ksigs, edecls))
+fn cs_kinfer_arms(xs, ksigs, edecls) = match xs
+    Nil        => Nil
+    Cons(h, t) => cs_keff_union(cs_kinfer_effs_e(h.body, ksigs, edecls), cs_kinfer_arms(t, ksigs, edecls))
+fn cs_kget_dec_effs(mks) = match mks
+    Nil         => Nil
+    Cons(ks, r) => ks.effs
+fn cs_kchk_fn(nm, pubf, body, kt) = let inf = cs_kinfer_effs_e(body, kt.ksigs, kt.edecls) in let mks = cs_keffsig_lookup(nm, kt.ksigs) in let dec = cs_kget_dec_effs(mks) in let missing_pub = if pubf == 1 and cs_isnil(mks) == 1 then inf else cs_keff_diff(inf, dec) in let d1 = if (pubf == 1 or cs_isnil(mks) == 0) and cs_isnil(missing_pub) == 0 then Cons(cs_mkdiag("E0200", "effect", "effect error: function '" + nm + "' performs undeclared effect '{" + cs_joinsep(missing_pub, ", ") + "}'", "add '/ {" + cs_joinsep(cs_keff_union(dec, inf), ", ") + "}' to the signature of '" + nm + "' or handle it with 'with handler'"), Nil) else Nil in let d2 = if cs_isnil(kt.caps) == 0 and cs_isnil(cs_keff_diff(inf, kt.caps)) == 0 then let uncap = cs_keff_diff(inf, kt.caps) in Cons(cs_mkdiag("E0200", "capability", "capability error: function '" + nm + "' requires capability '{" + cs_joinsep(uncap, ", ") + "}' not granted to this module", "add '@capability " + cs_hd_str(uncap, "io") + "' or declare it in lume.toml"), Nil) else Nil in cs_app(d1, d2)
+
+fn cs_ochk_fn(nm, ps, body, msig, osigs, sigs, kt) = match msig
+    Nil          => let dk = cs_kchk_fn(nm, 0, body, kt) in let rp = cs_achk_prov_e(body, nm, cs_uinit_sig(cs_siglookup(nm, sigs)), osigs, sigs) in let ctx = {fnm: nm, pubf: 0, freef: 0, halloc: 0, bparams: ps, mvars: Nil, origins: cs_oinit_orgs(ps), osigs: osigs} in let rb = cs_ochke(body, ctx, Nil) in cs_app(dk, cs_app(rp.diags, cs_app(rb.diags, cs_ochk_ret(nm, 0, "", rb.origin))))
+    Cons(sg, sr) => let dk = cs_kchk_fn(nm, sg.pubf, body, kt) in let dtot = if cs_ois_total(sg.freef) == 1 then cs_achk_total_e(body, nm, ps, Nil, Nil) else Nil in let rp = cs_achk_prov_e(body, nm, cs_uinit_sig(cs_siglookup(nm, sigs)), osigs, sigs) in let dret = if sg.pubf == 1 and cs_ois_llm(sg.freef) == 0 and cs_is_unv_ty(sg.rty) == 0 and rp.taint == 1 then Cons(cs_mkdiag("A0003", "provenance", "provenance error: unverified AI/probabilistic value cannot be returned from trusted 'pub fn " + nm + "' without verification", "wrap the return value in 'verify(val, <contract>)'"), Nil) else Nil in let bparams = if cs_isnil(sg.pl) == 1 then ps else cs_obparams(sg.pl) in let ctx = {fnm: nm, pubf: sg.pubf, freef: sg.freef, halloc: 0, bparams: bparams, mvars: cs_omvars(sg.pl), origins: cs_oinit_orgs(ps), osigs: osigs} in let rb = cs_ochke(body, ctx, Nil) in cs_app(dk, cs_app(dtot, cs_app(rp.diags, cs_app(dret, cs_app(rb.diags, cs_ochk_ret(nm, sg.pubf, sg.fromp, rb.origin))))))
+fn cs_odiagnose_stmts(prog, osigs, sigs, kt, moved) = match prog
+    Nil        => Nil
+    Cons(h, t) => cs_odiagnose_stmt1(h, t, osigs, sigs, kt, moved)
+fn cs_odiagnose_stmt1(s0, rest, osigs, sigs, kt, moved) = match s0
+    Fn(nm, ps, body) => cs_app(cs_ochk_fn(nm, ps, body, cs_osiglookup(nm, osigs), osigs, sigs, kt), cs_odiagnose_stmts(rest, osigs, sigs, kt, moved))
+    Print(v)         => let r = cs_ochke(v, {fnm: "<main>", pubf: 0, freef: 0, halloc: 0, bparams: Nil, mvars: Nil, origins: Nil, osigs: osigs}, moved) in cs_app(r.diags, cs_odiagnose_stmts(rest, osigs, sigs, kt, r.moved))
+    ExprS(v)         => let r = cs_ochke(v, {fnm: "<main>", pubf: 0, freef: 0, halloc: 0, bparams: Nil, mvars: Nil, origins: Nil, osigs: osigs}, moved) in cs_app(r.diags, cs_odiagnose_stmts(rest, osigs, sigs, kt, r.moved))
+    _                => cs_odiagnose_stmts(rest, osigs, sigs, kt, moved)
 
 fn cs_diagnose_stmts(prog, tt) = match prog
     Nil        => Nil
@@ -780,7 +859,7 @@ fn cs_diagnose_stmt(s0, tt) = match s0
     Print(v)         => cs_chk_expr(v, tt)
     ExprS(v)         => cs_chk_expr(v, tt)
     _                => Nil
-fn cs_diagnose(prog) = let tt = cs_tcollect(prog) in let osigs = cs_ocollects(prog) in let hr = cs_collect_holes_stmts(prog, tt.sigs, osigs) in cs_app(cs_diagnose_stmts(prog, tt), cs_app(hr.diags, cs_odiagnose_stmts(prog, osigs, tt.sigs, Nil)))
+fn cs_diagnose(prog) = let tt = cs_tcollect(prog) in let osigs = cs_ocollects(prog) in let kt = {ksigs: cs_kcollect_effsigs(prog), edecls: cs_kcollect_effdecls(prog), caps: cs_kcollect_caps(prog)} in let hr = cs_collect_holes_stmts(prog, tt.sigs, osigs) in cs_app(cs_diagnose_stmts(prog, tt), cs_app(hr.diags, cs_odiagnose_stmts(prog, osigs, tt.sigs, kt, Nil)))
 
 ## --- C3 generic erasure & C1/C2/M1/M2 comptime + hygienic macro expansion ---
 fn cs_gcfs(pl) = match pl
@@ -814,6 +893,7 @@ fn cs_geexpr(e, gt) = match e
     DeferE(c, b)     => LetIn("_d_val", cs_geexpr(b, gt), LetIn("_d_run", cs_geexpr(c, gt), Var("_d_val")))
     ErrDeferE(c, b)  => LetIn("_ed_val", cs_geexpr(b, gt), If(Bin("<", Var("_ed_val"), Num(0)), LetIn("_ed_run", cs_geexpr(c, gt), Var("_ed_val")), Var("_ed_val")))
     WithAllocE(a, b) => LetIn("_alloc_ctx", cs_geexpr(a, gt), cs_geexpr(b, gt))
+    WithHandlerE(en, hs, b) => cs_geexpr(b, gt)
     Call(nm, args)   => cs_gecall(nm, cs_geargs(args, gt), cs_gtlookup(nm, gt))
     Rec(items)       => Rec(cs_gerec(items, gt))
     RecT(tn, items)  => RecT(tn, cs_gerec(items, gt))
@@ -893,6 +973,7 @@ fn cs_expr_sexpr(e) = match e
     DeferE(c, b)     => "(defer " + cs_expr_sexpr(c) + " " + cs_expr_sexpr(b) + ")"
     ErrDeferE(c, b)  => "(errdefer " + cs_expr_sexpr(c) + " " + cs_expr_sexpr(b) + ")"
     WithAllocE(a, b) => "(with-alloc " + cs_expr_sexpr(a) + " " + cs_expr_sexpr(b) + ")"
+    WithHandlerE(en, hs, b) => "(with-handler " + en + " " + cs_expr_sexpr(b) + ")"
     Call(nm, args)  => if cs_isnil(args) == 1 then "(" + nm + ")" else "(" + nm + " " + cs_exprs_sexpr(args) + ")"
     CT(inner)       => "(comptime " + cs_expr_sexpr(inner) + ")"
     Quote(inner)    => "(quote " + cs_expr_sexpr(inner) + ")"
