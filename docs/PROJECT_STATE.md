@@ -137,9 +137,11 @@ subset; the triple self-build is not reached.
   from decimals (including local `let` bindings) in the ML-core parser and self-hosted compiler;
   interpreter, C oracle, and native assembly agree on the regression suite. Coefficient digits
   and scale are capped at 18, and inexact rescaling, overflow, division by zero, or repeating
-  decimal division fail instead of rounding. D1 remains incomplete: decimal types are not
-  available as parameter/return annotations, decimal function parameters are not inferred, and
-  automatic literal-context inference is outstanding.
+  decimal division fail instead of rounding. `decimal(p, s)` is available on function
+  parameters and returns; the gradual checker verifies explicit decimal constructor arguments,
+  and the self-hosted compiler lowers arithmetic over annotated decimal parameters to the exact
+  helpers. D1 remains incomplete: decimal function return values and unannotated parameters are
+  not inferred for operator dispatch, and automatic literal-context inference is outstanding.
 - **Track T (`lume` single CLI, `lfmt.src` canonical formatter, `lmod.src` + `lume pkg` modules & package manager) is done (T1 #118, T2 #122, T3)**: `./lume` provides `build`, `run`, `test`, `doc` (`--json`), `fmt` (`--check` / `--stdout`), `pkg` (`init`/`check`/`lock`/`verify`/`tree`), `check` (`--json`), and `describe` (`--json`), backed by native Lume-Core tools (`compiler/stage1/ldoc.src`, `compiler/stage1/ltest.src`, `compiler/stage1/lfmt.src`, and `compiler/stage1/lmod.src` compiled to ELF by `lumec` + `lasm`). `lfmt.src` proves idempotence and byte-for-byte codegen invariance; `lmod.src` + `lume pkg` provide topological `use` bundling, cycle detection, SHA-256 `lume.lock` verification (P32), and capability-scoped dependency auditing (P26). `lsp`, P34 LAWS, P35 mandatory tests — not built yet.
 - **Self-hosting `lumec` and the triple self-build: NOT done.** This is Phase 1's exit.
 

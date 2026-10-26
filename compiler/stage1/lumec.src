@@ -221,7 +221,7 @@ fn cfoldearms(xs, ft) = match xs
 ## sequence of statements up to end of input (the `Nil` arm stops the recursion). Each top-level `<expr>` must
 ## consume at least one token (prim always advances on a non-empty stream), so progmore cannot loop forever.
 ## F2: a parameter may carry an optional annotation `name: T` and the signature an optional `-> R` (T as in F1:
-## `int`, `str`, a declared name, `[T]`). `items` are the bare names (so `Fn(nm, ps, body)` is UNCHANGED and the
+## `int`, `str`, a declared name, `[T]`, or D1's `decimal(p, s)`). `items` are the bare names (so `Fn(nm, ps, body)` is UNCHANGED and the
 ## codegen never sees a type); `tys` is the parallel list of annotations, `TyAny` where a parameter has none.
 fn parseparams(ts) = if headtext(ts) == ")" then {items: Nil, tys: Nil, rest: droponce(ts)} else parseparam(headtext(ts), droponce(ts))
 fn parseparam(nm, ts) = if headtext(ts) == ":" then parseparamt(nm, parsetype1(droponce(ts))) else parammore(nm, TyAny, ts)
@@ -285,8 +285,10 @@ fn parsefieldcons(fname, fty, rr) = {items: Cons({fname: fname, fty: fty}, rr.it
 fn parsetypelist(ts) = if headtext(ts) == ")" then {items: Nil, rest: droponce(ts)} else parsetypemore(parsetype1(ts))
 fn parsetypemore(r) = if headtext(r.rest) == "," then parsetypecons(r.node, parsetypelist(droponce(r.rest))) else {items: Cons(r.node, Nil), rest: skiprp(r.rest)}
 fn parsetypecons(n, rr) = {items: Cons(n, rr.items), rest: rr.rest}
-fn parsetype1(ts) = if headtext(ts) == "[" then parsetypelistof(parsetype1(droponce(ts))) else {node: TyName(headtext(ts)), rest: droponce(ts)}
+fn parsetype1(ts) = if headtext(ts) == "[" then parsetypelistof(parsetype1(droponce(ts))) else if headtext(ts) == "decimal" and headtext(droponce(ts)) == "(" then parsetypedecimal(droponce(droponce(ts))) else {node: TyName(headtext(ts)), rest: droponce(ts)}
 fn parsetypelistof(r) = {node: TyList(r.node), rest: skiprk(r.rest)}
+fn parsetypedecimal(ts) = let p = toint(headtext(ts)) in let s = toint(headtext(droponce(droponce(ts)))) in let rest = skiprp(droponce(droponce(droponce(ts)))) in parsetypedecimal2(p, s, rest)
+fn parsetypedecimal2(p, s, rest) = if p < 1 or p > 18 or s < 0 or s > p then ctfail("lume: type error: decimal annotation requires 1 <= precision <= 18 and 0 <= scale <= precision\n") else {node: TyDecimal(p, s), rest: rest}
 fn skiprk(ts) = if headtext(ts) == "]" then droponce(ts) else ts
 
 ## --- code generator: x86-64 asm for the core (port of lcgen.lume, R6a; strings/records/ctors R6b) ---
@@ -505,7 +507,8 @@ fn laexpr(e, ctx, s) = match e
 fn lparams(ps, i) = match ps
     Nil        => ""
     Cons(h, t) => if i < 6 then "    movq " + areg(i) + ", " + lslot(i) + "(%rbp)\n" + lparams(t, i + 1) else "    movq " + str(16 + 8 * (i - 6)) + "(%rbp), %rax\n    movq %rax, " + lslot(i) + "(%rbp)\n" + lparams(t, i + 1)
-fn lafn(nm, params, body, s) = let locals = app(params, app(lcollect(body), lsds(0, lmdepth(body)))) in let frame = lframe(len(locals)) in let br = laexpr(body, {locals: locals, bound: params, dvars: Nil, depth: 0}, s) in let sub = if frame > 0 then "    subq $" + str(frame) + ", %rsp\n" else "" in lres(nm + ":\n    pushq %rbp\n    movq %rsp, %rbp\n" + sub + lparams(params, 0) + br.code + "    popq %rax\n    movq %rbp, %rsp\n    popq %rbp\n    ret\n", br)
+fn lafn(nm, params, body, s) = lafn_typed(nm, params, body, Nil, s)
+fn lafn_typed(nm, params, body, dvars, s) = let locals = app(params, app(lcollect(body), lsds(0, lmdepth(body)))) in let frame = lframe(len(locals)) in let br = laexpr(body, {locals: locals, bound: params, dvars: dvars, depth: 0}, s) in let sub = if frame > 0 then "    subq $" + str(frame) + ", %rsp\n" else "" in lres(nm + ":\n    pushq %rbp\n    movq %rsp, %rbp\n" + sub + lparams(params, 0) + br.code + "    popq %rax\n    movq %rbp, %rsp\n    popq %rbp\n    ret\n", br)
 
 ## --- statements: one pass in source order threading the state ---
 fn lmlocals(prog) = match prog
@@ -527,9 +530,23 @@ fn lstmts(prog, mlocals, s) = match prog
     Cons(h, t) => lstmt(h, t, mlocals, s)
 fn lstmt(s0, t, mlocals, s) = match s0
     Fn(nm, ps, body) => lstmtfn(lafn(nm, ps, body, s), t, mlocals)
+    Sig(nm, ps, tys, rt) => lstmt_sig(nm, ps, tys, t, mlocals, s)
     Print(v)         => lstmtprint(laexpr(v, {locals: mlocals, bound: Nil, dvars: Nil, depth: 0}, s), t, mlocals)
     ExprS(v)         => lstmtexpr(laexpr(v, {locals: mlocals, bound: Nil, dvars: Nil, depth: 0}, s), t, mlocals)
     _                => lstmts(t, mlocals, s)
+fn lstmt_sig(nm, pnames, ptypes, rest, mlocals, s) = match rest
+    Nil => lstmts(rest, mlocals, s)
+    Cons(Fn(nm2, ps, body), tail) => lstmtfn(lafn_typed(nm2, ps, body, ldecimal_params(pnames, ptypes), s), tail, mlocals)
+    _ => lstmts(rest, mlocals, s)
+fn ldecimal_params(pnames, ptypes) = match pnames
+    Nil => Nil
+    Cons(pn, pr) => ldecimal_param(pn, pr, ptypes)
+fn ldecimal_param(pn, rest, ptypes) = match ptypes
+    Nil => ldecimal_params(rest, Nil)
+    Cons(ty, tr) => app(if ldecimal_type(ty) then Cons(pn, Nil) else Nil, ldecimal_params(rest, tr))
+fn ldecimal_type(ty) = match ty
+    TyDecimal(p, s) => 1
+    _ => 0
 fn lstmtfn(f, t, mlocals) = let rest = lstmts(t, mlocals, f) in {funcs: Cons(f.code, rest.funcs), mains: rest.mains, nl: rest.nl, ns: rest.ns, dt: rest.dt}
 fn lstmtprint(pr, t, mlocals) = let rest = lstmts(t, mlocals, pr) in {funcs: rest.funcs, mains: Cons(pr.code + "    popq %rdi\n    call printval\n", rest.mains), nl: rest.nl, ns: rest.ns, dt: rest.dt}
 ## an expression statement: evaluate `v` for its effect and DISCARD the pushed value (popq %rax, no printval)
@@ -673,9 +690,25 @@ fn tknown(e, tt) = match e
     Num(n)        => TyName("int")
     Str(s)        => TyName("str")
     Var(nm)       => tknownctor(nm, tt)
-    Call(nm, xs)  => tknownctor(nm, tt)
+    Call(nm, xs)  => tknowncall(nm, xs, tt)
+    Rec(items)    => tknown_decimal_record(items)
     RecT(tn, its) => tknownrec(tn, trecptypelookup(tn, tt.recs))
     _             => TyAny
+fn tknowncall(nm, xs, tt) = if nm == "decimal" then tknown_decimal_call(xs) else if nm == "decimal_cast" then tknown_decimal_cast(xs) else tknownctor(nm, tt)
+fn tknown_decimal_call(xs) = match xs
+    Cons(Num(p), Cons(Num(s), rest)) => TyDecimal(p, s)
+    _ => TyAny
+fn tknown_decimal_cast(xs) = match xs
+    Cons(v, Cons(Num(p), Cons(Num(s), rest))) => TyDecimal(p, s)
+    _ => TyAny
+fn tknown_decimal_record(items) = if ldec_expr(Rec(items), Nil) then tknown_decimal_record2(ldec_value(items, "coefficient"), ldec_value(items, "scale")) else TyAny
+fn tknown_decimal_record2(c, s) = if c == (0 - 999999999999999999) or s == (0 - 999999999999999999) then TyAny else TyDecimalLiteral(c, s)
+fn ldec_value(items, key) = match items
+    Nil => 0 - 999999999999999999
+    Cons(h, t) => if h.key == key then ldec_num(h.val) else ldec_value(t, key)
+fn ldec_num(e) = match e
+    Num(n) => n
+    _ => 0 - 999999999999999999
 fn tknownctor(nm, tt) = if isctor(nm) then tknownctor2(tctorlookup(nm, tt.ctors), tctorcnt(nm, tt.ctors)) else TyAny
 fn tknownctor2(m, n) = if n != 1 then TyAny else tknownctor3(m)
 fn tknownctor3(m) = match m
@@ -687,20 +720,34 @@ fn tknownrec(tn, m) = match m
 fn tystr(t) = match t
     TyName(n) => n
     TyList(e) => "[" + tystr(e) + "]"
+    TyDecimal(p, s) => "decimal(" + str(p) + ", " + str(s) + ")"
+    TyDecimalLiteral(c, s) => "decimal literal"
     _         => "?"
 ## tcompat(expected, known): 1 unless both are known and differ
 fn tcompat(ex, k) = match ex
     TyAny     => 1
     TyName(n) => tcompatn(n, k)
     TyList(e) => tcompatl(e, k)
+    TyDecimal(p, s) => tcompatdecimal(p, s, k)
 fn tcompatn(n, k) = match k
     TyAny     => 1
     TyName(m) => if n == m then 1 else 0
     TyList(e) => 0
+    TyDecimal(p, s) => 0
+    TyDecimalLiteral(c, s) => 0
 fn tcompatl(e, k) = match k
     TyAny     => 1
     TyName(m) => 0
     TyList(e2) => tcompat(e, e2)
+    TyDecimal(p, s) => 0
+    TyDecimalLiteral(c, s) => 0
+fn tcompatdecimal(p, s, known) = match known
+    TyAny => 1
+    TyDecimal(p2, s2) => if p == p2 and s == s2 then 1 else 0
+    TyDecimalLiteral(c, s2) => tdecimal_literal_fits(c, s2, p, s)
+    _ => 0
+fn tdecimal_literal_fits(c, source_scale, precision, target_scale) = if source_scale != target_scale then 0 else tdecimal_digits(c) <= precision
+fn tdecimal_digits(c) = count(str(if c < 0 then 0 - c else c))
 fn tchksig(nm, args, m, tt) = match m
     Nil        => 0
     Cons(sg, r) => tchkargs(nm, 1, args, sg.pn, sg.pt, tt)

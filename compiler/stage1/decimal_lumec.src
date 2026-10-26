@@ -18,3 +18,5 @@ print decimal_format(-0.10)
 print decimal_format(0.000000000000000001)
 print decimal_format(let local_decimal = 0.10 in local_decimal + 0.20)
 print let local_decimal = 1 in local_decimal + 2
+fn decimal_sum(left: decimal(4, 2), right: decimal(4, 2)) -> decimal(4, 2) = left + right
+print decimal_format(decimal_sum(decimal(4, 2, 0.10), decimal(4, 2, 0.20)))

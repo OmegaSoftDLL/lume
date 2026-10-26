@@ -365,6 +365,10 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_
     printf 'fn f() -> str = 5\nprint f()\n' >"$ntmp/f2d.src"
     "$ntmp/lc" <"$ntmp/f2d.src" >"$ntmp/f2d.s" 2>"$ntmp/f2d.err"; f2d=$?
     if [ "$f2d" = 3 ] && [ ! -s "$ntmp/f2d.s" ] && grep -q "function 'f' returns int but is declared to return str" "$ntmp/f2d.err"; then ok "phase-2 F2: literal body contradicting -> R is a clear type error"; else bad "phase-2 F2: literal body contradicting -> R is a clear type error"; fi
+    # D1: decimal(p, s) annotations identify decimal parameters for exact operator dispatch and reject wrong arguments.
+    printf 'fn takes_decimal(value: decimal(4, 2)) = value\nprint takes_decimal(1)\n' >"$ntmp/d1_type_bad.src"
+    "$ntmp/lc" <"$ntmp/d1_type_bad.src" >"$ntmp/d1_type_bad.s" 2>"$ntmp/d1_type_bad.err"; d1tb=$?
+    if [ "$d1tb" = 3 ] && [ ! -s "$ntmp/d1_type_bad.s" ] && grep -q "argument 1 of 'takes_decimal' has type int but parameter 'value' expects decimal(4, 2)" "$ntmp/d1_type_bad.err"; then ok "phase-2 D1: decimal(p, s) parameter rejects an integer argument"; else bad "phase-2 D1: decimal(p, s) parameter rejects an integer argument"; fi
     # GRADUAL (zero false positive): variables / fn-call results / operator expressions as arguments are NOT
     # checked (F3 inference), and annotations alone do not turn on the F1 constructor checks (Zonk stays free).
     printf 'fn f(a: int, b: str) = b\nfn g(z) = z\nprint f(g(1), g("s"))\nprint f(1 + 2, "q")\nfn h(k: int) = match k\n    Zonk(n) => n\nprint 0\n' >"$ntmp/f2e.src"
