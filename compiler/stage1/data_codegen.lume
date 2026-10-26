@@ -139,7 +139,7 @@ fn pat_binds(p: Pat, path: str) -> str
 fn cexpr(e: DExpr) -> str
     match e
         DInt(n)   => "mkint(" + str(n) + ")"
-        DDecimal(coefficient, scale) => "mkrec(2, (const char*[]){{\"coefficient\", \"scale\"}}, (Value*[]){{mkint(" + str(coefficient) + "), mkint(" + str(scale) + ")}})"
+        DDecimal(coefficient, scale) => "mkrec(3, (const char*[]){{\"coefficient\", \"scale\", \"precision\"}}, (Value*[]){{mkint(" + str(coefficient) + "), mkint(" + str(scale) + "), mkint(0)}})"
         DStr(v)   => "mkstr(\"" + cesc(v) + "\")"
         DVar(nm)  => nm
         DCons(tag, args) => do

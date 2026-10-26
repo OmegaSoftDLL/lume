@@ -295,7 +295,7 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_
     printf 'fn test_ok() = 2 + 2 == 4\nfn test_broken() = 2 + 2 == 5\n' >"$ntmp/bad_test.src"
     LUME_BIN_DIR="$ntmp" ../../lume test "$ntmp/bad_test.src" >"$ntmp/bt.out" 2>"$ntmp/bt.err"; bt_code=$?
     if LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/sample_test.src 2>/dev/null | diff -u ../../tests/conformance/stage1/ltest_pass_asm.expected - >/dev/null && [ "$bt_code" != 0 ] && grep -q "FAIL test_broken" "$ntmp/bt.out" && grep -q "1 passed, 1 failed" "$ntmp/bt.out"; then ok "phase-2 T1: lume test (native ltest.src) discovers fn test_*(), passes valid suite and fails broken suite"; else bad "phase-2 T1: lume test (native ltest.src) discovers and runs fn test_*()"; fi
-    if LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/decimal.src 2>/dev/null | grep -q "12 passed, 0 failed"; then ok "phase-2 D1: decimal coefficient/scale helper regressions pass through native lume test"; else bad "phase-2 D1: decimal coefficient/scale helper regressions"; fi
+    if LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/decimal.src 2>/dev/null | grep -q "15 passed, 0 failed"; then ok "phase-2 D1: decimal precision/scale helper regressions pass through native lume test"; else bad "phase-2 D1: decimal precision/scale helper regressions"; fi
     cat ../../compiler/stage1/decimal.src >"$ntmp/decimal_bad.src"
     printf 'print decimal_format(decimal_cast(decimal_parse("1.234"), 4, 2))\n' >>"$ntmp/decimal_bad.src"
     if LUME_BIN_DIR="$ntmp" ../../lume build "$ntmp/decimal_bad.src" -o "$ntmp/decimal_bad" >/dev/null 2>&1; then
@@ -312,6 +312,14 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_
         decimal_div_bad_code=0
     fi
     if [ "$decimal_div_bad_code" = 3 ] && [ ! -s "$ntmp/decimal_div_bad.out" ] && grep -q "decimal division is inexact at requested scale" "$ntmp/decimal_div_bad.err"; then ok "phase-2 D1: exact division rejects a repeating result at the requested scale"; else bad "phase-2 D1: exact division rejects inexact results"; fi
+    cat ../../compiler/stage1/decimal.src >"$ntmp/decimal_precision_bad.src"
+    printf 'print decimal_add(decimal(4, 2, decimal_parse("99.99")), decimal(4, 2, decimal_parse("0.01")))\n' >>"$ntmp/decimal_precision_bad.src"
+    if LUME_BIN_DIR="$ntmp" ../../lume build "$ntmp/decimal_precision_bad.src" -o "$ntmp/decimal_precision_bad" >/dev/null 2>&1; then
+        "$ntmp/decimal_precision_bad" >"$ntmp/decimal_precision_bad.out" 2>"$ntmp/decimal_precision_bad.err"; decimal_precision_bad_code=$?
+    else
+        decimal_precision_bad_code=0
+    fi
+    if [ "$decimal_precision_bad_code" = 3 ] && [ ! -s "$ntmp/decimal_precision_bad.out" ] && grep -q "decimal precision overflow" "$ntmp/decimal_precision_bad.err"; then ok "phase-2 D1: fixed-precision addition rejects overflow"; else bad "phase-2 D1: fixed-precision addition rejects overflow"; fi
     printf 'fn f(x) = x + 1   \n\n\nprint f(41)  \n' >"$ntmp/unfmt.src"
     if ! LUME_BIN_DIR="$ntmp" ../../lume fmt --check "$ntmp/unfmt.src" >/dev/null 2>&1 && LUME_BIN_DIR="$ntmp" ../../lume fmt "$ntmp/unfmt.src" >/dev/null 2>&1 && LUME_BIN_DIR="$ntmp" ../../lume fmt --check "$ntmp/unfmt.src" >/dev/null 2>&1; then ok "phase-2 T1: lume fmt & lume fmt --check normalise and verify source formatting"; else bad "phase-2 T1: lume fmt & lume fmt --check"; fi
     # phase-2 F1: named type/enum/record declarations + a GRADUAL, AI-first checker (native lumec, no C).

@@ -213,13 +213,7 @@ fn decimal_expr(e: DExpr) -> bool
 fn aexpr(e: DExpr, c: mut AC)
     match e
         DInt(n) => c.out.push("    movq $" + str(n) + ", %rdi\n    call mkint\n    pushq %rax\n")
-        DDecimal(coefficient, scale) => do
-            let coefficient_name = strlabel("coefficient", c)
-            let scale_name = strlabel("scale", c)
-            c.out.push("    movq $" + str(coefficient) + ", %rdi\n    call mkint\n    pushq %rax\n")
-            c.out.push("    movq $" + str(scale) + ", %rdi\n    call mkint\n    pushq %rax\n")
-            c.out.push("    movq $16, %rdi\n    call alloc\n    movq %rax, %rcx\n    popq %rax\n    movq %rax, 8(%rcx)\n    popq %rax\n    movq %rax, (%rcx)\n")
-            c.out.push("    pushq %rcx\n    leaq " + coefficient_name + "(%rip), %rax\n    pushq %rax\n    leaq " + scale_name + "(%rip), %rax\n    pushq %rax\n    movq $16, %rdi\n    call alloc\n    movq %rax, %rdx\n    popq %rax\n    movq %rax, 8(%rdx)\n    popq %rax\n    movq %rax, (%rdx)\n    movq %rdx, %rdi\n    popq %rsi\n    movq $2, %rdx\n    call mkrec\n    pushq %rax\n")
+        DDecimal(coefficient, scale) => aexpr(DRec(fields: [RecField(name: "coefficient", value: DInt(n: coefficient)), RecField(name: "scale", value: DInt(n: scale)), RecField(name: "precision", value: DInt(n: 0))]), c)
         DStr(v) => do
             let lab = strlabel(v, c)
             c.out.push("    leaq " + lab + "(%rip), %rdi\n    call mkstr\n    pushq %rax\n")
