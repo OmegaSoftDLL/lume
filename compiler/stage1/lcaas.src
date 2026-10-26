@@ -536,7 +536,8 @@ fn cs_ceval_rec(items, env, ft, cd) = match items
 fn cs_ceval_list(xs, env, ft, cd) = match xs
     Nil        => {ok: 1, vals: Nil, err: "", fix: ""}
     Cons(h, t) => let rh = cs_ceval(h, env, ft, cd) in if rh.ok == 0 then {ok: 0, vals: Nil, err: rh.err, fix: rh.fix} else let rt = cs_ceval_list(t, env, ft, cd) in if rt.ok == 0 then rt else {ok: 1, vals: Cons(rh.v, rt.vals), err: "", fix: ""}
-fn cs_cbin(op, l, r) = if op == "==" then cs_cv_ok(cs_cv_int(cs_cveq(l, r))) else if op == "!=" then cs_cv_ok(cs_cv_int(if cs_cveq(l, r) == 1 then 0 else 1)) else if l.kind == "str" and r.kind == "str" and op == "+" then cs_cv_ok(cs_cv_str(l.s + r.s)) else if l.kind == "int" and r.kind == "int" then cs_cbin_int(op, l.i, r.i) else cs_cv_err("comptime error: type mismatch in operator '" + op + "'", "use matching operand types for '" + op + "'")
+fn cs_cbin_str(op, x, y) = if op == "+" then cs_cv_ok(cs_cv_str(x + y)) else if op == "<" then cs_cv_ok(cs_cv_int(if x < y then 1 else 0)) else if op == ">" then cs_cv_ok(cs_cv_int(if x > y then 1 else 0)) else if op == "<=" then cs_cv_ok(cs_cv_int(if x <= y then 1 else 0)) else if op == ">=" then cs_cv_ok(cs_cv_int(if x >= y then 1 else 0)) else cs_cv_err("comptime error: unknown string operator '" + op + "'", "use a valid string operator")
+fn cs_cbin(op, l, r) = if op == "==" then cs_cv_ok(cs_cv_int(cs_cveq(l, r))) else if op == "!=" then cs_cv_ok(cs_cv_int(if cs_cveq(l, r) == 1 then 0 else 1)) else if l.kind == "str" and r.kind == "str" then cs_cbin_str(op, l.s, r.s) else if l.kind == "int" and r.kind == "int" then cs_cbin_int(op, l.i, r.i) else cs_cv_err("comptime error: type mismatch in operator '" + op + "'", "use matching operand types for '" + op + "'")
 fn cs_cbin_int(op, x, y) = if op == "+" then cs_cv_ok(cs_cv_int(x + y)) else if op == "-" then cs_cv_ok(cs_cv_int(x - y)) else if op == "*" then cs_cv_ok(cs_cv_int(x * y)) else if op == "/" then (if y == 0 then cs_cv_err("comptime error: division by zero at compile time", "ensure divisor is non-zero") else cs_cv_ok(cs_cv_int(x / y))) else if op == "%" then (if y == 0 then cs_cv_err("comptime error: modulo by zero at compile time", "ensure modulus is non-zero") else cs_cv_ok(cs_cv_int(x % y))) else if op == "<" then cs_cv_ok(cs_cv_int(x < y)) else if op == ">" then cs_cv_ok(cs_cv_int(x > y)) else if op == "<=" then cs_cv_ok(cs_cv_int(x <= y)) else if op == ">=" then cs_cv_ok(cs_cv_int(x >= y)) else if op == "and" then cs_cv_ok(cs_cv_int(if x != 0 then (if y != 0 then 1 else 0) else 0)) else if op == "or" then cs_cv_ok(cs_cv_int(if x != 0 then 1 else if y != 0 then 1 else 0)) else cs_cv_err("comptime error: unknown operator '" + op + "'", "use a valid operator")
 
 fn cs_cbind(ps, vals, env) = match ps
@@ -948,6 +949,7 @@ fn cs_veval_bin(op, rl, rr) = if rl.ok == 0 or rr.ok == 0 then cs_vv_err() else 
 fn cs_veval(e, env, old_env, ft, d) = if d > 20 then cs_vv_err() else cs_veval1(e, env, old_env, ft, d)
 fn cs_veval1(e, env, old_env, ft, d) = match e
     Num(n)                  => cs_vv_int(n)
+    Str(s)                  => cs_vv_int(0)
     Var(nm)                 => cs_vlookup(nm, env)
     OwnE(inner)             => cs_veval(inner, env, old_env, ft, d)
     MutE(inner)             => cs_veval(inner, env, old_env, ft, d)
@@ -983,7 +985,7 @@ fn cs_veval_ufn2(fn0, vals, ft, d) = match fn0
 fn cs_vpts_a() = Cons(0, Cons(1, Cons(0 - 1, Nil)))
 fn cs_vpts_b() = Cons(0, Cons(1, Nil))
 fn cs_vpts_c() = Cons(0, Cons(1, Nil))
-fn cs_vpts_for(idx, total) = if total <= 1 then cs_vpts_a() else if total == 2 then cs_vpts_b() else cs_vpts_c()
+fn cs_vpts_for(idx, total) = if total <= 1 then cs_vpts_a() else if total == 2 then cs_vpts_b() else if idx < 3 then cs_vpts_c() else Cons(0, Nil)
 fn cs_vgen_envs(ps, idx, total) = match ps
     Nil        => Cons(Nil, Nil)
     Cons(p, r) => cs_vcross_p(p, cs_vpts_for(idx, total), cs_vgen_envs(r, idx + 1, total))

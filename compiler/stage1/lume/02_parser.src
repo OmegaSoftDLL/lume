@@ -7,7 +7,7 @@ fn primid(name, t) = if headtext(t) == "(" then let a = arglist(droponce(t)) in 
 fn isbadholech(c) = c == ":" or c == "\"" or c == "\n" or c == "{" or c == "}"
 fn hasbadhole(s, i) = if i >= count(s) then 0 else if isbadholech(at(s, i)) then 1 else hasbadhole(s, i + 1)
 fn isvalidhole(s) = if count(s) == 0 then 0 else let c0 = at(s, 0) in if (isalpha(c0) or isdigit(c0) or c0 == "(") and hasbadhole(s, 0) == 0 then 1 else 0
-fn findcloseb(s, j) = if j >= count(s) then 0 - 1 else if at(s, j) == "}" then j else findcloseb(s, j + 1)
+fn findcloseb(s, j) requires j >= 0 ensures result < 0 or result >= j = if j >= count(s) then 0 - 1 else if at(s, j) == "}" then j else findcloseb(s, j + 1)
 fn findinterp(s, i) = if i >= count(s) then 0 - 1 else if at(s, i) == "{" then (if i + 1 < count(s) and at(s, i + 1) == "{" then findinterp(s, i + 2) else let j = findcloseb(s, i + 1) in if j > i + 1 and isvalidhole(slice(s, i + 1, j)) == 1 then i else findinterp(s, i + 1)) else findinterp(s, i + 1)
 fn hasescbrace(s, i) = if i + 1 >= count(s) then 0 else if (at(s, i) == "{" and at(s, i + 1) == "{") or (at(s, i) == "}" and at(s, i + 1) == "}") then 1 else hasescbrace(s, i + 1)
 fn unescbracel(s, i, n) = if i >= n then Nil else if i + 1 < n and ((at(s, i) == "{" and at(s, i + 1) == "{") or (at(s, i) == "}" and at(s, i + 1) == "}")) then Cons(at(s, i), unescbracel(s, i + 2, n)) else Cons(at(s, i), unescbracel(s, i + 1, n))

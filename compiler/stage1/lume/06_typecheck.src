@@ -414,8 +414,8 @@ fn tcollecti2(h, t) = match h
     _                => tcollecti(t)
 fn tifn(fnnode, ps, body) = tifn2(fnnode, ps, henv0(ps, 0), body)
 fn tifn2(fnnode, ps, env, body) = tifn3(fnnode, ps, env, tinfer(body, env, Nil, len(ps)))
-fn tifn3(fnnode, ps, env, ri) = {fnode: fnnode, pn: ps, iptypes: tiptypes(env, ri.subst)}
-fn henv0(ps, i) = match ps
+fn tifn3(fnnode, ps, env, ri) requires len(env) == len(ps) ensures len(result.iptypes) == len(ps) = {fnode: fnnode, pn: ps, iptypes: tiptypes(env, ri.subst)}
+fn henv0(ps, i) requires i >= 0 ensures len(result) == len(ps) = match ps
     Nil        => Nil
     Cons(p, r) => Cons({k: p, v: TyVar(i)}, henv0(r, i + 1))
 fn tiptypes(env, subst) = match env
@@ -436,7 +436,7 @@ fn happly(subst, ty) = match ty
 fn happlyv(orig, subst, m) = match m
     Nil        => orig
     Cons(t, r) => happly(subst, t)
-fn hbind(n, ty, subst) = Cons({tv: n, ty: ty}, subst)
+fn hbind(n, ty, subst) requires n >= 0 ensures isnil(result) == 0 = Cons({tv: n, ty: ty}, subst)
 fn hunify(a, b, subst) = hunify2(happly(subst, a), happly(subst, b), subst)
 fn hunify2(a, b, subst) = match a
     TyVar(n) => hunifyl(n, b, subst)
