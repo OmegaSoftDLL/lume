@@ -275,6 +275,47 @@ fn tknownctor3(m) = match m
 fn tknownrec(tn, m) = match m
     Nil        => TyAny
     Cons(rd, r) => TyName(tn)
+## --- F3a: local gradual inference ---------------------------------------------------------------------------
+## `tknownl(e, tt, lenv)` is `tknown` extended with a LOCAL type environment `lenv` (variable name -> Ty, built
+## from a function's annotated parameters and from `let` bindings) plus operator/`if` result types. It returns a
+## CONCRETE type only when it is certain and TyAny (= unknown, never an error) otherwise, so it adds real checks
+## -- a function body whose inferred type contradicts its `-> R` annotation -- with ZERO false positives. A program
+## that opts into no types never reaches the checker (tcheck returns it unchanged), so the self-host fixpoint is
+## untouched. `tknown(e, tt)` is preserved as `tknownl(e, tt, Nil)` so every existing caller is byte-for-byte
+## unchanged. This is the first step toward full Hindley-Milner inference (F3b: unification + let-polymorphism).
+fn tknownl(e, tt, lenv) = match e
+    Var(nm)         => tknownlvar(nm, lenv, tt)
+    Bin(op, a, b)   => tknownlbin(op, tknownl(a, tt, lenv), tknownl(b, tt, lenv))
+    If(c, t, e2)    => tknownlif(tknownl(t, tt, lenv), tknownl(e2, tt, lenv))
+    LetIn(nm, v, b) => tknownl(b, tt, Cons({k: nm, v: tnarrow(tknownl(v, tt, lenv))}, lenv))
+    _               => tknown(e, tt)
+## F3a infers only int/str (the unambiguous, high-value subset); decimal/record/list/apply fall back to TyAny
+## (unchecked, as before), so the strict decimal/record equality can never produce a NEW false positive.
+fn tnarrow(ty) = if tisint(ty) == 1 or tisstr(ty) == 1 then ty else TyAny
+fn tknownlvar(nm, lenv, tt) = match tlookuplenv(nm, lenv)
+    Cons(ty, r) => ty
+    Nil         => tknown(Var(nm), tt)
+fn tlookuplenv(nm, lenv) = match lenv
+    Nil        => Nil
+    Cons(h, t) => if h.k == nm then Cons(h.v, Nil) else tlookuplenv(nm, t)
+fn tisint(ty) = match ty
+    TyName(n) => if n == "int" then 1 else 0
+    _         => 0
+fn tisstr(ty) = match ty
+    TyName(n) => if n == "str" then 1 else 0
+    _         => 0
+fn tisarith(op) = op == "+" or op == "-" or op == "*" or op == "/" or op == "%"
+fn tiscmp(op) = op == "==" or op == "!=" or op == "<" or op == ">" or op == "<=" or op == ">=" or op == "and" or op == "or"
+fn tknownlbin(op, ka, kb) = if op == "+" and tisstr(ka) == 1 and tisstr(kb) == 1 then TyName("str") else if tisarith(op) == 1 and tisint(ka) == 1 and tisint(kb) == 1 then TyName("int") else if tiscmp(op) == 1 then TyName("int") else TyAny
+fn tknownlif(kt, ke) = if tsameconcrete(kt, ke) == 1 then tnarrow(kt) else TyAny
+fn tsameconcrete(a, b) = if tystr(a) == "?" then 0 else if tystr(a) == tystr(b) then 1 else 0
+fn tparamlenv(sg) = tparamlenv2(sg.pn, sg.pt)
+fn tparamlenv2(pns, pts) = match pns
+    Nil        => Nil
+    Cons(pn, pr) => tparamlenv3(pn, pr, pts)
+fn tparamlenv3(pn, pr, pts) = match pts
+    Nil         => Nil
+    Cons(ty, tr) => Cons({k: pn, v: tnarrow(ty)}, tparamlenv2(pr, tr))
 fn tystr(t) = match t
     TyName(n) => n
     TyList(e) => "[" + tystr(e) + "]"
@@ -332,7 +373,7 @@ fn tchkargs2(nm, i, a, rest, pns, pts, tt) = match pts
 fn tchkarg(nm, i, pn, ty, k) = if tcompat(ty, k) == 1 then 1 else ctfail("lume: type error: argument " + str(i) + " of '" + nm + "' has type " + tystr(k) + " but parameter '" + pn + "' expects " + tystr(ty) + "\n")
 fn tchkret(nm, body, m, tt) = match m
     Nil        => 0
-    Cons(sg, r) => tchkret2(nm, sg.rt, tknown(body, tt))
+    Cons(sg, r) => tchkret2(nm, sg.rt, tknownl(body, tt, tparamlenv(sg)))
 fn tchkret2(nm, rt, k) = if tcompat(rt, k) == 1 then 1 else ctfail("lume: type error: function '" + nm + "' returns " + tystr(k) + " but is declared to return " + tystr(rt) + "\n")
 
 ## --- C3: generic argument checking (reuses F2's `tknown`/`tcompat`/`tchkarg`) -----------------------------------
