@@ -257,6 +257,28 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_
     printf 'print comptime(f(1))\n' >"$ntmp/ctbad.src"
     "$ntmp/lc" <"$ntmp/ctbad.src" >"$ntmp/ctbad.s" 2>"$ntmp/ctbad.err"; ctbad_code=$?
     if [ "$ctbad_code" != 0 ] && [ ! -s "$ntmp/ctbad.s" ] && grep -q "comptime error" "$ntmp/ctbad.err"; then ok "phase-2 comptime: non-constant comptime fails compilation with a clear error (no bad output)"; else bad "phase-2 comptime: non-constant comptime fails compilation with a clear error"; fi
+    # phase-2 C2: comptime EVALUATES calls to PURE user functions (recursion + if + arithmetic). ct2.src defines
+    # fib/fact and prints comptime(fib(10))=55, comptime(fact(5))=120, a nested comptime, and comptime(fact(fib(5)))=120.
+    "$ntmp/lc" <../../compiler/stage1/ct2.src >"$ntmp/ct2.s" 2>/dev/null; "$ntmp/lasm" <"$ntmp/ct2.s" >"$ntmp/ct2.elf" 2>/dev/null; chmod +x "$ntmp/ct2.elf"
+    ct2_ok=1
+    "$ntmp/ct2.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/comptime2_asm.expected - >/dev/null || ct2_ok=0
+    # PROOF of compile-time folding: each comptime call becomes a `movq $N` immediate in the program-entry (main)
+    # section -- there is NO `call fib`/`call fact` after `_start:` (fib/fact are still emitted as callable fns).
+    awk '/^_start:/{p=1} p{print}' "$ntmp/ct2.s" >"$ntmp/ct2_main.s"
+    grep -q 'movq \$55, %rdi' "$ntmp/ct2_main.s" || ct2_ok=0
+    grep -q 'movq \$120, %rdi' "$ntmp/ct2_main.s" || ct2_ok=0
+    grep -q 'call fib' "$ntmp/ct2_main.s" && ct2_ok=0
+    grep -q 'call fact' "$ntmp/ct2_main.s" && ct2_ok=0
+    if [ "$ct2_ok" = 1 ]; then ok "phase-2 C2: comptime folds pure user-fn calls fib(10)=55 / fact(5)=120 (no call in main)"; else bad "phase-2 C2: comptime folds pure user-fn calls"; fi
+    # C2 purity guard: a comptime that reaches an impure builtin (read) is a hard compile-time error ('not pure').
+    printf 'fn getx() = read()\nprint comptime(getx())\n' >"$ntmp/ctimp.src"
+    "$ntmp/lc" <"$ntmp/ctimp.src" >"$ntmp/ctimp.s" 2>"$ntmp/ctimp.err"; ctimp_code=$?
+    if [ "$ctimp_code" != 0 ] && [ ! -s "$ntmp/ctimp.s" ] && grep -q "not pure" "$ntmp/ctimp.err"; then ok "phase-2 C2: comptime of an impure fn (read) fails with 'not pure'"; else bad "phase-2 C2: comptime of an impure fn fails with 'not pure'"; fi
+    # C2 termination guard (SUPERIOR to C++ constexpr): infinite comptime recursion hits a finite, explicit step/
+    # depth budget and reports a legible error -- the compiler never hangs or crashes (exit nonzero, no asm).
+    printf 'fn loopy(n) = loopy(n) + 1\nprint comptime(loopy(1))\n' >"$ntmp/ctinf.src"
+    timeout 60 "$ntmp/lc" <"$ntmp/ctinf.src" >"$ntmp/ctinf.s" 2>"$ntmp/ctinf.err"; ctinf_code=$?
+    if [ "$ctinf_code" = 3 ] && [ ! -s "$ntmp/ctinf.s" ] && grep -q "exceeded" "$ntmp/ctinf.err"; then ok "phase-2 C2: infinite comptime recursion hits the step/depth budget (clean error, no hang/crash)"; else bad "phase-2 C2: infinite comptime recursion hits the step/depth budget"; fi
     rm -rf "$ntmp"
 else
     ok "no-toolchain ELF pipeline (skipped: not linux/x86_64, or under ASan)"
