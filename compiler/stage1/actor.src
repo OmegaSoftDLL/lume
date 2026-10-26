@@ -1,0 +1,52 @@
+## actor.src -- Lume Phase 3 Track S3 standard library for typed actors (`std.actor`),
+## Erlang/OTP-style supervisors (`one_for_one`, `one_for_all`), and deterministic virtual time
+## (`std.time.logical`, `use actor`, docs/16-phase3-plan.md S3).
+
+## --- `std.time.logical`: deterministic virtual clock & PRNG schedule seed ---
+fn lclock_new(seed) = {now_ms: 0, ticks: 0, seed: seed}
+fn lclock_now(clk) = clk.now_ms
+fn lclock_ticks(clk) = clk.ticks
+fn lclock_seed(clk) = clk.seed
+fn lclock_advance(clk, delta_ms) = {now_ms: clk.now_ms + (if delta_ms > 0 then delta_ms else 0), ticks: clk.ticks + 1, seed: (clk.seed * 1103515245 + 12345) % 2147483647}
+fn lclock_next_slot(clk, n) = if n <= 0 then 0 else (clk.seed % n)
+
+## --- `std.actor`: mailbox actor state machine ---
+fn act_snoc(xs, v) = match xs
+    Nil        => Cons(v, Nil)
+    Cons(h, t) => Cons(h, act_snoc(t, v))
+
+fn actor_new(id, init_state) = {id: id, state: init_state, init_state: init_state, mailbox: Nil, mbox_len: 0, processed: 0, restarts: 0, status: "running"}
+fn actor_state(a) = a.state
+fn actor_status(a) = a.status
+fn actor_restarts(a) = a.restarts
+fn actor_processed(a) = a.processed
+fn actor_mbox_len(a) = a.mbox_len
+
+fn actor_send(a, msg) = if a.status == "stopped" then a else {id: a.id, state: a.state, init_state: a.init_state, mailbox: act_snoc(a.mailbox, msg), mbox_len: a.mbox_len + 1, processed: a.processed, restarts: a.restarts, status: a.status}
+
+## Process next message in mailbox:
+## - `msg < 0` simulates a fault/crash (`status: "crashed"`)
+## - `msg >= 0` adds `msg` to `a.state` and increments `processed`
+fn actor_step(a) = actor_step_mb(a, a.mailbox)
+fn actor_step_mb(a, mb) = match mb
+    Nil        => a
+    Cons(m, r) => if m < 0 then {id: a.id, state: a.state, init_state: a.init_state, mailbox: r, mbox_len: a.mbox_len - 1, processed: a.processed, restarts: a.restarts, status: "crashed"} else {id: a.id, state: a.state + m, init_state: a.init_state, mailbox: r, mbox_len: a.mbox_len - 1, processed: a.processed + 1, restarts: a.restarts, status: "running"}
+
+fn actor_restart(a) = {id: a.id, state: a.init_state, init_state: a.init_state, mailbox: a.mailbox, mbox_len: a.mbox_len, processed: a.processed, restarts: a.restarts + 1, status: "running"}
+fn actor_stop(a) = {id: a.id, state: a.state, init_state: a.init_state, mailbox: Nil, mbox_len: 0, processed: a.processed, restarts: a.restarts, status: "stopped"}
+
+## --- `supervisor`: Erlang/OTP-style supervision (`one_for_one` and `one_for_all`) ---
+fn supervisor_new(strategy, max_restarts) = {strategy: strategy, max_restarts: max_restarts, total_restarts: 0, escalated: 0}
+
+fn supervisor_heal2(sup, a1, a2) = if a1.status != "crashed" and a2.status != "crashed" then {sup: sup, a1: a1, a2: a2} else if sup.total_restarts + 1 > sup.max_restarts then {sup: {strategy: sup.strategy, max_restarts: sup.max_restarts, total_restarts: sup.total_restarts, escalated: 1}, a1: actor_stop(a1), a2: actor_stop(a2)} else if sup.strategy == "one_for_all" then {sup: {strategy: sup.strategy, max_restarts: sup.max_restarts, total_restarts: sup.total_restarts + 1, escalated: 0}, a1: actor_restart(a1), a2: actor_restart(a2)} else {sup: {strategy: sup.strategy, max_restarts: sup.max_restarts, total_restarts: sup.total_restarts + 1, escalated: 0}, a1: if a1.status == "crashed" then actor_restart(a1) else a1, a2: if a2.status == "crashed" then actor_restart(a2) else a2}
+
+## --- unit tests (`lume test compiler/stage1/actor.src`) ---
+fn test_logical_clock_determinism() = let c0 = lclock_new(42) in let c1 = lclock_advance(c0, 25) in let c2 = lclock_advance(c1, 75) in let d0 = lclock_new(42) in let d1 = lclock_advance(d0, 25) in let d2 = lclock_advance(d1, 75) in lclock_now(c2) == 100 and lclock_ticks(c2) == 2 and lclock_seed(c2) == lclock_seed(d2) and lclock_next_slot(c2, 8) == lclock_next_slot(d2, 8)
+
+fn test_actor_mailbox_processing() = let a0 = actor_new(1, 10) in let a1 = actor_send(actor_send(a0, 15), 20) in let a2 = actor_step(actor_step(a1)) in actor_state(a2) == 45 and actor_processed(a2) == 2 and actor_mbox_len(a2) == 0 and actor_status(a2) == "running"
+
+fn test_supervisor_one_for_one_restarts_only_crashed_child() = let sup0 = supervisor_new("one_for_one", 3) in let a1 = actor_step(actor_send(actor_new(1, 0), 0 - 1)) in let a2 = actor_step(actor_send(actor_new(2, 10), 25)) in let h = supervisor_heal2(sup0, a1, a2) in actor_status(h.a1) == "running" and actor_restarts(h.a1) == 1 and actor_state(h.a2) == 35 and actor_restarts(h.a2) == 0 and h.sup.total_restarts == 1
+
+fn test_supervisor_one_for_all_restarts_all_children() = let sup0 = supervisor_new("one_for_all", 3) in let a1 = actor_step(actor_send(actor_new(1, 0), 0 - 1)) in let a2 = actor_step(actor_send(actor_new(2, 10), 25)) in let h = supervisor_heal2(sup0, a1, a2) in actor_status(h.a1) == "running" and actor_restarts(h.a1) == 1 and actor_state(h.a2) == 10 and actor_restarts(h.a2) == 1
+
+fn test_supervisor_max_restart_intensity_escalates() = let sup0 = supervisor_new("one_for_one", 1) in let a1 = actor_step(actor_send(actor_new(1, 0), 0 - 1)) in let a2 = actor_new(2, 0) in let h1 = supervisor_heal2(sup0, a1, a2) in let a1_crash2 = actor_step(actor_send(h1.a1, 0 - 1)) in let h2 = supervisor_heal2(h1.sup, a1_crash2, h1.a2) in h2.sup.escalated == 1 and actor_status(h2.a1) == "stopped" and actor_status(h2.a2) == "stopped"

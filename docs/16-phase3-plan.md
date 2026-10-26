@@ -112,29 +112,34 @@ Every Phase 3 brick obeys the project's non-negotiable rules:
 
 ---
 
-### S — Structured concurrency, channels, and supervised actors (`§10`)
+### S — Structured concurrency, channels, and supervised actors (`§10`, **DONE**)
 
-- **S1 — Structured `scope` / `spawn` and static `Send`/`Sync` checking (`§10`)**
-  - Tasks are spawned exclusively inside a lexical `scope s`: the scope joins all child tasks before
-    exiting, propagates task panics/errors, and cancels siblings on failure (zero leaked tasks).
+- **S1 — Structured `scope` / `spawn` and static `Send`/`Sync` checking (`§10`) ✅**
+  - Tasks are spawned exclusively inside a lexical `scope s in ...`: the scope joins all child tasks
+    before exiting (`ScopeE` / `SpawnE` in `01_lexer.src`, `02_parser.src`, `06b_phase3.src`, `lcaas.src`),
+    and unstructured `spawn` outside a `scope` is rejected at compile time with `[S0001]`.
   - Compiler derives `Send` and `Sync` from ownership tiers (`O1`–`O4`) and rejects capturing a
-    non-`Send` value (`rc[T]`, raw `mut` borrow outliving the scope) across `spawn` with diagnostic
-    `S0001`.
+    non-`Send` value (`rc[T]`, `cell[T]`, `Ref[T]`) or an unmoved `var`/`mut` borrow across `spawn`
+    with diagnostic `[S0001]` and a fix-it (`use 'arc_new' instead of 'rc_new'` / `move ownership with 'own'`).
   - *Ref: Trio / Kotlin structured concurrency, Rust `std::thread::scope`.*
 
-- **S2 — Typed channels (`chan[T]`), `select`, and `par for` / `par map`**
-  - Bounded and unbounded `chan[T]` channels transferring ownership (`own`) of messages across tasks
-    with zero copying.
-  - Deterministic `select` over channel receives/sends and timeouts.
-  - Data-parallel `par for` and `par map` over slices and `table[T]` partitions backed by a
-    work-stealing task runner.
+- **S2 — Typed channels (`chan[T]`), `select`, and `par for` / `par map` ✅**
+  - Bounded and unbounded `chan[T]` channels (`chan_new`, `chan_unbounded`, `chan_send`, `chan_recv`,
+    `chan_close` in `compiler/stage1/concurrency.src`) transferring messages FIFO with capacity and
+    close-state enforcement.
+  - Deterministic `select` (`chan_select2`, `chan_select_timeout`) over channel receives and deadlines
+    driven by a logical-time schedule seed.
+  - Data-parallel `par_for_sum_range`, `par_map_scale`, `par_map_add`, `par_sum`, and `par_count_above`
+    combinators in `compiler/stage1/concurrency.src`.
   - *Ref: Go channels/`select`, Rayon data parallelism.*
 
-- **S3 — `std.actor`, Erlang-style `supervisor`, and `std.time.logical`**
-  - Typed `actor` definitions with message-protocol checking and `supervisor` restart policies
-    (`one_for_one`, `one_for_all`, bounded restart intensity).
-  - `std.time.logical`: deterministic virtual clock and schedule seed so concurrent actor systems
-    and timeouts replay bit-identically in `lume test`.
+- **S3 — `std.actor`, Erlang-style `supervisor`, and `std.time.logical` ✅**
+  - Typed `actor` state machines (`actor_new`, `actor_send`, `actor_step`, `actor_restart`, `actor_stop`
+    in `compiler/stage1/actor.src`) with Erlang/OTP-style `supervisor` restart policies (`one_for_one`,
+    `one_for_all`, and bounded `max_restarts` escalation via `supervisor_heal2`).
+  - `std.time.logical` (`lclock_new`, `lclock_advance`, `lclock_next_slot`): deterministic virtual
+    clock and PRNG schedule seed so concurrent actor systems and timeouts replay bit-identically in
+    `lume test`.
   - *Ref: Erlang/OTP supervisors, TigerBeetle/FoundationDB deterministic simulation testing.*
 
 ---

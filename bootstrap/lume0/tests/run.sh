@@ -742,6 +742,21 @@ PY
     if [ -s "$ntmp/perc.s" ]; then "$ntmp/lasm" <"$ntmp/perc.s" >"$ntmp/perc.elf" 2>/dev/null; chmod +x "$ntmp/perc.elf"; fi
     _ub_asm=$(sed -n '/^unbox_inc_inplace:/,/^    ret$/p' "$ntmp/perc.s")
     if [ -x "$ntmp/perc.elf" ] && "$ntmp/perc.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/perceus_ok_asm.expected - >/dev/null && ! printf '%s\n' "$_ub_asm" | grep -q "call mkctor" && ! printf '%s\n' "$_ub_asm" | grep -q "call alloc"; then ok "phase-3 K3: Perceus reuse mutates 'own' matched constructors in place (zero 'call alloc' / 'call mkctor' in unbox_inc_inplace)"; else bad "phase-3 K3: Perceus in-place constructor reuse"; cat "$ntmp/perc.err"; printf '%s\n' "$_ub_asm"; fi
+    # phase-3 Track S (S1-S3): structured concurrency (`scope`/`spawn` + `Send`/`Sync` `[S0001]`), typed `chan[T]` + deterministic `select` + `par`, and `std.actor` + `supervisor` + `std.time.logical`.
+    "$ntmp/lc" <../../compiler/stage1/concurrency_ok.src >"$ntmp/conc.s" 2>"$ntmp/conc.err"
+    if [ -s "$ntmp/conc.s" ]; then "$ntmp/lasm" <"$ntmp/conc.s" >"$ntmp/conc.elf" 2>/dev/null; chmod +x "$ntmp/conc.elf"; fi
+    if [ -x "$ntmp/conc.elf" ] && "$ntmp/conc.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/concurrency_ok_asm.expected - >/dev/null; then ok "phase-3 S1: structured 'scope'/'spawn' with 'arc[T]' (Send + Sync) and 'own' transfer compiles + runs"; else bad "phase-3 S1: concurrency_ok.src compile + run"; cat "$ntmp/conc.err"; fi
+    if LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/concurrency.src 2>/dev/null | grep -q "5 passed, 0 failed"; then ok "phase-3 S2: concurrency.src (chan[T], deterministic select, par_map/par_for) passes native lume test"; else bad "phase-3 S2: concurrency.src unit tests"; fi
+    if LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/actor.src 2>/dev/null | grep -q "5 passed, 0 failed"; then ok "phase-3 S3: actor.src (std.actor, supervisor one_for_one/one_for_all, std.time.logical) passes native lume test"; else bad "phase-3 S3: actor.src unit tests"; fi
+    # S0001: unstructured `spawn` outside `scope`, capturing non-`Send` `rc[T]`, or capturing unmoved `var`/`mut` across `spawn`
+    printf 'fn bad_unscoped() -> int = spawn(42)\nprint bad_unscoped()\n' >"$ntmp/s1a.src"
+    "$ntmp/lc" <"$ntmp/s1a.src" >"$ntmp/s1a.s" 2>"$ntmp/s1a.err"; s1ac=$?
+    printf 'fn rc_new(v: int) -> rc[int] = v\nfn rc_get(r: rc[int]) -> int = r\nfn bad_rc() -> int = let r = rc_new(10) in scope s in spawn(rc_get(r))\nprint bad_rc()\n' >"$ntmp/s1b.src"
+    "$ntmp/lc" <"$ntmp/s1b.src" >"$ntmp/s1b.s" 2>"$ntmp/s1b.err"; s1bc=$?
+    printf 'fn bad_mut() -> int = var x = 10 in scope s in spawn(x + 1)\nprint bad_mut()\n' >"$ntmp/s1c.src"
+    "$ntmp/lc" <"$ntmp/s1c.src" >"$ntmp/s1c.s" 2>"$ntmp/s1c.err"; s1cc=$?
+    if [ "$s1ac" = 3 ] && [ ! -s "$ntmp/s1a.s" ] && grep -q "\[S0001\]" "$ntmp/s1a.err" && [ "$s1bc" = 3 ] && [ ! -s "$ntmp/s1b.s" ] && grep -q "\[S0001\]" "$ntmp/s1b.err" && [ "$s1cc" = 3 ] && [ ! -s "$ntmp/s1c.s" ] && grep -q "\[S0001\]" "$ntmp/s1c.err"; then ok "phase-3 S1: unstructured 'spawn', non-Send 'rc[T]' capture, and mutable 'var' capture across 'spawn' fail with [S0001] (exit 3, no asm)"; else bad "phase-3 S1: [S0001] structured concurrency & Send/Sync enforcement"; cat "$ntmp/s1a.err" "$ntmp/s1b.err" "$ntmp/s1c.err"; fi
+    if LUME_BIN_DIR="$ntmp" ../../lume agent check "$ntmp/s1a.src" 2>/dev/null | grep -q '"code":"S0001"' && LUME_BIN_DIR="$ntmp" ../../lume agent check "$ntmp/s1b.src" 2>/dev/null | grep -q '"code":"S0001"'; then ok "phase-3 S1: lume agent check emits structured S0001 JSON diagnostics with concurrency fix-its"; else bad "phase-3 S1: lume agent check S0001 JSON"; fi
     rm -rf "$ntmp"
 else
     ok "no-toolchain ELF pipeline (skipped: not linux/x86_64, or under ASan)"

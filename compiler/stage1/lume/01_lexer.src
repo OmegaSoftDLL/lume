@@ -60,6 +60,8 @@ fn parsehop(ts) = let opnm = headtext(droponce(ts)) in let ps = parseparams(drop
 fn parsehops(ts) = if headtext(ts) == "fn" then let r = parsehop(ts) in let rr = parsehops(r.rest) in {items: Cons(r.op, rr.items), rest: rr.rest} else {items: Nil, rest: ts}
 fn parsewithhandler(t) = let enm = headtext(t) in let hs = parsehops(dropkw(droponce(t), "{")) in let rb = expr(dropin(skiprb(hs.rest))) in {node: WithHandlerE(enm, hs.items, rb.node), rest: rb.rest}
 fn parsewith(t) = if headtext(t) == "alloc" then let ra = expr(dropkw(droponce(t), "=")) in let rb = expr(dropin(ra.rest)) in {node: WithAllocE(ra.node, rb.node), rest: rb.rest} else if headtext(t) == "handler" then parsewithhandler(droponce(t)) else expr(t)
+fn parsescope(t) = if headtext(droponce(t)) == "in" or headtext(droponce(t)) == ";" or headtext(droponce(t)) == "{" then (let snm = headtext(t) in let t1 = droponce(t) in let hb = if headtext(t1) == "{" then 1 else 0 in let rb = expr(if hb == 1 then droponce(t1) else dropin(t1)) in {node: ScopeE(snm, rb.node), rest: if hb == 1 then skiprb(rb.rest) else rb.rest}) else let hb = if headtext(t) == "{" then 1 else 0 in let rb = expr(if hb == 1 then droponce(t) else dropin(t)) in {node: ScopeE("_scope", rb.node), rest: if hb == 1 then skiprb(rb.rest) else rb.rest}
+fn parsespawn(t) = if headtext(t) == "(" then let a = arglist(droponce(t)) in {node: SpawnE(ohd_e(a.items)), rest: a.rest} else let r = expr(t) in {node: SpawnE(r.node), rest: r.rest}
 fn postdotcall(nd, mnm, a) = match nd
     Var(enm) => {node: Call(mnm, a.items), rest: a.rest}
     _        => {node: Call(mnm, Cons(nd, a.items)), rest: a.rest}

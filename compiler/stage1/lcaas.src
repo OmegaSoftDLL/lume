@@ -80,7 +80,7 @@ fn cs_skiprp(ts) = cs_dropkw(ts, ")")
 fn cs_skiprk(ts) = cs_dropkw(ts, "]")
 
 fn cs_prim(ts) = cs_postfix(cs_atom(ts))
-fn cs_atom(ts) = if cs_hdkind(ts) == "NM" then {node: Num(toint(cs_hdtext(ts))), rest: cs_drop1(ts)} else if cs_hdkind(ts) == "ST" then {node: Str(cs_hdtext(ts)), rest: cs_drop1(ts)} else if cs_hdtext(ts) == "(" then cs_paren(cs_drop1(ts)) else if cs_hdtext(ts) == "{" then cs_rec(cs_drop1(ts)) else if cs_hdtext(ts) == "if" then cs_if(cs_drop1(ts)) else if cs_hdtext(ts) == "let" then cs_let(cs_drop1(ts)) else if cs_hdtext(ts) == "var" then cs_var(cs_drop1(ts)) else if cs_hdtext(ts) == "own" then cs_owne(cs_drop1(ts)) else if cs_hdtext(ts) == "mut" then cs_mute(cs_drop1(ts)) else if cs_hdtext(ts) == "defer" then cs_defer(cs_drop1(ts)) else if cs_hdtext(ts) == "errdefer" then cs_errdefer(cs_drop1(ts)) else if cs_hdtext(ts) == "with" then cs_with(cs_drop1(ts)) else if cs_hdtext(ts) == "match" then cs_match(cs_drop1(ts)) else if cs_hdtext(ts) == "comptime" then cs_ct(cs_drop1(ts)) else if cs_hdtext(ts) == "quote" then cs_quote(cs_drop1(ts)) else if cs_hdtext(ts) == "splice" then cs_splice(cs_drop1(ts)) else if cs_hdkind(ts) == "ID" then cs_ident(cs_hdtext(ts), cs_drop1(ts)) else {node: Num(0), rest: cs_drop1(ts)}
+fn cs_atom(ts) = if cs_hdkind(ts) == "NM" then {node: Num(toint(cs_hdtext(ts))), rest: cs_drop1(ts)} else if cs_hdkind(ts) == "ST" then {node: Str(cs_hdtext(ts)), rest: cs_drop1(ts)} else if cs_hdtext(ts) == "(" then cs_paren(cs_drop1(ts)) else if cs_hdtext(ts) == "{" then cs_rec(cs_drop1(ts)) else if cs_hdtext(ts) == "if" then cs_if(cs_drop1(ts)) else if cs_hdtext(ts) == "let" then cs_let(cs_drop1(ts)) else if cs_hdtext(ts) == "var" then cs_var(cs_drop1(ts)) else if cs_hdtext(ts) == "own" then cs_owne(cs_drop1(ts)) else if cs_hdtext(ts) == "mut" then cs_mute(cs_drop1(ts)) else if cs_hdtext(ts) == "defer" then cs_defer(cs_drop1(ts)) else if cs_hdtext(ts) == "errdefer" then cs_errdefer(cs_drop1(ts)) else if cs_hdtext(ts) == "with" then cs_with(cs_drop1(ts)) else if cs_hdtext(ts) == "scope" then cs_scope(cs_drop1(ts)) else if cs_hdtext(ts) == "spawn" then cs_spawn(cs_drop1(ts)) else if cs_hdtext(ts) == "match" then cs_match(cs_drop1(ts)) else if cs_hdtext(ts) == "comptime" then cs_ct(cs_drop1(ts)) else if cs_hdtext(ts) == "quote" then cs_quote(cs_drop1(ts)) else if cs_hdtext(ts) == "splice" then cs_splice(cs_drop1(ts)) else if cs_hdkind(ts) == "ID" then cs_ident(cs_hdtext(ts), cs_drop1(ts)) else {node: Num(0), rest: cs_drop1(ts)}
 fn cs_paren(ts) = let r = cs_expr(ts) in {node: r.node, rest: cs_skiprp(r.rest)}
 fn cs_ident(nm, ts) = if cs_hdtext(ts) == "(" then cs_call(nm, cs_arglist(cs_drop1(ts))) else if cs_hdtext(ts) == "{" then cs_rect(nm, cs_rec(cs_drop1(ts))) else {node: Var(nm), rest: ts}
 fn cs_call(nm, a) = {node: Call(nm, a.items), rest: a.rest}
@@ -131,6 +131,8 @@ fn cs_parsehop(ts) = let opnm = cs_hdtext(cs_drop1(ts)) in let ps = cs_pparams(c
 fn cs_parsehops(ts) = if cs_hdtext(ts) == "fn" then let r = cs_parsehop(ts) in let rr = cs_parsehops(r.rest) in {items: Cons(r.op, rr.items), rest: rr.rest} else {items: Nil, rest: ts}
 fn cs_withhandler(t) = let enm = cs_hdtext(t) in let hs = cs_parsehops(cs_dropkw(cs_drop1(t), "{")) in let b = cs_expr(cs_dropin(cs_dropkw(hs.rest, "}"))) in {node: WithHandlerE(enm, hs.items, b.node), rest: b.rest}
 fn cs_with(ts) = if cs_hdtext(ts) == "alloc" then let a = cs_expr(cs_dropkw(cs_drop1(ts), "=")) in let b = cs_expr(cs_dropin(a.rest)) in {node: WithAllocE(a.node, b.node), rest: b.rest} else if cs_hdtext(ts) == "handler" then cs_withhandler(cs_drop1(ts)) else cs_expr(ts)
+fn cs_scope(t) = if cs_hdtext(cs_drop1(t)) == "in" or cs_hdtext(cs_drop1(t)) == ";" or cs_hdtext(cs_drop1(t)) == "{" then (let snm = cs_hdtext(t) in let t1 = cs_drop1(t) in let hb = if cs_hdtext(t1) == "{" then 1 else 0 in let rb = cs_expr(if hb == 1 then cs_drop1(t1) else cs_dropin(t1)) in {node: ScopeE(snm, rb.node), rest: if hb == 1 then cs_dropkw(rb.rest, "}") else rb.rest}) else let hb = if cs_hdtext(t) == "{" then 1 else 0 in let rb = cs_expr(if hb == 1 then cs_drop1(t) else cs_dropin(t)) in {node: ScopeE("_scope", rb.node), rest: if hb == 1 then cs_dropkw(rb.rest, "}") else rb.rest}
+fn cs_spawn(t) = if cs_hdtext(t) == "(" then let a = cs_arglist(cs_drop1(t)) in {node: SpawnE(cs_asthead(a.items)), rest: a.rest} else let r = cs_expr(t) in {node: SpawnE(r.node), rest: r.rest}
 
 fn cs_ispatstart(ts) = if cs_hdkind(ts) == "NM" or cs_hdkind(ts) == "ST" then 1 else if cs_hdkind(ts) == "ID" then cs_ispatid(cs_hdtext(ts)) else 0
 fn cs_ispatid(s) = if s == "fn" or s == "print" or s == "type" or s == "let" or s == "if" or s == "then" or s == "else" or s == "in" or s == "match" or s == "and" or s == "or" then 0 else 1
@@ -839,9 +841,58 @@ fn cs_kget_dec_effs(mks) = match mks
     Cons(ks, r) => ks.effs
 fn cs_kchk_fn(nm, pubf, body, kt) = let inf = cs_kinfer_effs_e(body, kt.ksigs, kt.edecls) in let mks = cs_keffsig_lookup(nm, kt.ksigs) in let dec = cs_kget_dec_effs(mks) in let missing_pub = if pubf == 1 and cs_isnil(mks) == 1 then inf else cs_keff_diff(inf, dec) in let d1 = if (pubf == 1 or cs_isnil(mks) == 0) and cs_isnil(missing_pub) == 0 then Cons(cs_mkdiag("E0200", "effect", "effect error: function '" + nm + "' performs undeclared effect '{" + cs_joinsep(missing_pub, ", ") + "}'", "add '/ {" + cs_joinsep(cs_keff_union(dec, inf), ", ") + "}' to the signature of '" + nm + "' or handle it with 'with handler'"), Nil) else Nil in let d2 = if cs_isnil(kt.caps) == 0 and cs_isnil(cs_keff_diff(inf, kt.caps)) == 0 then let uncap = cs_keff_diff(inf, kt.caps) in Cons(cs_mkdiag("E0200", "capability", "capability error: function '" + nm + "' requires capability '{" + cs_joinsep(uncap, ", ") + "}' not granted to this module", "add '@capability " + cs_hd_str(uncap, "io") + "' or declare it in lume.toml"), Nil) else Nil in cs_app(d1, d2)
 
+## --- Track S1: structured concurrency (`scope` / `spawn`) & `Send`/`Sync` (`[S0001]`) ---
+fn cs_sis_nonsend_ty(ty) = match ty
+    TyApply(n, e) => if n == "rc" or n == "cell" or n == "Ref" then 1 else cs_sis_nonsend_ty(e)
+    TyList(e)     => cs_sis_nonsend_ty(e)
+    _             => 0
+fn cs_sis_nonsend_init(e) = match e
+    Call(cnm, args) => if cnm == "rc_new" or cnm == "cell_new" or cnm == "borrow_mut" then 1 else 0
+    MutE(inner)     => 1
+    _               => 0
+fn cs_sinit_ns(pns, pts) = match pns
+    Nil         => Nil
+    Cons(pn, r) => if cs_sis_nonsend_ty(cs_hd_ty(pts)) == 1 then Cons(pn, cs_sinit_ns(r, cs_tl_ty(pts))) else cs_sinit_ns(r, cs_tl_ty(pts))
+fn cs_sinit_ns_sig(msig) = match msig
+    Nil        => Nil
+    Cons(sg, r) => cs_sinit_ns(sg.pn, sg.pt)
+fn cs_schk_spawn_body(e, fnm, nsvars, mvars) = match e
+    Var(x)          => if cs_omem(x, nsvars) == 1 then Cons(cs_mkdiag("S0001", "concurrency", "concurrency error: cannot capture non-Send value '" + x + "' across 'spawn' in '" + fnm + "'", "use 'arc_new' instead of 'rc_new'/'cell_new' or pass an owned message over 'chan[T]'"), Nil) else if cs_omem(x, mvars) == 1 then Cons(cs_mkdiag("S0001", "concurrency", "concurrency error: cannot capture mutable binding '" + x + "' across 'spawn' in '" + fnm + "' without 'own' transfer", "move ownership with 'own " + x + "' or share via 'arc[T]' / 'chan[T]'"), Nil) else Nil
+    OwnE(inner)     => cs_schk_spawn_own(inner, fnm, nsvars)
+    MutE(inner)     => Cons(cs_mkdiag("S0001", "concurrency", "concurrency error: cannot capture mutable borrow 'mut' across 'spawn' in '" + fnm + "'", "transfer ownership with 'own' or synchronize via 'chan[T]'"), Nil)
+    Field(o, fld)   => cs_schk_spawn_body(o, fnm, nsvars, mvars)
+    Bin(op, l, r)   => cs_app(cs_schk_spawn_body(l, fnm, nsvars, mvars), cs_schk_spawn_body(r, fnm, nsvars, mvars))
+    If(c, t, e2)    => cs_app(cs_schk_spawn_body(c, fnm, nsvars, mvars), cs_app(cs_schk_spawn_body(t, fnm, nsvars, mvars), cs_schk_spawn_body(e2, fnm, nsvars, mvars)))
+    LetIn(nm, v, b) => cs_app(cs_schk_spawn_body(v, fnm, nsvars, mvars), cs_schk_spawn_body(b, fnm, cs_orem(nm, nsvars), cs_orem(nm, mvars)))
+    VarIn(nm, v, b) => cs_app(cs_schk_spawn_body(v, fnm, nsvars, mvars), cs_schk_spawn_body(b, fnm, cs_orem(nm, nsvars), cs_orem(nm, mvars)))
+    Call(cnm, args) => if cnm == "borrow_mut" then Cons(cs_mkdiag("S0001", "concurrency", "concurrency error: cannot capture mutable borrow 'borrow_mut' across 'spawn' in '" + fnm + "'", "transfer ownership with 'own' or synchronize via 'chan[T]'"), Nil) else cs_schk_spawn_args(args, fnm, nsvars, mvars)
+    _               => Nil
+fn cs_schk_spawn_own(inner, fnm, nsvars) = match inner
+    Var(x) => if cs_omem(x, nsvars) == 1 then Cons(cs_mkdiag("S0001", "concurrency", "concurrency error: cannot transfer non-Send value '" + x + "' across 'spawn' in '" + fnm + "'", "convert 'rc[T]'/'cell[T]' to 'arc[T]'"), Nil) else Nil
+    _      => cs_schk_spawn_body(inner, fnm, nsvars, Nil)
+fn cs_schk_spawn_args(args, fnm, nsvars, mvars) = match args
+    Nil        => Nil
+    Cons(h, t) => cs_app(cs_schk_spawn_body(h, fnm, nsvars, mvars), cs_schk_spawn_args(t, fnm, nsvars, mvars))
+fn cs_schk_conc_e(e, fnm, in_scope, nsvars, mvars) = match e
+    ScopeE(snm, b)          => cs_schk_conc_e(b, fnm, 1, nsvars, mvars)
+    SpawnE(inner)           => let d0 = if in_scope == 0 then Cons(cs_mkdiag("S0001", "concurrency", "concurrency error: unstructured 'spawn' in '" + fnm + "' is forbidden outside a lexical 'scope' block", "wrap the task in 'scope s in spawn(...)'"), Nil) else Nil in cs_app(d0, cs_app(cs_schk_spawn_body(inner, fnm, nsvars, mvars), cs_schk_conc_e(inner, fnm, in_scope, nsvars, mvars)))
+    LetIn(nm, v, b)         => let d1 = cs_schk_conc_e(v, fnm, in_scope, nsvars, mvars) in let ns2 = if cs_sis_nonsend_init(v) == 1 then Cons(nm, cs_orem(nm, nsvars)) else cs_orem(nm, nsvars) in cs_app(d1, cs_schk_conc_e(b, fnm, in_scope, ns2, cs_orem(nm, mvars)))
+    VarIn(nm, v, b)         => let d1 = cs_schk_conc_e(v, fnm, in_scope, nsvars, mvars) in let ns2 = if cs_sis_nonsend_init(v) == 1 then Cons(nm, cs_orem(nm, nsvars)) else cs_orem(nm, nsvars) in cs_app(d1, cs_schk_conc_e(b, fnm, in_scope, ns2, Cons(nm, cs_orem(nm, mvars))))
+    Bin(op, l, r)           => cs_app(cs_schk_conc_e(l, fnm, in_scope, nsvars, mvars), cs_schk_conc_e(r, fnm, in_scope, nsvars, mvars))
+    If(c, t, e2)            => cs_app(cs_schk_conc_e(c, fnm, in_scope, nsvars, mvars), cs_app(cs_schk_conc_e(t, fnm, in_scope, nsvars, mvars), cs_schk_conc_e(e2, fnm, in_scope, nsvars, mvars)))
+    DeferE(c, b)            => cs_app(cs_schk_conc_e(c, fnm, in_scope, nsvars, mvars), cs_schk_conc_e(b, fnm, in_scope, nsvars, mvars))
+    ErrDeferE(c, b)         => cs_app(cs_schk_conc_e(c, fnm, in_scope, nsvars, mvars), cs_schk_conc_e(b, fnm, in_scope, nsvars, mvars))
+    WithAllocE(a, b)        => cs_app(cs_schk_conc_e(a, fnm, in_scope, nsvars, mvars), cs_schk_conc_e(b, fnm, in_scope, nsvars, mvars))
+    WithHandlerE(en, hs, b) => cs_schk_conc_e(b, fnm, in_scope, nsvars, mvars)
+    Call(cnm, args)         => if cnm == "spawn_task" then let d0 = if in_scope == 0 then Cons(cs_mkdiag("S0001", "concurrency", "concurrency error: unstructured 'spawn_task' in '" + fnm + "' is forbidden outside a lexical 'scope' block", "wrap the task in 'scope s in ...'"), Nil) else Nil in cs_app(d0, cs_schk_spawn_args(args, fnm, nsvars, mvars)) else cs_schk_conc_args(args, fnm, in_scope, nsvars, mvars)
+    _                       => Nil
+fn cs_schk_conc_args(args, fnm, in_scope, nsvars, mvars) = match args
+    Nil        => Nil
+    Cons(h, t) => cs_app(cs_schk_conc_e(h, fnm, in_scope, nsvars, mvars), cs_schk_conc_args(t, fnm, in_scope, nsvars, mvars))
+
 fn cs_ochk_fn(nm, ps, body, msig, osigs, sigs, kt) = match msig
-    Nil          => let dk = cs_kchk_fn(nm, 0, body, kt) in let rp = cs_achk_prov_e(body, nm, cs_uinit_sig(cs_siglookup(nm, sigs)), osigs, sigs) in let ctx = {fnm: nm, pubf: 0, freef: 0, halloc: 0, bparams: ps, mvars: Nil, origins: cs_oinit_orgs(ps), osigs: osigs} in let rb = cs_ochke(body, ctx, Nil) in cs_app(dk, cs_app(rp.diags, cs_app(rb.diags, cs_ochk_ret(nm, 0, "", rb.origin))))
-    Cons(sg, sr) => let dk = cs_kchk_fn(nm, sg.pubf, body, kt) in let dtot = if cs_ois_total(sg.freef) == 1 then cs_achk_total_e(body, nm, ps, Nil, Nil) else Nil in let rp = cs_achk_prov_e(body, nm, cs_uinit_sig(cs_siglookup(nm, sigs)), osigs, sigs) in let dret = if sg.pubf == 1 and cs_ois_llm(sg.freef) == 0 and cs_is_unv_ty(sg.rty) == 0 and rp.taint == 1 then Cons(cs_mkdiag("A0003", "provenance", "provenance error: unverified AI/probabilistic value cannot be returned from trusted 'pub fn " + nm + "' without verification", "wrap the return value in 'verify(val, <contract>)'"), Nil) else Nil in let bparams = if cs_isnil(sg.pl) == 1 then ps else cs_obparams(sg.pl) in let ctx = {fnm: nm, pubf: sg.pubf, freef: sg.freef, halloc: 0, bparams: bparams, mvars: cs_omvars(sg.pl), origins: cs_oinit_orgs(ps), osigs: osigs} in let rb = cs_ochke(body, ctx, Nil) in cs_app(dk, cs_app(dtot, cs_app(rp.diags, cs_app(dret, cs_app(rb.diags, cs_ochk_ret(nm, sg.pubf, sg.fromp, rb.origin))))))
+    Nil          => let dk = cs_kchk_fn(nm, 0, body, kt) in let ds = cs_schk_conc_e(body, nm, 0, cs_sinit_ns_sig(cs_siglookup(nm, sigs)), Nil) in let rp = cs_achk_prov_e(body, nm, cs_uinit_sig(cs_siglookup(nm, sigs)), osigs, sigs) in let ctx = {fnm: nm, pubf: 0, freef: 0, halloc: 0, bparams: ps, mvars: Nil, origins: cs_oinit_orgs(ps), osigs: osigs} in let rb = cs_ochke(body, ctx, Nil) in cs_app(dk, cs_app(ds, cs_app(rp.diags, cs_app(rb.diags, cs_ochk_ret(nm, 0, "", rb.origin)))))
+    Cons(sg, sr) => let dk = cs_kchk_fn(nm, sg.pubf, body, kt) in let mvars = cs_omvars(sg.pl) in let ds = cs_schk_conc_e(body, nm, 0, cs_sinit_ns_sig(cs_siglookup(nm, sigs)), mvars) in let dtot = if cs_ois_total(sg.freef) == 1 then cs_achk_total_e(body, nm, ps, Nil, Nil) else Nil in let rp = cs_achk_prov_e(body, nm, cs_uinit_sig(cs_siglookup(nm, sigs)), osigs, sigs) in let dret = if sg.pubf == 1 and cs_ois_llm(sg.freef) == 0 and cs_is_unv_ty(sg.rty) == 0 and rp.taint == 1 then Cons(cs_mkdiag("A0003", "provenance", "provenance error: unverified AI/probabilistic value cannot be returned from trusted 'pub fn " + nm + "' without verification", "wrap the return value in 'verify(val, <contract>)'"), Nil) else Nil in let bparams = if cs_isnil(sg.pl) == 1 then ps else cs_obparams(sg.pl) in let ctx = {fnm: nm, pubf: sg.pubf, freef: sg.freef, halloc: 0, bparams: bparams, mvars: mvars, origins: cs_oinit_orgs(ps), osigs: osigs} in let rb = cs_ochke(body, ctx, Nil) in cs_app(dk, cs_app(ds, cs_app(dtot, cs_app(rp.diags, cs_app(dret, cs_app(rb.diags, cs_ochk_ret(nm, sg.pubf, sg.fromp, rb.origin)))))))
 fn cs_odiagnose_stmts(prog, osigs, sigs, kt, moved) = match prog
     Nil        => Nil
     Cons(h, t) => cs_odiagnose_stmt1(h, t, osigs, sigs, kt, moved)
@@ -894,6 +945,8 @@ fn cs_geexpr(e, gt) = match e
     ErrDeferE(c, b)  => LetIn("_ed_val", cs_geexpr(b, gt), If(Bin("<", Var("_ed_val"), Num(0)), LetIn("_ed_run", cs_geexpr(c, gt), Var("_ed_val")), Var("_ed_val")))
     WithAllocE(a, b) => LetIn("_alloc_ctx", cs_geexpr(a, gt), cs_geexpr(b, gt))
     WithHandlerE(en, hs, b) => cs_geexpr(b, gt)
+    ScopeE(snm, b)   => LetIn(snm, Num(1), cs_geexpr(b, gt))
+    SpawnE(inner)    => cs_geexpr(inner, gt)
     Call(nm, args)   => cs_gecall(nm, cs_geargs(args, gt), cs_gtlookup(nm, gt))
     Rec(items)       => Rec(cs_gerec(items, gt))
     RecT(tn, items)  => RecT(tn, cs_gerec(items, gt))
@@ -974,6 +1027,8 @@ fn cs_expr_sexpr(e) = match e
     ErrDeferE(c, b)  => "(errdefer " + cs_expr_sexpr(c) + " " + cs_expr_sexpr(b) + ")"
     WithAllocE(a, b) => "(with-alloc " + cs_expr_sexpr(a) + " " + cs_expr_sexpr(b) + ")"
     WithHandlerE(en, hs, b) => "(with-handler " + en + " " + cs_expr_sexpr(b) + ")"
+    ScopeE(snm, b)   => "(scope " + snm + " " + cs_expr_sexpr(b) + ")"
+    SpawnE(inner)    => "(spawn " + cs_expr_sexpr(inner) + ")"
     Call(nm, args)  => if cs_isnil(args) == 1 then "(" + nm + ")" else "(" + nm + " " + cs_exprs_sexpr(args) + ")"
     CT(inner)       => "(comptime " + cs_expr_sexpr(inner) + ")"
     Quote(inner)    => "(quote " + cs_expr_sexpr(inner) + ")"

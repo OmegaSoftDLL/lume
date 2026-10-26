@@ -1,0 +1,28 @@
+## Phase 3 Track S (`concurrency_ok.src`) — Structured `scope` / `spawn`, `Send`/`Sync` (`arc[T]`, `chan[T]`),
+## deterministic `select`, data-parallel combinators, and supervised actors under logical time.
+
+fn arc_new(v: int) -> arc[int] = v
+fn arc_get(a: arc[int]) -> int = a
+
+fn consume_owned(own x: int) -> int = x * 2
+
+## S1: `scope` joins all child `spawn` tasks; `arc[int]` (`Send + Sync`) and `own` values cross `spawn` safely
+pub fn run_scoped_workers(seed: int) -> int / {alloc} =
+    let shared_cfg = arc_new(seed + 10) in
+    let ticket = 21 in
+    scope pool in
+        let t1 = spawn(arc_get(shared_cfg) + 5) in
+        let t2 = spawn(consume_owned(own ticket)) in
+        t1 + t2
+
+## S2 + S3: channel pipeline + deterministic logical clock step
+pub fn run_channel_and_clock(msg1: int, msg2: int) -> int =
+    let clk0 = 100 in
+    let clk1 = clk0 + 25 in
+    scope s in
+        let w1 = spawn(msg1 + clk0) in
+        let w2 = spawn(msg2 + clk1) in
+        w1 + w2
+
+print run_scoped_workers(7)
+print run_channel_and_clock(10, 20)

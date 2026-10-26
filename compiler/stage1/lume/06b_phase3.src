@@ -57,6 +57,8 @@ fn oanye(e) = match e
     ErrDeferE(c, b)         => 1
     WithAllocE(a, b)        => 1
     WithHandlerE(en, hs, b) => 1
+    ScopeE(snm, b)          => 1
+    SpawnE(inner)           => 1
     LetIn(nm, v, b)         => if oanye(v) == 1 then 1 else oanye(b)
     If(c, t, e2)            => if oanye(c) == 1 then 1 else if oanye(t) == 1 then 1 else oanye(e2)
     Bin(op, l, r)           => if oanye(l) == 1 then 1 else oanye(r)
@@ -407,6 +409,8 @@ fn ochke(e, ctx, moved) = match e
     ErrDeferE(c, b) => let rb = ochke(b, ctx, moved) in let rc = ochke(c, ctx, rb.moved) in {moved: rc.moved, origin: rb.origin}
     WithAllocE(a, b) => let ra = ochke(a, ctx, moved) in ochke(b, octx_with_alloc(ctx), ra.moved)
     WithHandlerE(en, hs, b) => let mvh = ochkhops(hs, ctx, moved) in ochke(b, ctx, mvh)
+    ScopeE(snm, b) => ochke(b, ctx, moved)
+    SpawnE(inner) => ochke(inner, ctx, moved)
     Bin(op, l, r) => let rl = ochke(l, ctx, moved) in let rr = ochke(r, ctx, rl.moved) in {moved: rr.moved, origin: ""}
     If(c, t, e2) => let rc = ochke(c, ctx, moved) in let rt = ochke(t, ctx, rc.moved) in let re = ochke(e2, ctx, rc.moved) in {moved: app(rt.moved, re.moved), origin: if rt.origin != "" then rt.origin else re.origin}
     Rec(items) => {moved: ochkrec(items, ctx, moved), origin: ""}
@@ -678,7 +682,73 @@ fn achk_sink_args(fnm, cnm, args, pts, uvars, ot) = match args
 fn achk_prov_call(cnm, args, fnm, uvars, ot) = if cnm == "verify" or cnm == "law_check" or cnm == "evolve_approve" then let z = achk_prov_args(args, fnm, uvars, ot) in 0 else if ais_trusted_sink(cnm, ot.osigs) == 1 then let z = achk_sink_args(fnm, cnm, args, asig_pts(cnm, ot.sigs), uvars, ot) in ais_unverified_fn(cnm, ot.osigs, ot.sigs) else let ta = achk_prov_args(args, fnm, uvars, ot) in if ais_unverified_fn(cnm, ot.osigs, ot.sigs) == 1 or ta == 1 then 1 else 0
 
 ## ============================================================================================================
-## Combined function driver for Track O & Track A (`ochkfn`)
+## Track S1: Structured concurrency (`scope` / `spawn`) & static `Send`/`Sync` checking (`[S0001]`)
+## ============================================================================================================
+fn sis_nonsend_ty(ty) = match ty
+    TyApply(n, e) => if n == "rc" or n == "cell" or n == "Ref" then 1 else sis_nonsend_ty(e)
+    TyList(e)     => sis_nonsend_ty(e)
+    _             => 0
+
+fn sis_nonsend_init(e) = match e
+    Call(cnm, args) => if cnm == "rc_new" or cnm == "cell_new" or cnm == "borrow_mut" then 1 else 0
+    MutE(inner)     => 1
+    _               => 0
+
+fn sinit_nonsend(pns, pts) = match pns
+    Nil         => Nil
+    Cons(pn, r) => if sis_nonsend_ty(ohd_ty(pts)) == 1 then Cons(pn, sinit_nonsend(r, ptl(pts))) else sinit_nonsend(r, ptl(pts))
+
+fn sinit_nonsend_sig(msig) = match msig
+    Nil        => Nil
+    Cons(sg, r) => sinit_nonsend(sg.pn, sg.pt)
+
+fn schk_spawn_body(e, fnm, nsvars, mvars) = match e
+    Var(x)                  => if omem(x, nsvars) == 1 then ctfail("lume: concurrency error [S0001]: cannot capture non-Send value '" + x + "' across 'spawn' in '" + fnm + "' (fix-it: use 'arc_new' instead of 'rc_new'/'cell_new' or pass an owned message over 'chan[T]')\n") else if omem(x, mvars) == 1 then ctfail("lume: concurrency error [S0001]: cannot capture mutable binding '" + x + "' across 'spawn' in '" + fnm + "' without 'own' transfer (fix-it: move ownership with 'own " + x + "' or share via 'arc[T]' / 'chan[T]')\n") else 0
+    OwnE(inner)             => schk_spawn_own(inner, fnm, nsvars)
+    MutE(inner)             => ctfail("lume: concurrency error [S0001]: cannot capture mutable borrow 'mut' across 'spawn' in '" + fnm + "' (fix-it: transfer ownership with 'own' or synchronize via 'chan[T]')\n")
+    Field(o, fld)           => schk_spawn_body(o, fnm, nsvars, mvars)
+    Bin(op, l, r)           => schk_spawn_body(l, fnm, nsvars, mvars) + schk_spawn_body(r, fnm, nsvars, mvars)
+    If(c, t, e2)            => schk_spawn_body(c, fnm, nsvars, mvars) + schk_spawn_body(t, fnm, nsvars, mvars) + schk_spawn_body(e2, fnm, nsvars, mvars)
+    LetIn(nm, v, b)         => schk_spawn_body(v, fnm, nsvars, mvars) + schk_spawn_body(b, fnm, orem(nm, nsvars), orem(nm, mvars))
+    VarIn(nm, v, b)         => schk_spawn_body(v, fnm, nsvars, mvars) + schk_spawn_body(b, fnm, orem(nm, nsvars), orem(nm, mvars))
+    Call(cnm, args)         => if cnm == "borrow_mut" then ctfail("lume: concurrency error [S0001]: cannot capture mutable borrow 'borrow_mut' across 'spawn' in '" + fnm + "' (fix-it: transfer ownership with 'own' or synchronize via 'chan[T]')\n") else schk_spawn_args(args, fnm, nsvars, mvars)
+    ScopeE(snm, b)          => schk_spawn_body(b, fnm, nsvars, mvars)
+    SpawnE(inner)           => schk_spawn_body(inner, fnm, nsvars, mvars)
+    _                       => 0
+
+fn schk_spawn_own(inner, fnm, nsvars) = match inner
+    Var(x) => if omem(x, nsvars) == 1 then ctfail("lume: concurrency error [S0001]: cannot transfer non-Send value '" + x + "' across 'spawn' in '" + fnm + "' (fix-it: convert 'rc[T]'/'cell[T]' to 'arc[T]')\n") else 0
+    _      => schk_spawn_body(inner, fnm, nsvars, Nil)
+
+fn schk_spawn_args(args, fnm, nsvars, mvars) = match args
+    Nil        => 0
+    Cons(h, t) => schk_spawn_body(h, fnm, nsvars, mvars) + schk_spawn_args(t, fnm, nsvars, mvars)
+
+fn schk_conc_e(e, fnm, in_scope, nsvars, mvars) = match e
+    ScopeE(snm, b)          => schk_conc_e(b, fnm, 1, nsvars, mvars)
+    SpawnE(inner)           => if in_scope == 0 then ctfail("lume: concurrency error [S0001]: unstructured 'spawn' in '" + fnm + "' is forbidden outside a lexical 'scope' block (fix-it: wrap the task in 'scope s in spawn(...)')\n") else schk_spawn_body(inner, fnm, nsvars, mvars) + schk_conc_e(inner, fnm, in_scope, nsvars, mvars)
+    LetIn(nm, v, b)         => let z1 = schk_conc_e(v, fnm, in_scope, nsvars, mvars) in let ns2 = if sis_nonsend_init(v) == 1 then Cons(nm, orem(nm, nsvars)) else orem(nm, nsvars) in schk_conc_e(b, fnm, in_scope, ns2, orem(nm, mvars))
+    VarIn(nm, v, b)         => let z1 = schk_conc_e(v, fnm, in_scope, nsvars, mvars) in let ns2 = if sis_nonsend_init(v) == 1 then Cons(nm, orem(nm, nsvars)) else orem(nm, nsvars) in schk_conc_e(b, fnm, in_scope, ns2, Cons(nm, orem(nm, mvars)))
+    Bin(op, l, r)           => schk_conc_e(l, fnm, in_scope, nsvars, mvars) + schk_conc_e(r, fnm, in_scope, nsvars, mvars)
+    If(c, t, e2)            => schk_conc_e(c, fnm, in_scope, nsvars, mvars) + schk_conc_e(t, fnm, in_scope, nsvars, mvars) + schk_conc_e(e2, fnm, in_scope, nsvars, mvars)
+    DeferE(c, b)            => schk_conc_e(c, fnm, in_scope, nsvars, mvars) + schk_conc_e(b, fnm, in_scope, nsvars, mvars)
+    ErrDeferE(c, b)         => schk_conc_e(c, fnm, in_scope, nsvars, mvars) + schk_conc_e(b, fnm, in_scope, nsvars, mvars)
+    WithAllocE(a, b)        => schk_conc_e(a, fnm, in_scope, nsvars, mvars) + schk_conc_e(b, fnm, in_scope, nsvars, mvars)
+    WithHandlerE(en, hs, b) => schk_conc_e(b, fnm, in_scope, nsvars, mvars)
+    Call(cnm, args)         => if cnm == "spawn_task" and in_scope == 0 then ctfail("lume: concurrency error [S0001]: unstructured 'spawn_task' in '" + fnm + "' is forbidden outside a lexical 'scope' block (fix-it: wrap the task in 'scope s in ...')\n") else if cnm == "spawn_task" then schk_spawn_args(args, fnm, nsvars, mvars) else schk_conc_args(args, fnm, in_scope, nsvars, mvars)
+    Match(sc, arms)         => schk_conc_e(sc, fnm, in_scope, nsvars, mvars) + schk_conc_arms(arms, fnm, in_scope, nsvars, mvars)
+    _                       => 0
+
+fn schk_conc_args(args, fnm, in_scope, nsvars, mvars) = match args
+    Nil        => 0
+    Cons(h, t) => schk_conc_e(h, fnm, in_scope, nsvars, mvars) + schk_conc_args(t, fnm, in_scope, nsvars, mvars)
+
+fn schk_conc_arms(arms, fnm, in_scope, nsvars, mvars) = match arms
+    Nil        => 0
+    Cons(h, t) => schk_conc_e(h.body, fnm, in_scope, nsvars, mvars) + schk_conc_arms(t, fnm, in_scope, nsvars, mvars)
+
+## ============================================================================================================
+## Combined function driver for Track O, Track A, Track K & Track S (`ochkfn`)
 ## ============================================================================================================
 fn aget_fn_rty(msig, mosig) = match mosig
     Cons(osg, r) => if isany(osg.rty) == 0 then osg.rty else aget_sig_rty(msig)
@@ -695,8 +765,8 @@ fn aget_fn_lenv(msig) = match msig
 fn ochkfn(nm, ps, body, ot) = ochkfn2(nm, ps, body, osiglookup(nm, ot.osigs), tsiglookup(nm, ot.sigs), ot)
 
 fn ochkfn2(nm, ps, body, mosig, msig, ot) = match mosig
-    Nil          => let rty = aget_sig_rty(msig) in let lenv = aget_fn_lenv(msig) in let zk = kchk_fn_effs(nm, 0, body, ot) in let zh = achk_holes_e(body, rty, lenv, {fnm: nm, pubf: 0, sigs: ot.sigs}) in let zp = achk_prov_e(body, nm, auinit_from_sig(msig), ot) in let ctx = {fnm: nm, pubf: 0, freef: 0, halloc: 0, bparams: ps, mvars: Nil, pnames: ps, locals: Nil, origins: oinit_origins(ps), osigs: ot.osigs, otypes: ot.otypes} in let rb = ochke(body, ctx, Nil) in ochk_ret_origin(nm, 0, "", rty, ps, rb.origin)
-    Cons(sg, sr) => if sg.pubf == 1 and oisgctype(sg.rty, ot.otypes) == 1 then ctfail("lume: ownership error [O0030]: public function '" + nm + "' cannot expose '@gc' region type across a public module boundary\n") else let rty = aget_fn_rty(msig, mosig) in let lenv = aget_fn_lenv(msig) in let zk = kchk_fn_effs(nm, sg.pubf, body, ot) in let zh = achk_holes_e(body, rty, lenv, {fnm: nm, pubf: sg.pubf, sigs: ot.sigs}) in let zt = (if ois_total(sg.freef) == 1 then achk_total_e(body, {fnm: nm, ps: ps, fns: ot.fns, osigs: ot.osigs}, Nil, Nil) else 0) in let tret = achk_prov_e(body, nm, auinit_from_sig(msig), ot) in if sg.pubf == 1 and ois_llm(sg.freef) == 0 and ois_unverified_ty(rty) == 0 and tret == 1 then ctfail("lume: provenance error [A0003]: unverified AI/probabilistic value cannot be returned from trusted 'pub fn " + nm + "' without verification (fix-it: wrap the return value in 'verify(val, <contract>)' or validate with a contract guard before returning)\n") else let bparams = if isnil(sg.pl) == 1 then ps else obparams_pl(sg.pl) in let mvars = omvars_pl(sg.pl) in let ctx = {fnm: nm, pubf: sg.pubf, freef: sg.freef, halloc: 0, bparams: bparams, mvars: mvars, pnames: ps, locals: Nil, origins: oinit_origins(ps), osigs: ot.osigs, otypes: ot.otypes} in let rb = ochke(body, ctx, Nil) in ochk_ret_origin(nm, sg.pubf, sg.fromp, rty, ps, rb.origin)
+    Nil          => let rty = aget_sig_rty(msig) in let lenv = aget_fn_lenv(msig) in let zk = kchk_fn_effs(nm, 0, body, ot) in let zs = schk_conc_e(body, nm, 0, sinit_nonsend_sig(msig), Nil) in let zh = achk_holes_e(body, rty, lenv, {fnm: nm, pubf: 0, sigs: ot.sigs}) in let zp = achk_prov_e(body, nm, auinit_from_sig(msig), ot) in let ctx = {fnm: nm, pubf: 0, freef: 0, halloc: 0, bparams: ps, mvars: Nil, pnames: ps, locals: Nil, origins: oinit_origins(ps), osigs: ot.osigs, otypes: ot.otypes} in let rb = ochke(body, ctx, Nil) in ochk_ret_origin(nm, 0, "", rty, ps, rb.origin)
+    Cons(sg, sr) => if sg.pubf == 1 and oisgctype(sg.rty, ot.otypes) == 1 then ctfail("lume: ownership error [O0030]: public function '" + nm + "' cannot expose '@gc' region type across a public module boundary\n") else let rty = aget_fn_rty(msig, mosig) in let lenv = aget_fn_lenv(msig) in let mvars = omvars_pl(sg.pl) in let zk = kchk_fn_effs(nm, sg.pubf, body, ot) in let zs = schk_conc_e(body, nm, 0, sinit_nonsend_sig(msig), mvars) in let zh = achk_holes_e(body, rty, lenv, {fnm: nm, pubf: sg.pubf, sigs: ot.sigs}) in let zt = (if ois_total(sg.freef) == 1 then achk_total_e(body, {fnm: nm, ps: ps, fns: ot.fns, osigs: ot.osigs}, Nil, Nil) else 0) in let tret = achk_prov_e(body, nm, auinit_from_sig(msig), ot) in if sg.pubf == 1 and ois_llm(sg.freef) == 0 and ois_unverified_ty(rty) == 0 and tret == 1 then ctfail("lume: provenance error [A0003]: unverified AI/probabilistic value cannot be returned from trusted 'pub fn " + nm + "' without verification (fix-it: wrap the return value in 'verify(val, <contract>)' or validate with a contract guard before returning)\n") else let bparams = if isnil(sg.pl) == 1 then ps else obparams_pl(sg.pl) in let ctx = {fnm: nm, pubf: sg.pubf, freef: sg.freef, halloc: 0, bparams: bparams, mvars: mvars, pnames: ps, locals: Nil, origins: oinit_origins(ps), osigs: ot.osigs, otypes: ot.otypes} in let rb = ochke(body, ctx, Nil) in ochk_ret_origin(nm, sg.pubf, sg.fromp, rty, ps, rb.origin)
 
 fn ochkstmts(prog, ot, moved) = match prog
     Nil        => 1
@@ -704,8 +774,8 @@ fn ochkstmts(prog, ot, moved) = match prog
 
 fn ochkstmt1(st, rest, ot, moved) = match st
     Fn(nm, ps, body) => let z = ochkfn(nm, ps, body, ot) in ochkstmts(rest, ot, moved)
-    Print(v)         => let zp = achk_prov_e(v, "<main>", Nil, ot) in let ctx = {fnm: "<main>", pubf: 0, freef: 0, halloc: 0, bparams: Nil, mvars: Nil, pnames: Nil, locals: Nil, origins: Nil, osigs: ot.osigs, otypes: ot.otypes} in let r = ochke(v, ctx, moved) in ochkstmts(rest, ot, r.moved)
-    ExprS(v)         => let zp = achk_prov_e(v, "<main>", Nil, ot) in let ctx = {fnm: "<main>", pubf: 0, freef: 0, halloc: 0, bparams: Nil, mvars: Nil, pnames: Nil, locals: Nil, origins: Nil, osigs: ot.osigs, otypes: ot.otypes} in let r = ochke(v, ctx, moved) in ochkstmts(rest, ot, r.moved)
+    Print(v)         => let zs = schk_conc_e(v, "<main>", 0, Nil, Nil) in let zp = achk_prov_e(v, "<main>", Nil, ot) in let ctx = {fnm: "<main>", pubf: 0, freef: 0, halloc: 0, bparams: Nil, mvars: Nil, pnames: Nil, locals: Nil, origins: Nil, osigs: ot.osigs, otypes: ot.otypes} in let r = ochke(v, ctx, moved) in ochkstmts(rest, ot, r.moved)
+    ExprS(v)         => let zs = schk_conc_e(v, "<main>", 0, Nil, Nil) in let zp = achk_prov_e(v, "<main>", Nil, ot) in let ctx = {fnm: "<main>", pubf: 0, freef: 0, halloc: 0, bparams: Nil, mvars: Nil, pnames: Nil, locals: Nil, origins: Nil, osigs: ot.osigs, otypes: ot.otypes} in let r = ochke(v, ctx, moved) in ochkstmts(rest, ot, r.moved)
     _                => ochkstmts(rest, ot, moved)
 
 ## --- lower Track O, Track A & Track K surface AST nodes into canonical Lume-Core (`LetIn`/`If`) ---
@@ -753,6 +823,8 @@ fn olowere(e, lctx, d) = match e
     ErrDeferE(c, b)         => let vn = "_ed_val_" + str(d) in let rn = "_ed_run_" + str(d) in LetIn(vn, olowere(b, lctx, d + 1), If(Bin("<", Var(vn), Num(0)), LetIn(rn, olowere(c, lctx, d + 2), Var(vn)), Var(vn)))
     WithAllocE(a, b)        => LetIn("_alloc_ctx_" + str(d), olowere(a, lctx, d + 1), olowere(b, lctx, d + 2))
     WithHandlerE(en, hs, b) => olowere(b, {ufns: lctx.ufns, hops: app(hs, lctx.hops), ownps: lctx.ownps}, d + 1)
+    ScopeE(snm, b)          => LetIn(snm, Num(1), olowere(b, lctx, d + 1))
+    SpawnE(inner)           => olowere(inner, lctx, d + 1)
     LetIn(nm, v, b)         => LetIn(nm, olowere(v, lctx, d), olowere(b, {ufns: lctx.ufns, hops: lctx.hops, ownps: orem(nm, lctx.ownps)}, d + 1))
     If(c, t, e2)            => If(olowere(c, lctx, d), olowere(t, lctx, d + 1), olowere(e2, lctx, d + 2))
     Bin(op, l, r)           => olowerbin(op, l, r, lctx, d)
