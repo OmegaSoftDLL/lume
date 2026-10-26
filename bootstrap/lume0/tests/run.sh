@@ -663,6 +663,44 @@ PY
     printf 'fn inc(x) = x + 1\nfn anchor() -> int = 0\nprint inc("hi")\n' >"$ntmp/hmbad.src"
     "$ntmp/lc" <"$ntmp/hmbad.src" >"$ntmp/hmbad.s" 2>"$ntmp/hmbad.err"; hmb=$?
     if [ "$hmb" = 3 ] && [ ! -s "$ntmp/hmbad.s" ] && grep -q "argument 1 of 'inc' has type str but parameter 'x' expects int" "$ntmp/hmbad.err"; then ok "phase-2 F3c: HM catches a mismatched call to an unannotated function (inc(\"hi\") with inc(x)=x+1) (exit 3, no asm)"; else bad "phase-2 F3c: HM mismatched call fails"; fi
+    # phase-3 Track O (O1-O4): ownership, borrow checker, region inference (`from`), LIFO `defer`/`errdefer`, and memory tiers (`rc`/`arc`/`weak`/`cell`/arena).
+    "$ntmp/lc" <../../compiler/stage1/own_ok.src >"$ntmp/own.s" 2>"$ntmp/own.err"
+    if [ -s "$ntmp/own.s" ]; then "$ntmp/lasm" <"$ntmp/own.s" >"$ntmp/own.elf" 2>/dev/null; chmod +x "$ntmp/own.elf"; fi
+    if [ -x "$ntmp/own.elf" ] && "$ntmp/own.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/own_ok_asm.expected - >/dev/null; then ok "phase-3 O1-O4: ownership, mut/own borrows, LIFO defer/errdefer, 'from' regions, and '@freestanding' compile + run"; else bad "phase-3 O1-O4: own_ok.src compile + run"; cat "$ntmp/own.err"; fi
+    if LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/ownership.src 2>/dev/null | grep -q "5 passed, 0 failed"; then ok "phase-3 O4: ownership.src tiers (rc, arc, weak, cell, arena) pass native lume test"; else bad "phase-3 O4: ownership.src tiers unit tests"; fi
+    # O0001: use of moved value
+    printf 'fn consume(own x: int) -> int = x\nfn bad() -> int = let f = 42 in let c = consume(own f) in f\nprint bad()\n' >"$ntmp/o1.src"
+    "$ntmp/lc" <"$ntmp/o1.src" >"$ntmp/o1.s" 2>"$ntmp/o1.err"; o1c=$?
+    if [ "$o1c" = 3 ] && [ ! -s "$ntmp/o1.s" ] && grep -q "\[O0001\]" "$ntmp/o1.err"; then ok "phase-3 O1: use of moved value fails with [O0001] and fix-it (exit 3, no asm)"; else bad "phase-3 O1: [O0001] use of moved value"; cat "$ntmp/o1.err"; fi
+    # O0002: moving out of a borrowed parameter
+    printf 'fn consume(own x: int) -> int = x\nfn inspect(f: int) -> int = consume(own f)\nprint inspect(10)\n' >"$ntmp/o2.src"
+    "$ntmp/lc" <"$ntmp/o2.src" >"$ntmp/o2.s" 2>"$ntmp/o2.err"; o2c=$?
+    if [ "$o2c" = 3 ] && [ ! -s "$ntmp/o2.s" ] && grep -q "\[O0002\]" "$ntmp/o2.err"; then ok "phase-3 O1: moving out of borrowed parameter fails with [O0002] (exit 3, no asm)"; else bad "phase-3 O1: [O0002] move from borrowed parameter"; cat "$ntmp/o2.err"; fi
+    # O0010: passing an immutable `let` binding to a `mut` parameter
+    printf 'fn bump(mut x: int) -> int = x + 1\nfn bad() -> int = let a = 10 in bump(mut a)\nprint bad()\n' >"$ntmp/o10.src"
+    "$ntmp/lc" <"$ntmp/o10.src" >"$ntmp/o10.s" 2>"$ntmp/o10.err"; o10c=$?
+    if [ "$o10c" = 3 ] && [ ! -s "$ntmp/o10.s" ] && grep -q "\[O0010\]" "$ntmp/o10.err"; then ok "phase-3 O2: passing immutable 'let' binding to 'mut' parameter fails with [O0010] (exit 3, no asm)"; else bad "phase-3 O2: [O0010] immutable let to mut param"; cat "$ntmp/o10.err"; fi
+    # O0011: conflicting mutable and shared borrows in the same call
+    printf 'fn transfer(mut dst: int, src: int) -> int = dst + src\nfn bad() -> int = var x = 5 in transfer(mut x, x)\nprint bad()\n' >"$ntmp/o11.src"
+    "$ntmp/lc" <"$ntmp/o11.src" >"$ntmp/o11.s" 2>"$ntmp/o11.err"; o11c=$?
+    if [ "$o11c" = 3 ] && [ ! -s "$ntmp/o11.s" ] && grep -q "\[O0011\]" "$ntmp/o11.err"; then ok "phase-3 O2: overlapping 'mut' and shared borrows in the same call fails with [O0011] (exit 3, no asm)"; else bad "phase-3 O2: [O0011] conflicting borrows"; cat "$ntmp/o11.err"; fi
+    # O0012: missing `own` keyword at call site for an `own` parameter
+    printf 'fn consume(own x: int) -> int = x\nfn bad() -> int = let f = 42 in consume(f)\nprint bad()\n' >"$ntmp/o12.src"
+    "$ntmp/lc" <"$ntmp/o12.src" >"$ntmp/o12.s" 2>"$ntmp/o12.err"; o12c=$?
+    if [ "$o12c" = 3 ] && [ ! -s "$ntmp/o12.s" ] && grep -q "\[O0012\]" "$ntmp/o12.err"; then ok "phase-3 O2: missing 'own' at call site for 'own' parameter fails with [O0012] (exit 3, no asm)"; else bad "phase-3 O2: [O0012] missing call-site own"; cat "$ntmp/o12.err"; fi
+    # O0020: borrowed value escapes local scope
+    printf 'fn dangling() -> int = let tmp = 99 in borrow(tmp)\nprint dangling()\n' >"$ntmp/o20.src"
+    "$ntmp/lc" <"$ntmp/o20.src" >"$ntmp/o20.s" 2>"$ntmp/o20.err"; o20c=$?
+    if [ "$o20c" = 3 ] && [ ! -s "$ntmp/o20.s" ] && grep -q "\[O0020\]" "$ntmp/o20.err"; then ok "phase-3 O3: returning a borrow of a local variable fails with [O0020] (exit 3, no asm)"; else bad "phase-3 O3: [O0020] escaping local borrow"; cat "$ntmp/o20.err"; fi
+    # O0021: public function returns a borrow without a `from <param>` origin clause
+    printf 'pub fn head_view(xs: [int]) -> [int] = borrow(xs)\nprint 0\n' >"$ntmp/o21.src"
+    "$ntmp/lc" <"$ntmp/o21.src" >"$ntmp/o21.s" 2>"$ntmp/o21.err"; o21c=$?
+    if [ "$o21c" = 3 ] && [ ! -s "$ntmp/o21.s" ] && grep -q "\[O0021\]" "$ntmp/o21.err"; then ok "phase-3 O3: public fn returning borrow without 'from <param>' fails with [O0021] (exit 3, no asm)"; else bad "phase-3 O3: [O0021] missing from origin clause"; cat "$ntmp/o21.err"; fi
+    # O0030: ambient heap allocation in `@freestanding` function without `with alloc`
+    printf 'fn rc_new(x: int) -> int = x\n@freestanding fn kmain() -> int = rc_new(42)\nprint kmain()\n' >"$ntmp/o30.src"
+    "$ntmp/lc" <"$ntmp/o30.src" >"$ntmp/o30.s" 2>"$ntmp/o30.err"; o30c=$?
+    if [ "$o30c" = 3 ] && [ ! -s "$ntmp/o30.s" ] && grep -q "\[O0030\]" "$ntmp/o30.err"; then ok "phase-3 O4: ambient heap allocation in '@freestanding' fn fails with [O0030] (exit 3, no asm)"; else bad "phase-3 O4: [O0030] freestanding heap allocation"; cat "$ntmp/o30.err"; fi
+    if LUME_BIN_DIR="$ntmp" ../../lume agent check "$ntmp/o1.src" 2>/dev/null | grep -q '"code":"O0001"' && LUME_BIN_DIR="$ntmp" ../../lume agent check "$ntmp/o21.src" 2>/dev/null | grep -q '"code":"O0021"'; then ok "phase-3 O1-O4: lume agent check (use lcaas) emits structured O0001-O0030 JSON diagnostics with fix-its"; else bad "phase-3 O1-O4: lume agent check O0001/O0021 JSON"; fi
     rm -rf "$ntmp"
 else
     ok "no-toolchain ELF pipeline (skipped: not linux/x86_64, or under ASan)"

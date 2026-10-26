@@ -29,9 +29,9 @@ Every Phase 3 brick obeys the project's non-negotiable rules:
 
 ## Tracks and bricks
 
-### O — Ownership, borrowing, regions, and memory tiers (`§6`)
+### O — Ownership, borrowing, regions, and memory tiers (`§6`) — **Complete**
 
-- **O1 — Move semantics, `Copy` classification, and deterministic `Drop` (`§6.1`)**
+- **O1 — Move semantics, `Copy` classification, and deterministic `Drop` (`§6.1`) — Done (`compiler/stage1/lume/06b_phase3.src`, `compiler/stage1/own_ok.src`)**
   - Every binding has a single owner. Plain-data types (`int`, `bool`, `decimal(p, s)`, enums and
     records composed solely of `Copy` fields) are `Copy`; heap-backed and resource types move on
     `own` transfer or assignment.
@@ -44,7 +44,7 @@ Every Phase 3 brick obeys the project's non-negotiable rules:
   - *Ref: Rust MIR borrowck, Austral linear capabilities. Superior: gradual opt-in for untyped
     scripts while enforcing strict ownership on resource/annotated types, with concrete fix-its.*
 
-- **O2 — Parameter borrow modes: shared, `mut`, and `own` (`§6.2`)**
+- **O2 — Parameter borrow modes: shared, `mut`, and `own` (`§6.2`) — Done (`compiler/stage1/lume/04_parser_decls.src`, `compiler/stage1/lume/06b_phase3.src`)**
   - Parameters default to **shared borrow** (read-only, non-escaping); `mut` grants an **exclusive
     mutable borrow**; `own` transfers ownership into the callee (`consume(own file)` at call site
     per `P7`).
@@ -58,7 +58,7 @@ Every Phase 3 brick obeys the project's non-negotiable rules:
   - *Ref: Rust borrow checker, Hylo (Val) value-semantics parameters. Superior: zero `&`/`&mut` sigil
     clutter in parameter lists and call sites.*
 
-- **O3 — Intra-module region inference and `from` return-origin clauses (`§6.2`)**
+- **O3 — Intra-module region inference and `from` return-origin clauses (`§6.2`) — Done (`compiler/stage1/lume/06b_phase3.src`)**
   - Within a module, borrow lifetimes (regions) are inferred automatically across local bindings and
     helper calls.
   - A `pub` function returning a borrowed view declares its origin via `from`:
@@ -70,7 +70,7 @@ Every Phase 3 brick obeys the project's non-negotiable rules:
   - *Ref: Rust elided lifetimes, Carbon/Austral region tracking. Superior: readable `from param`
     clauses instead of viral `'a` type parameters.*
 
-- **O4 — Shared ownership tiers, `@gc` regions, and `with alloc` contexts (`§6.3–6.4`)**
+- **O4 — Shared ownership tiers, `@gc` regions, and `with alloc` contexts (`§6.3–6.4`) — Done (`compiler/stage1/ownership.src`, `compiler/stage1/own_ok.src`)**
   - Explicit shared tiers: `rc[T]` (single-threaded), `arc[T]` (atomic, `Send + Sync`), `weak[T]`,
     and `cell[T]`.
   - Scoped `@gc` type attribute for cyclic graph structures confined to a region, checked at `pub`

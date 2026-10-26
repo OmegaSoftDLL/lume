@@ -80,7 +80,7 @@ fn cs_skiprp(ts) = cs_dropkw(ts, ")")
 fn cs_skiprk(ts) = cs_dropkw(ts, "]")
 
 fn cs_prim(ts) = cs_postfix(cs_atom(ts))
-fn cs_atom(ts) = if cs_hdkind(ts) == "NM" then {node: Num(toint(cs_hdtext(ts))), rest: cs_drop1(ts)} else if cs_hdkind(ts) == "ST" then {node: Str(cs_hdtext(ts)), rest: cs_drop1(ts)} else if cs_hdtext(ts) == "(" then cs_paren(cs_drop1(ts)) else if cs_hdtext(ts) == "{" then cs_rec(cs_drop1(ts)) else if cs_hdtext(ts) == "if" then cs_if(cs_drop1(ts)) else if cs_hdtext(ts) == "let" then cs_let(cs_drop1(ts)) else if cs_hdtext(ts) == "match" then cs_match(cs_drop1(ts)) else if cs_hdtext(ts) == "comptime" then cs_ct(cs_drop1(ts)) else if cs_hdtext(ts) == "quote" then cs_quote(cs_drop1(ts)) else if cs_hdtext(ts) == "splice" then cs_splice(cs_drop1(ts)) else if cs_hdkind(ts) == "ID" then cs_ident(cs_hdtext(ts), cs_drop1(ts)) else {node: Num(0), rest: cs_drop1(ts)}
+fn cs_atom(ts) = if cs_hdkind(ts) == "NM" then {node: Num(toint(cs_hdtext(ts))), rest: cs_drop1(ts)} else if cs_hdkind(ts) == "ST" then {node: Str(cs_hdtext(ts)), rest: cs_drop1(ts)} else if cs_hdtext(ts) == "(" then cs_paren(cs_drop1(ts)) else if cs_hdtext(ts) == "{" then cs_rec(cs_drop1(ts)) else if cs_hdtext(ts) == "if" then cs_if(cs_drop1(ts)) else if cs_hdtext(ts) == "let" then cs_let(cs_drop1(ts)) else if cs_hdtext(ts) == "var" then cs_var(cs_drop1(ts)) else if cs_hdtext(ts) == "own" then cs_owne(cs_drop1(ts)) else if cs_hdtext(ts) == "mut" then cs_mute(cs_drop1(ts)) else if cs_hdtext(ts) == "defer" then cs_defer(cs_drop1(ts)) else if cs_hdtext(ts) == "errdefer" then cs_errdefer(cs_drop1(ts)) else if cs_hdtext(ts) == "with" then cs_with(cs_drop1(ts)) else if cs_hdtext(ts) == "match" then cs_match(cs_drop1(ts)) else if cs_hdtext(ts) == "comptime" then cs_ct(cs_drop1(ts)) else if cs_hdtext(ts) == "quote" then cs_quote(cs_drop1(ts)) else if cs_hdtext(ts) == "splice" then cs_splice(cs_drop1(ts)) else if cs_hdkind(ts) == "ID" then cs_ident(cs_hdtext(ts), cs_drop1(ts)) else {node: Num(0), rest: cs_drop1(ts)}
 fn cs_paren(ts) = let r = cs_expr(ts) in {node: r.node, rest: cs_skiprp(r.rest)}
 fn cs_ident(nm, ts) = if cs_hdtext(ts) == "(" then cs_call(nm, cs_arglist(cs_drop1(ts))) else if cs_hdtext(ts) == "{" then cs_rect(nm, cs_rec(cs_drop1(ts))) else {node: Var(nm), rest: ts}
 fn cs_call(nm, a) = {node: Call(nm, a.items), rest: a.rest}
@@ -117,7 +117,14 @@ fn cs_mkbin(op, a, r) = {node: Bin(op, a, r.node), rest: r.rest}
 fn cs_expr(ts) = cs_or(ts)
 
 fn cs_if(ts) = let c = cs_expr(ts) in let t = cs_expr(cs_dropkw(c.rest, "then")) in let e2 = cs_expr(cs_dropkw(t.rest, "else")) in {node: If(c.node, t.node, e2.node), rest: e2.rest}
-fn cs_let(ts) = let nm = cs_hdtext(ts) in let v = cs_expr(cs_dropkw(cs_drop1(ts), "=")) in let b = cs_expr(cs_dropkw(v.rest, "in")) in {node: LetIn(nm, v.node, b.node), rest: b.rest}
+fn cs_dropin(ts) = if cs_hdtext(ts) == "in" or cs_hdtext(ts) == ";" then cs_drop1(ts) else ts
+fn cs_let(ts) = let nm = cs_hdtext(ts) in let v = cs_expr(cs_dropkw(cs_drop1(ts), "=")) in let b = cs_expr(cs_dropin(v.rest)) in {node: LetIn(nm, v.node, b.node), rest: b.rest}
+fn cs_var(ts) = let nm = cs_hdtext(ts) in let v = cs_expr(cs_dropkw(cs_drop1(ts), "=")) in let b = cs_expr(cs_dropin(v.rest)) in {node: VarIn(nm, v.node, b.node), rest: b.rest}
+fn cs_owne(ts) = let r = cs_prim(ts) in {node: OwnE(r.node), rest: r.rest}
+fn cs_mute(ts) = let r = cs_prim(ts) in {node: MutE(r.node), rest: r.rest}
+fn cs_defer(ts) = let c = cs_expr(ts) in let b = cs_expr(cs_dropin(c.rest)) in {node: DeferE(c.node, b.node), rest: b.rest}
+fn cs_errdefer(ts) = let c = cs_expr(ts) in let b = cs_expr(cs_dropin(c.rest)) in {node: ErrDeferE(c.node, b.node), rest: b.rest}
+fn cs_with(ts) = if cs_hdtext(ts) == "alloc" then let a = cs_expr(cs_dropkw(cs_drop1(ts), "=")) in let b = cs_expr(cs_dropin(a.rest)) in {node: WithAllocE(a.node, b.node), rest: b.rest} else cs_expr(ts)
 
 fn cs_ispatstart(ts) = if cs_hdkind(ts) == "NM" or cs_hdkind(ts) == "ST" then 1 else if cs_hdkind(ts) == "ID" then cs_ispatid(cs_hdtext(ts)) else 0
 fn cs_ispatid(s) = if s == "fn" or s == "print" or s == "type" or s == "let" or s == "if" or s == "then" or s == "else" or s == "in" or s == "match" or s == "and" or s == "or" then 0 else 1
@@ -135,22 +142,23 @@ fn cs_arms(ts) = let p = cs_pat(ts) in let b = cs_expr(cs_dropkw(p.rest, "=>")) 
 fn cs_armcons(p, b, rr) = {items: Cons({pat: p, body: b}, rr.items), rest: rr.rest}
 
 ## --- declarations (type / fn / print / expr) ---
-fn cs_ptype1(ts) = if cs_hdtext(ts) == "[" then cs_ptlist(cs_ptype1(cs_drop1(ts))) else if cs_hdtext(ts) == "table" and cs_hdtext(cs_drop1(ts)) == "[" then cs_pttable(cs_ptype1(cs_drop1(cs_drop1(ts)))) else {node: TyName(cs_hdtext(ts)), rest: cs_drop1(ts)}
+fn cs_istyapp1(nm) = nm == "table" or nm == "rc" or nm == "arc" or nm == "weak" or nm == "cell" or nm == "chan" or nm == "Ref" or nm == "View"
+fn cs_ptype1(ts) = if cs_hdtext(ts) == "[" then cs_ptlist(cs_ptype1(cs_drop1(ts))) else if cs_istyapp1(cs_hdtext(ts)) and cs_hdtext(cs_drop1(ts)) == "[" then cs_ptapp(cs_hdtext(ts), cs_ptype1(cs_drop1(cs_drop1(ts)))) else {node: TyName(cs_hdtext(ts)), rest: cs_drop1(ts)}
 fn cs_ptlist(r) = {node: TyList(r.node), rest: cs_skiprk(r.rest)}
-fn cs_pttable(r) = {node: TyApply("table", r.node), rest: cs_skiprk(r.rest)}
+fn cs_ptapp(kind, r) = {node: TyApply(kind, r.node), rest: cs_skiprk(r.rest)}
 fn cs_ptypes(ts) = if cs_hdtext(ts) == ")" then {items: Nil, rest: cs_drop1(ts)} else cs_ptmore(cs_ptype1(ts))
 fn cs_ptmore(r) = if cs_hdtext(r.rest) == "," then cs_ptcons(r.node, cs_ptypes(cs_drop1(r.rest))) else {items: Cons(r.node, Nil), rest: cs_skiprp(r.rest)}
 fn cs_ptcons(n, rr) = {items: Cons(n, rr.items), rest: rr.rest}
 
 fn cs_pparams(ts) = if cs_hdtext(ts) == ")" then {items: Nil, tys: Nil, plist: Nil, rest: cs_drop1(ts)} else cs_pparamk(ts)
-fn cs_pparamk(ts) = if cs_hdtext(ts) == "comptime" then cs_pparam(cs_hdtext(cs_drop1(ts)), 1, cs_drop1(cs_drop1(ts))) else cs_pparam(cs_hdtext(ts), 0, cs_drop1(ts))
+fn cs_pparamk(ts) = if cs_hdtext(ts) == "comptime" then cs_pparam(cs_hdtext(cs_drop1(ts)), 1, cs_drop1(cs_drop1(ts))) else if cs_hdtext(ts) == "own" then cs_pparam(cs_hdtext(cs_drop1(ts)), 2, cs_drop1(cs_drop1(ts))) else if cs_hdtext(ts) == "mut" then cs_pparam(cs_hdtext(cs_drop1(ts)), 3, cs_drop1(cs_drop1(ts))) else cs_pparam(cs_hdtext(ts), 0, cs_drop1(ts))
 fn cs_pparam(nm, ct, ts) = if cs_hdtext(ts) == ":" then cs_pparamt(nm, ct, cs_ptype1(cs_drop1(ts))) else cs_pmore(nm, TyAny, ct, ts)
 fn cs_pparamt(nm, ct, r) = cs_pmore(nm, r.node, ct, r.rest)
 fn cs_pmore(nm, ty, ct, ts) = if cs_hdtext(ts) == "," then cs_pmcons(nm, ty, ct, cs_pparams(cs_drop1(ts))) else cs_pmend(nm, ty, ct, cs_skiprp(ts))
-fn cs_pmcons(nm, ty, ct, rr) = {items: if ct == 0 then Cons(nm, rr.items) else rr.items, tys: Cons(ty, rr.tys), plist: Cons({cf: ct, pn: nm, pt: ty}, rr.plist), rest: rr.rest}
-fn cs_pmend(nm, ty, ct, rest) = {items: if ct == 0 then Cons(nm, Nil) else Nil, tys: Cons(ty, Nil), plist: Cons({cf: ct, pn: nm, pt: ty}, Nil), rest: rest}
-fn cs_pret(ts) = if cs_hdtext(ts) == "-" and cs_hdtext(cs_drop1(ts)) == ">" then cs_pret2(cs_ptype1(cs_drop1(cs_drop1(ts)))) else {ty: TyAny, rest: ts}
-fn cs_pret2(r) = {ty: r.node, rest: r.rest}
+fn cs_pmcons(nm, ty, ct, rr) = {items: if ct != 1 then Cons(nm, rr.items) else rr.items, tys: Cons(ty, rr.tys), plist: Cons({cf: ct, pn: nm, pt: ty}, rr.plist), rest: rr.rest}
+fn cs_pmend(nm, ty, ct, rest) = {items: if ct != 1 then Cons(nm, Nil) else Nil, tys: Cons(ty, Nil), plist: Cons({cf: ct, pn: nm, pt: ty}, Nil), rest: rest}
+fn cs_pret(ts) = if cs_hdtext(ts) == "-" and cs_hdtext(cs_drop1(ts)) == ">" then cs_pret2(cs_ptype1(cs_drop1(cs_drop1(ts)))) else {ty: TyAny, fromp: "", rest: ts}
+fn cs_pret2(r) = if cs_hdtext(r.rest) == "from" then {ty: r.node, fromp: cs_hdtext(cs_drop1(r.rest)), rest: cs_drop1(cs_drop1(r.rest))} else {ty: r.node, fromp: "", rest: r.rest}
 fn cs_isany(t) = match t
     TyAny => 1
     _     => 0
@@ -160,8 +168,13 @@ fn cs_anyann(tys) = match tys
 fn cs_ganyct(pl) = match pl
     Nil        => 0
     Cons(p, r) => if p.cf == 1 then 1 else cs_ganyct(r)
+fn cs_anyownp(pl) = match pl
+    Nil        => 0
+    Cons(p, r) => if p.cf >= 2 then 1 else cs_anyownp(r)
 fn cs_mksig(nm, ps, rty) = if cs_ganyct(ps.plist) == 1 then GSig(nm, ps.plist, rty) else if cs_anyann(ps.tys) == 1 or cs_isany(rty) == 0 then Sig(nm, ps.items, ps.tys, rty) else Nil
-fn cs_pfn(ts) = let nm = cs_hdtext(ts) in let ps = cs_pparams(cs_dropkw(cs_drop1(ts), "(")) in let rt = cs_pret(ps.rest) in let b = cs_expr(cs_dropkw(rt.rest, "=")) in {node: Fn(nm, ps.items, b.node), sg: cs_mksig(nm, ps, rt.ty), rest: b.rest}
+fn cs_mkosig(nm, pubf, freef, pl, rty, fromp) = if pubf == 1 or freef == 1 or cs_anyownp(pl) == 1 or fromp != "" then OSig(nm, pubf, freef, pl, rty, fromp) else Nil
+fn cs_pfnp(ts, pubf, freef) = let nm = cs_hdtext(ts) in let ps = cs_pparams(cs_dropkw(cs_drop1(ts), "(")) in let rt = cs_pret(ps.rest) in let b = cs_expr(cs_dropkw(rt.rest, "=")) in {node: Fn(nm, ps.items, b.node), sg: cs_mksig(nm, ps, rt.ty), osg: cs_mkosig(nm, pubf, freef, ps.plist, rt.ty, rt.fromp), rest: b.rest}
+fn cs_pfn(ts) = cs_pfnp(ts, 0, 0)
 
 fn cs_ptype(ts) = let nm = cs_hdtext(ts) in let rest = cs_dropkw(cs_drop1(ts), "=") in if cs_hdtext(rest) == "record" then cs_precordty(nm, cs_drop1(rest)) else cs_penumty(nm, cs_dropkw(rest, "enum"))
 fn cs_penumty(nm, ts) = let vs = cs_pvariants(ts) in {node: TypeS(nm, "enum", vs.items), rest: vs.rest}
@@ -171,10 +184,16 @@ fn cs_pvariantend(tag, ar, ts) = if cs_hdtext(ts) == "|" then let rr = cs_pvaria
 fn cs_precordty(nm, ts) = let fs = cs_pfields(ts) in {node: TypeS(nm, "record", fs.items), rest: fs.rest}
 fn cs_pfields(ts) = let fnm = cs_hdtext(ts) in let r = cs_ptype1(cs_dropkw(cs_drop1(ts), ":")) in if cs_hdtext(r.rest) == "," then let rr = cs_pfields(cs_drop1(r.rest)) in {items: Cons({fname: fnm, fty: r.node}, rr.items), rest: rr.rest} else {items: Cons({fname: fnm, fty: r.node}, Nil), rest: r.rest}
 
+fn cs_tdeclname(nd) = match nd
+    TypeS(nm, k, items) => nm
+    _                   => ""
+fn cs_progtyped(kind, r) = Cons(OType(cs_tdeclname(r.node), kind), Cons(r.node, cs_pprog(r.rest)))
+fn cs_progfree(ts) = if cs_hdtext(ts) == "pub" then cs_pprogfn(cs_pfnp(cs_drop1(cs_drop1(ts)), 1, 1)) else cs_pprogfn(cs_pfnp(cs_drop1(ts), 0, 1))
+fn cs_progat(t) = if cs_hdtext(t) == "freestanding" then cs_progfree(cs_drop1(t)) else if cs_hdtext(t) == "gc" then cs_progtyped("gc", cs_ptype(cs_drop1(cs_drop1(t)))) else cs_pprog(cs_drop1(t))
 fn cs_pprog(ts) = match ts
     Nil        => Nil
-    Cons(h, t) => if h.text == "fn" then cs_pprogfn(cs_pfn(cs_drop1(ts))) else if h.text == "type" then let r = cs_ptype(cs_drop1(ts)) in Cons(r.node, cs_pprog(r.rest)) else if h.text == "print" then let r = cs_expr(cs_drop1(ts)) in Cons(Print(r.node), cs_pprog(r.rest)) else let r = cs_expr(ts) in Cons(ExprS(r.node), cs_pprog(r.rest))
-fn cs_pprogfn(r) = cs_pprogfn2(r.sg, Cons(r.node, cs_pprog(r.rest)))
+    Cons(h, t) => if h.text == "fn" then cs_pprogfn(cs_pfn(cs_drop1(ts))) else if h.text == "pub" and cs_hdtext(t) == "fn" then cs_pprogfn(cs_pfnp(cs_drop1(t), 1, 0)) else if h.text == "@" then cs_progat(t) else if h.text == "resource" and cs_hdtext(t) == "type" then cs_progtyped("resource", cs_ptype(cs_drop1(t))) else if h.text == "type" then let r = cs_ptype(cs_drop1(ts)) in Cons(r.node, cs_pprog(r.rest)) else if h.text == "print" then let r = cs_expr(cs_drop1(ts)) in Cons(Print(r.node), cs_pprog(r.rest)) else let r = cs_expr(ts) in Cons(ExprS(r.node), cs_pprog(r.rest))
+fn cs_pprogfn(r) = cs_pprogfn2(r.osg, cs_pprogfn2(r.sg, Cons(r.node, cs_pprog(r.rest))))
 fn cs_pprogfn2(sg, rest) = match sg
     Nil => rest
     _   => Cons(sg, rest)
@@ -507,6 +526,124 @@ fn cs_cpure(nm, vs) = if nm == "str" and cs_len(vs) == 1 then cs_cv_ok(cs_cv_str
 fn cs_chk_ct(inner, tt) = let r = cs_ceval(inner, Nil, tt.ft, 0) in if r.ok == 1 then Nil else Cons(cs_mkdiag("C1001", "comptime", r.err, r.fix), Nil)
 fn cs_chk_splice(inner, tt) = let r = cs_ceval(inner, Nil, tt.ft, 0) in if r.ok == 0 then Cons(cs_mkdiag("C1001", "comptime", r.err, r.fix), Nil) else let u = cs_unreify(r.v) in if u.ok == 0 then Cons(cs_mkdiag("C1001", "comptime", u.err, u.fix), Nil) else cs_chk_expr(u.node, tt)
 
+## --- Phase 3 Track O non-aborting multi-diagnostic checker for `caas` (`O0001`–`O0030`) ---
+fn cs_omem(x, xs) = match xs
+    Nil        => 0
+    Cons(h, t) => if h == x then 1 else cs_omem(x, t)
+fn cs_orem(x, xs) = match xs
+    Nil        => Nil
+    Cons(h, t) => if h == x then cs_orem(x, t) else Cons(h, cs_orem(x, t))
+fn cs_ocollects(prog) = match prog
+    Nil        => Nil
+    Cons(h, t) => cs_ocollects1(h, cs_ocollects(t))
+fn cs_ocollects1(st, rest) = match st
+    OSig(nm, pubf, freef, pl, rty, fromp) => Cons({nm: nm, pubf: pubf, freef: freef, pl: pl, rty: rty, fromp: fromp}, rest)
+    _                                     => rest
+fn cs_osiglookup(nm, osigs) = match osigs
+    Nil        => Nil
+    Cons(h, t) => if h.nm == nm then Cons(h, Nil) else cs_osiglookup(nm, t)
+fn cs_obparams(pl) = match pl
+    Nil        => Nil
+    Cons(p, r) => if p.cf == 0 or p.cf == 3 then Cons(p.pn, cs_obparams(r)) else cs_obparams(r)
+fn cs_omvars(pl) = match pl
+    Nil        => Nil
+    Cons(p, r) => if p.cf == 2 or p.cf == 3 then Cons(p.pn, cs_omvars(r)) else cs_omvars(r)
+fn cs_oinit_orgs(ps) = match ps
+    Nil        => Nil
+    Cons(h, t) => Cons({k: h, v: "param:" + h}, cs_oinit_orgs(t))
+fn cs_olookup_org(x, orgs) = match orgs
+    Nil        => ""
+    Cons(h, t) => if h.k == x then h.v else cs_olookup_org(x, t)
+fn cs_ostrip_b(org) = if cs_startswith(org, "borrow:") == 1 then cs_ostrip_b(slice(org, 7, count(org))) else org
+fn cs_ois_own(e) = match e
+    OwnE(inner)    => 1
+    Call(nm, args) => if nm == "move" and cs_len(args) == 1 then 1 else 0
+    _              => 0
+fn cs_omut_root(e) = match e
+    Var(x)        => x
+    MutE(inner)   => cs_omut_root(inner)
+    Field(o, fld) => cs_omut_root(o)
+    _             => ""
+fn cs_ois_mut(e) = match e
+    MutE(inner) => 1
+    _           => 0
+fn cs_omentions(x, e) = match e
+    Var(nm)         => if nm == x then 1 else 0
+    OwnE(inner)     => cs_omentions(x, inner)
+    MutE(inner)     => cs_omentions(x, inner)
+    Field(o, fld)   => cs_omentions(x, o)
+    Bin(op, l, r)   => if cs_omentions(x, l) == 1 then 1 else cs_omentions(x, r)
+    If(c, t, e2)    => if cs_omentions(x, c) == 1 then 1 else if cs_omentions(x, t) == 1 then 1 else cs_omentions(x, e2)
+    LetIn(nm, v, b) => if cs_omentions(x, v) == 1 then 1 else if nm == x then 0 else cs_omentions(x, b)
+    VarIn(nm, v, b) => if cs_omentions(x, v) == 1 then 1 else if nm == x then 0 else cs_omentions(x, b)
+    Call(nm, args)  => cs_omentions_l(x, args)
+    _               => 0
+fn cs_omentions_l(x, xs) = match xs
+    Nil        => 0
+    Cons(h, t) => if cs_omentions(x, h) == 1 then 1 else cs_omentions_l(x, t)
+fn cs_ocount_args(x, args) = match args
+    Nil        => 0
+    Cons(h, t) => cs_omentions(x, h) + cs_ocount_args(x, t)
+fn cs_opl_cf(pl) = match pl
+    Nil        => 0
+    Cons(p, r) => p.cf
+fn cs_opl_tl(pl) = match pl
+    Nil        => Nil
+    Cons(p, r) => r
+fn cs_ocollect_muts(args, pl) = match args
+    Nil        => Nil
+    Cons(a, r) => let rest = cs_ocollect_muts(r, cs_opl_tl(pl)) in if cs_ois_mut(a) == 1 or cs_opl_cf(pl) == 3 then let mr = cs_omut_root(a) in (if mr != "" then Cons(mr, rest) else rest) else rest
+fn cs_ochk_conf(fnm, muts, args) = match muts
+    Nil         => Nil
+    Cons(mx, r) => if cs_ocount_args(mx, args) > 1 then Cons(cs_mkdiag("O0011", "borrow", "borrow error: conflicting borrow of '" + mx + "' in call to '" + fnm + "'", "bind the shared read of '" + mx + "' to a temporary before borrowing 'mut " + mx + "'"), cs_ochk_conf(fnm, r, args)) else cs_ochk_conf(fnm, r, args)
+fn cs_ochk_modes(fnm, args, pl, ctx) = match pl
+    Nil        => Nil
+    Cons(p, r) => if p.cf == 1 then cs_ochk_modes(fnm, args, r, ctx) else cs_ochk_mode1(fnm, args, p, r, ctx)
+fn cs_ochk_mode1(fnm, args, p, r, ctx) = match args
+    Nil         => Nil
+    Cons(a, ar) => let d1 = if p.cf == 2 and cs_ois_own(a) == 0 then Cons(cs_mkdiag("O0012", "ownership", "ownership error: parameter '" + p.pn + "' of '" + fnm + "' takes ownership; mark argument with 'own'", "prefix argument with 'own' at call site"), Nil) else if p.cf == 3 then (let vnm = cs_omut_root(a) in if vnm != "" and cs_omem(vnm, ctx.mvars) == 0 then Cons(cs_mkdiag("O0010", "borrow", "borrow error: cannot pass immutable binding '" + vnm + "' to 'mut' parameter '" + p.pn + "'", "declare 'var " + vnm + "' instead of 'let " + vnm + "'"), Nil) else Nil) else Nil in cs_app(d1, cs_ochk_modes(fnm, ar, r, ctx))
+fn cs_ochk_own_tgt(inner, ctx, moved) = match inner
+    Var(x) => if cs_omem(x, moved) == 1 then {diags: Cons(cs_mkdiag("O0001", "ownership", "ownership error: use of moved value '" + x + "'", "borrow '" + x + "' instead or call 'clone(" + x + ")'"), Nil), moved: moved, origin: ""} else if cs_omem(x, ctx.bparams) == 1 then {diags: Cons(cs_mkdiag("O0002", "ownership", "ownership error: cannot move out of borrowed parameter '" + x + "'", "change parameter declaration to 'own " + x + "' or call 'clone(" + x + ")'"), Nil), moved: moved, origin: ""} else {diags: Nil, moved: Cons(x, moved), origin: ""}
+    _      => cs_ochke(inner, ctx, moved)
+fn cs_ochk_mut_tgt(inner, ctx, moved) = match inner
+    Var(x) => if cs_omem(x, moved) == 1 then {diags: Cons(cs_mkdiag("O0001", "ownership", "ownership error: use of moved value '" + x + "'", "borrow '" + x + "' instead or call 'clone(" + x + ")'"), Nil), moved: moved, origin: ""} else if cs_omem(x, ctx.mvars) == 0 then {diags: Cons(cs_mkdiag("O0010", "borrow", "borrow error: cannot borrow immutable binding '" + x + "' as 'mut'", "declare 'var " + x + "' instead of 'let " + x + "'"), Nil), moved: moved, origin: ""} else {diags: Nil, moved: moved, origin: "borrow:" + cs_olookup_org(x, ctx.origins)}
+    _      => cs_ochke(inner, ctx, moved)
+fn cs_octx_bind(ctx, nm, ismut, org) = {fnm: ctx.fnm, pubf: ctx.pubf, freef: ctx.freef, halloc: ctx.halloc, bparams: cs_orem(nm, ctx.bparams), mvars: if ismut == 1 then Cons(nm, cs_orem(nm, ctx.mvars)) else cs_orem(nm, ctx.mvars), origins: Cons({k: nm, v: if org != "" then org else "local:" + nm}, ctx.origins), osigs: ctx.osigs}
+fn cs_ochke(e, ctx, moved) = match e
+    Var(x)           => if cs_omem(x, moved) == 1 then {diags: Cons(cs_mkdiag("O0001", "ownership", "ownership error: use of moved value '" + x + "'", "borrow '" + x + "' instead or call 'clone(" + x + ")'"), Nil), moved: moved, origin: ""} else {diags: Nil, moved: moved, origin: cs_olookup_org(x, ctx.origins)}
+    Field(o, fld)    => cs_ochke(o, ctx, moved)
+    OwnE(inner)      => cs_ochk_own_tgt(inner, ctx, moved)
+    MutE(inner)      => cs_ochk_mut_tgt(inner, ctx, moved)
+    LetIn(nm, v, b)  => let rv = cs_ochke(v, ctx, moved) in let rb = cs_ochke(b, cs_octx_bind(ctx, nm, 0, rv.origin), cs_orem(nm, rv.moved)) in {diags: cs_app(rv.diags, rb.diags), moved: rb.moved, origin: rb.origin}
+    VarIn(nm, v, b)  => let rv = cs_ochke(v, ctx, moved) in let rb = cs_ochke(b, cs_octx_bind(ctx, nm, 1, rv.origin), cs_orem(nm, rv.moved)) in {diags: cs_app(rv.diags, rb.diags), moved: rb.moved, origin: rb.origin}
+    DeferE(c, b)     => let rb = cs_ochke(b, ctx, moved) in let rc = cs_ochke(c, ctx, rb.moved) in {diags: cs_app(rb.diags, rc.diags), moved: rc.moved, origin: rb.origin}
+    ErrDeferE(c, b)  => let rb = cs_ochke(b, ctx, moved) in let rc = cs_ochke(c, ctx, rb.moved) in {diags: cs_app(rb.diags, rc.diags), moved: rc.moved, origin: rb.origin}
+    WithAllocE(a, b) => let ra = cs_ochke(a, ctx, moved) in let rb = cs_ochke(b, {fnm: ctx.fnm, pubf: ctx.pubf, freef: ctx.freef, halloc: 1, bparams: ctx.bparams, mvars: ctx.mvars, origins: ctx.origins, osigs: ctx.osigs}, ra.moved) in {diags: cs_app(ra.diags, rb.diags), moved: rb.moved, origin: rb.origin}
+    Bin(op, l, r)    => let rl = cs_ochke(l, ctx, moved) in let rr = cs_ochke(r, ctx, rl.moved) in {diags: cs_app(rl.diags, rr.diags), moved: rr.moved, origin: ""}
+    If(c, t, e2)     => let rc = cs_ochke(c, ctx, moved) in let rt = cs_ochke(t, ctx, rc.moved) in let re = cs_ochke(e2, ctx, rc.moved) in {diags: cs_app(rc.diags, cs_app(rt.diags, re.diags)), moved: cs_app(rt.moved, re.moved), origin: if rt.origin != "" then rt.origin else re.origin}
+    Call(nm, args)   => cs_ochkcall(nm, args, ctx, moved)
+    _                => {diags: Nil, moved: moved, origin: ""}
+fn cs_ochkargs(args, ctx, moved) = match args
+    Nil        => {diags: Nil, moved: moved}
+    Cons(h, t) => let r1 = cs_ochke(h, ctx, moved) in let r2 = cs_ochkargs(t, ctx, r1.moved) in {diags: cs_app(r1.diags, r2.diags), moved: r2.moved}
+fn cs_ois_heap(nm) = nm == "rc_new" or nm == "arc_new" or nm == "alloc_heap" or nm == "table_new" or nm == "box_new"
+fn cs_ochkcall(fnm, args, ctx, moved) = let d0 = if ctx.freef == 1 and ctx.halloc == 0 and cs_ois_heap(fnm) then Cons(cs_mkdiag("O0030", "ownership", "ownership error: ambient heap allocation '" + fnm + "' in '@freestanding' function '" + ctx.fnm + "'", "wrap allocation in 'with alloc = <arena> in ...'"), Nil) else Nil in if fnm == "borrow" and cs_len(args) == 1 then let ra = cs_ochke(cs_asthead(args), ctx, moved) in {diags: cs_app(d0, ra.diags), moved: ra.moved, origin: "borrow:" + ra.origin} else cs_ochkcall_sig(fnm, args, cs_osiglookup(fnm, ctx.osigs), ctx, moved, d0)
+fn cs_ochkcall_sig(fnm, args, msig, ctx, moved, d0) = match msig
+    Nil          => let dc = cs_ochk_conf(fnm, cs_ocollect_muts(args, Nil), args) in let ra = cs_ochkargs(args, ctx, moved) in {diags: cs_app(d0, cs_app(dc, ra.diags)), moved: ra.moved, origin: ""}
+    Cons(sg, sr) => let dm = cs_ochk_modes(fnm, args, sg.pl, ctx) in let dc = cs_ochk_conf(fnm, cs_ocollect_muts(args, sg.pl), args) in let ra = cs_ochkargs(args, ctx, moved) in {diags: cs_app(d0, cs_app(dm, cs_app(dc, ra.diags))), moved: ra.moved, origin: ""}
+fn cs_ochk_ret(nm, pubf, fromp, org) = let core_org = cs_ostrip_b(org) in if cs_startswith(org, "borrow:") == 1 and cs_startswith(core_org, "local:") == 1 then let lx = slice(core_org, 6, count(core_org)) in Cons(cs_mkdiag("O0020", "region", "region error: borrowed value '" + lx + "' escapes local scope of '" + nm + "'", "return an owned value instead of borrowing local '" + lx + "'"), Nil) else if cs_startswith(org, "borrow:") == 1 and cs_startswith(core_org, "param:") == 1 then let px = slice(core_org, 6, count(core_org)) in (if pubf == 1 and fromp == "" then Cons(cs_mkdiag("O0021", "region", "region error: public function '" + nm + "' returns a borrow from '" + px + "' without an origin clause", "add 'from " + px + "' to the return type of '" + nm + "'"), Nil) else if fromp != "" and fromp != px then Cons(cs_mkdiag("O0021", "region", "region error: function '" + nm + "' declares 'from " + fromp + "' but returns a borrow from '" + px + "'", "change origin clause to 'from " + px + "'"), Nil) else Nil) else Nil
+fn cs_ochk_fn(nm, ps, body, msig, osigs) = match msig
+    Nil          => let ctx = {fnm: nm, pubf: 0, freef: 0, halloc: 0, bparams: ps, mvars: Nil, origins: cs_oinit_orgs(ps), osigs: osigs} in let rb = cs_ochke(body, ctx, Nil) in cs_app(rb.diags, cs_ochk_ret(nm, 0, "", rb.origin))
+    Cons(sg, sr) => let bparams = if cs_isnil(sg.pl) == 1 then ps else cs_obparams(sg.pl) in let ctx = {fnm: nm, pubf: sg.pubf, freef: sg.freef, halloc: 0, bparams: bparams, mvars: cs_omvars(sg.pl), origins: cs_oinit_orgs(ps), osigs: osigs} in let rb = cs_ochke(body, ctx, Nil) in cs_app(rb.diags, cs_ochk_ret(nm, sg.pubf, sg.fromp, rb.origin))
+fn cs_odiagnose_stmts(prog, osigs, moved) = match prog
+    Nil        => Nil
+    Cons(h, t) => cs_odiagnose_stmt1(h, t, osigs, moved)
+fn cs_odiagnose_stmt1(s0, rest, osigs, moved) = match s0
+    Fn(nm, ps, body) => cs_app(cs_ochk_fn(nm, ps, body, cs_osiglookup(nm, osigs), osigs), cs_odiagnose_stmts(rest, osigs, moved))
+    Print(v)         => let r = cs_ochke(v, {fnm: "<main>", pubf: 0, freef: 0, halloc: 0, bparams: Nil, mvars: Nil, origins: Nil, osigs: osigs}, moved) in cs_app(r.diags, cs_odiagnose_stmts(rest, osigs, r.moved))
+    ExprS(v)         => let r = cs_ochke(v, {fnm: "<main>", pubf: 0, freef: 0, halloc: 0, bparams: Nil, mvars: Nil, origins: Nil, osigs: osigs}, moved) in cs_app(r.diags, cs_odiagnose_stmts(rest, osigs, r.moved))
+    _                => cs_odiagnose_stmts(rest, osigs, moved)
+
 fn cs_diagnose_stmts(prog, tt) = match prog
     Nil        => Nil
     Cons(h, t) => cs_app(cs_diagnose_stmt(h, tt), cs_diagnose_stmts(t, tt))
@@ -515,7 +652,7 @@ fn cs_diagnose_stmt(s0, tt) = match s0
     Print(v)         => cs_chk_expr(v, tt)
     ExprS(v)         => cs_chk_expr(v, tt)
     _                => Nil
-fn cs_diagnose(prog) = cs_diagnose_stmts(prog, cs_tcollect(prog))
+fn cs_diagnose(prog) = cs_app(cs_diagnose_stmts(prog, cs_tcollect(prog)), cs_odiagnose_stmts(prog, cs_ocollects(prog), Nil))
 
 ## --- C3 generic erasure & C1/C2/M1/M2 comptime + hygienic macro expansion ---
 fn cs_gcfs(pl) = match pl
@@ -537,21 +674,27 @@ fn cs_gefilter2(args, c, cr) = match args
     Nil         => Nil
     Cons(a, ar) => if c == 1 then cs_gefilter(ar, cr) else Cons(a, cs_gefilter(ar, cr))
 fn cs_gecall(nm, ea, m) = match m
-    Nil        => Call(nm, ea)
+    Nil        => if (nm == "borrow" or nm == "borrow_mut" or nm == "move" or nm == "clone") and cs_len(ea) == 1 then cs_asthead(ea) else Call(nm, ea)
     Cons(g, r) => Call(nm, cs_gefilter(ea, g.cfs))
 fn cs_geexpr(e, gt) = match e
-    Bin(op, a, b)   => Bin(op, cs_geexpr(a, gt), cs_geexpr(b, gt))
-    If(c, t, e2)    => If(cs_geexpr(c, gt), cs_geexpr(t, gt), cs_geexpr(e2, gt))
-    LetIn(nm, v, b) => LetIn(nm, cs_geexpr(v, gt), cs_geexpr(b, gt))
-    Call(nm, args)  => cs_gecall(nm, cs_geargs(args, gt), cs_gtlookup(nm, gt))
-    Rec(items)      => Rec(cs_gerec(items, gt))
-    RecT(tn, items) => RecT(tn, cs_gerec(items, gt))
-    Field(o, nm)    => Field(cs_geexpr(o, gt), nm)
-    Match(sc, arms) => Match(cs_geexpr(sc, gt), cs_gearms(arms, gt))
-    CT(inner)       => CT(cs_geexpr(inner, gt))
-    Quote(inner)    => Quote(cs_geexpr(inner, gt))
-    Splice(inner)   => Splice(cs_geexpr(inner, gt))
-    _               => e
+    Bin(op, a, b)    => Bin(op, cs_geexpr(a, gt), cs_geexpr(b, gt))
+    If(c, t, e2)     => If(cs_geexpr(c, gt), cs_geexpr(t, gt), cs_geexpr(e2, gt))
+    LetIn(nm, v, b)  => LetIn(nm, cs_geexpr(v, gt), cs_geexpr(b, gt))
+    VarIn(nm, v, b)  => LetIn(nm, cs_geexpr(v, gt), cs_geexpr(b, gt))
+    OwnE(inner)      => cs_geexpr(inner, gt)
+    MutE(inner)      => cs_geexpr(inner, gt)
+    DeferE(c, b)     => LetIn("_d_val", cs_geexpr(b, gt), LetIn("_d_run", cs_geexpr(c, gt), Var("_d_val")))
+    ErrDeferE(c, b)  => LetIn("_ed_val", cs_geexpr(b, gt), If(Bin("<", Var("_ed_val"), Num(0)), LetIn("_ed_run", cs_geexpr(c, gt), Var("_ed_val")), Var("_ed_val")))
+    WithAllocE(a, b) => LetIn("_alloc_ctx", cs_geexpr(a, gt), cs_geexpr(b, gt))
+    Call(nm, args)   => cs_gecall(nm, cs_geargs(args, gt), cs_gtlookup(nm, gt))
+    Rec(items)       => Rec(cs_gerec(items, gt))
+    RecT(tn, items)  => RecT(tn, cs_gerec(items, gt))
+    Field(o, nm)     => Field(cs_geexpr(o, gt), nm)
+    Match(sc, arms)  => Match(cs_geexpr(sc, gt), cs_gearms(arms, gt))
+    CT(inner)        => CT(cs_geexpr(inner, gt))
+    Quote(inner)     => Quote(cs_geexpr(inner, gt))
+    Splice(inner)    => Splice(cs_geexpr(inner, gt))
+    _                => e
 fn cs_geargs(xs, gt) = match xs
     Nil        => Nil
     Cons(h, t) => Cons(cs_geexpr(h, gt), cs_geargs(t, gt))
@@ -615,7 +758,13 @@ fn cs_expr_sexpr(e) = match e
     Var(nm)         => nm
     Bin(op, a, b)   => "(" + op + " " + cs_expr_sexpr(a) + " " + cs_expr_sexpr(b) + ")"
     If(c, t, e2)    => "(if " + cs_expr_sexpr(c) + " " + cs_expr_sexpr(t) + " " + cs_expr_sexpr(e2) + ")"
-    LetIn(nm, v, b) => "(let " + nm + " " + cs_expr_sexpr(v) + " " + cs_expr_sexpr(b) + ")"
+    LetIn(nm, v, b)  => "(let " + nm + " " + cs_expr_sexpr(v) + " " + cs_expr_sexpr(b) + ")"
+    VarIn(nm, v, b)  => "(var " + nm + " " + cs_expr_sexpr(v) + " " + cs_expr_sexpr(b) + ")"
+    OwnE(inner)      => "(own " + cs_expr_sexpr(inner) + ")"
+    MutE(inner)      => "(mut " + cs_expr_sexpr(inner) + ")"
+    DeferE(c, b)     => "(defer " + cs_expr_sexpr(c) + " " + cs_expr_sexpr(b) + ")"
+    ErrDeferE(c, b)  => "(errdefer " + cs_expr_sexpr(c) + " " + cs_expr_sexpr(b) + ")"
+    WithAllocE(a, b) => "(with-alloc " + cs_expr_sexpr(a) + " " + cs_expr_sexpr(b) + ")"
     Call(nm, args)  => if cs_isnil(args) == 1 then "(" + nm + ")" else "(" + nm + " " + cs_exprs_sexpr(args) + ")"
     CT(inner)       => "(comptime " + cs_expr_sexpr(inner) + ")"
     Quote(inner)    => "(quote " + cs_expr_sexpr(inner) + ")"
@@ -681,7 +830,7 @@ fn cs_eval_prog(prog) = cs_joinsep(cs_eval_stmts(prog, cs_buildft(prog)), "\n")
 ## --- PUBLIC CALLABLE LIBRARY API (`use lcaas`) ---
 fn caas_compile(src) = let ast = cs_parse(src) in let syms = cs_symbols(ast) in let diags = cs_diagnose(ast) in let raw_sexpr = cs_prog_sexpr(ast) in if cs_isnil(diags) == 0 then {ok: 0, diagnostics: diags, symbols: syms, ast: ast, ast_sexpr: raw_sexpr, expanded: Nil, expanded_sexpr: "", asm: "", result: ""} else let exp = cs_expand(ast) in {ok: 1, diagnostics: Nil, symbols: syms, ast: ast, ast_sexpr: raw_sexpr, expanded: exp, expanded_sexpr: cs_prog_sexpr(exp), asm: cs_asm_gen(exp), result: cs_eval_prog(exp)}
 
-fn caas_check(src) = let r = caas_compile(src) in {ok: r.ok, diagnostics: r.diagnostics, symbols: r.symbols}
+fn caas_check(src) = caas_compile(src)
 fn caas_ast(src) = (caas_compile(src)).ast_sexpr
 fn caas_expand(src) = (caas_compile(src)).expanded_sexpr
 fn caas_symbols(src) = (caas_compile(src)).symbols

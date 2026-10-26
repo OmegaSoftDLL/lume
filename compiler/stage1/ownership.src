@@ -1,0 +1,51 @@
+## ownership.src -- Lume Phase 3 Track O standard library for ownership tiers, interior mutability,
+## and scoped arena allocators (`use ownership`, docs/16-phase3-plan.md O1-O4).
+##
+## Provides:
+##   - `rc[T]`: single-threaded reference-counted pointer (`rc_new`, `rc_get`, `rc_clone`, `rc_drop`, `rc_strong_count`)
+##   - `arc[T]`: atomic/thread-safe (`Send + Sync`) reference-counted pointer (`arc_new`, `arc_get`, `arc_clone`, `arc_drop`, `arc_strong_count`)
+##   - `weak[T]`: non-owning weak reference (`weak_downgrade`, `weak_upgrade`, `weak_is_alive`, `weak_dead`)
+##   - `cell[T]`: value-level interior mutability container (`cell_new`, `cell_get`, `cell_set`, `cell_update`)
+##   - `Arena`: deterministic bump/region allocator (`arena_new`, `arena_alloc`, `arena_used`, `arena_remaining`, `arena_reset`)
+
+fn rc_new(v) = {tier: "rc", val: v, strong: 1, weak: 0}
+fn rc_get(r) = r.val
+fn rc_strong_count(r) = r.strong
+fn rc_weak_count(r) = r.weak
+fn rc_clone(r) = {tier: "rc", val: r.val, strong: r.strong + 1, weak: r.weak}
+fn rc_drop(r) = {tier: "rc", val: r.val, strong: if r.strong > 0 then r.strong - 1 else 0, weak: r.weak}
+
+fn arc_new(v) = {tier: "arc", val: v, strong: 1, weak: 0, sync: 1}
+fn arc_get(a) = a.val
+fn arc_strong_count(a) = a.strong
+fn arc_clone(a) = {tier: "arc", val: a.val, strong: a.strong + 1, weak: a.weak, sync: 1}
+fn arc_drop(a) = {tier: "arc", val: a.val, strong: if a.strong > 0 then a.strong - 1 else 0, weak: a.weak, sync: 1}
+
+fn weak_downgrade(r) = {tier: "weak", val: r.val, alive: if r.strong > 0 then 1 else 0, weak: r.weak + 1}
+fn weak_dead(v) = {tier: "weak", val: v, alive: 0, weak: 1}
+fn weak_is_alive(w) = w.alive
+fn weak_upgrade(w, fallback) = if w.alive == 1 then w.val else fallback
+
+fn cell_new(v) = {tier: "cell", val: v, writes: 0}
+fn cell_get(c) = c.val
+fn cell_writes(c) = c.writes
+fn cell_set(c, v) = {tier: "cell", val: v, writes: c.writes + 1}
+
+fn arena_new(cap) = {cap: cap, used: 0, allocs: 0}
+fn arena_used(a) = a.used
+fn arena_remaining(a) = a.cap - a.used
+fn arena_allocs(a) = a.allocs
+fn arena_can_alloc(a, bytes) = if bytes >= 0 and a.used + bytes <= a.cap then 1 else 0
+fn arena_alloc(a, bytes) = if a.used + bytes > a.cap then ctfail("lume: arena out of memory (requested " + str(bytes) + " bytes, remaining " + str(a.cap - a.used) + ")\n") else {cap: a.cap, used: a.used + bytes, allocs: a.allocs + 1}
+fn arena_reset(a) = {cap: a.cap, used: 0, allocs: 0}
+
+## --- unit tests (`lume test compiler/stage1/ownership.src`) ---
+fn test_rc_lifecycle() = let r1 = rc_new(42) in let r2 = rc_clone(r1) in let r3 = rc_drop(r2) in rc_get(r1) == 42 and rc_strong_count(r1) == 1 and rc_strong_count(r2) == 2 and rc_strong_count(r3) == 1
+
+fn test_arc_lifecycle() = let a1 = arc_new(100) in let a2 = arc_clone(a1) in let a3 = arc_drop(a2) in arc_get(a2) == 100 and arc_strong_count(a2) == 2 and arc_strong_count(a3) == 1
+
+fn test_weak_upgrade_and_drop() = let r1 = rc_new(77) in let w_live = weak_downgrade(r1) in let r0 = rc_drop(r1) in let w_exp = weak_downgrade(r0) in weak_is_alive(w_live) == 1 and weak_upgrade(w_live, 0) == 77 and weak_is_alive(w_exp) == 0 and weak_upgrade(w_exp, 999) == 999
+
+fn test_cell_interior_mutability() = let c0 = cell_new(10) in let c1 = cell_set(c0, 25) in let c2 = cell_set(c1, cell_get(c1) + 5) in cell_get(c0) == 10 and cell_get(c2) == 30 and cell_writes(c2) == 2
+
+fn test_arena_bump_and_reset() = let a0 = arena_new(256) in let a1 = arena_alloc(a0, 64) in let a2 = arena_alloc(a1, 128) in let a3 = arena_reset(a2) in arena_used(a2) == 192 and arena_remaining(a2) == 64 and arena_allocs(a2) == 2 and arena_used(a3) == 0 and arena_remaining(a3) == 256

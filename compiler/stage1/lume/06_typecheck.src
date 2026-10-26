@@ -506,6 +506,7 @@ fn tcompat(ex, k) = match ex
 fn tcompatn(n, k) = match k
     TyAny     => 1
     TyName(m) => if n == m then 1 else 0
+    TyApply(n2, e2) => if tiswrapty(n2) == 1 then tcompatn(n, e2) else 0
     TyList(e) => 0
     TyDecimal(p, s) => 0
     TyDecimalLiteral(c, s) => 0
@@ -515,10 +516,11 @@ fn tcompatl(e, k) = match k
     TyList(e2) => tcompat(e, e2)
     TyDecimal(p, s) => 0
     TyDecimalLiteral(c, s) => 0
+fn tiswrapty(n) = if n == "Ref" or n == "View" or n == "rc" or n == "arc" or n == "weak" or n == "cell" or n == "chan" or n == "unverified" then 1 else 0
 fn tcompatapply(n, e, k) = match k
     TyAny => 1
     TyApply(n2, e2) => if n == n2 then tcompat(e, e2) else 0
-    _ => 0
+    _ => if tiswrapty(n) == 1 then tcompat(e, k) else 0
 fn tcompatdecimal(p, s, known) = match known
     TyAny => 1
     TyDecimal(p2, s2) => if p == p2 and s == s2 then 1 else 0

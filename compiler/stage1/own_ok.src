@@ -1,0 +1,73 @@
+## own_ok.src -- Phase 3 Track O (O1-O4) positive conformance test:
+##   - O1: resource types, `own` move semantics, `Copy` values, deterministic LIFO `defer` and `errdefer`
+##   - O2: shared borrow (default), exclusive `mut` borrow (`var` + `mut`), and `own` parameter transfer
+##   - O3: intra-module region inference across helpers and `pub fn ... from <param>` return origins
+##   - O4: shared tiers (`rc[T]`, `arc[T]`, `weak[T]`, `cell[T]`), `@gc` region types, and `@freestanding` + `with alloc`
+
+resource type FileHandle = record fd: int, size: int
+@gc type GraphNode = record id: int, next_id: int
+
+## O1 + O2: shared borrow parameter (non-consuming) vs `own` parameter (consuming) vs `mut` parameter
+fn file_size(f: FileHandle) -> int = f.size
+fn close_file(own f: FileHandle) -> int = f.fd + f.size
+fn add_delta(mut x: int, delta: int) -> int = x + delta
+
+## O1: LIFO `defer` and `errdefer` scope-exit ordering
+fn trace_step(label: str) -> int =
+    let z = printval(label) in 0
+
+fn run_with_defers(x: int) -> int =
+    defer trace_step("defer:outer-cleanup") in
+    defer trace_step("defer:inner-cleanup") in
+    let y = trace_step("body:work") in
+    x + 10
+
+fn run_errdefer(code: int) -> int =
+    errdefer trace_step("errdefer:rollback") in
+    code
+
+## O3: private helper infers borrow origin automatically; `pub fn` declares `from items`
+fn priv_borrow(items: [int]) -> [int] = borrow(items)
+pub fn pub_view(items: [int]) -> Ref[[int]] from items = priv_borrow(items)
+
+fn head_or_zero(xs: [int]) -> int = match xs
+    Nil        => 0
+    Cons(h, t) => h
+
+## O4: `@gc` region-internal helper and `@freestanding` function with `with alloc = arena`
+fn gc_cycle_sum(n: int) -> int =
+    let a = GraphNode{id: n, next_id: n + 1} in
+    let b = GraphNode{id: a.next_id, next_id: a.id} in
+    a.id + b.id
+
+fn rc_new(v: int) -> rc[int] = v + 1000
+
+@freestanding fn kernel_alloc_task(arena: int) -> int =
+    with alloc = arena in
+    let handle = rc_new(42) in
+    arena + handle
+
+fn demo_file_move() -> int =
+    let fh = FileHandle{fd: 3, size: 120} in
+    let s1 = file_size(fh) in
+    let s2 = file_size(fh) in
+    let closed = close_file(own fh) in
+    s1 + s2 + closed
+
+fn demo_mut_borrow() -> int =
+    var counter = 50 in
+    add_delta(mut counter, 15)
+
+fn demo_region_view() -> int =
+    let nums = Cons(91, Cons(92, Nil)) in
+    let v = pub_view(nums) in
+    head_or_zero(v)
+
+print demo_file_move()
+print demo_mut_borrow()
+print run_with_defers(32)
+print run_errdefer(7)
+print run_errdefer(0 - 5)
+print demo_region_view()
+print gc_cycle_sum(10)
+print kernel_alloc_task(256)

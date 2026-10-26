@@ -1,0 +1,373 @@
+## --- Phase 3 Track O: ownership, borrow checker, region inference (`from`), and memory tiers (`06b_phase3.src`) ---
+## Gradual & fixpoint-safe: when a program uses no Track O constructs (`oany(prog) == 0`), `ocheck(prog)` returns
+## `prog` immediately with zero allocation, so `lumec.src` and all Stage 1/2 programs compile byte-identically.
+## When Track O constructs are present (`own`/`mut` params, `pub fn`, `@freestanding`, `@gc`, `resource type`,
+## `from <param>` return origins, `var`, `own <e>`, `mut <e>`, `defer`, `errdefer`, `with alloc`), `ocheck(prog)`
+## enforces O1 (O0001 use-after-move, O0002 move from borrowed param/field), O2 (O0010 immutable to mut, O0011
+## conflicting borrows, O0012 missing call-site `own`), O3 (O0020 escaping local borrow, O0021 missing/mismatched
+## `from <param>` origin on `pub fn`), and O4 (O0030 ambient heap allocation in `@freestanding` or `@gc` boundary
+## leak), then lowers surface Track O expression nodes into canonical Lume-Core (`LetIn`/`If`).
+
+fn omem(x, xs) = match xs
+    Nil        => 0
+    Cons(h, t) => if h == x then 1 else omem(x, t)
+
+fn orem(x, xs) = match xs
+    Nil        => Nil
+    Cons(h, t) => if h == x then orem(x, t) else Cons(h, orem(x, t))
+
+fn ostarts(s, p) = if count(s) < count(p) then 0 else slice(s, 0, count(p)) == p
+
+fn oany(prog) = match prog
+    Nil        => 0
+    Cons(h, t) => if oanystmt(h) == 1 then 1 else oany(t)
+
+fn oanystmt(st) = match st
+    OSig(nm, pubf, freef, pl, rty, fromp) => 1
+    OType(nm, k)                          => 1
+    Fn(nm, ps, body)                      => oanye(body)
+    Print(v)                              => oanye(v)
+    ExprS(v)                              => oanye(v)
+    _                                     => 0
+
+fn oanye(e) = match e
+    VarIn(nm, v, b)   => 1
+    OwnE(inner)       => 1
+    MutE(inner)       => 1
+    DeferE(c, b)      => 1
+    ErrDeferE(c, b)   => 1
+    WithAllocE(a, b)  => 1
+    LetIn(nm, v, b)   => if oanye(v) == 1 then 1 else oanye(b)
+    If(c, t, e2)      => if oanye(c) == 1 then 1 else if oanye(t) == 1 then 1 else oanye(e2)
+    Bin(op, l, r)     => if oanye(l) == 1 then 1 else oanye(r)
+    Call(nm, args)    => if nm == "borrow" or nm == "borrow_mut" or nm == "move" or nm == "clone" then 1 else oanyargs(args)
+    Field(o, fld)     => oanye(o)
+    Rec(items)        => oanyrec(items)
+    RecT(tn, items)   => oanyrec(items)
+    Match(sc, arms)   => if oanye(sc) == 1 then 1 else oanyarms(arms)
+    CT(inner)         => oanye(inner)
+    _                 => 0
+
+fn oanyargs(xs) = match xs
+    Nil        => 0
+    Cons(h, t) => if oanye(h) == 1 then 1 else oanyargs(t)
+
+fn oanyrec(xs) = match xs
+    Nil        => 0
+    Cons(h, t) => if oanye(h.val) == 1 then 1 else oanyrec(t)
+
+fn oanyarms(xs) = match xs
+    Nil        => 0
+    Cons(h, t) => if oanye(h.body) == 1 then 1 else oanyarms(t)
+
+## --- collect OSig, OType, and user function names ---
+fn ocollects(prog) = match prog
+    Nil        => Nil
+    Cons(h, t) => ocollects1(h, ocollects(t))
+
+fn ocollects1(st, rest) = match st
+    OSig(nm, pubf, freef, pl, rty, fromp) => Cons({nm: nm, pubf: pubf, freef: freef, pl: pl, rty: rty, fromp: fromp}, rest)
+    _                                     => rest
+
+fn ocollectt(prog) = match prog
+    Nil        => Nil
+    Cons(h, t) => ocollectt1(h, ocollectt(t))
+
+fn ocollectt1(st, rest) = match st
+    OType(nm, k) => Cons({nm: nm, kind: k}, rest)
+    _            => rest
+
+fn ocollectf(prog) = match prog
+    Nil        => Nil
+    Cons(h, t) => ocollectf1(h, ocollectf(t))
+
+fn ocollectf1(st, rest) = match st
+    Fn(nm, ps, body) => Cons({nm: nm, ps: ps, body: body}, rest)
+    _                => rest
+
+fn ocollectfnms(prog) = match prog
+    Nil        => Nil
+    Cons(h, t) => ocollectfnms1(h, ocollectfnms(t))
+
+fn ocollectfnms1(st, rest) = match st
+    Fn(nm, ps, body) => Cons(nm, rest)
+    _                => rest
+
+fn osiglookup(nm, osigs) = match osigs
+    Nil        => Nil
+    Cons(h, t) => if h.nm == nm then Cons(h, Nil) else osiglookup(nm, t)
+
+fn otypelookup(nm, otypes) = match otypes
+    Nil        => ""
+    Cons(h, t) => if h.nm == nm then h.kind else otypelookup(nm, t)
+
+fn oisgctype(ty, otypes) = match ty
+    TyName(n)     => if otypelookup(n, otypes) == "gc" then 1 else 0
+    TyList(e)     => oisgctype(e, otypes)
+    TyApply(n, e) => oisgctype(e, otypes)
+    _             => 0
+
+fn oisreftype(ty) = match ty
+    TyApply(n, e) => if n == "Ref" or n == "View" then 1 else 0
+    _             => 0
+
+fn obparams_pl(pl) = match pl
+    Nil        => Nil
+    Cons(p, r) => if p.cf == 0 or p.cf == 3 then Cons(p.pn, obparams_pl(r)) else obparams_pl(r)
+
+fn omvars_pl(pl) = match pl
+    Nil        => Nil
+    Cons(p, r) => if p.cf == 2 or p.cf == 3 then Cons(p.pn, omvars_pl(r)) else omvars_pl(r)
+
+fn oinit_origins(ps) = match ps
+    Nil        => Nil
+    Cons(h, t) => Cons({k: h, v: "param:" + h}, oinit_origins(t))
+
+fn olookup_origin(x, orgs) = match orgs
+    Nil        => ""
+    Cons(h, t) => if h.k == x then h.v else olookup_origin(x, t)
+
+fn obind_origin(x, v, orgs) = Cons({k: x, v: v}, orgs)
+
+## Intra-module quick origin inference for private helper functions (`borrow(p)` -> `p`)
+fn oquick_origin(e, orgs) = match e
+    Var(x)          => olookup_origin(x, orgs)
+    Field(o, fld)   => oquick_origin(o, orgs)
+    LetIn(nm, v, b) => let vo = oquick_origin(v, orgs) in oquick_origin(b, obind_origin(nm, if vo != "" then vo else "local:" + nm, orgs))
+    VarIn(nm, v, b) => let vo = oquick_origin(v, orgs) in oquick_origin(b, obind_origin(nm, if vo != "" then vo else "local:" + nm, orgs))
+    If(c, t, e2)    => let to = oquick_origin(t, orgs) in if to != "" then to else oquick_origin(e2, orgs)
+    DeferE(c, b)    => oquick_origin(b, orgs)
+    ErrDeferE(c, b) => oquick_origin(b, orgs)
+    WithAllocE(a, b) => oquick_origin(b, orgs)
+    Call(nm, args)  => if (nm == "borrow" or nm == "borrow_mut") and len(args) == 1 then "borrow:" + oquick_origin(ohd_e(args), orgs) else ""
+    _               => ""
+
+fn ohd_e(xs) = match xs
+    Nil        => Num(0)
+    Cons(h, t) => h
+
+fn ostrip_borrow(org) = if ostarts(org, "borrow:") == 1 then ostrip_borrow(slice(org, 7, count(org))) else org
+
+fn oinfer_priv_osigs(fns, osigs) = match fns
+    Nil        => osigs
+    Cons(f, r) => oinfer_priv_one(f, oinfer_priv_osigs(r, osigs))
+
+fn oinfer_priv_one(f, osigs) = let m = osiglookup(f.nm, osigs) in match m
+    Cons(sg, r) => osigs
+    Nil         => let bo = oquick_origin(f.body, oinit_origins(f.ps)) in if ostarts(bo, "borrow:param:") == 1 then Cons({nm: f.nm, pubf: 0, freef: 0, pl: Nil, rty: TyAny, fromp: slice(ostrip_borrow(bo), 6, count(ostrip_borrow(bo)))}, osigs) else osigs
+
+## --- call-site conflict & mode helpers ---
+fn ois_own_expr(e) = match e
+    OwnE(inner)    => 1
+    Call(nm, args) => if nm == "move" and len(args) == 1 then 1 else 0
+    _              => 0
+
+fn ois_mut_expr(e) = match e
+    MutE(inner) => 1
+    _           => 0
+
+fn omentions_var(x, e) = match e
+    Var(nm)          => if nm == x then 1 else 0
+    OwnE(inner)      => omentions_var(x, inner)
+    MutE(inner)      => omentions_var(x, inner)
+    Field(o, fld)    => omentions_var(x, o)
+    Bin(op, l, r)    => if omentions_var(x, l) == 1 then 1 else omentions_var(x, r)
+    If(c, t, e2)     => if omentions_var(x, c) == 1 then 1 else if omentions_var(x, t) == 1 then 1 else omentions_var(x, e2)
+    LetIn(nm, v, b)  => if omentions_var(x, v) == 1 then 1 else if nm == x then 0 else omentions_var(x, b)
+    VarIn(nm, v, b)  => if omentions_var(x, v) == 1 then 1 else if nm == x then 0 else omentions_var(x, b)
+    Call(nm, args)   => omentions_args(x, args)
+    Rec(items)       => omentions_rec(x, items)
+    RecT(tn, items)  => omentions_rec(x, items)
+    _                => 0
+
+fn omentions_args(x, xs) = match xs
+    Nil        => 0
+    Cons(h, t) => if omentions_var(x, h) == 1 then 1 else omentions_args(x, t)
+
+fn omentions_rec(x, xs) = match xs
+    Nil        => 0
+    Cons(h, t) => if omentions_var(x, h.val) == 1 then 1 else omentions_rec(x, t)
+
+fn ocount_var_args(x, args) = match args
+    Nil        => 0
+    Cons(h, t) => omentions_var(x, h) + ocount_var_args(x, t)
+
+fn omut_root(e) = match e
+    MutE(inner)    => omut_root_plain(inner)
+    Call(nm, args) => if nm == "borrow_mut" and len(args) == 1 then omut_root_plain(ohd_e(args)) else ""
+    _              => ""
+
+fn omut_root_plain(e) = match e
+    Var(x)        => x
+    MutE(inner)   => omut_root_plain(inner)
+    Field(o, fld) => omut_root_plain(o)
+    _             => ""
+
+fn ocollect_mut_args(args, pl) = match args
+    Nil        => Nil
+    Cons(a, r) => ocollect_mut_arg1(a, r, pl)
+
+fn ocollect_mut_arg1(a, r, pl) = let mr = omut_root(a) in let rest = ocollect_mut_args(r, opl_tl(pl)) in if mr != "" then Cons(mr, rest) else if opl_cf(pl) == 3 then let pr = omut_root_plain(a) in (if pr != "" then Cons(pr, rest) else rest) else rest
+
+fn opl_cf(pl) = match pl
+    Nil        => 0
+    Cons(p, r) => p.cf
+
+fn opl_pn(pl) = match pl
+    Nil        => ""
+    Cons(p, r) => p.pn
+
+fn opl_tl(pl) = match pl
+    Nil        => Nil
+    Cons(p, r) => r
+
+fn ochk_conflicts(fnm, muts, args) = match muts
+    Nil         => 0
+    Cons(mx, r) => if ocount_var_args(mx, args) > 1 then ctfail("lume: borrow error [O0011]: conflicting borrow of '" + mx + "' in call to '" + fnm + "' (cannot borrow '" + mx + "' as mutable while also borrowing it in the same call)\n") else ochk_conflicts(fnm, r, args)
+
+fn ochk_call_modes(fnm, args, pl, ctx) = match pl
+    Nil        => 0
+    Cons(p, r) => if p.cf == 1 then ochk_call_modes(fnm, args, r, ctx) else ochk_call_mode1(fnm, args, p, r, ctx)
+
+fn ochk_call_mode1(fnm, args, p, r, ctx) = match args
+    Nil         => 0
+    Cons(a, ar) => if p.cf == 2 and ois_own_expr(a) == 0 then ctfail("lume: ownership error [O0012]: parameter '" + p.pn + "' of '" + fnm + "' takes ownership; mark argument with 'own' at call site (help: write 'own <arg>')\n") else if p.cf == 3 then ochk_mut_param(fnm, p.pn, a, ar, r, ctx) else ochk_call_modes(fnm, ar, r, ctx)
+
+fn ochk_mut_param(fnm, pn, a, ar, r, ctx) = let vnm = omut_root_plain(a) in if vnm != "" and omem(vnm, ctx.mvars) == 0 then ctfail("lume: borrow error [O0010]: cannot pass immutable binding '" + vnm + "' to 'mut' parameter '" + pn + "' of '" + fnm + "' (help: declare 'var " + vnm + "' instead of 'let " + vnm + "')\n") else ochk_call_modes(fnm, ar, r, ctx)
+
+fn oarg_for_param(fromp, args, pl) = match pl
+    Nil        => Num(0)
+    Cons(p, r) => if p.cf == 1 then oarg_for_param(fromp, args, r) else oarg_for_param2(fromp, args, p, r)
+
+fn oarg_for_param2(fromp, args, p, r) = match args
+    Nil         => Num(0)
+    Cons(a, ar) => if p.pn == fromp then a else oarg_for_param(fromp, ar, r)
+
+fn ois_heap_alloc(nm) = if nm == "rc_new" or nm == "arc_new" or nm == "alloc_heap" or nm == "table_new" or nm == "box_new" then 1 else 0
+
+## --- core expression ownership/borrow/region check: returns {moved, origin} ---
+fn ochk_own_field(o, fld, ctx, moved) = match o
+    Var(x) => if omem(x, moved) == 1 then ctfail("lume: ownership error [O0001]: use of moved value '" + x + "' (moved earlier via 'own " + x + "'; help: borrow '" + x + "' instead or call 'clone(" + x + ")')\n") else if omem(x, ctx.bparams) == 1 or ostarts(olookup_origin(x, ctx.origins), "borrow:") == 1 then ctfail("lume: ownership error [O0002]: cannot move out of borrowed field '" + x + "." + fld + "' (help: borrow '" + x + "." + fld + "' or clone the field)\n") else {moved: Cons(x, moved), origin: ""}
+    _      => let r = ochke(o, ctx, moved) in {moved: r.moved, origin: ""}
+
+fn ochk_own_target(inner, ctx, moved) = match inner
+    Var(x)        => if omem(x, moved) == 1 then ctfail("lume: ownership error [O0001]: use of moved value '" + x + "' (moved earlier via 'own " + x + "'; help: borrow '" + x + "' instead or call 'clone(" + x + ")')\n") else if omem(x, ctx.bparams) == 1 or ostarts(olookup_origin(x, ctx.origins), "borrow:") == 1 then ctfail("lume: ownership error [O0002]: cannot move out of borrowed parameter '" + x + "' (help: change parameter mode to 'own " + x + "' or call 'clone(" + x + ")')\n") else {moved: Cons(x, moved), origin: ""}
+    Field(o, fld) => ochk_own_field(o, fld, ctx, moved)
+    _             => let r = ochke(inner, ctx, moved) in {moved: r.moved, origin: ""}
+
+fn ochk_mut_field(o, fld, ctx, moved) = match o
+    Var(x) => if omem(x, moved) == 1 then ctfail("lume: ownership error [O0001]: use of moved value '" + x + "' (moved earlier via 'own " + x + "'; help: borrow '" + x + "' instead or call 'clone(" + x + ")')\n") else if omem(x, ctx.mvars) == 0 then ctfail("lume: borrow error [O0010]: cannot borrow field of immutable binding '" + x + "' as 'mut' (help: declare 'var " + x + "' instead of 'let " + x + "')\n") else {moved: moved, origin: "borrow:" + olookup_origin(x, ctx.origins)}
+    _      => let r = ochke(o, ctx, moved) in {moved: r.moved, origin: ""}
+
+fn ochk_mut_target(inner, ctx, moved) = match inner
+    Var(x)        => if omem(x, moved) == 1 then ctfail("lume: ownership error [O0001]: use of moved value '" + x + "' (moved earlier via 'own " + x + "'; help: borrow '" + x + "' instead or call 'clone(" + x + ")')\n") else if omem(x, ctx.mvars) == 0 then ctfail("lume: borrow error [O0010]: cannot borrow immutable binding '" + x + "' as 'mut' (help: declare 'var " + x + "' instead of 'let " + x + "')\n") else {moved: moved, origin: "borrow:" + olookup_origin(x, ctx.origins)}
+    Field(o, fld) => ochk_mut_field(o, fld, ctx, moved)
+    _             => let r = ochke(inner, ctx, moved) in {moved: r.moved, origin: ""}
+
+fn octx_bind(ctx, nm, ismut, org) = {fnm: ctx.fnm, pubf: ctx.pubf, freef: ctx.freef, halloc: ctx.halloc, bparams: orem(nm, ctx.bparams), mvars: if ismut == 1 then Cons(nm, orem(nm, ctx.mvars)) else orem(nm, ctx.mvars), pnames: ctx.pnames, locals: Cons(nm, ctx.locals), origins: obind_origin(nm, if org != "" then org else "local:" + nm, ctx.origins), osigs: ctx.osigs, otypes: ctx.otypes}
+
+fn octx_with_alloc(ctx) = {fnm: ctx.fnm, pubf: ctx.pubf, freef: ctx.freef, halloc: 1, bparams: ctx.bparams, mvars: ctx.mvars, pnames: ctx.pnames, locals: ctx.locals, origins: ctx.origins, osigs: ctx.osigs, otypes: ctx.otypes}
+
+fn ochke(e, ctx, moved) = match e
+    Var(x) => if omem(x, moved) == 1 then ctfail("lume: ownership error [O0001]: use of moved value '" + x + "' (moved earlier via 'own " + x + "'; help: borrow '" + x + "' instead or call 'clone(" + x + ")')\n") else {moved: moved, origin: olookup_origin(x, ctx.origins)}
+    Field(o, fld) => let ro = ochke(o, ctx, moved) in {moved: ro.moved, origin: ro.origin}
+    OwnE(inner) => ochk_own_target(inner, ctx, moved)
+    MutE(inner) => ochk_mut_target(inner, ctx, moved)
+    LetIn(nm, v, b) => let rv = ochke(v, ctx, moved) in ochke(b, octx_bind(ctx, nm, 0, rv.origin), orem(nm, rv.moved))
+    VarIn(nm, v, b) => let rv = ochke(v, ctx, moved) in ochke(b, octx_bind(ctx, nm, 1, rv.origin), orem(nm, rv.moved))
+    DeferE(c, b) => let rb = ochke(b, ctx, moved) in let rc = ochke(c, ctx, rb.moved) in {moved: rc.moved, origin: rb.origin}
+    ErrDeferE(c, b) => let rb = ochke(b, ctx, moved) in let rc = ochke(c, ctx, rb.moved) in {moved: rc.moved, origin: rb.origin}
+    WithAllocE(a, b) => let ra = ochke(a, ctx, moved) in ochke(b, octx_with_alloc(ctx), ra.moved)
+    Bin(op, l, r) => let rl = ochke(l, ctx, moved) in let rr = ochke(r, ctx, rl.moved) in {moved: rr.moved, origin: ""}
+    If(c, t, e2) => let rc = ochke(c, ctx, moved) in let rt = ochke(t, ctx, rc.moved) in let re = ochke(e2, ctx, rc.moved) in {moved: app(rt.moved, re.moved), origin: if rt.origin != "" then rt.origin else re.origin}
+    Rec(items) => {moved: ochkrec(items, ctx, moved), origin: ""}
+    RecT(tn, items) => {moved: ochkrec(items, ctx, moved), origin: ""}
+    Match(sc, arms) => let rsc = ochke(sc, ctx, moved) in {moved: ochkarms(arms, ctx, rsc.moved), origin: ""}
+    CT(inner) => ochke(inner, ctx, moved)
+    Call(nm, args) => ochkcall(nm, args, ctx, moved)
+    _ => {moved: moved, origin: ""}
+
+fn ochkrec(items, ctx, moved) = match items
+    Nil        => moved
+    Cons(h, t) => let r = ochke(h.val, ctx, moved) in ochkrec(t, ctx, r.moved)
+
+fn ochkarms(arms, ctx, moved) = match arms
+    Nil        => moved
+    Cons(h, t) => let r = ochke(h.body, ctx, moved) in app(r.moved, ochkarms(t, ctx, moved))
+
+fn ochkargs(args, ctx, moved) = match args
+    Nil        => moved
+    Cons(h, t) => let r = ochke(h, ctx, moved) in ochkargs(t, ctx, r.moved)
+
+fn ochkcall(fnm, args, ctx, moved) = if ctx.freef == 1 and ctx.halloc == 0 and ois_heap_alloc(fnm) == 1 then ctfail("lume: ownership error [O0030]: ambient heap allocation '" + fnm + "' in '@freestanding' function '" + ctx.fnm + "' (help: pass an explicit allocator via 'with alloc = <arena> in ...')\n") else if fnm == "move" and len(args) == 1 then ochk_own_target(ohd_e(args), ctx, moved) else if fnm == "borrow" and len(args) == 1 then let ra = ochke(ohd_e(args), ctx, moved) in {moved: ra.moved, origin: "borrow:" + ra.origin} else if fnm == "borrow_mut" and len(args) == 1 then ochk_mut_target(ohd_e(args), ctx, moved) else ochkcall_sig(fnm, args, osiglookup(fnm, ctx.osigs), ctx, moved)
+
+fn ochkcall_sig(fnm, args, msig, ctx, moved) = match msig
+    Nil          => let z = ochk_conflicts(fnm, ocollect_mut_args(args, Nil), args) in {moved: ochkargs(args, ctx, moved), origin: ""}
+    Cons(sg, sr) => let z1 = ochk_call_modes(fnm, args, sg.pl, ctx) in let z2 = ochk_conflicts(fnm, ocollect_mut_args(args, sg.pl), args) in let mv2 = ochkargs(args, ctx, moved) in if sg.fromp != "" then let fa = oarg_for_param(sg.fromp, args, sg.pl) in let rfa = ochke(fa, ctx, moved) in {moved: mv2, origin: "borrow:" + rfa.origin} else {moved: mv2, origin: ""}
+
+## --- check function return region rules O0020 & O0021 ---
+fn ochk_ret_origin(nm, pubf, fromp, rty, pnames, org) = let core_org = ostrip_borrow(org) in if ostarts(org, "borrow:") == 1 and ostarts(core_org, "local:") == 1 then let lx = slice(core_org, 6, count(core_org)) in ctfail("lume: region error [O0020]: borrowed value '" + lx + "' does not live long enough (escapes local scope of '" + nm + "')\n") else if ostarts(org, "borrow:") == 1 and ostarts(core_org, "param:") == 1 then let px = slice(core_org, 6, count(core_org)) in (if pubf == 1 and fromp == "" then ctfail("lume: region error [O0021]: public function '" + nm + "' returns a borrow from parameter '" + px + "' without an origin clause (help: add 'from " + px + "' to the return type)\n") else if fromp != "" and fromp != px then ctfail("lume: region error [O0021]: function '" + nm + "' declares 'from " + fromp + "' but returns a borrow from parameter '" + px + "' (help: change origin clause to 'from " + px + "')\n") else 1) else if pubf == 1 and oisreftype(rty) == 1 and fromp == "" then ctfail("lume: region error [O0021]: public function '" + nm + "' returns a borrowed view without a 'from <param>' origin clause\n") else 1
+
+fn ochkfn(nm, ps, body, ot) = ochkfn2(nm, ps, body, osiglookup(nm, ot.osigs), ot)
+
+fn ochkfn2(nm, ps, body, msig, ot) = match msig
+    Nil          => let ctx = {fnm: nm, pubf: 0, freef: 0, halloc: 0, bparams: ps, mvars: Nil, pnames: ps, locals: Nil, origins: oinit_origins(ps), osigs: ot.osigs, otypes: ot.otypes} in let rb = ochke(body, ctx, Nil) in ochk_ret_origin(nm, 0, "", TyAny, ps, rb.origin)
+    Cons(sg, sr) => if sg.pubf == 1 and oisgctype(sg.rty, ot.otypes) == 1 then ctfail("lume: ownership error [O0030]: public function '" + nm + "' cannot expose '@gc' region type across a public module boundary\n") else let bparams = if isnil(sg.pl) == 1 then ps else obparams_pl(sg.pl) in let mvars = omvars_pl(sg.pl) in let ctx = {fnm: nm, pubf: sg.pubf, freef: sg.freef, halloc: 0, bparams: bparams, mvars: mvars, pnames: ps, locals: Nil, origins: oinit_origins(ps), osigs: ot.osigs, otypes: ot.otypes} in let rb = ochke(body, ctx, Nil) in ochk_ret_origin(nm, sg.pubf, sg.fromp, sg.rty, ps, rb.origin)
+
+fn ochkstmts(prog, ot, moved) = match prog
+    Nil        => 1
+    Cons(h, t) => ochkstmt1(h, t, ot, moved)
+
+fn ochkstmt1(st, rest, ot, moved) = match st
+    Fn(nm, ps, body) => let z = ochkfn(nm, ps, body, ot) in ochkstmts(rest, ot, moved)
+    Print(v)         => let ctx = {fnm: "<main>", pubf: 0, freef: 0, halloc: 0, bparams: Nil, mvars: Nil, pnames: Nil, locals: Nil, origins: Nil, osigs: ot.osigs, otypes: ot.otypes} in let r = ochke(v, ctx, moved) in ochkstmts(rest, ot, r.moved)
+    ExprS(v)         => let ctx = {fnm: "<main>", pubf: 0, freef: 0, halloc: 0, bparams: Nil, mvars: Nil, pnames: Nil, locals: Nil, origins: Nil, osigs: ot.osigs, otypes: ot.otypes} in let r = ochke(v, ctx, moved) in ochkstmts(rest, ot, r.moved)
+    _                => ochkstmts(rest, ot, moved)
+
+## --- lower Track O surface AST nodes into canonical Lume-Core (`LetIn`/`If`) ---
+fn ois_intrinsic(nm, ufns) = if (nm == "borrow" or nm == "borrow_mut" or nm == "move" or nm == "clone") and omem(nm, ufns) == 0 then 1 else 0
+
+fn olowere(e, ufns, d) = match e
+    VarIn(nm, v, b)  => LetIn(nm, olowere(v, ufns, d), olowere(b, ufns, d + 1))
+    OwnE(inner)      => olowere(inner, ufns, d)
+    MutE(inner)      => olowere(inner, ufns, d)
+    DeferE(c, b)     => let vn = "_d_val_" + str(d) in let rn = "_d_run_" + str(d) in LetIn(vn, olowere(b, ufns, d + 1), LetIn(rn, olowere(c, ufns, d + 2), Var(vn)))
+    ErrDeferE(c, b)  => let vn = "_ed_val_" + str(d) in let rn = "_ed_run_" + str(d) in LetIn(vn, olowere(b, ufns, d + 1), If(Bin("<", Var(vn), Num(0)), LetIn(rn, olowere(c, ufns, d + 2), Var(vn)), Var(vn)))
+    WithAllocE(a, b) => LetIn("_alloc_ctx_" + str(d), olowere(a, ufns, d + 1), olowere(b, ufns, d + 2))
+    LetIn(nm, v, b)  => LetIn(nm, olowere(v, ufns, d), olowere(b, ufns, d + 1))
+    If(c, t, e2)     => If(olowere(c, ufns, d), olowere(t, ufns, d + 1), olowere(e2, ufns, d + 2))
+    Bin(op, l, r)    => Bin(op, olowere(l, ufns, d), olowere(r, ufns, d + 1))
+    Call(nm, args)   => if ois_intrinsic(nm, ufns) == 1 and len(args) == 1 then olowere(ohd_e(args), ufns, d) else Call(nm, olowerargs(args, ufns, d))
+    Field(o, fld)    => Field(olowere(o, ufns, d), fld)
+    Rec(items)       => Rec(olowerrec(items, ufns, d))
+    RecT(tn, items)  => RecT(tn, olowerrec(items, ufns, d))
+    Match(sc, arms)  => Match(olowere(sc, ufns, d), olowerarms(arms, ufns, d + 1))
+    CT(inner)        => CT(olowere(inner, ufns, d))
+    _                => e
+
+fn olowerargs(xs, ufns, d) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons(olowere(h, ufns, d), olowerargs(t, ufns, d + 1))
+
+fn olowerrec(xs, ufns, d) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons({key: h.key, val: olowere(h.val, ufns, d)}, olowerrec(t, ufns, d + 1))
+
+fn olowerarms(xs, ufns, d) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons({pat: h.pat, body: olowere(h.body, ufns, d)}, olowerarms(t, ufns, d + 1))
+
+fn olowerprog(prog, ufns) = match prog
+    Nil        => Nil
+    Cons(h, t) => olowerstmt(h, olowerprog(t, ufns), ufns)
+
+fn olowerstmt(st, rest, ufns) = match st
+    OSig(nm, pubf, freef, pl, rty, fromp) => rest
+    OType(nm, k)                          => rest
+    Fn(nm, ps, body)                      => Cons(Fn(nm, ps, olowere(body, ufns, 0)), rest)
+    Print(v)                              => Cons(Print(olowere(v, ufns, 0)), rest)
+    ExprS(v)                              => Cons(ExprS(olowere(v, ufns, 0)), rest)
+    _                                     => Cons(st, rest)
+
+fn ocheck(prog) = if oany(prog) == 0 then prog else ocheckforce(prog)
+fn ocheckforce(prog) = let raw_osigs = ocollects(prog) in let fns = ocollectf(prog) in let osigs = oinfer_priv_osigs(fns, raw_osigs) in let otypes = ocollectt(prog) in let ufns = ocollectfnms(prog) in let z = ochkstmts(prog, {osigs: osigs, otypes: otypes}, Nil) in olowerprog(prog, ufns)
