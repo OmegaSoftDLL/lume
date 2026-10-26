@@ -902,6 +902,7 @@ fn vchk_expr_e(e, fnm, ot) = match e
     Call(cnm, args)         => vchk_call_req(cnm, args, fnm, vsiglookup(cnm, ot.vsigs), ot.fns) + vchk_args_e(args, fnm, ot)
     RecT(tn, items)         => vchk_rect_inv(tn, items, fnm, vinvlookup(tn, ot.invs), ot.fns) + vchk_rec_e(items, fnm, ot)
     Rec(items)              => vchk_rec_e(items, fnm, ot)
+    Field(o, fld)           => vchk_expr_e(o, fnm, ot)
     Bin(op, l, r)           => vchk_expr_e(l, fnm, ot) + vchk_expr_e(r, fnm, ot)
     If(c, t, e2)            => vchk_expr_e(c, fnm, ot) + vchk_expr_e(t, fnm, ot) + vchk_expr_e(e2, fnm, ot)
     LetIn(nm, v, b)         => vchk_expr_e(v, fnm, ot) + vchk_expr_e(b, fnm, ot)

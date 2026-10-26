@@ -801,7 +801,7 @@ PY
     "$ntmp/lc" <"$ntmp/cc_bad2.src" >"$ntmp/cc_bad2.s" 2>"$ntmp/cc_bad2.err"; ccb2=$?
     { cat "$ntmp/cc_base.src"; printf 'print (decscan("1.2", 0, 0, 0 - 1, 0, 0)).scale\n'; } >"$ntmp/cc_bad3.src"
     "$ntmp/lc" <"$ntmp/cc_bad3.src" >"$ntmp/cc_bad3.s" 2>"$ntmp/cc_bad3.err"; ccb3=$?
-    { cat "$ntmp/cc_base.src"; printf 'print findcloseb("a{x}", 0 - 1)\n'; } >"$ntmp/cc_bad4.src"
+    { cat "$ntmp/cc_base.src"; printf 'print findcloseb("xy}b", 0 - 1)\n'; } >"$ntmp/cc_bad4.src"
     "$ntmp/lc" <"$ntmp/cc_bad4.src" >"$ntmp/cc_bad4.s" 2>"$ntmp/cc_bad4.err"; ccb4=$?
     { cat "$ntmp/cc_base.src"; printf 'print len((parsevariantend("Leaf", 0 - 1, Nil)).items)\n'; } >"$ntmp/cc_bad5.src"
     "$ntmp/lc" <"$ntmp/cc_bad5.src" >"$ntmp/cc_bad5.s" 2>/dev/null; "$ntmp/lasm" <"$ntmp/cc_bad5.s" >"$ntmp/cc_bad5.elf" 2>/dev/null; chmod +x "$ntmp/cc_bad5.elf"; "$ntmp/cc_bad5.elf" >/dev/null 2>"$ntmp/cc_bad5.err"; ccb5=$?

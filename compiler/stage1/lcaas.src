@@ -1019,6 +1019,8 @@ fn cs_vchk_rect_inv(tn, items, fnm, miv, ft) = match miv
 fn cs_vchk_expr_e(e, fnm, vsigs, invs, ft) = match e
     Call(cnm, args) => let r1 = cs_vchk_call_req(cnm, args, fnm, cs_vsiglookup(cnm, vsigs), ft) in let r2 = cs_vchk_args_e(args, fnm, vsigs, invs, ft) in {proofs: cs_app(r1.proofs, r2.proofs), diags: cs_app(r1.diags, r2.diags)}
     RecT(tn, items) => let r1 = cs_vchk_rect_inv(tn, items, fnm, cs_vinvlookup(tn, invs), ft) in let r2 = cs_vchk_rec_e(items, fnm, vsigs, invs, ft) in {proofs: cs_app(r1.proofs, r2.proofs), diags: cs_app(r1.diags, r2.diags)}
+    Rec(items)      => cs_vchk_rec_e(items, fnm, vsigs, invs, ft)
+    Field(o, fld)   => cs_vchk_expr_e(o, fnm, vsigs, invs, ft)
     Bin(op, l, r)   => let r1 = cs_vchk_expr_e(l, fnm, vsigs, invs, ft) in let r2 = cs_vchk_expr_e(r, fnm, vsigs, invs, ft) in {proofs: cs_app(r1.proofs, r2.proofs), diags: cs_app(r1.diags, r2.diags)}
     If(c, t, e2)    => let r1 = cs_vchk_expr_e(c, fnm, vsigs, invs, ft) in let r2 = cs_vchk_expr_e(t, fnm, vsigs, invs, ft) in let r3 = cs_vchk_expr_e(e2, fnm, vsigs, invs, ft) in {proofs: cs_app(r1.proofs, cs_app(r2.proofs, r3.proofs)), diags: cs_app(r1.diags, cs_app(r2.diags, r3.diags))}
     LetIn(nm, v, b) => let r1 = cs_vchk_expr_e(v, fnm, vsigs, invs, ft) in let r2 = cs_vchk_expr_e(b, fnm, vsigs, invs, ft) in {proofs: cs_app(r1.proofs, r2.proofs), diags: cs_app(r1.diags, r2.diags)}

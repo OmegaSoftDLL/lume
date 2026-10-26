@@ -25,7 +25,7 @@ fn hbind(n, ty, subst) requires n >= 0 ensures isnil(result) == 0 = Cons({tv: n,
 print numend("1234x", 0)
 print decimalend("12.34x", 0)
 print (decscan("12.34", 0, 0, 0, 0, 0)).scale
-print findcloseb("a{xy}b", 2)
+print findcloseb("xy}b", 0)
 print len((parsevariantend("Leaf", 1, Nil)).items)
 print isnil((parsetypedecimal2(10, 2, Nil)).rest)
 print let ps0 = Cons("a", Cons("b", Nil)) in let env0 = henv0(ps0, 0) in let sb0 = hbind(0, TyName("int"), Nil) in let inf0 = tifn3(Num(0), ps0, env0, {subst: sb0}) in len(env0) + len(inf0.iptypes) + len(sb0)
