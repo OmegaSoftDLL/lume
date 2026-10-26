@@ -40,7 +40,14 @@ fn skiprb(ts) = if headtext(ts) == "}" then droponce(ts) else ts
 fn recentries(ts) = if headtext(ts) == "}" then {items: Nil, rest: droponce(ts)} else recmore(headtext(ts), expr(dropkw(droponce(ts), ":")))
 fn recmore(k, rv) = if headtext(rv.rest) == "," then let rr = recentries(droponce(rv.rest)) in {items: Cons({key: k, val: rv.node}, rr.items), rest: rr.rest} else {items: Cons({key: k, val: rv.node}, Nil), rest: skiprb(rv.rest)}
 fn dropkw(ts, kw) = if headtext(ts) == kw then droponce(ts) else ts
-fn parseif(t) = let rc = expr(t) in let tb = expr(dropkw(rc.rest, "then")) in let eb = expr(dropkw(tb.rest, "else")) in {node: If(rc.node, tb.node, eb.node), rest: eb.rest}
+## F4 (front-end unification): `if c then t elif c2 then t2 ... else e` is the surface's chained-if form; it
+## desugars to the core's nested `If` AST (`elif X` == `else if X`). The plain `else` path is byte-identical to
+## before, so lumec.src (which uses `else if`, never `elif`) parses unchanged and the self-host fixpoint holds.
+fn parseif(t) = parseifcore(t)
+fn parseifcore(t) = let rc = expr(t) in let tb = expr(dropkw(rc.rest, "then")) in parseifelse(rc.node, tb.node, tb.rest)
+fn parseifelse(c, tb, rest) = if headtext(rest) == "elif" then parseifelif(c, tb, parseifcore(droponce(rest))) else parseifplain(c, tb, expr(dropkw(rest, "else")))
+fn parseifelif(c, tb, r) = {node: If(c, tb, r.node), rest: r.rest}
+fn parseifplain(c, tb, eb) = {node: If(c, tb, eb.node), rest: eb.rest}
 fn parselet(t) = let nm = headtext(t) in let rv = expr(dropkw(droponce(t), "=")) in let rb = expr(dropkw(rv.rest, "in")) in {node: LetIn(nm, rv.node, rb.node), rest: rb.rest}
 fn postloop(r) = if headtext(r.rest) == "." then postloop({node: Field(r.node, headtext(droponce(r.rest))), rest: droponce(droponce(r.rest))}) else r
 fn post(ts) = postloop(prim(ts))

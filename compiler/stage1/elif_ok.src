@@ -1,0 +1,3 @@
+## F4: the surface's chained `elif` form desugars to the core's nested If AST. grade(85) = "B".
+fn grade(n: int) -> str = if n >= 90 then "A" elif n >= 80 then "B" elif n >= 70 then "C" else "F"
+print grade(85)
