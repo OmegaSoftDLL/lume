@@ -77,7 +77,13 @@ getting stuck), one green PR with a regression test, and the **self-host fixpoin
   `comptime` assertions, C `static_assert`. Superior: the condition may call pure user functions (C2), runs fully
   at build time with exact integers, and emits an AI-legible error.* NOT yet (**C4b**): precomputed tables and
   build-time data embedding.
-- **C4b** precomputed tables, build-time data embedding.
+- **C4b ✅ done (precomputed tables)** a `comptime` whose body is a pure function returning a data structure
+  (e.g. a list) folds the **whole table** at compile time: every element is computed during the build and the
+  generating function is never called at runtime — only the constant table survives (proven by `grep -c 'call
+  squares' == 0` on the emitted asm). *Ref: Zig comptime tables, D's CTFE.* NOT yet, deferred by design: **build-time
+  data embedding** (`embed(file)`, à la Zig `@embedFile`) reads a file during compilation, which is an I/O
+  **capability** surface — it belongs behind the P26 capability model (like `lume pkg`'s `allow = [...]`), not a
+  casual builtin, so it is left for a dedicated capability-gated design rather than shipped unguarded.
 
 ### M — macros (metaprogramming)
 - **M1 ✅ done (#129)** the AST as a first-class comptime value (`compiler/stage1/lume/03_comptime.src`): `quote(<expr>)` reifies any Lume-Core expression into first-class algebraic constructor values (`Num(n)`, `Str(s)`, `Var(nm)`, `Bin(op, l, r)`, `If(c, t, e2)`, `LetIn(nm, v, b)`, `Call(nm, args)` with `Cons`/`Nil` argument lists) — the **exact same constructor vocabulary** `lumec.src` uses internally. `ceval` now evaluates ADT constructors (`cv_ctor`), structural equality `==`/`!=` over AST/constructor trees, pure string/int builtins (`str`, `count`, `at`, `slice`, `toint`, `ord`), and **`match` pattern-matching at compile time** (`PWild`, `PInt`, `PStr`, `PBind`, `PCons`), and `splice(<expr>)` reflects a comptime-computed AST value back into a live compiler AST node (validated for arity and operator legality via `ctfail`) that is subsequently compiled to native x86-64 with zero runtime overhead. *Ref: Lisp homoiconicity, Nim. Superior to Lisp/Nim: typed algebraic AST constructors with full `match` pattern matching (including string/int sub-patterns like `Bin("+", l, Num(0)) => l`) and compile-time structural validation on `splice`.*
