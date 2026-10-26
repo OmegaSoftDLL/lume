@@ -118,13 +118,12 @@ getting stuck), one green PR with a regression test, and the **self-host fixpoin
 - **E2 ✅ done** automated evolution gate: every PR runs `make bootstrap` in CI, asserting the triple
   self-build stays bit-identical, alongside `make test`/`asan`. Any change that breaks self-hosting is
   rejected automatically — the prerequisite for safe multi-contributor work. *Ref: our staged bootstrap + CI; `docs/04-roadmap.md`.*
-- **E1a ✅ done** compiler-as-a-service: `lume compile [--json] [--run] <file.src>` runs the self-hosted compiler
+- **E1a ✅ done (#138)** compiler-as-a-service: `lume compile [--json] [--run] <file.src>` runs the self-hosted compiler
   and returns a machine-readable result — `{ok, exit, asm_lines, diagnostics, ran, run_exit, stdout}` — so an agent
   (or the E3 loop) can submit source and read back structured diagnostics, the emitted assembly size, and, with
   `--run`, the program's native stdout, without scraping the CLI. The compiler itself is unchanged (source in →
-  diagnostics / asm / result out). *Ref: Roslyn (C#), rustc query API, clangd.* NOT yet (**E1b**): an in-process
-  library API that also returns the AST as data.
-- **E1b** in-process compiler library API (AST/typed-tree out), depends on F3b. *Ref: Roslyn, rustc query API.*
+  diagnostics / asm / result out). *Ref: Roslyn (C#), rustc query API, clangd.*
+- **E1b ✅ done** in-process compiler library API (`compiler/stage1/lcaas.src` + `compiler/stage1/lume/07_driver.src`, wired into `use lcaas` and `lume agent`): exposes the Lume-Core compiler pipeline both as an in-process callable Lume-Core library (`use lcaas`: `caas_compile`, `caas_check`, `caas_ast`, `caas_expand`, `caas_symbols`, `caas_asm`, `caas_eval`, `caas_json`) and as a structured JSON query service (`lume agent [check|compile|ast|expand|symbols|eval] <file.src>`). Given source text in memory, `caas_compile(src)` returns `{ok, diagnostics, symbols, ast_sexpr, expanded_sexpr, asm, result}` without ever aborting the host process on invalid input, accumulating multiple F1 (`T1001`/`T1002`/`T1003`), F2 (`T2001`/`T2002`), C3 (`T3001`), and C1/C2/M1/M2 (`C1001`) errors in a single pass with deterministic AI-first fix-it suggestions (suggesting closest declared constructors or record fields) alongside the pre- and post-comptime/macro-expanded ASTs, native x86-64 assembly, and evaluated execution result. *Ref: Roslyn, rustc query API. Superior to Roslyn/clangd: single unified in-memory request returns multi-error diagnostics + deterministic fix-its + macro-expanded AST + native x86-64 asm + evaluated execution result, callable directly inside Lume-Core programs (`use lcaas`) for self-evolution (E3).*
 - **E3** the governance loop: an AI proposes a change via E1, the E2 gates run automatically, a human approves. *Ref: `docs/04-roadmap.md`.*
 
 ## Recommended order

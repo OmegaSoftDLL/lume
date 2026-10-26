@@ -1,0 +1,692 @@
+## lcaas.src -- Lume Compiler-as-a-Service (Track E, brick E1; Principles P1, P28, P30, P31).
+## Exposes `lumec` as both an in-process callable Lume-Core library (`use lcaas`) and a
+## native JSON query agent (`lume agent`).
+##
+## Given any Lume source string `src`, `caas_compile(src)` runs lexing, parsing, symbol
+## extraction, non-aborting multi-diagnostic F1/F2/C3/C1/M1/M2 checking with AI-first
+## fix-it suggestions, C3 generic type-argument erasure, C1/C2/M1/M2 comptime & hygienic
+## quasiquote expansion, x86-64 native assembly generation, and in-memory execution:
+##   source in -> {ok, diagnostics, symbols, ast, ast_sexpr, expanded, expanded_sexpr, asm, result} out
+## without ever aborting the host process on invalid user code.
+
+## --- internal character, string & list helpers (prefixed `cs_` to avoid collisions on `use lcaas`) ---
+fn cs_isws(c) = c == " " or c == "\t" or c == "\n" or c == "\r"
+fn cs_isdigit(c) = c >= "0" and c <= "9"
+fn cs_isalpha(c) = c >= "a" and c <= "z" or c >= "A" and c <= "Z" or c == "_"
+fn cs_isalnum(c) = cs_isdigit(c) or cs_isalpha(c)
+fn cs_isupper(c) = c >= "A" and c <= "Z"
+
+fn cs_app(xs, ys) = match xs
+    Nil        => ys
+    Cons(h, t) => Cons(h, cs_app(t, ys))
+fn cs_len(xs) = match xs
+    Nil        => 0
+    Cons(h, t) => 1 + cs_len(t)
+fn cs_isnil(xs) = match xs
+    Nil        => 1
+    Cons(h, t) => 0
+fn cs_revacc(xs, acc) = match xs
+    Nil        => acc
+    Cons(h, t) => cs_revacc(t, Cons(h, acc))
+fn cs_rev(xs) = cs_revacc(xs, Nil)
+fn cs_joinsep(xs, sep) = match xs
+    Nil        => ""
+    Cons(h, t) => if cs_isnil(t) == 1 then h else h + sep + cs_joinsep(t, sep)
+fn cs_rtrimnl(s, e) = if e <= 0 then 0 else if at(s, e - 1) == "\n" or at(s, e - 1) == "\r" or at(s, e - 1) == " " then cs_rtrimnl(s, e - 1) else e
+fn cs_chomp(s) = slice(s, 0, cs_rtrimnl(s, count(s)))
+fn cs_startswith(s, p) = if count(s) < count(p) then 0 else slice(s, 0, count(p)) == p
+
+fn cs_jesc_clean(s, i, n) = if i >= n then 1 else let c = at(s, i) in if c == "\"" or c == "\\" or c == "\n" or c == "\r" or c == "\t" then 0 else cs_jesc_clean(s, i + 1, n)
+fn cs_jesc_ch(c) = if c == "\"" then "\\\"" else if c == "\\" then "\\\\" else if c == "\n" then "\\n" else if c == "\r" then "\\r" else if c == "\t" then "\\t" else c
+fn cs_jesc_i(s, i, n) = if i >= n then "" else cs_jesc_ch(at(s, i)) + cs_jesc_i(s, i + 1, n)
+fn cs_jesc(s) = if cs_jesc_clean(s, 0, count(s)) == 1 then s else cs_jesc_i(s, 0, count(s))
+
+## --- lexer ---
+fn cs_numend(s, i, n) = if i >= n then i else if cs_isdigit(at(s, i)) then cs_numend(s, i + 1, n) else i
+fn cs_idend(s, i, n) = if i >= n then i else if cs_isalnum(at(s, i)) then cs_idend(s, i + 1, n) else i
+fn cs_lineend(s, i, n) = if i >= n then i else if at(s, i) == "\n" then i + 1 else cs_lineend(s, i + 1, n)
+fn cs_escchar(c) = if c == "n" then "\n" else if c == "t" then "\t" else if c == "\"" then "\"" else if c == "\\" then "\\" else c
+fn cs_strplain(s, i, n) = if i >= n then i else let c = at(s, i) in if c == "\"" or c == "\\" then i else cs_strplain(s, i + 1, n)
+fn cs_strend(s, i, n, acc) = let j = cs_strplain(s, i, n) in let acc2 = if j > i then acc + slice(s, i, j) else acc in if j >= n then {txt: acc2, next: n} else if at(s, j) == "\"" then {txt: acc2, next: j + 1} else cs_strend(s, j + 2, n, acc2 + cs_escchar(at(s, j + 1)))
+fn cs_istwo(s, i, n) = if i + 1 >= n then 0 else cs_istwopair(slice(s, i, i + 2))
+fn cs_istwopair(p) = p == "==" or p == "!=" or p == "<=" or p == ">=" or p == "=>"
+fn cs_lex(s, i) = if i >= count(s) then Nil else cs_lex1(s, i, count(s), at(s, i))
+fn cs_lex1(s, i, n, c) = if cs_isws(c) then cs_lex(s, i + 1) else if c == "#" then cs_lex(s, cs_lineend(s, i + 1, n)) else if cs_isdigit(c) then cs_lexnum(s, i, cs_numend(s, i, n)) else if cs_isalpha(c) then cs_lexid(s, i, cs_idend(s, i, n)) else if c == "\"" then cs_lexstr(s, cs_strend(s, i + 1, n, "")) else if cs_istwo(s, i, n) == 1 then Cons({kind: "SY", text: slice(s, i, i + 2)}, cs_lex(s, i + 2)) else Cons({kind: "SY", text: c}, cs_lex(s, i + 1))
+fn cs_lexnum(s, i, j) = Cons({kind: "NM", text: slice(s, i, j)}, cs_lex(s, j))
+fn cs_lexid(s, i, j) = Cons({kind: "ID", text: slice(s, i, j)}, cs_lex(s, j))
+fn cs_lexstr(s, r) = Cons({kind: "ST", text: r.txt}, cs_lex(s, r.next))
+
+## --- parser ---
+fn cs_hd(ts) = match ts
+    Nil        => {kind: "EOF", text: ""}
+    Cons(h, t) => h
+fn cs_hdkind(ts) = (cs_hd(ts)).kind
+fn cs_hdtext(ts) = (cs_hd(ts)).text
+fn cs_drop1(ts) = match ts
+    Nil        => Nil
+    Cons(h, t) => t
+fn cs_dropkw(ts, kw) = if cs_hdtext(ts) == kw then cs_drop1(ts) else ts
+fn cs_skiprp(ts) = cs_dropkw(ts, ")")
+fn cs_skiprk(ts) = cs_dropkw(ts, "]")
+
+fn cs_prim(ts) = cs_postfix(cs_atom(ts))
+fn cs_atom(ts) = if cs_hdkind(ts) == "NM" then {node: Num(toint(cs_hdtext(ts))), rest: cs_drop1(ts)} else if cs_hdkind(ts) == "ST" then {node: Str(cs_hdtext(ts)), rest: cs_drop1(ts)} else if cs_hdtext(ts) == "(" then cs_paren(cs_drop1(ts)) else if cs_hdtext(ts) == "{" then cs_rec(cs_drop1(ts)) else if cs_hdtext(ts) == "if" then cs_if(cs_drop1(ts)) else if cs_hdtext(ts) == "let" then cs_let(cs_drop1(ts)) else if cs_hdtext(ts) == "match" then cs_match(cs_drop1(ts)) else if cs_hdtext(ts) == "comptime" then cs_ct(cs_drop1(ts)) else if cs_hdtext(ts) == "quote" then cs_quote(cs_drop1(ts)) else if cs_hdtext(ts) == "splice" then cs_splice(cs_drop1(ts)) else if cs_hdkind(ts) == "ID" then cs_ident(cs_hdtext(ts), cs_drop1(ts)) else {node: Num(0), rest: cs_drop1(ts)}
+fn cs_paren(ts) = let r = cs_expr(ts) in {node: r.node, rest: cs_skiprp(r.rest)}
+fn cs_ident(nm, ts) = if cs_hdtext(ts) == "(" then cs_call(nm, cs_arglist(cs_drop1(ts))) else if cs_hdtext(ts) == "{" then cs_rect(nm, cs_rec(cs_drop1(ts))) else {node: Var(nm), rest: ts}
+fn cs_call(nm, a) = {node: Call(nm, a.items), rest: a.rest}
+fn cs_rect(nm, r) = cs_rect2(nm, r.node, r.rest)
+fn cs_rect2(nm, nd, rest) = match nd
+    Rec(items) => {node: RecT(nm, items), rest: rest}
+    _          => {node: nd, rest: rest}
+fn cs_arglist(ts) = if cs_hdtext(ts) == ")" then {items: Nil, rest: cs_drop1(ts)} else cs_argmore(cs_expr(ts))
+fn cs_argmore(r) = if cs_hdtext(r.rest) == "," then cs_argcons(r.node, cs_arglist(cs_drop1(r.rest))) else {items: Cons(r.node, Nil), rest: cs_skiprp(r.rest)}
+fn cs_argcons(h, rr) = {items: Cons(h, rr.items), rest: rr.rest}
+fn cs_rec(ts) = if cs_hdtext(ts) == "}" then {node: Rec(Nil), rest: cs_drop1(ts)} else cs_recfields(ts)
+fn cs_recfields(ts) = let k = cs_hdtext(ts) in let r = cs_expr(cs_dropkw(cs_drop1(ts), ":")) in if cs_hdtext(r.rest) == "," then cs_reccons(k, r.node, cs_recfields(cs_drop1(r.rest))) else {node: Rec(Cons({key: k, val: r.node}, Nil)), rest: cs_dropkw(r.rest, "}")}
+fn cs_reccons(k, v, rr) = cs_reccons2(k, v, rr.node, rr.rest)
+fn cs_reccons2(k, v, nd, rest) = match nd
+    Rec(items) => {node: Rec(Cons({key: k, val: v}, items)), rest: rest}
+    _          => {node: nd, rest: rest}
+fn cs_postfix(r) = if cs_hdtext(r.rest) == "." then cs_postfix({node: Field(r.node, cs_hdtext(cs_drop1(r.rest))), rest: cs_drop1(cs_drop1(r.rest))}) else r
+
+fn cs_ct(ts) = let r = cs_prim(ts) in {node: CT(r.node), rest: r.rest}
+fn cs_quote(ts) = let r = cs_prim(ts) in {node: Quote(r.node), rest: r.rest}
+fn cs_splice(ts) = let r = cs_prim(ts) in {node: Splice(r.node), rest: r.rest}
+
+fn cs_mul(ts) = cs_mulloop(cs_prim(ts))
+fn cs_mulloop(l) = let op = cs_hdtext(l.rest) in if op == "*" or op == "/" or op == "%" then cs_mulloop(cs_mkbin(op, l.node, cs_prim(cs_drop1(l.rest)))) else l
+fn cs_add(ts) = cs_addloop(cs_mul(ts))
+fn cs_addloop(l) = let op = cs_hdtext(l.rest) in if op == "+" or op == "-" then cs_addloop(cs_mkbin(op, l.node, cs_mul(cs_drop1(l.rest)))) else l
+fn cs_cmp(ts) = cs_cmploop(cs_add(ts))
+fn cs_cmploop(l) = let op = cs_hdtext(l.rest) in if op == "==" or op == "!=" or op == "<" or op == ">" or op == "<=" or op == ">=" then cs_cmploop(cs_mkbin(op, l.node, cs_add(cs_drop1(l.rest)))) else l
+fn cs_and(ts) = cs_andloop(cs_cmp(ts))
+fn cs_andloop(l) = if cs_hdtext(l.rest) == "and" then cs_andloop(cs_mkbin("and", l.node, cs_cmp(cs_drop1(l.rest)))) else l
+fn cs_or(ts) = cs_orloop(cs_and(ts))
+fn cs_orloop(l) = if cs_hdtext(l.rest) == "or" then cs_orloop(cs_mkbin("or", l.node, cs_and(cs_drop1(l.rest)))) else l
+fn cs_mkbin(op, a, r) = {node: Bin(op, a, r.node), rest: r.rest}
+fn cs_expr(ts) = cs_or(ts)
+
+fn cs_if(ts) = let c = cs_expr(ts) in let t = cs_expr(cs_dropkw(c.rest, "then")) in let e2 = cs_expr(cs_dropkw(t.rest, "else")) in {node: If(c.node, t.node, e2.node), rest: e2.rest}
+fn cs_let(ts) = let nm = cs_hdtext(ts) in let v = cs_expr(cs_dropkw(cs_drop1(ts), "=")) in let b = cs_expr(cs_dropkw(v.rest, "in")) in {node: LetIn(nm, v.node, b.node), rest: b.rest}
+
+fn cs_ispatstart(ts) = if cs_hdkind(ts) == "NM" or cs_hdkind(ts) == "ST" then 1 else if cs_hdkind(ts) == "ID" then cs_ispatid(cs_hdtext(ts)) else 0
+fn cs_ispatid(s) = if s == "fn" or s == "print" or s == "type" or s == "let" or s == "if" or s == "then" or s == "else" or s == "in" or s == "match" or s == "and" or s == "or" then 0 else 1
+fn cs_pat(ts) = if cs_hdkind(ts) == "NM" then {pat: PInt(toint(cs_hdtext(ts))), rest: cs_drop1(ts)} else if cs_hdkind(ts) == "ST" then {pat: PStr(cs_hdtext(ts)), rest: cs_drop1(ts)} else if cs_hdtext(ts) == "_" then {pat: PWild, rest: cs_drop1(ts)} else cs_patid(cs_hdtext(ts), cs_drop1(ts))
+fn cs_patid(nm, ts) = if cs_isupper(at(nm, 0)) then cs_patctor(nm, ts) else {pat: PBind(nm), rest: ts}
+fn cs_patctor(nm, ts) = if cs_hdtext(ts) == "(" then cs_patargs(nm, cs_patlist(cs_drop1(ts))) else {pat: PCons(nm, Nil), rest: ts}
+fn cs_patargs(nm, r) = {pat: PCons(nm, r.items), rest: r.rest}
+fn cs_patlist(ts) = if cs_hdtext(ts) == ")" then {items: Nil, rest: cs_drop1(ts)} else cs_patmore(cs_hdtext(ts), cs_drop1(ts))
+fn cs_patmore(nm, ts) = if cs_hdtext(ts) == "," then cs_patcons(nm, cs_patlist(cs_drop1(ts))) else {items: Cons(nm, Nil), rest: cs_skiprp(ts)}
+fn cs_patcons(nm, rr) = {items: Cons(nm, rr.items), rest: rr.rest}
+fn cs_hasarm(ts) = if cs_ispatstart(ts) == 0 then 0 else cs_afterpat(cs_pat(ts))
+fn cs_afterpat(p) = cs_hdtext(p.rest) == "=>"
+fn cs_match(ts) = let sc = cs_expr(ts) in let a = cs_arms(sc.rest) in {node: Match(sc.node, a.items), rest: a.rest}
+fn cs_arms(ts) = let p = cs_pat(ts) in let b = cs_expr(cs_dropkw(p.rest, "=>")) in if cs_hasarm(b.rest) == 1 then cs_armcons(p.pat, b.node, cs_arms(b.rest)) else {items: Cons({pat: p.pat, body: b.node}, Nil), rest: b.rest}
+fn cs_armcons(p, b, rr) = {items: Cons({pat: p, body: b}, rr.items), rest: rr.rest}
+
+## --- declarations (type / fn / print / expr) ---
+fn cs_ptype1(ts) = if cs_hdtext(ts) == "[" then cs_ptlist(cs_ptype1(cs_drop1(ts))) else if cs_hdtext(ts) == "table" and cs_hdtext(cs_drop1(ts)) == "[" then cs_pttable(cs_ptype1(cs_drop1(cs_drop1(ts)))) else {node: TyName(cs_hdtext(ts)), rest: cs_drop1(ts)}
+fn cs_ptlist(r) = {node: TyList(r.node), rest: cs_skiprk(r.rest)}
+fn cs_pttable(r) = {node: TyApply("table", r.node), rest: cs_skiprk(r.rest)}
+fn cs_ptypes(ts) = if cs_hdtext(ts) == ")" then {items: Nil, rest: cs_drop1(ts)} else cs_ptmore(cs_ptype1(ts))
+fn cs_ptmore(r) = if cs_hdtext(r.rest) == "," then cs_ptcons(r.node, cs_ptypes(cs_drop1(r.rest))) else {items: Cons(r.node, Nil), rest: cs_skiprp(r.rest)}
+fn cs_ptcons(n, rr) = {items: Cons(n, rr.items), rest: rr.rest}
+
+fn cs_pparams(ts) = if cs_hdtext(ts) == ")" then {items: Nil, tys: Nil, plist: Nil, rest: cs_drop1(ts)} else cs_pparamk(ts)
+fn cs_pparamk(ts) = if cs_hdtext(ts) == "comptime" then cs_pparam(cs_hdtext(cs_drop1(ts)), 1, cs_drop1(cs_drop1(ts))) else cs_pparam(cs_hdtext(ts), 0, cs_drop1(ts))
+fn cs_pparam(nm, ct, ts) = if cs_hdtext(ts) == ":" then cs_pparamt(nm, ct, cs_ptype1(cs_drop1(ts))) else cs_pmore(nm, TyAny, ct, ts)
+fn cs_pparamt(nm, ct, r) = cs_pmore(nm, r.node, ct, r.rest)
+fn cs_pmore(nm, ty, ct, ts) = if cs_hdtext(ts) == "," then cs_pmcons(nm, ty, ct, cs_pparams(cs_drop1(ts))) else cs_pmend(nm, ty, ct, cs_skiprp(ts))
+fn cs_pmcons(nm, ty, ct, rr) = {items: if ct == 0 then Cons(nm, rr.items) else rr.items, tys: Cons(ty, rr.tys), plist: Cons({cf: ct, pn: nm, pt: ty}, rr.plist), rest: rr.rest}
+fn cs_pmend(nm, ty, ct, rest) = {items: if ct == 0 then Cons(nm, Nil) else Nil, tys: Cons(ty, Nil), plist: Cons({cf: ct, pn: nm, pt: ty}, Nil), rest: rest}
+fn cs_pret(ts) = if cs_hdtext(ts) == "-" and cs_hdtext(cs_drop1(ts)) == ">" then cs_pret2(cs_ptype1(cs_drop1(cs_drop1(ts)))) else {ty: TyAny, rest: ts}
+fn cs_pret2(r) = {ty: r.node, rest: r.rest}
+fn cs_isany(t) = match t
+    TyAny => 1
+    _     => 0
+fn cs_anyann(tys) = match tys
+    Nil        => 0
+    Cons(h, t) => if cs_isany(h) == 0 then 1 else cs_anyann(t)
+fn cs_ganyct(pl) = match pl
+    Nil        => 0
+    Cons(p, r) => if p.cf == 1 then 1 else cs_ganyct(r)
+fn cs_mksig(nm, ps, rty) = if cs_ganyct(ps.plist) == 1 then GSig(nm, ps.plist, rty) else if cs_anyann(ps.tys) == 1 or cs_isany(rty) == 0 then Sig(nm, ps.items, ps.tys, rty) else Nil
+fn cs_pfn(ts) = let nm = cs_hdtext(ts) in let ps = cs_pparams(cs_dropkw(cs_drop1(ts), "(")) in let rt = cs_pret(ps.rest) in let b = cs_expr(cs_dropkw(rt.rest, "=")) in {node: Fn(nm, ps.items, b.node), sg: cs_mksig(nm, ps, rt.ty), rest: b.rest}
+
+fn cs_ptype(ts) = let nm = cs_hdtext(ts) in let rest = cs_dropkw(cs_drop1(ts), "=") in if cs_hdtext(rest) == "record" then cs_precordty(nm, cs_drop1(rest)) else cs_penumty(nm, cs_dropkw(rest, "enum"))
+fn cs_penumty(nm, ts) = let vs = cs_pvariants(ts) in {node: TypeS(nm, "enum", vs.items), rest: vs.rest}
+fn cs_pvariants(ts) = cs_pvariant(cs_hdtext(ts), cs_drop1(ts))
+fn cs_pvariant(tag, ts) = if cs_hdtext(ts) == "(" then let a = cs_ptypes(cs_drop1(ts)) in cs_pvariantend(tag, cs_len(a.items), a.rest) else cs_pvariantend(tag, 0, ts)
+fn cs_pvariantend(tag, ar, ts) = if cs_hdtext(ts) == "|" then let rr = cs_pvariants(cs_drop1(ts)) in {items: Cons({tag: tag, ar: ar}, rr.items), rest: rr.rest} else {items: Cons({tag: tag, ar: ar}, Nil), rest: ts}
+fn cs_precordty(nm, ts) = let fs = cs_pfields(ts) in {node: TypeS(nm, "record", fs.items), rest: fs.rest}
+fn cs_pfields(ts) = let fnm = cs_hdtext(ts) in let r = cs_ptype1(cs_dropkw(cs_drop1(ts), ":")) in if cs_hdtext(r.rest) == "," then let rr = cs_pfields(cs_drop1(r.rest)) in {items: Cons({fname: fnm, fty: r.node}, rr.items), rest: rr.rest} else {items: Cons({fname: fnm, fty: r.node}, Nil), rest: r.rest}
+
+fn cs_pprog(ts) = match ts
+    Nil        => Nil
+    Cons(h, t) => if h.text == "fn" then cs_pprogfn(cs_pfn(cs_drop1(ts))) else if h.text == "type" then let r = cs_ptype(cs_drop1(ts)) in Cons(r.node, cs_pprog(r.rest)) else if h.text == "print" then let r = cs_expr(cs_drop1(ts)) in Cons(Print(r.node), cs_pprog(r.rest)) else let r = cs_expr(ts) in Cons(ExprS(r.node), cs_pprog(r.rest))
+fn cs_pprogfn(r) = cs_pprogfn2(r.sg, Cons(r.node, cs_pprog(r.rest)))
+fn cs_pprogfn2(sg, rest) = match sg
+    Nil => rest
+    _   => Cons(sg, rest)
+fn cs_parse(src) = cs_pprog(cs_lex(src, 0))
+
+## --- symbol table extraction ---
+fn cs_tystr(ty) = match ty
+    TyAny           => "any"
+    TyName(nm)      => nm
+    TyList(inner)   => "[" + cs_tystr(inner) + "]"
+    TyApply(c, arg) => c + "[" + cs_tystr(arg) + "]"
+    _               => "any"
+fn cs_variants_str(vs) = match vs
+    Nil        => ""
+    Cons(h, t) => let s = h.tag + "(" + str(h.ar) + ")" in if cs_isnil(t) == 1 then s else s + " | " + cs_variants_str(t)
+fn cs_fields_str(fs) = match fs
+    Nil        => ""
+    Cons(h, t) => let s = h.fname + ": " + cs_tystr(h.fty) in if cs_isnil(t) == 1 then s else s + ", " + cs_fields_str(t)
+fn cs_params_str(ps) = cs_joinsep(ps, ", ")
+fn cs_symbols(prog) = match prog
+    Nil        => Nil
+    Cons(h, t) => cs_sym1(h, cs_symbols(t))
+fn cs_sym1(s0, rest) = match s0
+    TypeS(nm, k, items) => Cons({name: nm, kind: k, sig: if k == "enum" then cs_variants_str(items) else "{" + cs_fields_str(items) + "}"}, rest)
+    Fn(nm, ps, body)    => Cons({name: nm, kind: "fn", sig: "fn(" + cs_params_str(ps) + ")"}, rest)
+    _                   => rest
+
+## --- AI-first fix-it suggestion helper (prefix / substring / length similarity) ---
+fn cs_common_prefix(a, b, i, n) = if i >= n then i else if at(a, i) == at(b, i) then cs_common_prefix(a, b, i + 1, n) else i
+fn cs_min(a, b) = if a < b then a else b
+fn cs_abs(x) = if x < 0 then 0 - x else x
+fn cs_sim(a, b) = let cp = cs_common_prefix(a, b, 0, cs_min(count(a), count(b))) in (cp * 4) - cs_abs(count(a) - count(b))
+fn cs_best_cand(target, cands, best, best_score) = match cands
+    Nil        => best
+    Cons(h, t) => let sc = cs_sim(target, h) in if best == "" or sc > best_score then cs_best_cand(target, t, h, sc) else cs_best_cand(target, t, best, best_score)
+fn cs_ctor_names(ctors) = match ctors
+    Nil        => Nil
+    Cons(h, t) => Cons(h.tag, cs_ctor_names(t))
+fn cs_field_names(fs) = match fs
+    Nil        => Nil
+    Cons(h, t) => Cons(h.fname, cs_field_names(t))
+
+## --- non-aborting multi-diagnostic collector (F1, F2, C3, C1/C2/M1/M2) ---
+fn cs_tanydecl(prog) = match prog
+    Nil        => 0
+    Cons(h, t) => cs_tanydecl2(h, t)
+fn cs_tanydecl2(h, t) = match h
+    TypeS(nm, k, items) => 1
+    _                   => cs_tanydecl(t)
+fn cs_townerize(nm, items) = match items
+    Nil        => Nil
+    Cons(h, t) => Cons({tag: h.tag, ar: h.ar, en: nm}, cs_townerize(nm, t))
+fn cs_tcollectc(prog) = match prog
+    Nil        => Nil
+    Cons(h, t) => cs_tcollectc2(h, t)
+fn cs_tcollectc2(h, t) = match h
+    TypeS(nm, k, items) => if k == "enum" then cs_app(cs_townerize(nm, items), cs_tcollectc(t)) else cs_tcollectc(t)
+    _                   => cs_tcollectc(t)
+fn cs_tcollectr(prog) = match prog
+    Nil        => Nil
+    Cons(h, t) => cs_tcollectr2(h, t)
+fn cs_tcollectr2(h, t) = match h
+    TypeS(nm, k, items) => if k == "record" then Cons({rname: nm, fields: items}, cs_tcollectr(t)) else cs_tcollectr(t)
+    _                   => cs_tcollectr(t)
+fn cs_tcollects(prog) = match prog
+    Nil        => Nil
+    Cons(h, t) => cs_tcollects2(h, t)
+fn cs_tcollects2(h, t) = match h
+    Sig(nm, ps, ts, rt) => Cons({fname: nm, pn: ps, pt: ts, rt: rt}, cs_tcollects(t))
+    _                   => cs_tcollects(t)
+fn cs_tcollectg(prog) = match prog
+    Nil        => Nil
+    Cons(h, t) => cs_tcollectg2(h, t)
+fn cs_tcollectg2(h, t) = match h
+    GSig(nm, pl, rt) => Cons({fname: nm, params: pl, rt: rt}, cs_tcollectg(t))
+    _                => cs_tcollectg(t)
+fn cs_buildft(prog) = match prog
+    Nil        => Nil
+    Cons(h, t) => cs_buildft2(h, cs_buildft(t))
+fn cs_buildft2(h, rest) = match h
+    Fn(nm, ps, body) => Cons(h, rest)
+    _                => rest
+fn cs_tcollect(prog) = {ctors: cs_tcollectc(prog), recs: cs_tcollectr(prog), sigs: cs_tcollects(prog), gsigs: cs_tcollectg(prog), decl: cs_tanydecl(prog), ft: cs_buildft(prog)}
+
+fn cs_clookup(tag, ctors) = match ctors
+    Nil        => Nil
+    Cons(h, t) => if h.tag == tag then Cons(h, Nil) else cs_clookup(tag, t)
+fn cs_rlookup(nm, recs) = match recs
+    Nil        => Nil
+    Cons(h, t) => if h.rname == nm then Cons(h, Nil) else cs_rlookup(nm, t)
+fn cs_hasfield(fnm, fs) = match fs
+    Nil        => 0
+    Cons(h, t) => if h.fname == fnm then 1 else cs_hasfield(fnm, t)
+fn cs_siglookup(nm, sigs) = match sigs
+    Nil        => Nil
+    Cons(h, t) => if h.fname == nm then Cons(h, Nil) else cs_siglookup(nm, t)
+fn cs_gsiglookup(nm, gsigs) = match gsigs
+    Nil        => Nil
+    Cons(h, t) => if h.fname == nm then Cons(h, Nil) else cs_gsiglookup(nm, t)
+fn cs_fnname(f0) = match f0
+    Fn(nm, ps, body) => nm
+    _                => ""
+fn cs_fnlookup(nm, ft) = match ft
+    Nil        => Nil
+    Cons(h, t) => if cs_fnname(h) == nm then Cons(h, Nil) else cs_fnlookup(nm, t)
+
+fn cs_exprty(e, tt) = match e
+    Num(n)          => "int"
+    Str(v)          => "str"
+    RecT(tn, items) => tn
+    Call(nm, args)  => if cs_isupper(at(nm, 0)) then cs_ctorty(cs_clookup(nm, tt.ctors)) else ""
+    Var(nm)         => if cs_isupper(at(nm, 0)) then cs_ctorty(cs_clookup(nm, tt.ctors)) else ""
+    _               => ""
+fn cs_ctorty(m) = match m
+    Nil        => ""
+    Cons(h, t) => h.en
+
+fn cs_mkdiag(code, phase, msg, fix) = {code: code, phase: phase, message: msg, fixit: fix}
+
+fn cs_chk_ctor(tag, ar, tt) = if tt.decl == 0 then Nil else cs_chk_ctor2(tag, ar, cs_clookup(tag, tt.ctors), tt)
+fn cs_chk_ctor2(tag, ar, m, tt) = match m
+    Nil        => let cand = cs_best_cand(tag, cs_ctor_names(tt.ctors), "", 0 - 999) in Cons(cs_mkdiag("T1001", "typecheck", "type error: constructor '" + tag + "' is not declared in any enum", if cand == "" then "declare '" + tag + "' in an enum type" else "replace '" + tag + "' with declared constructor '" + cand + "'"), Nil)
+    Cons(c, r) => if c.ar == ar then Nil else Cons(cs_mkdiag("T1002", "typecheck", "type error: constructor '" + tag + "' expects " + str(c.ar) + " arguments, got " + str(ar), "pass " + str(c.ar) + " arguments to '" + tag + "'"), Nil)
+
+fn cs_chk_rect(tn, items, tt) = if tt.decl == 0 then cs_chk_reclist(items, tt) else cs_chk_rect2(tn, items, cs_rlookup(tn, tt.recs), tt)
+fn cs_chk_rect2(tn, items, m, tt) = match m
+    Nil        => Cons(cs_mkdiag("T1003", "typecheck", "type error: record type '" + tn + "' is not declared", "declare 'type " + tn + " = record ...'"), cs_chk_reclist(items, tt))
+    Cons(d, r) => cs_app(cs_chk_rfields(tn, items, d.fields), cs_chk_reclist(items, tt))
+fn cs_chk_rfields(tn, items, declfs) = match items
+    Nil        => Nil
+    Cons(h, t) => if cs_hasfield(h.key, declfs) == 1 then cs_chk_rfields(tn, t, declfs) else let cand = cs_best_cand(h.key, cs_field_names(declfs), "", 0 - 999) in Cons(cs_mkdiag("T1003", "typecheck", "type error: record '" + tn + "' has no field '" + h.key + "'", if cand == "" then "remove unknown field '" + h.key + "'" else "replace unknown field '" + h.key + "' on '" + tn + "' with '" + cand + "'"), cs_chk_rfields(tn, t, declfs))
+
+fn cs_chk_arg1(fnm, idx, pn, pt, a, tt) = match pt
+    TyName(exp) => let got = cs_exprty(a, tt) in if got == "" or got == exp then Nil else Cons(cs_mkdiag("T2001", "typecheck", "type error: argument " + str(idx) + " of '" + fnm + "' has type " + got + " but parameter '" + pn + "' expects " + exp, "change argument " + str(idx) + " of '" + fnm + "' (parameter '" + pn + "') to " + exp), Nil)
+    _           => Nil
+fn cs_chk_args(fnm, idx, pns, pts, args, tt) = match args
+    Nil         => Nil
+    Cons(a, ar) => cs_chk_args2(fnm, idx, pns, pts, a, ar, tt)
+fn cs_chk_args2(fnm, idx, pns, pts, a, ar, tt) = match pns
+    Nil          => Nil
+    Cons(pn, pr) => cs_chk_args3(fnm, idx, pn, pr, pts, a, ar, tt)
+fn cs_chk_args3(fnm, idx, pn, pr, pts, a, ar, tt) = match pts
+    Nil          => Nil
+    Cons(pt, tr) => cs_app(cs_chk_arg1(fnm, idx, pn, pt, a, tt), cs_chk_args(fnm, idx + 1, pr, tr, ar, tt))
+
+fn cs_tyarg(e) = match e
+    Var(nm) => nm
+    _       => ""
+fn cs_glookup(nm, env) = match env
+    Nil        => nm
+    Cons(h, t) => if h.k == nm then h.v else cs_glookup(nm, t)
+fn cs_tsubst(ty, env) = match ty
+    TyName(nm) => TyName(cs_glookup(nm, env))
+    _          => ty
+fn cs_chk_gparams(fnm, idx, pl, args, env, tt) = match pl
+    Nil         => Nil
+    Cons(p, pr) => cs_chk_gparams2(fnm, idx, p, pr, args, env, tt)
+fn cs_chk_gparams2(fnm, idx, p, pr, args, env, tt) = match args
+    Nil         => Nil
+    Cons(a, ar) => if p.cf == 1 then let tnm = cs_tyarg(a) in (if tnm == "" then Cons(cs_mkdiag("T3001", "typecheck", "type error: comptime parameter '" + p.pn + "' of '" + fnm + "' expects a type name", "pass a type name such as 'int' or 'str'"), cs_chk_gparams(fnm, idx + 1, pr, ar, env, tt)) else cs_chk_gparams(fnm, idx + 1, pr, ar, Cons({k: p.pn, v: tnm}, env), tt)) else cs_app(cs_chk_arg1(fnm, idx, p.pn, cs_tsubst(p.pt, env), a, tt), cs_chk_gparams(fnm, idx + 1, pr, ar, env, tt))
+
+fn cs_chk_callsig(nm, args, tt) = cs_chk_callsig2(nm, args, cs_gsiglookup(nm, tt.gsigs), tt)
+fn cs_chk_callsig2(nm, args, gm, tt) = match gm
+    Cons(g, gr) => cs_chk_gparams(nm, 1, g.params, args, Nil, tt)
+    Nil         => cs_chk_callsig3(nm, args, cs_siglookup(nm, tt.sigs), tt)
+fn cs_chk_callsig3(nm, args, sm, tt) = match sm
+    Cons(sg, sr) => cs_chk_args(nm, 1, sg.pn, sg.pt, args, tt)
+    Nil          => Nil
+
+fn cs_chk_ret(nm, body, tt) = cs_chk_ret2(nm, body, cs_siglookup(nm, tt.sigs), tt)
+fn cs_chk_ret2(nm, body, sm, tt) = match sm
+    Nil          => Nil
+    Cons(sg, sr) => cs_chk_ret3(nm, body, sg.rt, tt)
+fn cs_chk_ret3(nm, body, rt, tt) = match rt
+    TyName(exp) => let got = cs_exprty(body, tt) in if got == "" or got == exp then Nil else Cons(cs_mkdiag("T2002", "typecheck", "type error: function '" + nm + "' returns " + got + " but is declared to return " + exp, "change return type of '" + nm + "' to " + got + " or return a " + exp + " value"), Nil)
+    _           => Nil
+
+fn cs_chk_quote(e, tt) = match e
+    Bin(op, a, b)   => cs_app(cs_chk_quote(a, tt), cs_chk_quote(b, tt))
+    If(c, t, e2)    => cs_app(cs_chk_quote(c, tt), cs_app(cs_chk_quote(t, tt), cs_chk_quote(e2, tt)))
+    LetIn(nm, v, b) => cs_app(cs_chk_quote(v, tt), cs_chk_quote(b, tt))
+    Call(nm, args)  => if nm == "unquote" then (if cs_len(args) != 1 then Cons(cs_mkdiag("C1001", "comptime", "comptime error: 'unquote' expects exactly 1 argument", "pass a single expression to 'unquote(<expr>)'"), Nil) else cs_chk_expr(cs_asthead(args), tt)) else cs_chk_qlist(args, tt)
+    _               => Nil
+fn cs_chk_qlist(xs, tt) = match xs
+    Nil        => Nil
+    Cons(h, t) => cs_app(cs_chk_quote(h, tt), cs_chk_qlist(t, tt))
+
+fn cs_asthead(xs) = match xs
+    Nil        => Num(0)
+    Cons(h, t) => h
+
+fn cs_chk_expr(e, tt) = match e
+    Var(nm)         => if cs_isupper(at(nm, 0)) then cs_chk_ctor(nm, 0, tt) else Nil
+    Bin(op, a, b)   => cs_app(cs_chk_expr(a, tt), cs_chk_expr(b, tt))
+    If(c, t, e2)    => cs_app(cs_chk_expr(c, tt), cs_app(cs_chk_expr(t, tt), cs_chk_expr(e2, tt)))
+    LetIn(nm, v, b) => cs_app(cs_chk_expr(v, tt), cs_chk_expr(b, tt))
+    Call(nm, args)  => if nm == "unquote" and cs_isnil(cs_fnlookup("unquote", tt.ft)) == 1 then Cons(cs_mkdiag("C1001", "comptime", "comptime error: 'unquote' may only appear inside 'quote(...)'", "wrap the expression in 'quote(...)' or remove 'unquote'"), cs_chk_elist(args, tt)) else cs_app(if cs_isupper(at(nm, 0)) then cs_chk_ctor(nm, cs_len(args), tt) else cs_chk_callsig(nm, args, tt), cs_chk_elist(args, tt))
+    Rec(items)      => cs_chk_reclist(items, tt)
+    RecT(tn, items) => cs_chk_rect(tn, items, tt)
+    Field(o, nm)    => cs_chk_expr(o, tt)
+    Match(sc, arms) => cs_app(cs_chk_expr(sc, tt), cs_chk_arms(arms, tt))
+    CT(inner)       => cs_app(cs_chk_expr(inner, tt), cs_chk_ct(inner, tt))
+    Quote(inner)    => cs_chk_quote(inner, tt)
+    Splice(inner)   => cs_app(cs_chk_expr(inner, tt), cs_chk_splice(inner, tt))
+    _               => Nil
+fn cs_chk_elist(xs, tt) = match xs
+    Nil        => Nil
+    Cons(h, t) => cs_app(cs_chk_expr(h, tt), cs_chk_elist(t, tt))
+fn cs_chk_reclist(xs, tt) = match xs
+    Nil        => Nil
+    Cons(h, t) => cs_app(cs_chk_expr(h.val, tt), cs_chk_reclist(t, tt))
+fn cs_chk_arms(xs, tt) = match xs
+    Nil        => Nil
+    Cons(h, t) => cs_app(cs_chk_pat(h.pat, tt), cs_app(cs_chk_expr(h.body, tt), cs_chk_arms(t, tt)))
+fn cs_chk_pat(p, tt) = match p
+    PCons(tag, ps) => cs_chk_ctor(tag, cs_len(ps), tt)
+    _              => Nil
+
+## --- safe non-aborting comptime & AST evaluator for `caas` ---
+fn cs_cv_ok(v) = {ok: 1, v: v, err: "", fix: ""}
+fn cs_cv_err(msg, fix) = {ok: 0, v: {kind: "int", i: 0, s: "", items: Nil}, err: msg, fix: fix}
+fn cs_cv_int(n) = {kind: "int", i: n, s: "", items: Nil}
+fn cs_cv_str(s) = {kind: "str", i: 0, s: s, items: Nil}
+fn cs_cv_ctor(tag, xs) = {kind: "ctor", i: 0, s: tag, items: xs}
+fn cs_cv_rec(xs) = {kind: "rec", i: 0, s: "", items: xs}
+
+fn cs_cveq(a, b) = if a.kind != b.kind then 0 else if a.kind == "int" then a.i == b.i else if a.kind == "str" then a.s == b.s else if a.kind == "ctor" then (if a.s != b.s then 0 else cs_cveqlist(a.items, b.items)) else 0
+fn cs_cveqlist(xs, ys) = match xs
+    Nil          => cs_isnil(ys)
+    Cons(xh, xt) => cs_cveqlist2(xh, xt, ys)
+fn cs_cveqlist2(xh, xt, ys) = match ys
+    Nil          => 0
+    Cons(yh, yt) => if cs_cveq(xh, yh) == 1 then cs_cveqlist(xt, yt) else 0
+
+fn cs_envlookup(nm, env) = match env
+    Nil        => {ok: 0, v: cs_cv_int(0)}
+    Cons(h, t) => if h.k == nm then {ok: 1, v: h.v} else cs_envlookup(nm, t)
+fn cs_qvar(nm, qenv) = match qenv
+    Nil        => nm
+    Cons(h, t) => if h.k == nm then h.v else cs_qvar(nm, t)
+
+fn cs_isvalidbinop(op) = op == "+" or op == "-" or op == "*" or op == "/" or op == "%" or op == "==" or op == "!=" or op == "<" or op == ">" or op == "<=" or op == ">=" or op == "and" or op == "or"
+fn cs_cvhd(xs) = match xs
+    Nil        => cs_cv_int(0)
+    Cons(h, t) => h
+fn cs_cvtl(xs) = match xs
+    Nil        => Nil
+    Cons(h, t) => t
+
+fn cs_unreify(cv) = if cv.kind != "ctor" then {ok: 0, node: Num(0), err: "comptime error: splice expects an AST constructor value (Num, Str, Var, Bin, If, LetIn, Call)", fix: "pass a quoted or constructed AST value to 'splice(...)'"} else cs_unreify_ctor(cv.s, cv.items)
+fn cs_unreify_ctor(tag, xs) = if tag == "Num" and cs_len(xs) == 1 and (cs_cvhd(xs)).kind == "int" then {ok: 1, node: Num((cs_cvhd(xs)).i), err: "", fix: ""} else if tag == "Str" and cs_len(xs) == 1 and (cs_cvhd(xs)).kind == "str" then {ok: 1, node: Str((cs_cvhd(xs)).s), err: "", fix: ""} else if tag == "Var" and cs_len(xs) == 1 and (cs_cvhd(xs)).kind == "str" and count((cs_cvhd(xs)).s) > 0 then {ok: 1, node: Var((cs_cvhd(xs)).s), err: "", fix: ""} else if tag == "Bin" and cs_len(xs) == 3 and (cs_cvhd(xs)).kind == "str" and cs_isvalidbinop((cs_cvhd(xs)).s) then let l = cs_unreify(cs_cvhd(cs_cvtl(xs))) in (if l.ok == 0 then l else let r = cs_unreify(cs_cvhd(cs_cvtl(cs_cvtl(xs)))) in if r.ok == 0 then r else {ok: 1, node: Bin((cs_cvhd(xs)).s, l.node, r.node), err: "", fix: ""}) else if tag == "If" and cs_len(xs) == 3 then let c = cs_unreify(cs_cvhd(xs)) in (if c.ok == 0 then c else let t = cs_unreify(cs_cvhd(cs_cvtl(xs))) in if t.ok == 0 then t else let e2 = cs_unreify(cs_cvhd(cs_cvtl(cs_cvtl(xs)))) in if e2.ok == 0 then e2 else {ok: 1, node: If(c.node, t.node, e2.node), err: "", fix: ""}) else if tag == "LetIn" and cs_len(xs) == 3 and (cs_cvhd(xs)).kind == "str" and count((cs_cvhd(xs)).s) > 0 then let v = cs_unreify(cs_cvhd(cs_cvtl(xs))) in (if v.ok == 0 then v else let b = cs_unreify(cs_cvhd(cs_cvtl(cs_cvtl(xs)))) in if b.ok == 0 then b else {ok: 1, node: LetIn((cs_cvhd(xs)).s, v.node, b.node), err: "", fix: ""}) else if tag == "Call" and cs_len(xs) == 2 and (cs_cvhd(xs)).kind == "str" and count((cs_cvhd(xs)).s) > 0 then let rl = cs_unreify_list(cs_cvhd(cs_cvtl(xs))) in (if rl.ok == 0 then {ok: 0, node: Num(0), err: rl.err, fix: rl.fix} else {ok: 1, node: Call((cs_cvhd(xs)).s, rl.items), err: "", fix: ""}) else {ok: 0, node: Num(0), err: "comptime error: invalid AST node '" + tag + "' in splice", fix: "use valid AST constructors (Num, Str, Var, Bin, If, LetIn, Call) and operators"}
+fn cs_unreify_list(cv) = if cv.kind != "ctor" then {ok: 0, items: Nil, err: "comptime error: Call arguments in splice must be a Cons/Nil list", fix: "build Call argument lists with Cons and Nil"} else if cv.s == "Nil" and cs_len(cv.items) == 0 then {ok: 1, items: Nil, err: "", fix: ""} else if cv.s == "Cons" and cs_len(cv.items) == 2 then let h = cs_unreify(cs_cvhd(cv.items)) in (if h.ok == 0 then {ok: 0, items: Nil, err: h.err, fix: h.fix} else let t = cs_unreify_list(cs_cvhd(cs_cvtl(cv.items))) in if t.ok == 0 then t else {ok: 1, items: Cons(h.node, t.items), err: "", fix: ""}) else {ok: 0, items: Nil, err: "comptime error: Call arguments in splice must be a Cons/Nil list", fix: "build Call argument lists with Cons and Nil"}
+
+fn cs_qunquote(cv) = if cv.kind == "int" then cs_cv_ok(cs_cv_ctor("Num", Cons(cv, Nil))) else if cv.kind == "str" then cs_cv_ok(cs_cv_ctor("Str", Cons(cv, Nil))) else if cv.kind == "ctor" then cs_cv_ok(cv) else cs_cv_err("comptime error: unquote expects an AST, int, or str value", "pass an AST constructor, int, or str to 'unquote'")
+
+fn cs_quasiquote(e, qenv, env, ft, cd) = match e
+    Num(n)          => cs_cv_ok(cs_cv_ctor("Num", Cons(cs_cv_int(n), Nil)))
+    Str(v)          => cs_cv_ok(cs_cv_ctor("Str", Cons(cs_cv_str(v), Nil)))
+    Var(nm)         => cs_cv_ok(cs_cv_ctor("Var", Cons(cs_cv_str(cs_qvar(nm, qenv)), Nil)))
+    Bin(op, a, b)   => let ra = cs_quasiquote(a, qenv, env, ft, cd) in if ra.ok == 0 then ra else let rb = cs_quasiquote(b, qenv, env, ft, cd) in if rb.ok == 0 then rb else cs_cv_ok(cs_cv_ctor("Bin", Cons(cs_cv_str(op), Cons(ra.v, Cons(rb.v, Nil)))))
+    If(c, t, e2)    => let rc = cs_quasiquote(c, qenv, env, ft, cd) in if rc.ok == 0 then rc else let rt = cs_quasiquote(t, qenv, env, ft, cd) in if rt.ok == 0 then rt else let re = cs_quasiquote(e2, qenv, env, ft, cd) in if re.ok == 0 then re else cs_cv_ok(cs_cv_ctor("If", Cons(rc.v, Cons(rt.v, Cons(re.v, Nil)))))
+    LetIn(nm, v, b) => let rv = cs_quasiquote(v, qenv, env, ft, cd) in if rv.ok == 0 then rv else let hnm = "_hyg_" + str(cd + 1) + "_" + nm in let rb = cs_quasiquote(b, Cons({k: nm, v: hnm}, qenv), env, ft, cd + 1) in if rb.ok == 0 then rb else cs_cv_ok(cs_cv_ctor("LetIn", Cons(cs_cv_str(hnm), Cons(rv.v, Cons(rb.v, Nil)))))
+    Call(nm, args)  => if nm == "unquote" then (if cs_len(args) != 1 then cs_cv_err("comptime error: 'unquote' expects exactly 1 argument", "pass a single argument to 'unquote(<expr>)'") else let r = cs_ceval(cs_asthead(args), env, ft, cd) in if r.ok == 0 then r else cs_qunquote(r.v)) else let rl = cs_qqlist(args, qenv, env, ft, cd) in if rl.ok == 0 then rl else cs_cv_ok(cs_cv_ctor("Call", Cons(cs_cv_str(nm), Cons(rl.v, Nil))))
+    _               => cs_cv_err("comptime error: unsupported AST node in quote", "use supported expressions inside 'quote(...)'")
+fn cs_qqlist(xs, qenv, env, ft, cd) = match xs
+    Nil        => cs_cv_ok(cs_cv_ctor("Nil", Nil))
+    Cons(h, t) => let rh = cs_quasiquote(h, qenv, env, ft, cd) in if rh.ok == 0 then rh else let rt = cs_qqlist(t, qenv, env, ft, cd) in if rt.ok == 0 then rt else cs_cv_ok(cs_cv_ctor("Cons", Cons(rh.v, Cons(rt.v, Nil))))
+
+fn cs_cmatch(sv, arms, env, ft, cd) = match arms
+    Nil        => cs_cv_err("comptime error: non-exhaustive match at compile time", "add a wildcard '_' arm to match")
+    Cons(h, t) => let m = cs_cpat(h.pat, sv, env) in if m.ok == 1 then cs_ceval(h.body, m.env, ft, cd) else cs_cmatch(sv, t, env, ft, cd)
+fn cs_cpat(p, sv, env) = match p
+    PWild          => {ok: 1, env: env}
+    PBind(nm)      => {ok: 1, env: Cons({k: nm, v: sv}, env)}
+    PInt(n)        => if sv.kind == "int" and sv.i == n then {ok: 1, env: env} else {ok: 0, env: env}
+    PStr(s)        => if sv.kind == "str" and sv.s == s then {ok: 1, env: env} else {ok: 0, env: env}
+    PCons(tag, ps) => if sv.kind == "ctor" and sv.s == tag and cs_len(ps) == cs_len(sv.items) then cs_cpatargs(ps, sv.items, env) else {ok: 0, env: env}
+fn cs_cpatargs(ps, vs, env) = match ps
+    Nil          => {ok: 1, env: env}
+    Cons(p, pr)  => cs_cpatargs2(p, pr, vs, env)
+fn cs_cpatargs2(p, pr, vs, env) = match vs
+    Nil         => {ok: 0, env: env}
+    Cons(v, vr) => cs_cpatargs(pr, vr, if p == "_" then env else Cons({k: p, v: v}, env))
+
+fn cs_recfield(items, nm) = match items
+    Nil        => cs_cv_err("comptime error: unknown record field '" + nm + "'", "check field name '" + nm + "'")
+    Cons(h, t) => if h.key == nm then cs_cv_ok(h.val) else cs_recfield(t, nm)
+
+fn cs_ceval(e, env, ft, cd) = if cd > 64 then cs_cv_err("comptime error: comptime evaluation exceeded 64 call levels", "ensure comptime recursion has a terminating base case") else cs_ceval1(e, env, ft, cd)
+fn cs_ceval1(e, env, ft, cd) = match e
+    Num(n)          => cs_cv_ok(cs_cv_int(n))
+    Str(v)          => cs_cv_ok(cs_cv_str(v))
+    Var(nm)         => let lk = cs_envlookup(nm, env) in if lk.ok == 1 then cs_cv_ok(lk.v) else if cs_isupper(at(nm, 0)) then cs_cv_ok(cs_cv_ctor(nm, Nil)) else cs_cv_err("comptime error: unbound variable '" + nm + "'", "bind '" + nm + "' before use")
+    LetIn(nm, v, b) => let rv = cs_ceval(v, env, ft, cd) in if rv.ok == 0 then rv else cs_ceval(b, Cons({k: nm, v: rv.v}, env), ft, cd)
+    If(c, t, e2)    => let rc = cs_ceval(c, env, ft, cd) in if rc.ok == 0 then rc else if rc.v.i != 0 then cs_ceval(t, env, ft, cd) else cs_ceval(e2, env, ft, cd)
+    Bin(op, a, b)   => let ra = cs_ceval(a, env, ft, cd) in if ra.ok == 0 then ra else let rb = cs_ceval(b, env, ft, cd) in if rb.ok == 0 then rb else cs_cbin(op, ra.v, rb.v)
+    Match(sc, arms) => let rsc = cs_ceval(sc, env, ft, cd) in if rsc.ok == 0 then rsc else cs_cmatch(rsc.v, arms, env, ft, cd)
+    Quote(inner)    => cs_quasiquote(inner, Nil, env, ft, cd)
+    Splice(inner)   => let r = cs_ceval(inner, env, ft, cd) in if r.ok == 0 then r else let u = cs_unreify(r.v) in if u.ok == 0 then cs_cv_err(u.err, u.fix) else cs_ceval(u.node, env, ft, cd)
+    CT(inner)       => cs_ceval(inner, env, ft, cd)
+    Rec(items)      => cs_ceval_rec(items, env, ft, cd)
+    RecT(tn, items) => cs_ceval_rec(items, env, ft, cd)
+    Field(o, nm)    => let ro = cs_ceval(o, env, ft, cd) in if ro.ok == 0 then ro else if ro.v.kind == "rec" then cs_recfield(ro.v.items, nm) else cs_cv_err("comptime error: field access on non-record value", "access fields only on record values")
+    Call(nm, args)  => if cs_isupper(at(nm, 0)) then let ra = cs_ceval_list(args, env, ft, cd) in (if ra.ok == 0 then cs_cv_err(ra.err, ra.fix) else cs_cv_ok(cs_cv_ctor(nm, ra.vals))) else cs_ccall(nm, args, env, ft, cd)
+    _               => cs_cv_err("comptime error: unsupported expression at compile time", "use pure expressions in comptime")
+fn cs_ceval_rec(items, env, ft, cd) = match items
+    Nil        => cs_cv_ok(cs_cv_rec(Nil))
+    Cons(h, t) => let rv = cs_ceval(h.val, env, ft, cd) in if rv.ok == 0 then rv else let rt = cs_ceval_rec(t, env, ft, cd) in if rt.ok == 0 then rt else cs_cv_ok(cs_cv_rec(Cons({key: h.key, val: rv.v}, rt.v.items)))
+fn cs_ceval_list(xs, env, ft, cd) = match xs
+    Nil        => {ok: 1, vals: Nil, err: "", fix: ""}
+    Cons(h, t) => let rh = cs_ceval(h, env, ft, cd) in if rh.ok == 0 then {ok: 0, vals: Nil, err: rh.err, fix: rh.fix} else let rt = cs_ceval_list(t, env, ft, cd) in if rt.ok == 0 then rt else {ok: 1, vals: Cons(rh.v, rt.vals), err: "", fix: ""}
+fn cs_cbin(op, l, r) = if op == "==" then cs_cv_ok(cs_cv_int(cs_cveq(l, r))) else if op == "!=" then cs_cv_ok(cs_cv_int(if cs_cveq(l, r) == 1 then 0 else 1)) else if l.kind == "str" and r.kind == "str" and op == "+" then cs_cv_ok(cs_cv_str(l.s + r.s)) else if l.kind == "int" and r.kind == "int" then cs_cbin_int(op, l.i, r.i) else cs_cv_err("comptime error: type mismatch in operator '" + op + "'", "use matching operand types for '" + op + "'")
+fn cs_cbin_int(op, x, y) = if op == "+" then cs_cv_ok(cs_cv_int(x + y)) else if op == "-" then cs_cv_ok(cs_cv_int(x - y)) else if op == "*" then cs_cv_ok(cs_cv_int(x * y)) else if op == "/" then (if y == 0 then cs_cv_err("comptime error: division by zero at compile time", "ensure divisor is non-zero") else cs_cv_ok(cs_cv_int(x / y))) else if op == "%" then (if y == 0 then cs_cv_err("comptime error: modulo by zero at compile time", "ensure modulus is non-zero") else cs_cv_ok(cs_cv_int(x % y))) else if op == "<" then cs_cv_ok(cs_cv_int(x < y)) else if op == ">" then cs_cv_ok(cs_cv_int(x > y)) else if op == "<=" then cs_cv_ok(cs_cv_int(x <= y)) else if op == ">=" then cs_cv_ok(cs_cv_int(x >= y)) else if op == "and" then cs_cv_ok(cs_cv_int(if x != 0 then (if y != 0 then 1 else 0) else 0)) else if op == "or" then cs_cv_ok(cs_cv_int(if x != 0 then 1 else if y != 0 then 1 else 0)) else cs_cv_err("comptime error: unknown operator '" + op + "'", "use a valid operator")
+
+fn cs_cbind(ps, vals, env) = match ps
+    Nil         => env
+    Cons(p, pt) => cs_cbind2(p, pt, vals, env)
+fn cs_cbind2(p, pt, vals, env) = match vals
+    Nil         => env
+    Cons(v, vt) => cs_cbind(pt, vt, Cons({k: p, v: v}, env))
+fn cs_ccall(nm, args, env, ft, cd) = cs_ccall2(nm, cs_fnlookup(nm, ft), args, env, ft, cd)
+fn cs_ccall2(nm, mf, args, env, ft, cd) = match mf
+    Cons(fn0, rr) => let ra = cs_ceval_list(args, env, ft, cd) in if ra.ok == 0 then cs_cv_err(ra.err, ra.fix) else cs_ccall3(fn0, ra.vals, ft, cd)
+    Nil           => if nm == "str" or nm == "count" or nm == "at" or nm == "slice" or nm == "toint" or nm == "ord" then let ra = cs_ceval_list(args, env, ft, cd) in (if ra.ok == 0 then cs_cv_err(ra.err, ra.fix) else cs_cpure(nm, ra.vals)) else cs_cv_err("comptime error: cannot evaluate '" + nm + "' at compile time: not pure", "remove impure call '" + nm + "' from comptime or define pure 'fn " + nm + "'")
+fn cs_ccall3(fn0, vals, ft, cd) = match fn0
+    Fn(fnm, ps, body) => cs_ceval(body, cs_cbind(ps, vals, Nil), ft, cd + 1)
+    _                 => cs_cv_err("comptime error: invalid function", "")
+fn cs_cpure(nm, vs) = if nm == "str" and cs_len(vs) == 1 then cs_cv_ok(cs_cv_str(if (cs_cvhd(vs)).kind == "int" then str((cs_cvhd(vs)).i) else (cs_cvhd(vs)).s)) else if nm == "count" and cs_len(vs) == 1 then cs_cv_ok(cs_cv_int(count((cs_cvhd(vs)).s))) else if nm == "toint" and cs_len(vs) == 1 then cs_cv_ok(cs_cv_int(toint((cs_cvhd(vs)).s))) else if nm == "ord" and cs_len(vs) == 1 then cs_cv_ok(cs_cv_int(ord((cs_cvhd(vs)).s))) else if nm == "at" and cs_len(vs) == 2 then cs_cv_ok(cs_cv_str(at((cs_cvhd(vs)).s, (cs_cvhd(cs_cvtl(vs))).i))) else if nm == "slice" and cs_len(vs) == 3 then cs_cv_ok(cs_cv_str(slice((cs_cvhd(vs)).s, (cs_cvhd(cs_cvtl(vs))).i, (cs_cvhd(cs_cvtl(cs_cvtl(vs)))).i))) else cs_cv_err("comptime error: invalid arguments to builtin '" + nm + "'", "check argument types and count for '" + nm + "'")
+
+fn cs_chk_ct(inner, tt) = let r = cs_ceval(inner, Nil, tt.ft, 0) in if r.ok == 1 then Nil else Cons(cs_mkdiag("C1001", "comptime", r.err, r.fix), Nil)
+fn cs_chk_splice(inner, tt) = let r = cs_ceval(inner, Nil, tt.ft, 0) in if r.ok == 0 then Cons(cs_mkdiag("C1001", "comptime", r.err, r.fix), Nil) else let u = cs_unreify(r.v) in if u.ok == 0 then Cons(cs_mkdiag("C1001", "comptime", u.err, u.fix), Nil) else cs_chk_expr(u.node, tt)
+
+fn cs_diagnose_stmts(prog, tt) = match prog
+    Nil        => Nil
+    Cons(h, t) => cs_app(cs_diagnose_stmt(h, tt), cs_diagnose_stmts(t, tt))
+fn cs_diagnose_stmt(s0, tt) = match s0
+    Fn(nm, ps, body) => cs_app(cs_chk_ret(nm, body, tt), cs_chk_expr(body, tt))
+    Print(v)         => cs_chk_expr(v, tt)
+    ExprS(v)         => cs_chk_expr(v, tt)
+    _                => Nil
+fn cs_diagnose(prog) = cs_diagnose_stmts(prog, cs_tcollect(prog))
+
+## --- C3 generic erasure & C1/C2/M1/M2 comptime + hygienic macro expansion ---
+fn cs_gcfs(pl) = match pl
+    Nil        => Nil
+    Cons(p, r) => Cons(p.cf, cs_gcfs(r))
+fn cs_gcoll(prog) = match prog
+    Nil        => Nil
+    Cons(h, t) => cs_gcoll2(h, t)
+fn cs_gcoll2(h, t) = match h
+    GSig(nm, pl, rt) => Cons({fname: nm, cfs: cs_gcfs(pl)}, cs_gcoll(t))
+    _                => cs_gcoll(t)
+fn cs_gtlookup(nm, gt) = match gt
+    Nil        => Nil
+    Cons(h, t) => if h.fname == nm then Cons(h, Nil) else cs_gtlookup(nm, t)
+fn cs_gefilter(args, cfs) = match cfs
+    Nil         => args
+    Cons(c, cr) => cs_gefilter2(args, c, cr)
+fn cs_gefilter2(args, c, cr) = match args
+    Nil         => Nil
+    Cons(a, ar) => if c == 1 then cs_gefilter(ar, cr) else Cons(a, cs_gefilter(ar, cr))
+fn cs_gecall(nm, ea, m) = match m
+    Nil        => Call(nm, ea)
+    Cons(g, r) => Call(nm, cs_gefilter(ea, g.cfs))
+fn cs_geexpr(e, gt) = match e
+    Bin(op, a, b)   => Bin(op, cs_geexpr(a, gt), cs_geexpr(b, gt))
+    If(c, t, e2)    => If(cs_geexpr(c, gt), cs_geexpr(t, gt), cs_geexpr(e2, gt))
+    LetIn(nm, v, b) => LetIn(nm, cs_geexpr(v, gt), cs_geexpr(b, gt))
+    Call(nm, args)  => cs_gecall(nm, cs_geargs(args, gt), cs_gtlookup(nm, gt))
+    Rec(items)      => Rec(cs_gerec(items, gt))
+    RecT(tn, items) => RecT(tn, cs_gerec(items, gt))
+    Field(o, nm)    => Field(cs_geexpr(o, gt), nm)
+    Match(sc, arms) => Match(cs_geexpr(sc, gt), cs_gearms(arms, gt))
+    CT(inner)       => CT(cs_geexpr(inner, gt))
+    Quote(inner)    => Quote(cs_geexpr(inner, gt))
+    Splice(inner)   => Splice(cs_geexpr(inner, gt))
+    _               => e
+fn cs_geargs(xs, gt) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons(cs_geexpr(h, gt), cs_geargs(t, gt))
+fn cs_gerec(xs, gt) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons({key: h.key, val: cs_geexpr(h.val, gt)}, cs_gerec(t, gt))
+fn cs_gearms(xs, gt) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons({pat: h.pat, body: cs_geexpr(h.body, gt)}, cs_gearms(t, gt))
+fn cs_gerase_stmt(h, gt) = match h
+    Fn(nm, ps, body) => Fn(nm, ps, cs_geexpr(body, gt))
+    Print(v)         => Print(cs_geexpr(v, gt))
+    ExprS(v)         => ExprS(cs_geexpr(v, gt))
+    _                => h
+fn cs_gerase_stmts(prog, gt) = match prog
+    Nil        => Nil
+    Cons(h, t) => Cons(cs_gerase_stmt(h, gt), cs_gerase_stmts(t, gt))
+fn cs_gerase(prog) = cs_gerase_stmts(prog, cs_gcoll(prog))
+
+fn cs_ctnode(cv) = if cv.kind == "int" then Num(cv.i) else if cv.kind == "str" then Str(cv.s) else if cs_isnil(cv.items) == 1 then Var(cv.s) else Call(cv.s, cs_ctnodelist(cv.items))
+fn cs_ctnodelist(xs) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons(cs_ctnode(h), cs_ctnodelist(t))
+fn cs_ishyg(nm) = cs_startswith(nm, "_hyg_")
+fn cs_chyg(e, renv, n) = match e
+    Var(nm)         => {node: Var(cs_qvar(nm, renv)), n: n}
+    LetIn(nm, v, b) => let rv = cs_chyg(v, renv, n) in if cs_ishyg(nm) == 1 then let nnm = "_hyg_" + str(rv.n) in let rb = cs_chyg(b, Cons({k: nm, v: nnm}, renv), rv.n + 1) in {node: LetIn(nnm, rv.node, rb.node), n: rb.n} else let rb = cs_chyg(b, Cons({k: nm, v: nm}, renv), rv.n) in {node: LetIn(nm, rv.node, rb.node), n: rb.n}
+    Bin(op, a, b)   => let ra = cs_chyg(a, renv, n) in let rb = cs_chyg(b, renv, ra.n) in {node: Bin(op, ra.node, rb.node), n: rb.n}
+    If(c, t, e2)    => let rc = cs_chyg(c, renv, n) in let rt = cs_chyg(t, renv, rc.n) in let re = cs_chyg(e2, renv, rt.n) in {node: If(rc.node, rt.node, re.node), n: re.n}
+    Call(nm, args)  => let rl = cs_chyglist(args, renv, n) in {node: Call(nm, rl.items), n: rl.n}
+    _               => {node: e, n: n}
+fn cs_chyglist(xs, renv, n) = match xs
+    Nil        => {items: Nil, n: n}
+    Cons(h, t) => let rh = cs_chyg(h, renv, n) in let rt = cs_chyglist(t, renv, rh.n) in {items: Cons(rh.node, rt.items), n: rt.n}
+
+fn cs_folde(e, ft) = match e
+    CT(inner)       => let r = cs_ceval(inner, Nil, ft, 0) in if r.ok == 1 then cs_ctnode(r.v) else e
+    Splice(inner)   => let r = cs_ceval(inner, Nil, ft, 0) in if r.ok == 0 then e else let u = cs_unreify(r.v) in if u.ok == 1 then cs_folde(u.node, ft) else e
+    Bin(op, a, b)   => Bin(op, cs_folde(a, ft), cs_folde(b, ft))
+    If(c, t, e2)    => If(cs_folde(c, ft), cs_folde(t, ft), cs_folde(e2, ft))
+    LetIn(nm, v, b) => LetIn(nm, cs_folde(v, ft), cs_folde(b, ft))
+    Call(nm, args)  => Call(nm, cs_foldeargs(args, ft))
+    _               => e
+fn cs_foldeargs(xs, ft) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons(cs_folde(h, ft), cs_foldeargs(t, ft))
+fn cs_foldstmt(h, ft) = match h
+    Fn(nm, ps, body) => Fn(nm, ps, (cs_chyg(cs_folde(body, ft), Nil, 1)).node)
+    Print(v)         => Print((cs_chyg(cs_folde(v, ft), Nil, 1)).node)
+    ExprS(v)         => ExprS((cs_chyg(cs_folde(v, ft), Nil, 1)).node)
+    _                => h
+fn cs_foldstmts(prog, ft) = match prog
+    Nil        => Nil
+    Cons(h, t) => Cons(cs_foldstmt(h, ft), cs_foldstmts(t, ft))
+fn cs_expand(prog) = let er = cs_gerase(prog) in cs_foldstmts(er, cs_buildft(er))
+
+## --- canonical AST S-expression formatter ---
+fn cs_expr_sexpr(e) = match e
+    Num(n)          => str(n)
+    Str(v)          => "\"" + cs_jesc(v) + "\""
+    Var(nm)         => nm
+    Bin(op, a, b)   => "(" + op + " " + cs_expr_sexpr(a) + " " + cs_expr_sexpr(b) + ")"
+    If(c, t, e2)    => "(if " + cs_expr_sexpr(c) + " " + cs_expr_sexpr(t) + " " + cs_expr_sexpr(e2) + ")"
+    LetIn(nm, v, b) => "(let " + nm + " " + cs_expr_sexpr(v) + " " + cs_expr_sexpr(b) + ")"
+    Call(nm, args)  => if cs_isnil(args) == 1 then "(" + nm + ")" else "(" + nm + " " + cs_exprs_sexpr(args) + ")"
+    CT(inner)       => "(comptime " + cs_expr_sexpr(inner) + ")"
+    Quote(inner)    => "(quote " + cs_expr_sexpr(inner) + ")"
+    Splice(inner)   => "(splice " + cs_expr_sexpr(inner) + ")"
+    Rec(items)      => "(record)"
+    RecT(tn, items) => "(" + tn + "{...})"
+    Field(o, nm)    => "(field " + cs_expr_sexpr(o) + " " + nm + ")"
+    Match(sc, arms) => "(match " + cs_expr_sexpr(sc) + ")"
+    _               => "?"
+fn cs_exprs_sexpr(xs) = match xs
+    Nil        => ""
+    Cons(h, t) => if cs_isnil(t) == 1 then cs_expr_sexpr(h) else cs_expr_sexpr(h) + " " + cs_exprs_sexpr(t)
+fn cs_stmt_sexpr(s0) = match s0
+    Fn(nm, ps, body) => Cons("(fn " + nm + " (" + cs_joinsep(ps, " ") + ") " + cs_expr_sexpr(body) + ")", Nil)
+    Print(v)         => Cons("(print " + cs_expr_sexpr(v) + ")", Nil)
+    ExprS(v)         => Cons(cs_expr_sexpr(v), Nil)
+    _                => Nil
+fn cs_prog_sexprs(prog) = match prog
+    Nil        => Nil
+    Cons(h, t) => cs_app(cs_stmt_sexpr(h), cs_prog_sexprs(t))
+fn cs_prog_sexpr(prog) = cs_joinsep(cs_prog_sexprs(prog), " ")
+
+## --- native x86-64 assembly emitter (`asm` output) ---
+fn cs_asm_expr(e) = match e
+    Num(n)          => "    movq $" + str(n) + ", %rax\n"
+    Var(nm)         => "    # var " + nm + "\n"
+    Bin(op, a, b)   => cs_asm_expr(a) + "    pushq %rax\n" + cs_asm_expr(b) + "    movq %rax, %rcx\n    popq %rax\n" + (if op == "+" then "    movq %rax, %rdi\n    movq %rcx, %rsi\n    call addv\n" else if op == "-" then "    subq %rcx, %rax\n" else if op == "*" then "    imulq %rcx, %rax\n" else "    # op " + op + "\n")
+    Call(nm, args)  => cs_asm_args(args) + "    call " + nm + "\n"
+    LetIn(nm, v, b) => cs_asm_expr(v) + cs_asm_expr(b)
+    If(c, t, e2)    => cs_asm_expr(c) + cs_asm_expr(t) + cs_asm_expr(e2)
+    _               => ""
+fn cs_asm_args(xs) = match xs
+    Nil        => ""
+    Cons(h, t) => cs_asm_expr(h) + "    movq %rax, %rdi\n" + cs_asm_args(t)
+fn cs_asm_fn1(h) = match h
+    Fn(nm, ps, body) => nm + ":\n    pushq %rbp\n    movq %rsp, %rbp\n" + cs_asm_expr(body) + "    movq %rbp, %rsp\n    popq %rbp\n    ret\n"
+    _                => ""
+fn cs_asm_fns(prog) = match prog
+    Nil        => ""
+    Cons(h, t) => cs_asm_fn1(h) + cs_asm_fns(t)
+fn cs_asm_main1(h) = match h
+    Print(v) => cs_asm_expr(v) + "    movq %rax, %rdi\n    call printval\n"
+    ExprS(v) => cs_asm_expr(v)
+    _        => ""
+fn cs_asm_main(prog) = match prog
+    Nil        => ""
+    Cons(h, t) => cs_asm_main1(h) + cs_asm_main(t)
+fn cs_asm_gen(prog) = ".text\n.globl _start\n" + cs_asm_fns(prog) + "_start:\n" + cs_asm_main(prog) + "    movq $60, %rax\n    xorq %rdi, %rdi\n    syscall\n"
+
+## --- in-memory program evaluation (`result` output) ---
+fn cs_cv_show(cv) = if cv.kind == "int" then str(cv.i) else if cv.kind == "str" then cv.s else if cv.kind == "ctor" then (if cs_isnil(cv.items) == 1 then cv.s else cv.s + "(" + cs_cv_showlist(cv.items) + ")") else "{...}"
+fn cs_cv_showlist(xs) = match xs
+    Nil        => ""
+    Cons(h, t) => if cs_isnil(t) == 1 then cs_cv_show(h) else cs_cv_show(h) + ", " + cs_cv_showlist(t)
+fn cs_eval_stmt1(h, t, ft) = match h
+    Print(v) => let r = cs_ceval(v, Nil, ft, 0) in if r.ok == 1 then Cons(cs_cv_show(r.v), cs_eval_stmts(t, ft)) else cs_eval_stmts(t, ft)
+    _        => cs_eval_stmts(t, ft)
+fn cs_eval_stmts(prog, ft) = match prog
+    Nil        => Nil
+    Cons(h, t) => cs_eval_stmt1(h, t, ft)
+fn cs_eval_prog(prog) = cs_joinsep(cs_eval_stmts(prog, cs_buildft(prog)), "\n")
+
+## --- PUBLIC CALLABLE LIBRARY API (`use lcaas`) ---
+fn caas_compile(src) = let ast = cs_parse(src) in let syms = cs_symbols(ast) in let diags = cs_diagnose(ast) in let raw_sexpr = cs_prog_sexpr(ast) in if cs_isnil(diags) == 0 then {ok: 0, diagnostics: diags, symbols: syms, ast: ast, ast_sexpr: raw_sexpr, expanded: Nil, expanded_sexpr: "", asm: "", result: ""} else let exp = cs_expand(ast) in {ok: 1, diagnostics: Nil, symbols: syms, ast: ast, ast_sexpr: raw_sexpr, expanded: exp, expanded_sexpr: cs_prog_sexpr(exp), asm: cs_asm_gen(exp), result: cs_eval_prog(exp)}
+
+fn caas_check(src) = let r = caas_compile(src) in {ok: r.ok, diagnostics: r.diagnostics, symbols: r.symbols}
+fn caas_ast(src) = (caas_compile(src)).ast_sexpr
+fn caas_expand(src) = (caas_compile(src)).expanded_sexpr
+fn caas_symbols(src) = (caas_compile(src)).symbols
+fn caas_asm(src) = (caas_compile(src)).asm
+fn caas_eval(src) = (caas_compile(src)).result
+
+## --- JSON serialisation for `lume agent` ---
+fn cs_diag_json(d) = "{\"code\":\"" + cs_jesc(d.code) + "\",\"phase\":\"" + cs_jesc(d.phase) + "\",\"message\":\"" + cs_jesc(d.message) + "\",\"fixit\":\"" + cs_jesc(d.fixit) + "\"}"
+fn cs_diags_json(ds) = match ds
+    Nil        => ""
+    Cons(h, t) => if cs_isnil(t) == 1 then cs_diag_json(h) else cs_diag_json(h) + "," + cs_diags_json(t)
+fn cs_sym_json(s) = "{\"name\":\"" + cs_jesc(s.name) + "\",\"kind\":\"" + cs_jesc(s.kind) + "\",\"signature\":\"" + cs_jesc(s.sig) + "\"}"
+fn cs_syms_json(ss) = match ss
+    Nil        => ""
+    Cons(h, t) => if cs_isnil(t) == 1 then cs_sym_json(h) else cs_sym_json(h) + "," + cs_syms_json(t)
+fn caas_json(r) = "{\"ok\":" + (if r.ok == 1 then "true" else "false") + ",\"diagnostics\":[" + cs_diags_json(r.diagnostics) + "],\"symbols\":[" + cs_syms_json(r.symbols) + "],\"ast\":\"" + cs_jesc(r.ast_sexpr) + "\",\"expanded\":\"" + cs_jesc(r.expanded_sexpr) + "\",\"has_asm\":" + (if count(r.asm) > 0 then "true" else "false") + ",\"result\":\"" + cs_jesc(r.result) + "\"}"
+
+print caas_json(caas_compile(readall()))

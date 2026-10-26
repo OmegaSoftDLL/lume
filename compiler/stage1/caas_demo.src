@@ -1,0 +1,23 @@
+## caas_demo.src -- Conformance test for E1 (Compiler-as-a-Service library `use lcaas`).
+## Calls `caas_compile(src)` in-process on both:
+##   1. A valid program combining F1 ADTs/records, F2 annotations, C2 comptime recursion,
+##      C3 generic type erasure, and M1/M2 hygienic quasiquote macros.
+##   2. A broken program containing 7 distinct F1/F2/C3/M2 errors in a single compilation
+##      unit -- verifying that `caas_compile` never aborts the host process, collects all
+##      diagnostics, and produces deterministic AI-first fix-it suggestions.
+use lcaas
+
+fn show_diags(ds) = match ds
+    Nil        => ""
+    Cons(h, t) => h.code + " | " + h.message + " | fixit: " + h.fixit + (if cs_isnil(t) == 1 then "" else "\n" + show_diags(t))
+
+fn good_src() = "type Expr = enum Lit(int) | Add(Expr, Expr)\ntype Point = record x: int, y: int\nfn fib(n) = if n < 2 then n else fib(n - 1) + fib(n - 2)\nfn id(comptime T: type, x: T) -> T = x\nfn add_pt(p: Point, dx: int) -> int = p.x + p.y + dx\nfn m_with_tmp(k, body) = quote(let tmp = unquote(k) in tmp + unquote(body))\nfn bump(tmp) = splice(m_with_tmp(10, quote(tmp * 2)))\nprint id(int, comptime(fib(6)))\nprint add_pt(Point{x: 3, y: 4}, 5)\nprint bump(7)\n"
+
+fn bad_src() = "type Expr = enum Lit(int) | Add(Expr, Expr)\ntype Point = record x: int, y: int\nfn greet(name: str) -> str = 99\nfn id(comptime T: type, x: T) -> T = x\nprint Litt(5)\nprint Add(Lit(1))\nprint (Point{x: 1, z: 2}).x\nprint greet(42)\nprint id(int, \"bad\")\nprint unquote(1)\n"
+
+fn fmt_good(r1) = str(r1.ok) + "\n" + str(cs_len(r1.diagnostics)) + "\n" + str(cs_len(r1.symbols)) + "\n" + r1.expanded_sexpr + "\n" + str(if count(r1.asm) > 0 then 1 else 0) + "\n" + r1.result
+
+fn fmt_bad(r2) = str(r2.ok) + "\n" + str(cs_len(r2.diagnostics)) + "\n" + show_diags(r2.diagnostics)
+
+print fmt_good(caas_compile(good_src()))
+print fmt_bad(caas_compile(bad_src()))

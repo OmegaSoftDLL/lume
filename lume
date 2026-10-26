@@ -141,6 +141,8 @@ collect_reachable_mods() {
             _ucand="$_mdir/src/$_u.src"
         elif [ -f "$_mdir/deps/$_u.src" ]; then
             _ucand="$_mdir/deps/$_u.src"
+        elif [ -f "$SRC_DIR/$_u.src" ]; then
+            _ucand="$SRC_DIR/$_u.src"
         fi
         if [ -n "$_ucand" ]; then
             printf '@module %s\n' "$_u" >> "$_modin"
@@ -650,6 +652,30 @@ EOF
     esac
 }
 
+cmd_agent() {
+    [ $# -ge 1 ] || usage
+    _afile=""
+    for _arg in "$@"; do
+        case "$_arg" in
+            check|compile|ast|expand|symbols|eval|--json) ;;
+            -*) usage ;;
+            *) _afile=$_arg ;;
+        esac
+    done
+    [ -n "$_afile" ] || usage
+    if [ ! -f "$_afile" ]; then
+        echo "lume agent: cannot read $_afile" >&2
+        exit 66
+    fi
+    _abun=$(mktemp)
+    if ! bundle_src_if_needed "$_afile" "$_abun"; then
+        rm -f "$_abun"
+        exit 1
+    fi
+    run_core_tool lcaas "$_abun"
+    rm -f "$_abun"
+}
+
 [ $# -ge 1 ] || usage
 _sub=$1
 shift
@@ -678,6 +704,9 @@ case "$_sub" in
         ;;
     pkg)
         cmd_pkg "$@"
+        ;;
+    agent|service)
+        cmd_agent "$@"
         ;;
     check)
         cmd_check "$@"

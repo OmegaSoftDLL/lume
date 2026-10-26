@@ -553,6 +553,28 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_
     { [ -x "$ntmp/ne.elf" ] && "$ntmp/ne.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/named_enum_asm.expected - >/dev/null; } || ne_ok=0
     cmp -s "$ntmp/ne.s" "$ntmp/ne_pos.s" || ne_ok=0
     if [ "$ne_ok" = 1 ]; then ok "phase-2 F4: core accepts named enum payloads; named and positional forms emit identical asm"; else bad "phase-2 F4: named enum payload unification"; cat "$ntmp/ne.err"; fi
+    # phase-2 E1b: in-process compiler-as-a-service library (`use lcaas` + `lume agent` JSON query protocol).
+    # 1. In-process library (`caas_demo.src` imports `use lcaas`, calls `caas_compile` on both valid F1/F2/C2/C3/M1/M2 code and 7-error code without aborting).
+    if LUME_BIN_DIR="$ntmp" ../../lume run ../../compiler/stage1/caas_demo.src 2>/dev/null | diff -u ../../tests/conformance/stage1/caas_demo_asm.expected - >/dev/null; then ok "phase-2 E1b: compiler-as-a-service library (use lcaas: diagnostics/fixits/AST/expanded/symbols/asm/result in-memory)"; else bad "phase-2 E1b: compiler-as-a-service library (use lcaas)"; fi
+    # 2. `lume agent` structured JSON query protocol on both valid and multi-error sources.
+    printf 'type Val = enum Lit(int)\nfn double(x: int) -> int = x * 2\nprint double(21)\n' >"$ntmp/e1_ok.src"
+    printf 'type Val = enum Lit(int)\nfn double(x: int) -> int = x * 2\nprint Litt(1)\nprint double("bad")\n' >"$ntmp/e1_bad.src"
+    if command -v python3 >/dev/null 2>&1; then
+        LUME_BIN_DIR="$ntmp" ../../lume agent check "$ntmp/e1_ok.src" >"$ntmp/e1_ok.json" 2>/dev/null
+        LUME_BIN_DIR="$ntmp" ../../lume agent check "$ntmp/e1_bad.src" >"$ntmp/e1_bad.json" 2>/dev/null
+        if python3 - "$ntmp/e1_ok.json" "$ntmp/e1_bad.json" <<'PY' >/dev/null 2>&1
+import json, sys
+ok_d = json.load(open(sys.argv[1]))
+bad_d = json.load(open(sys.argv[2]))
+assert ok_d["ok"] is True and ok_d["diagnostics"] == [] and ok_d["has_asm"] is True and ok_d["result"] == "42"
+assert len(ok_d["symbols"]) == 2 and "(fn double" in ok_d["ast"]
+assert bad_d["ok"] is False and len(bad_d["diagnostics"]) == 2 and bad_d["has_asm"] is False
+codes = [d["code"] for d in bad_d["diagnostics"]]
+assert codes == ["T1001", "T2001"]
+assert "replace 'Litt' with declared constructor 'Lit'" in bad_d["diagnostics"][0]["fixit"]
+PY
+        then ok "phase-2 E1b: lume agent emits valid structured JSON (symbols, multi-error diagnostics + fix-its, result)"; else bad "phase-2 E1b: lume agent structured JSON"; fi
+    fi
     rm -rf "$ntmp"
 else
     ok "no-toolchain ELF pipeline (skipped: not linux/x86_64, or under ASan)"
