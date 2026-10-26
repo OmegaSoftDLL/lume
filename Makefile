@@ -1,6 +1,6 @@
 # Lume top-level convenience targets. The real build lives in the staged
 # bootstrap (scripts/bootstrap.sh) and the seed Makefile (bootstrap/lume0).
-.PHONY: amalgamate bootstrap seed test asan clean
+.PHONY: amalgamate bootstrap seed zero-c test asan clean
 
 ## Generate compiler/stage1/lumec.src by concatenating compiler/stage1/lume/*.src
 ## (SQLite-style amalgamation). lumec.src is a build artifact, not a source file;
@@ -16,6 +16,12 @@ bootstrap: amalgamate
 ## Build just the frozen C seed (lume0 + its own assembler/ELF writer).
 seed:
 	$(MAKE) -C bootstrap/lume0
+
+## Prove the zero-C steady state: after the seed mints the first Lume tools,
+## shadow cc/gcc/clang/as/ld with failing stubs and rebuild stages 1-3 (Lume
+## building Lume, assembled by lasm), asserting the stage 2 == stage 3 fixpoint.
+zero-c: amalgamate
+	./scripts/check-zero-c.sh
 
 ## Conformance suite (includes the self-host and zero-C-loop tests).
 test: amalgamate
