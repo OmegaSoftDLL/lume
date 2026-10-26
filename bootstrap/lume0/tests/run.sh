@@ -633,6 +633,12 @@ PY
     printf 'fn needs(s: str) -> str = s\nfn mk() -> int = let p = {x: 10} in let u = needs(p.x) in 0\nprint mk()\n' >"$ntmp/f3ctbad.src"
     "$ntmp/lc" <"$ntmp/f3ctbad.src" >"$ntmp/f3ctbad.s" 2>"$ntmp/f3ctbad.err"; f3ct=$?
     if [ "$f3ct" = 3 ] && [ ! -s "$ntmp/f3ctbad.s" ] && grep -q "argument 1 of 'needs' has type int but parameter 's' expects str" "$ntmp/f3ctbad.err"; then ok "phase-2 F3c: a record field of the wrong type passed as an argument fails at compile time (exit 3, no asm)"; else bad "phase-2 F3c: field-type argument mismatch fails"; fi
+    # phase-2 F3c (Hindley-Milner): an UNANNOTATED function's parameter types are inferred from the body by unification.
+    "$ntmp/lc" <../../compiler/stage1/hm_ok.src >"$ntmp/hm.s" 2>"$ntmp/hm.err"; "$ntmp/lasm" <"$ntmp/hm.s" >"$ntmp/hm.elf" 2>/dev/null; chmod +x "$ntmp/hm.elf"
+    if [ -x "$ntmp/hm.elf" ] && "$ntmp/hm.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/hm_ok_asm.expected - >/dev/null; then ok "phase-2 F3c: HM infers unannotated parameter types (inc(x)=x+1 => int), type-checks, and runs"; else bad "phase-2 F3c: HM inference (passing)"; cat "$ntmp/hm.err"; fi
+    printf 'fn inc(x) = x + 1\nfn anchor() -> int = 0\nprint inc("hi")\n' >"$ntmp/hmbad.src"
+    "$ntmp/lc" <"$ntmp/hmbad.src" >"$ntmp/hmbad.s" 2>"$ntmp/hmbad.err"; hmb=$?
+    if [ "$hmb" = 3 ] && [ ! -s "$ntmp/hmbad.s" ] && grep -q "argument 1 of 'inc' has type str but parameter 'x' expects int" "$ntmp/hmbad.err"; then ok "phase-2 F3c: HM catches a mismatched call to an unannotated function (inc(\"hi\") with inc(x)=x+1) (exit 3, no asm)"; else bad "phase-2 F3c: HM mismatched call fails"; fi
     rm -rf "$ntmp"
 else
     ok "no-toolchain ELF pipeline (skipped: not linux/x86_64, or under ASan)"
