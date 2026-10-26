@@ -16,3 +16,5 @@ print 1.21 > 1.2
 print decimal_format(decimal(4, 2, 1.2))
 print decimal(4, 2, 1.2).precision
 print decimal_format(decimal(4, 2, 1.2) + 0.30)
+print (decimal(4, 2, 1.2) + decimal(4, 2, 0.30)).precision
+print decimal_mul(decimal(3, 2, 1.25), decimal(2, 1, 0.4)).precision
