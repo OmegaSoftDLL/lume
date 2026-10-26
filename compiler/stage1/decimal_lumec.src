@@ -19,4 +19,7 @@ print decimal_format(0.000000000000000001)
 print decimal_format(let local_decimal = 0.10 in local_decimal + 0.20)
 print let local_decimal = 1 in local_decimal + 2
 fn decimal_sum(left: decimal(4, 2), right: decimal(4, 2)) -> decimal(4, 2) = left + right
-print decimal_format(decimal_sum(decimal(4, 2, 0.10), decimal(4, 2, 0.20)))
+print decimal_format(decimal_sum(0.1, 0.20))
+fn decimal_cent() -> decimal(4, 2) = 0.1
+print decimal_format(decimal_cent())
+print decimal_format(decimal_cent() + decimal_cent())
