@@ -97,7 +97,13 @@ getting stuck), one green PR with a regression test, and the **self-host fixpoin
 - **E2 ✅ done** automated evolution gate: every PR runs `make bootstrap` in CI, asserting the triple
   self-build stays bit-identical, alongside `make test`/`asan`. Any change that breaks self-hosting is
   rejected automatically — the prerequisite for safe multi-contributor work. *Ref: our staged bootstrap + CI; `docs/04-roadmap.md`.*
-- **E1** compiler-as-a-service: expose `lumec` as a callable API/library (source in → diagnostics/AST/asm/result out), not only a CLI. Depends on F. *Ref: Roslyn (C#), rustc query API, clangd.*
+- **E1a ✅ done** compiler-as-a-service: `lume compile [--json] [--run] <file.src>` runs the self-hosted compiler
+  and returns a machine-readable result — `{ok, exit, asm_lines, diagnostics, ran, run_exit, stdout}` — so an agent
+  (or the E3 loop) can submit source and read back structured diagnostics, the emitted assembly size, and, with
+  `--run`, the program's native stdout, without scraping the CLI. The compiler itself is unchanged (source in →
+  diagnostics / asm / result out). *Ref: Roslyn (C#), rustc query API, clangd.* NOT yet (**E1b**): an in-process
+  library API that also returns the AST as data.
+- **E1b** in-process compiler library API (AST/typed-tree out), depends on F3b. *Ref: Roslyn, rustc query API.*
 - **E3** the governance loop: an AI proposes a change via E1, the E2 gates run automatically, a human approves. *Ref: `docs/04-roadmap.md`.*
 
 ## Recommended order
