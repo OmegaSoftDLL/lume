@@ -7,6 +7,10 @@ type DP = record
     toks: [Token]
     pos:  int
 
+type DDecimalParts = record
+    coefficient: int
+    scale: int
+
 fn dcur(p: DP) -> Token = p.toks[p.pos]
 fn deat(p: mut DP) -> Token
     let t = p.toks[p.pos]
@@ -18,9 +22,9 @@ fn dnl(p: mut DP)
 
 fn is_upper(s: str) -> bool = s.len() > 0 and s[0] >= 'A' and s[0] <= 'Z'
 
-fn ddecimal_scan(text: str, index: int, coefficient: int, scale: int, past_point: int, digits: int)
+fn ddecimal_scan(text: str, index: int, coefficient: int, scale: int, past_point: int, digits: int) -> DDecimalParts
     if index >= text.len()
-        {coefficient: coefficient, scale: scale}
+        DDecimalParts(coefficient: coefficient, scale: scale)
     elif text[index] == '.'
         ddecimal_scan(text, index + 1, coefficient, scale, 1, digits)
     else
