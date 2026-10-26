@@ -16,7 +16,7 @@ plainly, because the project's golden rule forbids claiming a milestone that is 
 | **E — self-evolution** | E1a `lume compile` service, E1b in-process `lcaas` + `lume agent`, E2 CI fixpoint gate, E3 `lume evolve` (6 gates + human approval) | ✅ complete |
 | **F — type foundation** | F1 type/enum/record decls + gradual checker, F2 param/return annotations + gradual argument checks | ✅ complete |
 | **F3 — inference** | F3a/F3b gradual return/argument/let/record-field inference + **F3c Hindley–Milner unification engine** (`TyVar`, `hunify`, `happly`, `tcollecti`/`tinfer`) inferring unannotated function parameters (`fn inc(x) = x + 1` -> `x: int`) and checking call sites with zero false positives | ✅ complete |
-| **F4 — front-end unification** | slice 1: the core grammar accepts the surface's **named enum payloads**, normalized to the same AST (byte-identical codegen) | 🟡 started |
+| **F4 — front-end unification** | named enum payloads (#143), `elif` chains (#152), string interpolation (`"a{e}b"` + `{{`/`}}` escaping), and unified layout/indented + explicit-brace (`docs/05-vision.md:224`) + inline core forms (`f4_layout.src`, `f4_brace.src`, `f4_core.src`) emitting byte-identical asm and normalising via `lume fmt` | ✅ complete |
 | **Capstone — Stage 2 exit criterion** | `examples/apps/inventory/`: multi-module inventory, invoicing & executive reporting app (< 500 lines across `catalog.src`, `invoicing.src`, `reports.src`, `main.src`, `lume.toml`, `lume.lock`) combining `use`, `decimal`, `table[T]`/`read_csv`, `query`, `comptime`, hygienic macros, `lume pkg`, and `lume test` | ✅ complete |
 
 Plus a cross-cutting fix: the self-hosted lexer/parser recurse once per source character, so the
@@ -33,19 +33,17 @@ stage-1 `SIGSEGV`.
    false positives. Generalizing polymorphic `let`-bound functions across distinct instantiations
    inside a single body remains open for future extension.
 
-2. **F4 — layout and one shared parser.** Slice 1 (named payloads) is additive and safe. The
-   remaining surface features — indentation/layout as a block form, string interpolation — cannot
-   be added to the **core** parser alone: the self-host byte-equivalence test compares the
-   self-hosted compiler against the frozen ML-core oracle (`data_parser.lume`), so any core-parser
-   change that the oracle does not mirror diverges by construction. Interpolation was attempted in
-   the core and correctly rejected by that gate (it is a surface-layer feature that should desugar
-   to the core's `+`/`str` AST). Unifying the two front-ends into one grammar is therefore a
-   deliberate core-plus-oracle effort, not an additive slice.
+2. **F4 — layout, explicit-brace, and string interpolation unification (shipped).** The unified
+   front-end (`compiler/stage1/lume/01_lexer.src`, `02_parser.src`, `04_parser_decls.src`, and
+   `compiler/stage1/lfmt.src`) now accepts all three forms — indented layout (`f4_layout.src`),
+   explicit-brace (`f4_brace.src`, `docs/05-vision.md:224`), and canonical inline Lume-Core
+   (`f4_core.src`) — plus surface string interpolation (`"a{e}b"` with `{{`/`}}` escaping),
+   lowering all of them to the same AST, emitting byte-identical x86-64 assembly, and normalising
+   both surface forms into `f4_core.src` via `lume fmt` while keeping `lumec.src`'s self-host
+   fixpoint and oracle byte-equivalence untouched.
 
 ## Bottom line
 
-All five structural tracks (**C, M, D, T, E**), the Stage 2 capstone (`examples/apps/inventory/`),
-and Track **F**'s type declarations, gradual checker, and Hindley–Milner core unification engine
-(**F1–F3c**) are complete and proven in CI, with full front-end grammar unification (**F4**) scoped
-honestly above. Nothing is faked: the triple self-build fixpoint is green, and every claim above is
-backed by a CI check.
+All six Phase 2 tracks (**C, M, D, T, E, F**) and the Stage 2 capstone (`examples/apps/inventory/`)
+are complete and proven in CI. Nothing is faked: the triple self-build fixpoint is green, and every
+claim above is backed by a CI check.

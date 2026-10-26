@@ -1,0 +1,14 @@
+## F4 front-end unification: layout/indented form, explicit-brace form, and inline Lume-Core form
+## all lower to the exact same AST, emit byte-identical assembly, and normalise via `lume fmt`.
+type Role = enum Admin(int) | Guest
+
+type User = record name: str, age: int
+
+fn role_bonus(r: Role) -> int = match r
+    Admin(lv) => lv * 10
+    Guest     => 0
+
+fn badge(u: User, r: Role) -> str = let bonus = role_bonus(r) in let score = let base = u.age + bonus in base in let tier = if score >= 50 then "senior" else if score >= 20 then "mid" else "entry" in "{{user}} " + str(u.name) + ": tier=" + str(tier) + ", score=" + str(score) + "!"
+
+print badge(User{name: "Ada", age: 30}, Admin(3))
+print badge(User{name: "Lin", age: 15}, Guest)
