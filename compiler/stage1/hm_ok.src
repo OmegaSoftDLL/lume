@@ -1,0 +1,6 @@
+## F3c Hindley-Milner: UNANNOTATED functions are inferred from their use. inc(x)=x+1 infers x:int;
+## dbl(n)=n*2 infers n:int. (anchor's -> int opts the program into checking.) inc(dbl(20)) = 41.
+fn inc(x) = x + 1
+fn dbl(n) = n * 2
+fn anchor() -> int = inc(dbl(20))
+print anchor()

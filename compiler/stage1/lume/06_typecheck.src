@@ -86,8 +86,8 @@ fn tanydecl2(h, t) = match h
     TypeS(nm, k, items) => 1
     _                   => tanydecl(t)
 ## the type table {ctors, recs}: ctors is a flat list of {tag, ar} from every enum, recs a list of {rname, fields}
-fn tcollect(prog) = {ctors: tcollectc(prog), recs: tcollectr(prog), sigs: tcollects(prog), gsigs: tcollectg(prog), decl: tanydecl(prog), lenv: Nil, recenv: Nil}
-fn twith(tt, lenv, recenv) = {ctors: tt.ctors, recs: tt.recs, sigs: tt.sigs, gsigs: tt.gsigs, decl: tt.decl, lenv: lenv, recenv: recenv}
+fn tcollect(prog) = {ctors: tcollectc(prog), recs: tcollectr(prog), sigs: tcollects(prog), gsigs: tcollectg(prog), decl: tanydecl(prog), lenv: Nil, recenv: Nil, isigs: tcollecti(prog)}
+fn twith(tt, lenv, recenv) = {ctors: tt.ctors, recs: tt.recs, sigs: tt.sigs, gsigs: tt.gsigs, decl: tt.decl, lenv: lenv, recenv: recenv, isigs: tt.isigs}
 fn twithlenv(tt, lenv) = twith(tt, lenv, tt.recenv)
 ## F3c (structural inference): a `let` bound to an ANONYMOUS record literal records its field names in `tt.recenv`,
 ## so a later `<var>.<field>` on that variable is checked WITHOUT any annotation -- accessing a field the record
@@ -381,8 +381,99 @@ fn tchkinferargs2(nm, args, g, tt) = match g
     Cons(gg, r) => 0
     Nil         => tchkinferargs3(nm, args, tsiglookup(nm, tt.sigs), tt)
 fn tchkinferargs3(nm, args, m, tt) = match m
-    Nil         => 0
+    Nil         => tchkinferargsi(nm, args, tilookup(nm, tt.isigs), tt)
     Cons(sg, r) => tchkinferwalk(nm, 1, args, sg.pn, sg.pt, tt)
+## F3c HM: a function with NO explicit signature is checked against its INFERRED parameter types (Hindley-Milner
+## over the body; unresolved types are TyAny, so a polymorphic/unknown parameter is never flagged). Every argument
+## (literal or not) is checked, since an inferred int/str parameter is as binding as an annotated one.
+fn tchkinferargsi(nm, args, m, tt) = match m
+    Nil          => 0
+    Cons(isg, r) => tchkiwalk(nm, 1, args, isg.pn, isg.iptypes, tt)
+fn tchkiwalk(nm, i, args, pns, pts, tt) = match args
+    Nil         => 0
+    Cons(a, ar) => tchkiwalk2(nm, i, a, ar, pns, pts, tt)
+fn tchkiwalk2(nm, i, a, ar, pns, pts, tt) = match pts
+    Nil          => 0
+    Cons(ty, pr) => tchkinfercmp(nm, i, phd(pns), ty, tnarrow(tknownl(a, tt, tt.lenv))) + tchkiwalk(nm, i + 1, ar, ptl(pns), pr, tt)
+fn tilookup(nm, is) = match is
+    Nil        => Nil
+    Cons(h, t) => if h.fname == nm then Cons(h, Nil) else tilookup(nm, t)
+## --- F3c: the Hindley-Milner inference engine (unification) --------------------------------------------------
+## `tcollecti` infers every function's parameter types from their use in the body. Each parameter starts as a
+## fresh type variable; literals and operators (`+ - * / %` and comparisons) generate unifications; a parameter
+## that unifies to int or str is reported as that type, and anything unresolved (polymorphic or simply unknown)
+## concretizes to TyAny. The engine is INTERNAL: a `TyVar` never escapes `tcollecti` -- inferred parameter types
+## are concretized to int/str/TyAny before any check sees them, so there are zero false positives and no other
+## pass changes. This infers UNANNOTATED functions (`fn inc(x) = x + 1` => x: int), which gradual checking could
+## not, and catches a mismatched call to them.
+fn tcollecti(prog) = match prog
+    Nil        => Nil
+    Cons(h, t) => tcollecti2(h, t)
+fn tcollecti2(h, t) = match h
+    Fn(nm, ps, body) => Cons(tifn(nm, ps, body), tcollecti(t))
+    _                => tcollecti(t)
+fn tifn(nm, ps, body) = tifn2(nm, ps, henv0(ps, 0), body)
+fn tifn2(nm, ps, env, body) = tifn3(nm, ps, env, tinfer(body, env, Nil, len(ps)))
+fn tifn3(nm, ps, env, ri) = {fname: nm, pn: ps, iptypes: tiptypes(env, ri.subst)}
+fn henv0(ps, i) = match ps
+    Nil        => Nil
+    Cons(p, r) => Cons({k: p, v: TyVar(i)}, henv0(r, i + 1))
+fn tiptypes(env, subst) = match env
+    Nil        => Nil
+    Cons(h, t) => Cons(hconcrete(happly(subst, h.v)), tiptypes(t, subst))
+fn hconcrete(ty) = match ty
+    TyName(n) => tnarrow(ty)
+    _         => TyAny
+fn henv(nm, env) = match env
+    Nil        => TyAny
+    Cons(h, t) => if h.k == nm then h.v else henv(nm, t)
+fn hlook(subst, n) = match subst
+    Nil        => Nil
+    Cons(b, r) => if b.tv == n then Cons(b.ty, Nil) else hlook(r, n)
+fn happly(subst, ty) = match ty
+    TyVar(n) => happlyv(ty, subst, hlook(subst, n))
+    _        => ty
+fn happlyv(orig, subst, m) = match m
+    Nil        => orig
+    Cons(t, r) => happly(subst, t)
+fn hbind(n, ty, subst) = Cons({tv: n, ty: ty}, subst)
+fn hunify(a, b, subst) = hunify2(happly(subst, a), happly(subst, b), subst)
+fn hunify2(a, b, subst) = match a
+    TyVar(n) => hunifyl(n, b, subst)
+    _        => hunifyr(a, b, subst)
+fn hunifyl(n, b, subst) = match b
+    TyVar(m) => if n == m then subst else hbind(n, b, subst)
+    _        => hbind(n, b, subst)
+fn hunifyr(a, b, subst) = match b
+    TyVar(m) => hbind(m, a, subst)
+    _        => subst
+fn tir(ty, subst, fresh) = {ty: ty, subst: subst, fresh: fresh}
+fn tinfer(e, env, subst, fresh) = match e
+    Num(n)          => tir(TyName("int"), subst, fresh)
+    Str(s)          => tir(TyName("str"), subst, fresh)
+    Var(nm)         => tir(henv(nm, env), subst, fresh)
+    Bin(op, a, b)   => tinferbin(op, a, b, env, subst, fresh)
+    If(c, t, e2)    => tinferif(c, t, e2, env, subst, fresh)
+    LetIn(nm, v, b) => tinferlet(nm, v, b, env, subst, fresh)
+    _               => tir(TyAny, subst, fresh)
+fn tinferbin(op, a, b, env, subst, fresh) = tinferbinA(op, b, env, tinfer(a, env, subst, fresh))
+fn tinferbinA(op, b, env, ra) = tinferbinB(op, ra.ty, tinfer(b, env, ra.subst, ra.fresh))
+fn tinferbinB(op, aty, rb) = tinferbinC(op, aty, rb.ty, rb.subst, rb.fresh)
+fn tinferbinC(op, aty, bty, subst, fresh) = if tisarith(op) == 1 then tir(TyName("int"), hunify(bty, TyName("int"), hunify(aty, TyName("int"), subst)), fresh) else if op == "+" then tinferplus(aty, bty, subst, fresh) else if tiscmp(op) == 1 then tir(TyName("int"), hunify(aty, bty, subst), fresh) else tir(TyAny, subst, fresh)
+fn tinferplus(aty, bty, subst, fresh) = tinferplus2(aty, bty, hunify(aty, bty, subst), fresh)
+fn tinferplus2(aty, bty, subst, fresh) = tir(hplusres(happly(subst, aty), happly(subst, bty)), subst, fresh)
+fn hplusres(a, b) = match a
+    TyName(n) => TyName(n)
+    _         => hplusresb(b)
+fn hplusresb(b) = match b
+    TyName(n) => TyName(n)
+    _         => TyAny
+fn tinferif(c, t, e2, env, subst, fresh) = tinferifA(t, e2, env, tinfer(c, env, subst, fresh))
+fn tinferifA(t, e2, env, rc) = tinferifB(e2, env, rc.ty, tinfer(t, env, rc.subst, rc.fresh))
+fn tinferifB(e2, env, cty, rt) = tinferifC(rt.ty, tinfer(e2, env, rt.subst, rt.fresh))
+fn tinferifC(tty, re) = tir(hplusres(happly(re.subst, tty), happly(re.subst, re.ty)), hunify(tty, re.ty, re.subst), re.fresh)
+fn tinferlet(nm, v, b, env, subst, fresh) = tinferletA(nm, b, env, tinfer(v, env, subst, fresh))
+fn tinferletA(nm, b, env, rv) = tinfer(b, Cons({k: nm, v: rv.ty}, env), rv.subst, rv.fresh)
 fn tchkinferwalk(nm, i, args, pns, pts, tt) = match args
     Nil         => 0
     Cons(a, ar) => tchkinferwalk2(nm, i, a, ar, pns, pts, tt)
