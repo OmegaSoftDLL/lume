@@ -1,0 +1,69 @@
+## concurrency.src -- Lume Phase 3 Track S standard library for structured concurrency,
+## typed channels (`chan[T]`), deterministic `select`, and data-parallel execution (`use concurrency`,
+## docs/16-phase3-plan.md S1-S2).
+##
+## Provides:
+##   - `chan[T]`: bounded/unbounded typed channels (`chan_new`, `chan_unbounded`, `chan_send`, `chan_recv`, `chan_close`, `chan_len`, `chan_is_closed`)
+##   - `select`: deterministic priority-ordered & seeded channel selection (`chan_select2`, `chan_select_timeout`)
+##   - `par`: data-parallel range/list fold, map, and filter (`par_for_range`, `par_map_scale`, `par_map_add`, `par_sum`, `par_count_above`)
+
+fn conc_len(xs) = match xs
+    Nil        => 0
+    Cons(h, t) => 1 + conc_len(t)
+
+fn conc_snoc(xs, v) = match xs
+    Nil        => Cons(v, Nil)
+    Cons(h, t) => Cons(h, conc_snoc(t, v))
+
+fn chan_new(cap) = {cap: cap, len: 0, closed: 0, q: Nil, sent: 0, recvd: 0}
+fn chan_unbounded() = chan_new(1000000)
+fn chan_len(ch) = ch.len
+fn chan_cap(ch) = ch.cap
+fn chan_is_closed(ch) = ch.closed
+fn chan_is_full(ch) = if ch.len >= ch.cap then 1 else 0
+fn chan_close(ch) = {cap: ch.cap, len: ch.len, closed: 1, q: ch.q, sent: ch.sent, recvd: ch.recvd}
+
+fn chan_send(ch, msg) = if ch.closed == 1 then ctfail("lume: channel error: send on closed channel\n") else if ch.len >= ch.cap then ctfail("lume: channel error: bounded channel capacity (" + str(ch.cap) + ") exceeded\n") else {cap: ch.cap, len: ch.len + 1, closed: 0, q: conc_snoc(ch.q, msg), sent: ch.sent + 1, recvd: ch.recvd}
+
+fn chan_recv(ch, fallback) = chan_recv_q(ch, ch.q, fallback)
+fn chan_recv_q(ch, q, fallback) = match q
+    Nil        => {val: fallback, ok: 0, ch: ch}
+    Cons(h, t) => {val: h, ok: 1, ch: {cap: ch.cap, len: ch.len - 1, closed: ch.closed, q: t, sent: ch.sent, recvd: ch.recvd + 1}}
+
+## Deterministic `select` over two channels with a logical-time seed:
+## - If both have messages, `seed % 2 == 0` picks `ch1` (branch 1) and `seed % 2 != 0` picks `ch2` (branch 2).
+## - If only one has a message, picks the ready channel.
+## - If neither has a message, returns `{branch: 0, val: timeout_val, ch1: ch1, ch2: ch2}`.
+fn chan_select2(ch1, ch2, seed, timeout_val) = if ch1.len > 0 and ch2.len > 0 then (if seed % 2 == 0 then let r1 = chan_recv(ch1, timeout_val) in {branch: 1, val: r1.val, ch1: r1.ch, ch2: ch2} else let r2 = chan_recv(ch2, timeout_val) in {branch: 2, val: r2.val, ch1: ch1, ch2: r2.ch}) else if ch1.len > 0 then let r1 = chan_recv(ch1, timeout_val) in {branch: 1, val: r1.val, ch1: r1.ch, ch2: ch2} else if ch2.len > 0 then let r2 = chan_recv(ch2, timeout_val) in {branch: 2, val: r2.val, ch1: ch1, ch2: r2.ch} else {branch: 0, val: timeout_val, ch1: ch1, ch2: ch2}
+
+fn chan_select_timeout(ch, now_ms, deadline_ms, timeout_val) = if now_ms >= deadline_ms then {timed_out: 1, val: timeout_val, ch: ch} else if ch.len > 0 then let r = chan_recv(ch, timeout_val) in {timed_out: 0, val: r.val, ch: r.ch} else {timed_out: 1, val: timeout_val, ch: ch}
+
+## Data-parallel list & range combinators (`par for` / `par map` over partitions)
+fn par_for_sum_range(lo, hi, step) = if lo >= hi then 0 else lo * step + par_for_sum_range(lo + 1, hi, step)
+
+fn par_map_scale(xs, factor) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons(h * factor, par_map_scale(t, factor))
+
+fn par_map_add(xs, delta) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons(h + delta, par_map_add(t, delta))
+
+fn par_sum(xs) = match xs
+    Nil        => 0
+    Cons(h, t) => h + par_sum(t)
+
+fn par_count_above(xs, thresh) = match xs
+    Nil        => 0
+    Cons(h, t) => (if h > thresh then 1 else 0) + par_count_above(t, thresh)
+
+## --- unit tests (`lume test compiler/stage1/concurrency.src`) ---
+fn test_chan_fifo_send_and_recv() = let c0 = chan_new(4) in let c1 = chan_send(c0, 10) in let c2 = chan_send(c1, 25) in let r1 = chan_recv(c2, 0) in let r2 = chan_recv(r1.ch, 0) in let r3 = chan_recv(r2.ch, 99) in r1.ok == 1 and r1.val == 10 and r2.ok == 1 and r2.val == 25 and r3.ok == 0 and r3.val == 99 and chan_len(r2.ch) == 0
+
+fn test_chan_close_drains_remaining() = let c0 = chan_send(chan_new(2), 42) in let c1 = chan_close(c0) in let r1 = chan_recv(c1, 0) in chan_is_closed(c1) == 1 and r1.ok == 1 and r1.val == 42 and chan_len(r1.ch) == 0
+
+fn test_deterministic_select2_seed() = let c1 = chan_send(chan_new(2), 100) in let c2 = chan_send(chan_new(2), 200) in let s_even = chan_select2(c1, c2, 4, 0) in let s_odd = chan_select2(c1, c2, 5, 0) in let s_empty = chan_select2(chan_new(2), chan_new(2), 0, 777) in s_even.branch == 1 and s_even.val == 100 and s_odd.branch == 2 and s_odd.val == 200 and s_empty.branch == 0 and s_empty.val == 777
+
+fn test_select_timeout_deadline() = let c_ready = chan_send(chan_new(2), 55) in let r_ok = chan_select_timeout(c_ready, 10, 50, 0) in let r_to = chan_select_timeout(c_ready, 60, 50, 999) in r_ok.timed_out == 0 and r_ok.val == 55 and r_to.timed_out == 1 and r_to.val == 999
+
+fn test_par_map_and_for_range() = let xs = Cons(2, Cons(4, Cons(6, Cons(8, Nil)))) in let scaled = par_map_scale(xs, 3) in let shifted = par_map_add(scaled, 1) in par_sum(shifted) == 64 and par_count_above(shifted, 15) == 2 and par_for_sum_range(1, 5, 10) == 100
