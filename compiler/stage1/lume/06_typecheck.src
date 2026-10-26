@@ -459,7 +459,7 @@ fn tinfer(e, env, subst, fresh) = match e
 fn tinferbin(op, a, b, env, subst, fresh) = tinferbinA(op, b, env, tinfer(a, env, subst, fresh))
 fn tinferbinA(op, b, env, ra) = tinferbinB(op, ra.ty, tinfer(b, env, ra.subst, ra.fresh))
 fn tinferbinB(op, aty, rb) = tinferbinC(op, aty, rb.ty, rb.subst, rb.fresh)
-fn tinferbinC(op, aty, bty, subst, fresh) = if tisarith(op) == 1 then tir(TyName("int"), hunify(bty, TyName("int"), hunify(aty, TyName("int"), subst)), fresh) else if op == "+" then tinferplus(aty, bty, subst, fresh) else if tiscmp(op) == 1 then tir(TyName("int"), hunify(aty, bty, subst), fresh) else tir(TyAny, subst, fresh)
+fn tinferbinC(op, aty, bty, subst, fresh) = if op == "+" then tinferplus(aty, bty, subst, fresh) else if tisarith(op) == 1 then tir(TyName("int"), hunify(bty, TyName("int"), hunify(aty, TyName("int"), subst)), fresh) else if tiscmp(op) == 1 then tir(TyName("int"), hunify(aty, bty, subst), fresh) else tir(TyAny, subst, fresh)
 fn tinferplus(aty, bty, subst, fresh) = tinferplus2(aty, bty, hunify(aty, bty, subst), fresh)
 fn tinferplus2(aty, bty, subst, fresh) = tir(hplusres(happly(subst, aty), happly(subst, bty)), subst, fresh)
 fn hplusres(a, b) = match a
