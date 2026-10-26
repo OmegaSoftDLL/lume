@@ -59,3 +59,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: make bootstrap
         run: make bootstrap
+
+  zero-c:
+    name: Zero-C steady state (no cc/as/ld)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: make zero-c
+        run: make zero-c
