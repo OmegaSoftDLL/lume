@@ -699,7 +699,7 @@ fn cs_pat_subvars(p) = match p
     _               => Nil
 fn cs_guard_ps(ps, c, guarded) = match ps
     Nil        => guarded
-    Cons(p, r) => if cs_omention(p, c) == 1 and cs_omem(p, guarded) == 0 then Cons(p, cs_guard_ps(r, c, guarded)) else cs_guard_ps(r, c, guarded)
+    Cons(p, r) => if cs_omentions(p, c) == 1 and cs_omem(p, guarded) == 0 then Cons(p, cs_guard_ps(r, c, guarded)) else cs_guard_ps(r, c, guarded)
 fn cs_is_pos_num(e, minv) = match e
     Num(k) => if k >= minv then 1 else 0
     _      => 0
@@ -747,7 +747,7 @@ fn cs_is_pub_nonllm(msig) = match msig
     Cons(sg, r) => if sg.pubf == 1 and cs_ois_llm(sg.freef) == 0 then 1 else 0
 fn cs_discharge_vars(uvars, c) = match uvars
     Nil        => Nil
-    Cons(v, r) => if cs_omention(v, c) == 1 then cs_discharge_vars(r, c) else Cons(v, cs_discharge_vars(r, c))
+    Cons(v, r) => if cs_omentions(v, c) == 1 then cs_discharge_vars(r, c) else Cons(v, cs_discharge_vars(r, c))
 fn cs_achk_prov_e(e, fnm, uvars, osigs, sigs) = match e
     Var(x)          => {taint: cs_omem(x, uvars), diags: Nil}
     Bin(op, l, r)   => let rl = cs_achk_prov_e(l, fnm, uvars, osigs, sigs) in let rr = cs_achk_prov_e(r, fnm, uvars, osigs, sigs) in {taint: if rl.taint == 1 or rr.taint == 1 then 1 else 0, diags: cs_app(rl.diags, rr.diags)}
