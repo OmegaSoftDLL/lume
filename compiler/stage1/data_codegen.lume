@@ -85,17 +85,28 @@ fn decimal_expr(e: DExpr) -> bool
         _ => false
 
 fn cdecimal_bin(op: str, left: str, right: str) -> str
-    if op == "+" then "decimal_add(" + left + ", " + right + ")"
-    elif op == "-" then "decimal_sub(" + left + ", " + right + ")"
-    elif op == "*" then "decimal_mul(" + left + ", " + right + ")"
-    elif op == "/" then "decimal_div(" + left + ", " + right + ")"
-    elif op == "==" then "mkint(decimal_compare(" + left + ", " + right + ")->i == 0)"
-    elif op == "!=" then "mkint(decimal_compare(" + left + ", " + right + ")->i != 0)"
-    elif op == "<" then "mkint(decimal_compare(" + left + ", " + right + ")->i < 0)"
-    elif op == ">" then "mkint(decimal_compare(" + left + ", " + right + ")->i > 0)"
-    elif op == "<=" then "mkint(decimal_compare(" + left + ", " + right + ")->i <= 0)"
-    elif op == ">=" then "mkint(decimal_compare(" + left + ", " + right + ")->i >= 0)"
-    else "mkint(0)"
+    if op == "+"
+        "decimal_add(" + left + ", " + right + ")"
+    elif op == "-"
+        "decimal_sub(" + left + ", " + right + ")"
+    elif op == "*"
+        "decimal_mul(" + left + ", " + right + ")"
+    elif op == "/"
+        "decimal_div(" + left + ", " + right + ")"
+    elif op == "=="
+        "mkint(decimal_compare(" + left + ", " + right + ")->i == 0)"
+    elif op == "!="
+        "mkint(decimal_compare(" + left + ", " + right + ")->i != 0)"
+    elif op == "<"
+        "mkint(decimal_compare(" + left + ", " + right + ")->i < 0)"
+    elif op == ">"
+        "mkint(decimal_compare(" + left + ", " + right + ")->i > 0)"
+    elif op == "<="
+        "mkint(decimal_compare(" + left + ", " + right + ")->i <= 0)"
+    elif op == ">="
+        "mkint(decimal_compare(" + left + ", " + right + ")->i >= 0)"
+    else
+        "mkint(0)"
 
 ## pattern -> boolean C test against the C expression `path`
 fn pat_test(p: Pat, path: str) -> str
