@@ -1,6 +1,9 @@
 ## D3 query operations over D2 tables. Type names are comptime-only and are erased;
 ## columns are resolved against the table schema at runtime and return table errors.
 fn query_column(schema, name) = query_column_at(schema, name, 0)
+fn query_append(left, right) = match left
+    Nil => right
+    Cons(head, tail) => Cons(head, query_append(tail, right))
 fn query_column_at(schema, name, index) = match schema
     Nil => {ok: 0, error: "unknown query column", index: 0, type: ""}
     Cons(column, rest) => if column.name == name then {ok: 1, error: "", index: index, type: column.type} else query_column_at(rest, name, index + 1)
@@ -25,7 +28,7 @@ fn query_insert(row, rows, index, direction) = match rows
 fn query_before(a, b, direction) = if direction == "desc" then query_compare(a, b) > 0 else query_compare(a, b) < 0
 fn query_join(left, right, left_prefix, right_prefix, left_key, right_key) = if left.ok == 0 then left else if right.ok == 0 then right else query_join_checked(left, right, query_column(left.schema, left_key), query_column(right.schema, right_key), left_prefix, right_prefix)
 fn query_join_checked(left, right, lk, rk, lp, rp) = if lk.ok == 0 then table_error(lk.error) else if rk.ok == 0 then table_error(rk.error) else if lp == "" or rp == "" or lp == rp then table_error("join prefixes must be non-empty and distinct") else if lk.type != rk.type then table_error("join key type mismatch") else table_success(query_join_schema(left.schema, right.schema, lp, rp), query_join_rows(left.rows, right.rows, lk.index, rk.index, Nil))
-fn query_join_schema(left, right, lp, rp) = app(query_prefix_schema(left, lp), query_prefix_schema(right, rp))
+fn query_join_schema(left, right, lp, rp) = query_append(query_prefix_schema(left, lp), query_prefix_schema(right, rp))
 fn query_prefix_schema(schema, prefix) = match schema
     Nil => Nil
     Cons(column, rest) => Cons({name: prefix + "_" + column.name, type: column.type}, query_prefix_schema(rest, prefix))
@@ -34,7 +37,7 @@ fn query_join_rows(left, right, li, ri, acc) = match left
     Cons(row, rest) => query_join_rows(rest, right, li, ri, query_join_one(row, right, li, ri, acc))
 fn query_join_one(row, right, li, ri, acc) = match right
     Nil => acc
-    Cons(other, rest) => if query_matches(query_value(row, li), "==", query_value(other, ri)) then query_join_one(row, rest, li, ri, Cons(app(row, other), acc)) else query_join_one(row, rest, li, ri, acc)
+    Cons(other, rest) => if query_matches(query_value(row, li), "==", query_value(other, ri)) then query_join_one(row, rest, li, ri, Cons(query_append(row, other), acc)) else query_join_one(row, rest, li, ri, acc)
 fn query_group(table, key, sum) = if table.ok == 0 then table else query_group_checked(table, query_column(table.schema, key), query_column(table.schema, sum))
 fn query_group_checked(table, key, sum) = if key.ok == 0 then table_error(key.error) else if sum.ok == 0 then table_error(sum.error) else if sum.type != "int" and sum.type != "decimal" then table_error("group sum requires int or decimal") else table_success(Cons({name: key_name(table, key), type: key.type}, Cons({name: "count", type: "int"}, Cons({name: "sum", type: sum.type}, Nil))), query_groups_emit(query_groups(table.rows, key.index, sum.index, sum.type, Nil), Nil))
 fn key_name(table, col) = schema_name_at(table.schema, col.index)
@@ -44,8 +47,8 @@ fn query_groups(rows, ki, si, kind, groups) = match rows
     Cons(row, rest) => query_groups(rest, ki, si, kind, query_group_update(groups, query_value(row, ki), query_value(row, si), kind, Nil))
 fn query_groups_add(groups, key, value, kind) = query_group_update(groups, key, value, kind, Nil)
 fn query_group_update(groups, key, value, kind, acc) = match groups
-    Nil => app(list_reverse(acc), Cons({key: key, count: 1, sum: value}, Nil))
-    Cons(group, rest) => if query_compare(group.key, key) == 0 then app(list_reverse(acc), Cons({key: key, count: group.count + 1, sum: query_sum(group.sum, value, kind)}, rest)) else query_group_update(rest, key, value, kind, Cons(group, acc))
+    Nil => query_append(list_reverse(acc), Cons({key: key, count: 1, sum: value}, Nil))
+    Cons(group, rest) => if query_compare(group.key, key) == 0 then query_append(list_reverse(acc), Cons({key: key, count: group.count + 1, sum: query_sum(group.sum, value, kind)}, rest)) else query_group_update(rest, key, value, kind, Cons(group, acc))
 fn query_sum(a, b, kind) = if kind == "int" then {kind: "int", value: a.value + b.value} else {kind: "decimal", value: decimal_add(a.value, b.value)}
 fn query_groups_emit(groups, acc) = match groups
     Nil => list_reverse(acc)
