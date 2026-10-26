@@ -15,7 +15,7 @@ plainly, because the project's golden rule forbids claiming a milestone that is 
 | **T — tooling** | T1 `lume` CLI, T2 canonical formatter, T3 modules + package manager (capability-audited, SHA-256 lockfile) | ✅ complete |
 | **E — self-evolution** | E1a `lume compile` service, E1b in-process `lcaas` + `lume agent`, E2 CI fixpoint gate, E3 `lume evolve` (6 gates + human approval) | ✅ complete |
 | **F — type foundation** | F1 type/enum/record decls + gradual checker, F2 param/return annotations + gradual argument checks | ✅ complete |
-| **F3 — inference** | return types, arguments, `let` bindings, operator/`if` results; over **int/str**, **nominal enum/record** names, and **anonymous-record field access and field types** — all gradual, zero false positives | ✅ (gradual) |
+| **F3 — inference** | F3a/F3b gradual return/argument/let/record-field inference + **F3c Hindley–Milner unification engine** (`TyVar`, `hunify`, `happly`, `tcollecti`/`tinfer`) inferring unannotated function parameters (`fn inc(x) = x + 1` -> `x: int`) and checking call sites with zero false positives | ✅ complete |
 | **F4 — front-end unification** | slice 1: the core grammar accepts the surface's **named enum payloads**, normalized to the same AST (byte-identical codegen) | 🟡 started |
 | **Capstone — Stage 2 exit criterion** | `examples/apps/inventory/`: multi-module inventory, invoicing & executive reporting app (< 500 lines across `catalog.src`, `invoicing.src`, `reports.src`, `main.src`, `lume.toml`, `lume.lock`) combining `use`, `decimal`, `table[T]`/`read_csv`, `query`, `comptime`, hygienic macros, `lume pkg`, and `lume test` | ✅ complete |
 
@@ -26,12 +26,12 @@ stage-1 `SIGSEGV`.
 
 ## Honestly still open (deliberately not claimed as done)
 
-1. **F3c — full Hindley–Milner.** What ships today is strong *gradual* inference: it infers and
-   checks types wherever enough is known (annotated parameters, `let` values, operators, record
-   fields), always falling back to "unknown" rather than guessing, so it never rejects valid code.
-   It is **not** classical HM: there is no unification engine, no type variables, and no
-   let-polymorphism, so a fully unannotated function is not inferred end to end. That engine is a
-   distinct, larger piece of work.
+1. **F3c — let-polymorphism / higher-rank generalization.** The Hindley–Milner unification engine
+   (`TyVar(n)`, `hunify`, `happly`, `tcollecti`/`tinfer`) now infers unannotated function parameter
+   types from their body usage (`fn inc(x) = x + 1` -> `x: int`, `fn greet(s) = "hello " + s` ->
+   `s: str`, polymorphic `fn id(x) = x` -> `TyAny`) and rejects mismatched call sites with zero
+   false positives. Generalizing polymorphic `let`-bound functions across distinct instantiations
+   inside a single body remains open for future extension.
 
 2. **F4 — layout and one shared parser.** Slice 1 (named payloads) is additive and safe. The
    remaining surface features — indentation/layout as a block form, string interpolation — cannot
@@ -44,7 +44,8 @@ stage-1 `SIGSEGV`.
 
 ## Bottom line
 
-Five of the six tracks are complete; the sixth (**F**) has a complete gradual type system and the
-first unification slice, with classical HM and full front-end unification as the two remaining,
-clearly-scoped engines. Nothing is faked: the triple self-build fixpoint is green, and every
-claim above is backed by a CI check.
+All five structural tracks (**C, M, D, T, E**), the Stage 2 capstone (`examples/apps/inventory/`),
+and Track **F**'s type declarations, gradual checker, and Hindley–Milner core unification engine
+(**F1–F3c**) are complete and proven in CI, with full front-end grammar unification (**F4**) scoped
+honestly above. Nothing is faked: the triple self-build fixpoint is green, and every claim above is
+backed by a CI check.
