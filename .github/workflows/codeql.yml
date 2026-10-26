@@ -1,5 +1,10 @@
 name: CodeQL
 
+# Scope note: CodeQL's `c-cpp` extractor analyzes only the disposable Stage-0 C seed (`bootstrap/lume0/*.c`),
+# and `actions` analyzes `.github/workflows/*.yml`. Because GitHub CodeQL has no native Lume extractor, the
+# self-hosted Lume compiler (`compiler/stage1/lume/*.src`, `compiler/stage1/*.src`) is verified by Lume's own
+# static analyzers (`lcaas`, `lume prove`, `make bootstrap`, `make zero-c`) in `ci.yml`.
+
 on:
   push:
     branches: [main]

@@ -726,6 +726,12 @@ PY
     "$ntmp/lc" <../../compiler/stage1/effects_ok.src >"$ntmp/eff.s" 2>"$ntmp/eff.err"
     if [ -s "$ntmp/eff.s" ]; then "$ntmp/lasm" <"$ntmp/eff.s" >"$ntmp/eff.elf" 2>/dev/null; chmod +x "$ntmp/eff.elf"; fi
     if [ -x "$ntmp/eff.elf" ] && "$ntmp/eff.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/effects_ok_asm.expected - >/dev/null; then ok "phase-3 K1-K2: effect rows (/ {io, fs}), @capability, user 'effect', and tail-resumptive 'with handler' compile + run"; else bad "phase-3 K1-K2: effects_ok.src compile + run"; cat "$ntmp/eff.err"; fi
+    # K2 inter-procedural effect handler dispatch across function boundaries (`step(c)` with bare `now_tick()` called twice inside `with handler Clock`)
+    printf 'effect Clock { fn now_tick() -> int }\npub fn step(c: int) -> int / {Clock} = now_tick() + c\npub fn run(c: int) -> int / pure = with handler Clock { fn now_tick() -> int = 100 } in step(c) + step(c)\nprint run(5)\n' >"$ntmp/k2_interproc.src"
+    "$ntmp/lc" <"$ntmp/k2_interproc.src" >"$ntmp/k2_interproc.s" 2>"$ntmp/k2_interproc.err"
+    if [ -s "$ntmp/k2_interproc.s" ]; then "$ntmp/lasm" <"$ntmp/k2_interproc.s" >"$ntmp/k2_interproc.elf" 2>/dev/null; chmod +x "$ntmp/k2_interproc.elf"; fi
+    _k2_run_asm=$(sed -n '/^run:/,/^    ret$/p' "$ntmp/k2_interproc.s")
+    if [ -x "$ntmp/k2_interproc.elf" ] && [ "$("$ntmp/k2_interproc.elf" 2>/dev/null)" = "210" ] && ! printf '%s\n' "$_k2_run_asm" | grep -q "call now_tick"; then ok "phase-3 K2: inter-procedural effect handler dispatch across function boundaries (step(c) + step(c) == 210)"; else bad "phase-3 K2: inter-procedural effect handler dispatch across function boundaries"; cat "$ntmp/k2_interproc.err"; printf '%s\n' "$_k2_run_asm"; fi
     # K1 [E0200]: impure `pub fn` missing `/ {io}` effect row fails at compile time
     printf 'fn io_write(x: int) -> int = x\npub fn noisy(x: int) -> int = io_write(x)\nprint noisy(5)\n' >"$ntmp/k1a.src"
     "$ntmp/lc" <"$ntmp/k1a.src" >"$ntmp/k1a.s" 2>"$ntmp/k1a.err"; k1ac=$?
@@ -785,6 +791,11 @@ else
 fi
 
 if ../../lume --version | grep -q "^lume " && ../../lume check ../../examples/01_hello.lume >/dev/null 2>&1 && ../../lume test ../../examples/01_hello.lume | grep -q "1 passed, 0 failed"; then ok "phase-2 T1: lume CLI (--version, check, test on surface .lume)"; else bad "phase-2 T1: lume CLI (--version, check, test on surface .lume)"; fi
+
+_k2x_tmp=$(mktemp "${TMPDIR:-/tmp}/lume_k2x_XXXXXX.src")
+printf 'effect Clock { fn now_tick() -> int }\npub fn step(c: int) -> int / {Clock} = now_tick() + c\npub fn run(c: int) -> int / pure = with handler Clock { fn now_tick() -> int = 100 } in step(c) + step(c)\nprint run(5)\n' >"$_k2x_tmp"
+if [ "$(../../lume agent eval "$_k2x_tmp" 2>/dev/null)" = "210" ]; then ok "phase-3 K2 (#167): cross-platform inter-procedural effect handler dispatch (step(c) + step(c) == 210)"; else bad "phase-3 K2 (#167): cross-platform inter-procedural effect handler dispatch"; fi
+rm -f "$_k2x_tmp"
 
 if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_ASAN:-}" ]; then
     _e1ok=$(../../lume compile --json --run ../../compiler/stage1/e1_sample.src 2>/dev/null)

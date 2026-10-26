@@ -37,7 +37,7 @@ pub fn stamped_event(delta: int) -> int / {Clock, Log} =
     let logged = Log.info(t + delta) in
     t + delta + logged
 
-## K2: lexical `with handler` discharges `Clock` and `Log`, leaving a pure function (`/ pure`)
+## K2: lexical `with handler` discharges `Clock` and `Log` across the `stamped_event(delta)` call boundary (`/ pure`)
 pub fn run_deterministic_event(delta: int) -> int / pure =
     with handler Clock {
         fn now() -> int = 1000
@@ -45,9 +45,16 @@ pub fn run_deterministic_event(delta: int) -> int / pure =
     with handler Log {
         fn info(code: int) -> int = code / 10
     } in
-    let t = Clock.now() in
-    let ack = Log.info(t + delta) in
-    t + delta + ack
+    stamped_event(delta)
+
+## K2: effect-polymorphic function `step(c)` with bare op `now()` called twice inside a single handler
+pub fn step(c: int) -> int / {Clock} = now() + c
+
+pub fn run_step_twice(c: int) -> int / pure =
+    with handler Clock {
+        fn now() -> int = 100
+    } in
+    step(c) + step(c)
 
 ## K2: handler for `Fail` turning `Fail.raise(e)` into a fallback value
 pub fn safe_div_handled(a: int, b: int) -> int / pure =
@@ -60,5 +67,6 @@ print pure_square(9)
 print audit_file(4)
 print with handler Clock { fn now() -> int = 500 } in with handler Log { fn info(code: int) -> int = 7 } in let t = Clock.now() in let l = Log.info(t + 25) in t + 25 + l
 print run_deterministic_event(50)
+print run_step_twice(5)
 print safe_div_handled(84, 2)
 print safe_div_handled(84, 0)
