@@ -1,7 +1,7 @@
 # Data Tracks D1–D3 Handoff
 
-This note captures the completed Phase 2 data track for future sessions. D1, D2, and D3 are
-merged. The next data-track brick is D4; wait for Ricardo's explicit approval before starting it.
+This note captures the completed Phase 2 data work for future sessions. D1, D2, and D3 are
+merged. Work after D3 has not been defined; follow Ricardo's direction on what comes next.
 
 ## D1 — exact decimals
 
@@ -62,7 +62,7 @@ merged. The next data-track brick is D4; wait for Ricardo's explicit approval be
 
 ## Continuation rules
 
-- D1–D3 are complete; do not begin D4 until Ricardo explicitly says to proceed.
+- D1–D3 are complete. Future data-track scope is open and must follow Ricardo's direction.
 - Keep compiler/stage1/lumec.src generated. Make compiler changes only in the relevant
   compiler/stage1/lume/NN_*.src module.
 - Keep future work on separate track files/modules where possible to avoid collisions.
