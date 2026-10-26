@@ -875,7 +875,10 @@ rm -f "$_k2x_tmp"
 
 if ../../lume agent eval ../../compiler/stage1/compiler_effects_ok.src 2>/dev/null | grep -q '"result":"108\\n244"'; then ok "inflection Stage C: cross-platform CompilerIO driver effect & / pure pipeline passes"; else bad "inflection Stage C: cross-platform CompilerIO driver effect & / pure pipeline passes"; fi
 
-if ../../lume agent eval ../../compiler/stage1/compiler_perceus_ok.src 2>/dev/null | grep -q '"result":"lume-stage-d\\n70"'; then ok "inflection Stage D: cross-platform Perceus own-annotated compiler passes (joinall, gerase, cfold)"; else bad "inflection Stage D: cross-platform Perceus own-annotated compiler passes"; fi
+_sd_tmp=$(mktemp)
+printf 'fn isnil(xs) = match xs\n    Nil => 1\n    Cons(h, t) => 0\nfn pairs(own xs) = match xs\n    Nil => Nil\n    Cons(a, t) => pairs2(a, own t)\nfn pairs2(a, own t) = match t\n    Nil => Cons(a, Nil)\n    Cons(b, r) => Cons(a + b, pairs(own r))\nfn joinall(own xs) = match xs\n    Nil => ""\n    Cons(a, t) => if isnil(t) == 1 then a else joinall(own pairs2(a, own t))\nfn geexpr(own e) = match e\n    Num(n) => Num(n + 10)\n    Bin(op, l, r) => Bin(op, geexpr(own l), geexpr(own r))\n    _ => e\nfn eval_e(e) = match e\n    Num(n) => n\n    Bin(op, l, r) => eval_e(l) + eval_e(r)\n    _ => 0\nprint joinall(own Cons("lume-", Cons("stage-", Cons("d", Nil))))\nprint eval_e(geexpr(own Bin("+", Num(15), Num(35))))\n' >"$_sd_tmp"
+if ../../lume agent eval "$_sd_tmp" 2>/dev/null | grep -q '"result":"lume-stage-d\\n70"'; then ok "inflection Stage D: cross-platform Perceus own-annotated compiler passes (joinall, gerase, cfold)"; else bad "inflection Stage D: cross-platform Perceus own-annotated compiler passes"; fi
+rm -f "$_sd_tmp"
 
 _sb_all_tmp=$(mktemp)
 printf 'fn f(x: int) -> int requires x >= 0 ensures result >= 0 = 10 - x\nfn h(x: int) -> int requires x >= 0 ensures result != 0 = x - 1000000\nfn g(x: int) -> int requires x >= 5 ensures result >= 1 = x - 4\nfn sq(x: int) -> int ensures result >= 0 = x * x\nprint g(6)\nprint sq(0 - 7)\n' >"$_sb_all_tmp"
