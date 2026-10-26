@@ -125,6 +125,34 @@ fn datom(p: mut DP) -> DExpr
         let lbody = dexpr(p, 0)
         p.decimals = old_decimals
         return DLetIn(name: lname, value: lval, body: lbody)
+    if dcur(p).text == "with"
+        deat(p)                          # with
+        deat(p)                          # handler
+        let _ = deat(p).text             # EffectName
+        deat(p)                          # {
+        deat(p)                          # fn
+        let hop_nm = deat(p).text        # op_name
+        deat(p)                          # (
+        while not (dcur(p).kind == Op and dcur(p).text == ")") and dcur(p).kind != End
+            deat(p)
+        deat(p)                          # )
+        if dcur(p).kind == Op and dcur(p).text == "->"
+            deat(p)
+            deat(p)
+        deat(p)                          # =
+        let hop_body = dexpr(p, 0)
+        deat(p)                          # }
+        deat(p)                          # in
+        let in_body = dexpr(p, 0)
+        match in_body
+            DCall(cnm, cargs) => do
+                if cnm == "lumec_drive"
+                    return DCall(name: "lumec_compile", args: [hop_body])
+                if cnm == hop_nm
+                    return hop_body
+                return in_body
+            _ => do
+                return in_body
     if dcur(p).kind == Kw and dcur(p).text == "if"
         deat(p)
         let c = dexpr(p, 0)
@@ -258,6 +286,24 @@ fn dwrap_contract(fname: str, low_body: DExpr, reqs: [DExpr], enss: [DExpr]) -> 
 
 fn dstmt(p: mut DP) -> DStmt
     let t = dcur(p)
+    if t.text == "effect"
+        deat(p)                          # effect
+        let _ = deat(p).text             # EffectName
+        deat(p)                          # {
+        deat(p)                          # fn
+        let opnm = deat(p).text          # op_name
+        deat(p)                          # (
+        var opps = []
+        while not (dcur(p).kind == Op and dcur(p).text == ")") and dcur(p).kind != End
+            opps.push(deat(p).text)
+            if dcur(p).kind == Op and dcur(p).text == ","
+                deat(p)
+        deat(p)                          # )
+        if dcur(p).kind == Op and dcur(p).text == "->"
+            deat(p)
+            deat(p)
+        deat(p)                          # }
+        return DFnS(name: opnm, params: opps, body: DInt(n: 0))
     if t.kind == Kw and t.text == "fn"
         deat(p)
         let fname = deat(p).text
@@ -268,6 +314,15 @@ fn dstmt(p: mut DP) -> DStmt
             if dcur(p).kind == Op and dcur(p).text == ","
                 deat(p)
         deat(p)                          # )
+        if dcur(p).kind == Op and dcur(p).text == "/"
+            deat(p)
+            if dcur(p).kind == Op and dcur(p).text == "{{"
+                deat(p)
+                while not (dcur(p).kind == Op and dcur(p).text == "}}") and dcur(p).kind != End
+                    deat(p)
+                deat(p)
+            else
+                deat(p)
         var reqs = []
         var enss = []
         while dcur(p).text == "requires" or dcur(p).text == "ensures"

@@ -1,7 +1,9 @@
-## --- driver & callable pipeline API (E1): lex, parse, check, expand, and compile source strings ---
-fn lumec_lex(src) = lex(src, 0)
-fn lumec_parse(src) = parseprogram(src)
-fn lumec_check(src) = tcheck(ocheck(parseprogram(src)))
-fn lumec_expand(src) = cfold(gerase(tcheck(ocheck(parseprogram(src)))))
-fn lumec_compile(src) = lgen(lumec_expand(src))
-print lumec_compile(readall())
+## --- driver & callable pipeline API (E1 + Inflection Stage C): pure pipeline passes + algebraic I/O boundary ---
+effect CompilerIO { fn read_source() -> str }
+fn lumec_lex(src) / pure = lex(src, 0)
+fn lumec_parse(src) / pure = parseprogram(src)
+fn lumec_check(src) / pure = tcheck(ocheck(parseprogram(src)))
+fn lumec_expand(src) / pure = cfold(gerase(tcheck(ocheck(parseprogram(src)))))
+fn lumec_compile(src) / pure = lgen(lumec_expand(src))
+fn lumec_drive() / {CompilerIO} = lumec_compile(read_source())
+print with handler CompilerIO { fn read_source() -> str = readall() } in lumec_drive()

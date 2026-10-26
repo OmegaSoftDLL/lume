@@ -1,0 +1,23 @@
+## compiler_effects_ok.src -- Inflection Stage C (`docs/21-inflection-plan.md`):
+## Dogfooding Track K algebraic effects (`CompilerIO`) at the compiler driver boundary (`07_driver.src`)
+## while keeping the pure compiler passes (`lumec_lex`, `lumec_parse`, `lumec_check`, `lumec_expand`, `lumec_compile`) pure (`/ pure`).
+
+effect CompilerIO { fn read_source() -> str }
+
+fn lumec_lex(src: str) -> int / pure = count(src)
+fn lumec_parse(src: str) -> int / pure = lumec_lex(src) + 10
+fn lumec_check(src: str) -> int / pure = lumec_parse(src) + 20
+fn lumec_expand(src: str) -> int / pure = lumec_check(src) + 30
+fn lumec_compile(src: str) -> int / pure = lumec_expand(src) + 40
+fn lumec_drive() -> int / {CompilerIO} = lumec_compile(read_source())
+
+pub fn drive_in_memory(mock_src: str) -> int / pure = with handler CompilerIO {
+    fn read_source() -> str = mock_src
+} in lumec_drive()
+
+pub fn drive_two_units(s1: str, s2: str) -> int / pure = with handler CompilerIO {
+    fn read_source() -> str = s1 + s2
+} in lumec_drive() + lumec_drive()
+
+print drive_in_memory("print 42")
+print drive_two_units("fn f(x) = x", "\nprint f(1)")
