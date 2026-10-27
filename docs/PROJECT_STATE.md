@@ -45,8 +45,9 @@ protection. License: dual **MIT OR Apache-2.0** (like Rust).
 - Do **not** use Rust to implement Lume.
 - Do **not** edit the generated `compiler/stage1/lumec.src` by hand — your change would be
   overwritten by the next amalgamation. Edit the module under `compiler/stage1/lume/`.
-- Do **not** fake completion or claim a milestone that is not real (e.g. the triple
-  self-build / fixpoint is NOT done — never say it is).
+- Do **not** fake completion or claim a milestone that is not real. (The triple
+  self-build / fixpoint **is reached** — `stage 2 == stage 3` in CI — so never regress it;
+  state every other feature at its real level: shipped, a model/stub, or planned.)
 - Do **not** let `check` regress; all 9 `examples/0*.lume` must `check` clean (name
   resolution has zero false positives by design — keep it that way).
 - Do **not** add a predictive lottery-number feature (unrelated; a standing user rule).
@@ -86,8 +87,10 @@ Seed CLI (`bootstrap/lume0/lume0`):
 - **Block language** — `compiler/stage1/block_*.lume`: an imperative mini-language
   (var/while/for/if/arrays) compiled to C by `block_cc.lume`.
 
-The honest gap (`docs/10`): Layer A and the ML-core are not unified; `lumec` compiles only a
-subset; the triple self-build is not reached.
+Historical note (`docs/10`): an earlier gap had Layer A and the ML-core not unified and `lumec`
+compiling only a subset. The triple self-build **has since been reached** (`stage 2 == stage 3`
+in CI); sections 6 and "Next bricks" below predate Phases 1–5 and are kept only as history —
+see the Phase 1–5 entries in §5 for the current state.
 
 ## 5. What is DONE (verified, with tests)
 
