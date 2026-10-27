@@ -714,26 +714,136 @@ fn cs_synth_fn_arg(pty, lenv) = match lenv
 fn cs_synth_fns(ety, lenv, sigs, curfn) = match sigs
     Nil        => Nil
     Cons(sg, r) => if sg.fname == curfn or cs_tystr(sg.rt) != ety then cs_synth_fns(ety, lenv, r, curfn) else if cs_len(sg.pt) == 0 then Cons(sg.fname + "()", cs_synth_fns(ety, lenv, r, curfn)) else if cs_len(sg.pt) == 1 then let v = cs_synth_fn_arg(cs_tystr(cs_hd_ty(sg.pt)), lenv) in (if v != "" then Cons(sg.fname + "(" + v + ")", cs_synth_fns(ety, lenv, r, curfn)) else cs_synth_fns(ety, lenv, r, curfn)) else cs_synth_fns(ety, lenv, r, curfn)
-fn cs_synth_def(ety) = if ety == "int" then Cons("0", Nil) else if ety == "str" then Cons("\"\"", Nil) else Cons("Nil", Nil)
-fn cs_synth_cands(ety, lenv, sigs, curfn) = cs_app(cs_synth_vars(ety, lenv), cs_app(cs_synth_fns(ety, lenv, sigs, curfn), cs_synth_def(ety)))
+fn cs_synth_def(ety) = if ety == "int" then Cons("0", Cons("1", Nil)) else if ety == "str" then Cons("\"\"", Nil) else Cons("Nil", Nil)
+fn cs_synth_int_pairs(v, vs) = match vs
+    Nil        => Cons(v + " + 1", Cons(v + " - 1", Nil))
+    Cons(w, r) => Cons(v + " + " + w, Cons(v + " - " + w, Cons(w + " - " + v, Cons("if " + v + " >= " + w + " then " + v + " else " + w, Cons("if " + v + " <= " + w + " then " + v + " else " + w, cs_synth_int_pairs(v, r))))))
+fn cs_synth_int_ops(vs) = match vs
+    Nil        => Nil
+    Cons(v, r) => cs_app(cs_synth_int_pairs(v, r), cs_synth_int_ops(r))
+fn cs_synth_cands(ety, lenv, sigs, curfn) = let vs = cs_synth_vars(ety, lenv) in let ops = if ety == "int" then cs_synth_int_ops(vs) else Nil in cs_app(vs, cs_app(ops, cs_app(cs_synth_fns(ety, lenv, sigs, curfn), cs_synth_def(ety))))
 
-fn cs_holes_e(e, fnm, ety, lenv, sigs) = match e
-    Var(nm)         => if cs_is_hole(nm) == 1 then let cands = cs_synth_cands(ety, lenv, sigs, fnm) in let best = cs_hd_str(cands, "0") in {holes: Cons({hole: nm, fnm: fnm, expected_type: ety, context: lenv, candidates: cands}, Nil), diags: Cons(cs_mkdiag("A0001", "hole", "hole error: unfilled typed hole '" + nm + "' of expected type " + ety + " in '" + fnm + "'", "replace '" + nm + "' with '" + best + "'"), Nil)} else {holes: Nil, diags: Nil}
-    Bin(op, l, r)   => let r1 = cs_holes_e(l, fnm, ety, lenv, sigs) in let r2 = cs_holes_e(r, fnm, ety, lenv, sigs) in {holes: cs_app(r1.holes, r2.holes), diags: cs_app(r1.diags, r2.diags)}
-    If(c, t, e2)    => let rc = cs_holes_e(c, fnm, "int", lenv, sigs) in let rt = cs_holes_e(t, fnm, ety, lenv, sigs) in let re = cs_holes_e(e2, fnm, ety, lenv, sigs) in {holes: cs_app(rc.holes, cs_app(rt.holes, re.holes)), diags: cs_app(rc.diags, cs_app(rt.diags, re.diags))}
-    LetIn(nm, v, b) => let rv = cs_holes_e(v, fnm, ety, lenv, sigs) in let rb = cs_holes_e(b, fnm, ety, Cons({k: nm, v: ety}, lenv), sigs) in {holes: cs_app(rv.holes, rb.holes), diags: cs_app(rv.diags, rb.diags)}
-    VarIn(nm, v, b) => let rv = cs_holes_e(v, fnm, ety, lenv, sigs) in let rb = cs_holes_e(b, fnm, ety, Cons({k: nm, v: ety}, lenv), sigs) in {holes: cs_app(rv.holes, rb.holes), diags: cs_app(rv.diags, rb.diags)}
-    Call(cnm, args) => cs_holes_args(args, fnm, ety, lenv, sigs)
+fn cs_expr_surface(e) = match e
+    Num(n)        => str(n)
+    Str(s)        => "\"" + cs_jesc(s) + "\""
+    Var(nm)       => nm
+    Bin(op, a, b) => cs_expr_surface(a) + " " + op + " " + cs_expr_surface(b)
+    If(c, t, e2)  => "if " + cs_expr_surface(c) + " then " + cs_expr_surface(t) + " else " + cs_expr_surface(e2)
+    Call(nm, xs)  => nm + "(" + cs_exprs_surface(xs) + ")"
+    _             => "0"
+fn cs_exprs_surface(xs) = match xs
+    Nil        => ""
+    Cons(h, t) => if cs_isnil(t) == 1 then cs_expr_surface(h) else cs_expr_surface(h) + ", " + cs_exprs_surface(t)
+fn cs_exprs_surface_list(xs) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons(cs_expr_surface(h), cs_exprs_surface_list(t))
+fn cs_synth_var_es(ety, lenv) = match lenv
+    Nil        => Nil
+    Cons(h, t) => if h.v == ety then Cons(Var(h.k), cs_synth_var_es(ety, t)) else cs_synth_var_es(ety, t)
+fn cs_synth_int_pair_es(v, vs) = match vs
+    Nil        => Cons(Bin("+", Var(v), Num(1)), Cons(Bin("-", Var(v), Num(1)), Nil))
+    Cons(w, r) => Cons(Bin("+", Var(v), Var(w)), Cons(Bin("-", Var(v), Var(w)), Cons(Bin("-", Var(w), Var(v)), Cons(If(Bin(">=", Var(v), Var(w)), Var(v), Var(w)), Cons(If(Bin("<=", Var(v), Var(w)), Var(v), Var(w)), cs_synth_int_pair_es(v, r))))))
+fn cs_synth_int_op_es(vs) = match vs
+    Nil        => Nil
+    Cons(v, r) => cs_app(cs_synth_int_pair_es(v, r), cs_synth_int_op_es(r))
+fn cs_synth_fn_es(ety, lenv, sigs, curfn) = match sigs
+    Nil        => Nil
+    Cons(sg, r) => if sg.fname == curfn or cs_tystr(sg.rt) != ety then cs_synth_fn_es(ety, lenv, r, curfn) else if cs_len(sg.pt) == 0 then Cons(Call(sg.fname, Nil), cs_synth_fn_es(ety, lenv, r, curfn)) else if cs_len(sg.pt) == 1 then let v = cs_synth_fn_arg(cs_tystr(cs_hd_ty(sg.pt)), lenv) in (if v != "" then Cons(Call(sg.fname, Cons(Var(v), Nil)), cs_synth_fn_es(ety, lenv, r, curfn)) else cs_synth_fn_es(ety, lenv, r, curfn)) else cs_synth_fn_es(ety, lenv, r, curfn)
+fn cs_synth_def_es(ety) = if ety == "int" then Cons(Num(0), Cons(Num(1), Nil)) else if ety == "str" then Cons(Str(""), Nil) else Cons(Var("Nil"), Nil)
+fn cs_synth_cand_es(ety, lenv, sigs, curfn) = let vs = cs_synth_vars(ety, lenv) in let ves = cs_synth_var_es(ety, lenv) in let oes = if ety == "int" then cs_synth_int_op_es(vs) else Nil in cs_app(ves, cs_app(oes, cs_app(cs_synth_fn_es(ety, lenv, sigs, curfn), cs_synth_def_es(ety))))
+
+fn cs_subst_hole_e(e, hnm, rep) = match e
+    Var(nm)         => if nm == hnm or (hnm == "_" and cs_is_hole(nm) == 1) then rep else e
+    Bin(op, a, b)   => Bin(op, cs_subst_hole_e(a, hnm, rep), cs_subst_hole_e(b, hnm, rep))
+    If(c, t, e2)    => If(cs_subst_hole_e(c, hnm, rep), cs_subst_hole_e(t, hnm, rep), cs_subst_hole_e(e2, hnm, rep))
+    LetIn(nm, v, b) => LetIn(nm, cs_subst_hole_e(v, hnm, rep), cs_subst_hole_e(b, hnm, rep))
+    VarIn(nm, v, b) => VarIn(nm, cs_subst_hole_e(v, hnm, rep), cs_subst_hole_e(b, hnm, rep))
+    Call(nm, args)  => Call(nm, cs_subst_hole_args(args, hnm, rep))
+    _               => e
+fn cs_subst_hole_args(xs, hnm, rep) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons(cs_subst_hole_e(h, hnm, rep), cs_subst_hole_args(t, hnm, rep))
+fn cs_update_fn_ft(fnm, ps, nbody, ft) = match ft
+    Nil        => Cons(Fn(fnm, ps, nbody), Nil)
+    Cons(h, t) => if cs_fnname(h) == fnm then Cons(Fn(fnm, ps, nbody), t) else Cons(h, cs_update_fn_ft(fnm, ps, nbody, t))
+fn cs_mentions_call(fnm, e) = match e
+    Call(cnm, args) => if cnm == fnm then 1 else cs_mentions_call_args(fnm, args)
+    Bin(op, a, b)   => if cs_mentions_call(fnm, a) == 1 then 1 else cs_mentions_call(fnm, b)
+    If(c, t, e2)    => if cs_mentions_call(fnm, c) == 1 then 1 else if cs_mentions_call(fnm, t) == 1 then 1 else cs_mentions_call(fnm, e2)
+    LetIn(nm, v, b) => if cs_mentions_call(fnm, v) == 1 then 1 else cs_mentions_call(fnm, b)
+    _               => 0
+fn cs_mentions_call_args(fnm, xs) = match xs
+    Nil        => 0
+    Cons(h, t) => if cs_mentions_call(fnm, h) == 1 then 1 else cs_mentions_call_args(fnm, t)
+fn cs_laws_mention_fn(fnm, laws) = match laws
+    Nil        => Nil
+    Cons(l, r) => if cs_mentions_call(fnm, l.body) == 1 then Cons(l, cs_laws_mention_fn(fnm, r)) else cs_laws_mention_fn(fnm, r)
+fn cs_check_cand_laws(laws, ft) = match laws
+    Nil        => 2
+    Cons(l, r) => let lenv = cs_vlin_init_env(l.ps) in let chyps = cs_vcollect_body_hyps(l.body, Nil, lenv, Cons(l.body, Nil), ft, 0) in let pr = cs_vprove_law_envs(cs_vgen_envs_hyps(l.ps, 0, cs_len(l.ps), chyps), l.body, ft, 0) in if pr.status == "refuted" then 0 - 1 else let qf = cs_vqflia_prove_law(l.ps, l.body, ft) in let rest = cs_check_cand_laws(r, ft) in if rest < 0 then 0 - 1 else if qf == 1 and rest == 2 then 2 else 1
+fn cs_score_cand_vsig(ps, nbody, mvs, ft2) = match mvs
+    Nil          => 1
+    Cons(vsg, r) => let lenv = cs_vlin_init_env(ps) in let raw_hyps = cs_vcollect_body_hyps(nbody, (cs_vprove_reqs_hyps(vsg.reqs, lenv, ft2)).hyps, lenv, vsg.enss, ft2, 0) in let chyps = cs_vfm_trace_hyps(raw_hyps, cs_vfm_vars(raw_hyps, Nil)) in let pr = cs_vprove_envs(cs_vgen_envs_hyps(ps, 0, cs_len(ps), chyps), vsg.reqs, vsg.enss, nbody, ft2, 0) in if pr.status == "refuted" then 0 - 1 else if cs_vqflia_prove_fn(ps, vsg.reqs, vsg.enss, nbody, ft2) == 1 then 2 else 1
+fn cs_score_cand_e(ce, hnm, hctx) = let nbody = cs_subst_hole_e(hctx.body, hnm, ce) in let ft2 = cs_update_fn_ft(hctx.fnm, hctx.ps, nbody, hctx.ft) in let mvs = cs_vsiglookup(hctx.fnm, hctx.vsigs) in let mlaws = cs_laws_mention_fn(hctx.fnm, hctx.laws) in let c_sc = cs_score_cand_vsig(hctx.ps, nbody, mvs, ft2) in if c_sc < 0 then 0 - 1 else if cs_isnil(mlaws) == 1 then c_sc else let l_sc = cs_check_cand_laws(mlaws, ft2) in if l_sc < 0 then 0 - 1 else if c_sc == 2 or l_sc == 2 then 2 else 1
+fn cs_filter_proven_es(ces, hnm, hctx) = match ces
+    Nil         => Nil
+    Cons(ce, r) => if cs_score_cand_e(ce, hnm, hctx) == 2 then Cons(ce, cs_filter_proven_es(r, hnm, hctx)) else cs_filter_proven_es(r, hnm, hctx)
+fn cs_filter_valid_es(ces, hnm, hctx) = match ces
+    Nil         => Nil
+    Cons(ce, r) => if cs_score_cand_e(ce, hnm, hctx) == 1 then Cons(ce, cs_filter_valid_es(r, hnm, hctx)) else cs_filter_valid_es(r, hnm, hctx)
+fn cs_rank_cand_es(ety, lenv, hnm, hctx) = let raw = cs_synth_cand_es(ety, lenv, hctx.sigs, hctx.fnm) in let prv = cs_filter_proven_es(raw, hnm, hctx) in let val = cs_filter_valid_es(raw, hnm, hctx) in let ranked = cs_app(prv, val) in if cs_isnil(ranked) == 0 then ranked else raw
+fn cs_best_hole_expr(ety, lenv, hnm, hctx) = match cs_rank_cand_es(ety, lenv, hnm, hctx)
+    Nil         => Num(0)
+    Cons(ce, r) => ce
+
+fn cs_holes_e(e, ety, lenv, hctx) = match e
+    Var(nm)         => if cs_is_hole(nm) == 1 then let raw_es = cs_synth_cand_es(ety, lenv, hctx.sigs, hctx.fnm) in let prv_es = cs_filter_proven_es(raw_es, nm, hctx) in let rnk_es = cs_rank_cand_es(ety, lenv, nm, hctx) in let cands = cs_exprs_surface_list(rnk_es) in let prv_cands = cs_exprs_surface_list(prv_es) in let best = cs_hd_str(cands, "0") in {holes: Cons({hole: nm, fnm: hctx.fnm, expected_type: ety, context: lenv, candidates: cands, proven_candidates: prv_cands}, Nil), diags: Cons(cs_mkdiag("A0001", "hole", "hole error: unfilled typed hole '" + nm + "' of expected type " + ety + " in '" + hctx.fnm + "'", "replace '" + nm + "' with '" + best + "'"), Nil)} else {holes: Nil, diags: Nil}
+    Bin(op, l, r)   => let r1 = cs_holes_e(l, ety, lenv, hctx) in let r2 = cs_holes_e(r, ety, lenv, hctx) in {holes: cs_app(r1.holes, r2.holes), diags: cs_app(r1.diags, r2.diags)}
+    If(c, t, e2)    => let rc = cs_holes_e(c, "int", lenv, hctx) in let rt = cs_holes_e(t, ety, lenv, hctx) in let re = cs_holes_e(e2, ety, lenv, hctx) in {holes: cs_app(rc.holes, cs_app(rt.holes, re.holes)), diags: cs_app(rc.diags, cs_app(rt.diags, re.diags))}
+    LetIn(nm, v, b) => let rv = cs_holes_e(v, ety, lenv, hctx) in let rb = cs_holes_e(b, ety, Cons({k: nm, v: ety}, lenv), hctx) in {holes: cs_app(rv.holes, rb.holes), diags: cs_app(rv.diags, rb.diags)}
+    VarIn(nm, v, b) => let rv = cs_holes_e(v, ety, lenv, hctx) in let rb = cs_holes_e(b, ety, Cons({k: nm, v: ety}, lenv), hctx) in {holes: cs_app(rv.holes, rb.holes), diags: cs_app(rv.diags, rb.diags)}
+    Call(cnm, args) => cs_holes_args(args, ety, lenv, hctx)
     _               => {holes: Nil, diags: Nil}
-fn cs_holes_args(args, fnm, ety, lenv, sigs) = match args
+fn cs_holes_args(args, ety, lenv, hctx) = match args
     Nil        => {holes: Nil, diags: Nil}
-    Cons(h, t) => let r1 = cs_holes_e(h, fnm, ety, lenv, sigs) in let r2 = cs_holes_args(t, fnm, ety, lenv, sigs) in {holes: cs_app(r1.holes, r2.holes), diags: cs_app(r1.diags, r2.diags)}
-fn cs_collect_holes_stmts(prog, sigs, osigs) = match prog
+    Cons(h, t) => let r1 = cs_holes_e(h, ety, lenv, hctx) in let r2 = cs_holes_args(t, ety, lenv, hctx) in {holes: cs_app(r1.holes, r2.holes), diags: cs_app(r1.diags, r2.diags)}
+fn cs_collect_holes_stmts(prog, sigs, osigs, vsigs, laws, ft) = match prog
     Nil        => {holes: Nil, diags: Nil}
-    Cons(h, t) => cs_collect_holes_stmt1(h, t, sigs, osigs)
-fn cs_collect_holes_stmt1(st, rest, sigs, osigs) = match st
-    Fn(nm, ps, body) => let msig = cs_siglookup(nm, sigs) in let mosig = cs_osiglookup(nm, osigs) in let r1 = cs_holes_e(body, nm, cs_fn_rty(msig, mosig), cs_fn_lenv(msig), sigs) in let r2 = cs_collect_holes_stmts(rest, sigs, osigs) in {holes: cs_app(r1.holes, r2.holes), diags: cs_app(r1.diags, r2.diags)}
-    _                => cs_collect_holes_stmts(rest, sigs, osigs)
+    Cons(h, t) => cs_collect_holes_stmt1(h, t, sigs, osigs, vsigs, laws, ft)
+fn cs_collect_holes_stmt1(st, rest, sigs, osigs, vsigs, laws, ft) = match st
+    Fn(nm, ps, body) => let msig = cs_siglookup(nm, sigs) in let mosig = cs_osiglookup(nm, osigs) in let r1 = cs_holes_e(body, cs_fn_rty(msig, mosig), cs_fn_lenv(msig), {fnm: nm, pubf: cs_pub_osig(mosig), ps: ps, body: body, sigs: sigs, vsigs: vsigs, laws: laws, ft: ft}) in let r2 = cs_collect_holes_stmts(rest, sigs, osigs, vsigs, laws, ft) in {holes: cs_app(r1.holes, r2.holes), diags: cs_app(r1.diags, r2.diags)}
+    _                => cs_collect_holes_stmts(rest, sigs, osigs, vsigs, laws, ft)
+fn cs_has_hole_e(e) = match e
+    Var(nm)         => cs_is_hole(nm)
+    Bin(op, a, b)   => if cs_has_hole_e(a) == 1 then 1 else cs_has_hole_e(b)
+    If(c, t, e2)    => if cs_has_hole_e(c) == 1 then 1 else if cs_has_hole_e(t) == 1 then 1 else cs_has_hole_e(e2)
+    LetIn(nm, v, b) => if cs_has_hole_e(v) == 1 then 1 else cs_has_hole_e(b)
+    VarIn(nm, v, b) => if cs_has_hole_e(v) == 1 then 1 else cs_has_hole_e(b)
+    Call(nm, args)  => cs_has_hole_args(args)
+    _               => 0
+fn cs_has_hole_args(xs) = match xs
+    Nil        => 0
+    Cons(h, t) => if cs_has_hole_e(h) == 1 then 1 else cs_has_hole_args(t)
+fn cs_pub_osig(mosig) = match mosig
+    Nil          => 0
+    Cons(osg, r) => osg.pubf
+fn cs_fill_holes_e(e, ety, lenv, hctx) = match e
+    Var(nm)         => if cs_is_hole(nm) == 1 then (if cs_isnil(cs_vsiglookup(hctx.fnm, hctx.vsigs)) == 1 and cs_isnil(cs_laws_mention_fn(hctx.fnm, hctx.laws)) == 1 then Num(0) else cs_best_hole_expr(ety, lenv, nm, hctx)) else e
+    Bin(op, a, b)   => Bin(op, cs_fill_holes_e(a, ety, lenv, hctx), cs_fill_holes_e(b, ety, lenv, hctx))
+    If(c, t, e2)    => If(cs_fill_holes_e(c, "int", lenv, hctx), cs_fill_holes_e(t, ety, lenv, hctx), cs_fill_holes_e(e2, ety, lenv, hctx))
+    LetIn(nm, v, b) => LetIn(nm, cs_fill_holes_e(v, ety, lenv, hctx), cs_fill_holes_e(b, ety, Cons({k: nm, v: ety}, lenv), hctx))
+    VarIn(nm, v, b) => VarIn(nm, cs_fill_holes_e(v, ety, lenv, hctx), cs_fill_holes_e(b, ety, Cons({k: nm, v: ety}, lenv), hctx))
+    Call(nm, args)  => Call(nm, cs_fill_holes_args(args, ety, lenv, hctx))
+    _               => e
+fn cs_fill_holes_args(xs, ety, lenv, hctx) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons(cs_fill_holes_e(h, ety, lenv, hctx), cs_fill_holes_args(t, ety, lenv, hctx))
+fn cs_fill_prog_holes(prog, sigs, osigs, vsigs, laws, ft) = match prog
+    Nil        => Nil
+    Cons(h, t) => Cons(cs_fill_stmt_holes(h, sigs, osigs, vsigs, laws, ft), cs_fill_prog_holes(t, sigs, osigs, vsigs, laws, ft))
+fn cs_fill_stmt_holes(st, sigs, osigs, vsigs, laws, ft) = match st
+    Fn(nm, ps, body) => if cs_has_hole_e(body) == 0 then st else let mosig = cs_osiglookup(nm, osigs) in if cs_pub_osig(mosig) == 1 then st else let msig = cs_siglookup(nm, sigs) in let ety = cs_fn_rty(msig, mosig) in Fn(nm, ps, cs_fill_holes_e(body, ety, cs_fn_lenv(msig), {fnm: nm, ps: ps, body: body, sigs: sigs, vsigs: vsigs, laws: laws, ft: ft}))
+    _                => st
 
 ## --- Track A2: totality check (`[A0002]`) ---
 fn cs_pat_subvars(p) = match p
@@ -932,6 +1042,12 @@ fn cs_vcollect_invs(prog) = match prog
 fn cs_vcollect_inv1(st, rest) = match st
     VTypeInvariant(nm, fs, inv) => Cons({nm: nm, fs: fs, inv: inv}, rest)
     _                           => rest
+fn cs_vcollect_laws(prog) = match prog
+    Nil        => Nil
+    Cons(h, t) => cs_vcollect_law1(h, cs_vcollect_laws(t))
+fn cs_vcollect_law1(st, rest) = match st
+    VLawDecl(nm, ps, body) => Cons({nm: nm, ps: ps, body: body}, rest)
+    _                      => rest
 fn cs_vsiglookup(nm, vsigs) = match vsigs
     Nil        => Nil
     Cons(h, t) => if h.nm == nm then Cons(h, Nil) else cs_vsiglookup(nm, t)
@@ -1228,7 +1344,7 @@ fn cs_diagnose_stmt(s0, tt) = match s0
     Print(v)         => cs_chk_expr(v, tt)
     ExprS(v)         => cs_chk_expr(v, tt)
     _                => Nil
-fn cs_diagnose(prog) = let tt = cs_tcollect(prog) in let osigs = cs_ocollects(prog) in let kt = {ksigs: cs_kcollect_effsigs(prog), edecls: cs_kcollect_effdecls(prog), caps: cs_kcollect_caps(prog)} in let hr = cs_collect_holes_stmts(prog, tt.sigs, osigs) in let vr = cs_vprove_all(prog) in cs_app(cs_diagnose_stmts(prog, tt), cs_app(hr.diags, cs_app(vr.diags, cs_odiagnose_stmts(prog, osigs, tt.sigs, kt, Nil))))
+fn cs_diagnose(prog) = let tt = cs_tcollect(prog) in let osigs = cs_ocollects(prog) in let vsigs = cs_vcollect_vsigs(prog) in let laws = cs_vcollect_laws(prog) in let kt = {ksigs: cs_kcollect_effsigs(prog), edecls: cs_kcollect_effdecls(prog), caps: cs_kcollect_caps(prog)} in let hr = cs_collect_holes_stmts(prog, tt.sigs, osigs, vsigs, laws, tt.ft) in let prog2 = cs_fill_prog_holes(prog, tt.sigs, osigs, vsigs, laws, tt.ft) in let vr = cs_vprove_all(prog2) in cs_app(cs_diagnose_stmts(prog2, tt), cs_app(hr.diags, cs_app(vr.diags, cs_odiagnose_stmts(prog2, osigs, tt.sigs, kt, Nil))))
 
 ## --- C3 generic erasure & C1/C2/M1/M2 comptime + hygienic macro expansion ---
 fn cs_gcfs(pl) = match pl
@@ -1411,8 +1527,8 @@ fn cs_eval_stmts(prog, ft) = match prog
 fn cs_eval_prog(prog) = cs_joinsep(cs_eval_stmts(prog, cs_buildft(prog)), "\n")
 
 ## --- PUBLIC CALLABLE LIBRARY API (`use lcaas`) ---
-fn cs_collect_holes(prog) = let tt = cs_tcollect(prog) in let osigs = cs_ocollects(prog) in (cs_collect_holes_stmts(prog, tt.sigs, osigs)).holes
-fn caas_compile(src) = let ast = cs_parse(src) in let syms = cs_symbols(ast) in let tt = cs_tcollect(ast) in let osigs = cs_ocollects(ast) in let kt = {ksigs: cs_kcollect_effsigs(ast), edecls: cs_kcollect_effdecls(ast), caps: cs_kcollect_caps(ast)} in let hr = cs_collect_holes_stmts(ast, tt.sigs, osigs) in let vr = cs_vprove_stmts(ast, cs_vcollect_vsigs(ast), cs_vcollect_invs(ast), tt.ft) in let diags = cs_app(cs_diagnose_stmts(ast, tt), cs_app(hr.diags, cs_app(vr.diags, cs_odiagnose_stmts(ast, osigs, tt.sigs, kt, Nil)))) in let raw_sexpr = cs_prog_sexpr(ast) in if cs_isnil(diags) == 0 then {ok: 0, diagnostics: diags, holes: hr.holes, proofs: vr.proofs, symbols: syms, ast: ast, ast_sexpr: raw_sexpr, expanded: Nil, expanded_sexpr: "", asm: "", result: ""} else let exp = cs_expand(ast) in {ok: 1, diagnostics: Nil, holes: hr.holes, proofs: vr.proofs, symbols: syms, ast: ast, ast_sexpr: raw_sexpr, expanded: exp, expanded_sexpr: cs_prog_sexpr(exp), asm: cs_asm_gen(exp), result: cs_eval_prog(exp)}
+fn cs_collect_holes(prog) = let tt = cs_tcollect(prog) in let osigs = cs_ocollects(prog) in let vsigs = cs_vcollect_vsigs(prog) in let laws = cs_vcollect_laws(prog) in (cs_collect_holes_stmts(prog, tt.sigs, osigs, vsigs, laws, tt.ft)).holes
+fn caas_compile(src) = let ast = cs_parse(src) in let syms = cs_symbols(ast) in let tt = cs_tcollect(ast) in let osigs = cs_ocollects(ast) in let vsigs = cs_vcollect_vsigs(ast) in let invs = cs_vcollect_invs(ast) in let laws = cs_vcollect_laws(ast) in let kt = {ksigs: cs_kcollect_effsigs(ast), edecls: cs_kcollect_effdecls(ast), caps: cs_kcollect_caps(ast)} in let hr = cs_collect_holes_stmts(ast, tt.sigs, osigs, vsigs, laws, tt.ft) in let ast_filled = cs_fill_prog_holes(ast, tt.sigs, osigs, vsigs, laws, tt.ft) in let vr = cs_vprove_stmts(ast_filled, vsigs, invs, cs_buildft(ast_filled)) in let diags = cs_app(cs_diagnose_stmts(ast_filled, tt), cs_app(hr.diags, cs_app(vr.diags, cs_odiagnose_stmts(ast_filled, osigs, tt.sigs, kt, Nil)))) in let raw_sexpr = cs_prog_sexpr(ast) in if cs_isnil(diags) == 0 then {ok: 0, diagnostics: diags, holes: hr.holes, proofs: vr.proofs, symbols: syms, ast: ast, ast_sexpr: raw_sexpr, expanded: Nil, expanded_sexpr: "", asm: "", result: ""} else let exp = cs_expand(ast_filled) in {ok: 1, diagnostics: Nil, holes: hr.holes, proofs: vr.proofs, symbols: syms, ast: ast, ast_sexpr: raw_sexpr, expanded: exp, expanded_sexpr: cs_prog_sexpr(exp), asm: cs_asm_gen(exp), result: cs_eval_prog(exp)}
 
 fn caas_check(src) = caas_compile(src)
 fn caas_fill(src) = (caas_compile(src)).holes
@@ -1431,7 +1547,7 @@ fn cs_ctx1_json(c) = "{\"name\":\"" + cs_jesc(c.k) + "\",\"type\":\"" + cs_jesc(
 fn cs_ctx_json(cs) = match cs
     Nil        => ""
     Cons(h, t) => cs_ctx1_json(h) + (if cs_isnil(t) == 1 then "" else "," + cs_ctx_json(t))
-fn cs_hole_json(h) = "{\"hole\":\"" + cs_jesc(h.hole) + "\",\"function\":\"" + cs_jesc(h.fnm) + "\",\"expected_type\":\"" + cs_jesc(h.expected_type) + "\",\"context\":[" + cs_ctx_json(h.context) + "],\"candidates\":[" + cs_strlist_json(h.candidates) + "]}"
+fn cs_hole_json(h) = "{\"hole\":\"" + cs_jesc(h.hole) + "\",\"function\":\"" + cs_jesc(h.fnm) + "\",\"expected_type\":\"" + cs_jesc(h.expected_type) + "\",\"context\":[" + cs_ctx_json(h.context) + "],\"candidates\":[" + cs_strlist_json(h.candidates) + "],\"proven_candidates\":[" + cs_strlist_json(h.proven_candidates) + "]}"
 fn cs_holes_json(hs) = match hs
     Nil        => ""
     Cons(h, t) => cs_hole_json(h) + (if cs_isnil(t) == 1 then "" else "," + cs_holes_json(t))

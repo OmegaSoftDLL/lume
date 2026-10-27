@@ -468,11 +468,111 @@ fn ohd_ty(xs) = match xs
     Cons(h, t) => h
 
 fn asynth_default(expty) = match expty
-    TyName(n) => if n == "int" then Cons("0", Nil) else if n == "str" then Cons("\"\"", Nil) else Nil
+    TyName(n) => if n == "int" then Cons("0", Cons("1", Nil)) else if n == "str" then Cons("\"\"", Nil) else Nil
     TyList(e) => Cons("Nil", Nil)
     _         => Nil
 
-fn asynth_cands(expty, lenv, sigs, curfn) = app(asynth_vars(expty, lenv), app(asynth_fns(expty, lenv, sigs, curfn), asynth_default(expty)))
+fn asynth_int_pairs(v, vs) = match vs
+    Nil        => Cons(v + " + 1", Cons(v + " - 1", Nil))
+    Cons(w, r) => Cons(v + " + " + w, Cons(v + " - " + w, Cons(w + " - " + v, Cons("if " + v + " >= " + w + " then " + v + " else " + w, Cons("if " + v + " <= " + w + " then " + v + " else " + w, asynth_int_pairs(v, r))))))
+
+fn asynth_int_ops(vs) = match vs
+    Nil        => Nil
+    Cons(v, r) => app(asynth_int_pairs(v, r), asynth_int_ops(r))
+
+fn asynth_cands(expty, lenv, sigs, curfn) = let vs = asynth_vars(expty, lenv) in let ops = if tystr(expty) == "int" then asynth_int_ops(vs) else Nil in app(vs, app(ops, app(asynth_fns(expty, lenv, sigs, curfn), asynth_default(expty))))
+
+fn aexpr_str(e) = match e
+    Num(n)        => str(n)
+    Str(s)        => "\"" + s + "\""
+    Var(nm)       => nm
+    Bin(op, a, b) => aexpr_str(a) + " " + op + " " + aexpr_str(b)
+    If(c, t, e2)  => "if " + aexpr_str(c) + " then " + aexpr_str(t) + " else " + aexpr_str(e2)
+    Call(nm, xs)  => nm + "(" + aexprs_str(xs) + ")"
+    _             => "0"
+
+fn aexprs_str(xs) = match xs
+    Nil        => ""
+    Cons(h, t) => if isnil(t) == 1 then aexpr_str(h) else aexpr_str(h) + ", " + aexprs_str(t)
+
+fn asynth_var_exprs(expty, lenv) = match lenv
+    Nil        => Nil
+    Cons(h, t) => if tystr(h.v) != "?" and tcompat(expty, h.v) == 1 then Cons(Var(h.k), asynth_var_exprs(expty, t)) else asynth_var_exprs(expty, t)
+
+fn asynth_int_pair_es(v, vs) = match vs
+    Nil        => Cons(Bin("+", Var(v), Num(1)), Cons(Bin("-", Var(v), Num(1)), Nil))
+    Cons(w, r) => Cons(Bin("+", Var(v), Var(w)), Cons(Bin("-", Var(v), Var(w)), Cons(Bin("-", Var(w), Var(v)), Cons(If(Bin(">=", Var(v), Var(w)), Var(v), Var(w)), Cons(If(Bin("<=", Var(v), Var(w)), Var(v), Var(w)), asynth_int_pair_es(v, r))))))
+
+fn asynth_int_op_es(vs) = match vs
+    Nil        => Nil
+    Cons(v, r) => app(asynth_int_pair_es(v, r), asynth_int_op_es(r))
+
+fn asynth_fn_es(expty, lenv, sigs, curfn) = match sigs
+    Nil        => Nil
+    Cons(sg, r) => if sg.fname == curfn or tystr(sg.rt) == "?" or tcompat(expty, sg.rt) == 0 then asynth_fn_es(expty, lenv, r, curfn) else if len(sg.pt) == 0 then Cons(Call(sg.fname, Nil), asynth_fn_es(expty, lenv, r, curfn)) else if len(sg.pt) == 1 then let v = asynth_fn_arg(ohd_ty(sg.pt), lenv) in (if v != "" then Cons(Call(sg.fname, Cons(Var(v), Nil)), asynth_fn_es(expty, lenv, r, curfn)) else asynth_fn_es(expty, lenv, r, curfn)) else asynth_fn_es(expty, lenv, r, curfn)
+
+fn asynth_def_es(expty) = match expty
+    TyName(n) => if n == "int" then Cons(Num(0), Cons(Num(1), Nil)) else if n == "str" then Cons(Str(""), Nil) else Nil
+    TyList(e) => Cons(Var("Nil"), Nil)
+    _         => Nil
+
+fn asynth_cand_es(expty, lenv, sigs, curfn) = let vs = asynth_vars(expty, lenv) in let ves = asynth_var_exprs(expty, lenv) in let oes = if tystr(expty) == "int" then asynth_int_op_es(vs) else Nil in app(ves, app(oes, app(asynth_fn_es(expty, lenv, sigs, curfn), asynth_def_es(expty))))
+
+fn asubst_hole_e(e, hnm, rep) = match e
+    Var(nm)         => if nm == hnm or (hnm == "_" and ais_hole_name(nm) == 1) then rep else e
+    Bin(op, a, b)   => Bin(op, asubst_hole_e(a, hnm, rep), asubst_hole_e(b, hnm, rep))
+    If(c, t, e2)    => If(asubst_hole_e(c, hnm, rep), asubst_hole_e(t, hnm, rep), asubst_hole_e(e2, hnm, rep))
+    LetIn(nm, v, b) => LetIn(nm, asubst_hole_e(v, hnm, rep), asubst_hole_e(b, hnm, rep))
+    VarIn(nm, v, b) => VarIn(nm, asubst_hole_e(v, hnm, rep), asubst_hole_e(b, hnm, rep))
+    Call(nm, args)  => Call(nm, asubst_hole_args(args, hnm, rep))
+    _               => e
+
+fn asubst_hole_args(xs, hnm, rep) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons(asubst_hole_e(h, hnm, rep), asubst_hole_args(t, hnm, rep))
+
+fn aupdate_fn_ft(fnm, ps, nbody, fns) = match fns
+    Nil        => Cons({nm: fnm, ps: ps, body: nbody}, Nil)
+    Cons(f, r) => if f.nm == fnm then Cons({nm: fnm, ps: ps, body: nbody}, r) else Cons(f, aupdate_fn_ft(fnm, ps, nbody, r))
+
+fn alaws_mention_fn(fnm, laws) = match laws
+    Nil        => Nil
+    Cons(l, r) => if omentions_call(fnm, l.body) == 1 then Cons(l, alaws_mention_fn(fnm, r)) else alaws_mention_fn(fnm, r)
+
+fn omentions_call(fnm, e) = match e
+    Call(cnm, args) => if cnm == fnm then 1 else omentions_call_args(fnm, args)
+    Bin(op, a, b)   => if omentions_call(fnm, a) == 1 then 1 else omentions_call(fnm, b)
+    If(c, t, e2)    => if omentions_call(fnm, c) == 1 then 1 else if omentions_call(fnm, t) == 1 then 1 else omentions_call(fnm, e2)
+    LetIn(nm, v, b) => if omentions_call(fnm, v) == 1 then 1 else omentions_call(fnm, b)
+    _               => 0
+
+fn omentions_call_args(fnm, xs) = match xs
+    Nil        => 0
+    Cons(h, t) => if omentions_call(fnm, h) == 1 then 1 else omentions_call_args(fnm, t)
+
+fn acheck_cand_laws(laws, fns) = match laws
+    Nil        => 2
+    Cons(l, r) => let lenv = vlin_init_env(l.ps) in let chyps = vcollect_body_hyps(l.body, Nil, lenv, Cons(l.body, Nil), fns, 0) in let pr = vprove_law_envs(vgen_envs_hyps(l.ps, 0, len(l.ps), chyps), l.body, fns) in if pr.status < 0 then 0 - 1 else let qf = vqflia_prove_law(l.ps, l.body, fns) in let rest = acheck_cand_laws(r, fns) in if rest < 0 then 0 - 1 else if qf == 1 and rest == 2 then 2 else 1
+
+fn ascore_cand_e(ce, hnm, hctx) = let nbody = asubst_hole_e(hctx.body, hnm, ce) in let fns2 = aupdate_fn_ft(hctx.fnm, hctx.ps, nbody, hctx.fns) in let mvs = vsiglookup(hctx.fnm, hctx.vsigs) in let mlaws = alaws_mention_fn(hctx.fnm, hctx.laws) in let c_sc = ascore_cand_vsig(hctx.ps, nbody, mvs, fns2) in if c_sc < 0 then 0 - 1 else if isnil(mlaws) == 1 then c_sc else let l_sc = acheck_cand_laws(mlaws, fns2) in if l_sc < 0 then 0 - 1 else if c_sc == 2 or l_sc == 2 then 2 else 1
+
+fn ascore_cand_vsig(ps, nbody, mvs, fns2) = match mvs
+    Nil          => 1
+    Cons(vsg, r) => let lenv = vlin_init_env(ps) in let raw_hyps = vcollect_body_hyps(nbody, (vprove_reqs_hyps(vsg.reqs, lenv, fns2)).hyps, lenv, vsg.enss, fns2, 0) in let chyps = vfm_trace_hyps(raw_hyps, vfm_vars(raw_hyps, Nil)) in let pr = vprove_envs(vgen_envs_hyps(ps, 0, len(ps), chyps), vsg.reqs, vsg.enss, nbody, fns2, 0) in if pr.status < 0 then 0 - 1 else if vqflia_prove_fn(ps, vsg.reqs, vsg.enss, nbody, fns2) == 1 then 2 else 1
+
+fn afilter_proven_es(ces, hnm, hctx) = match ces
+    Nil         => Nil
+    Cons(ce, r) => if ascore_cand_e(ce, hnm, hctx) == 2 then Cons(ce, afilter_proven_es(r, hnm, hctx)) else afilter_proven_es(r, hnm, hctx)
+
+fn afilter_valid_es(ces, hnm, hctx) = match ces
+    Nil         => Nil
+    Cons(ce, r) => if ascore_cand_e(ce, hnm, hctx) == 1 then Cons(ce, afilter_valid_es(r, hnm, hctx)) else afilter_valid_es(r, hnm, hctx)
+
+fn arank_cand_es(expty, lenv, hnm, hctx) = let raw = asynth_cand_es(expty, lenv, hctx.sigs, hctx.fnm) in let prv = afilter_proven_es(raw, hnm, hctx) in let val = afilter_valid_es(raw, hnm, hctx) in let ranked = app(prv, val) in if isnil(ranked) == 0 then ranked else raw
+
+fn abest_hole_expr(expty, lenv, hnm, hctx) = match arank_cand_es(expty, lenv, hnm, hctx)
+    Nil         => Num(0)
+    Cons(ce, r) => ce
 
 fn aquick_ty(e, lenv, sigs) = match e
     Num(n)        => TyName("int")
@@ -494,7 +594,7 @@ fn aquick_call_ty(msig) = match msig
 
 fn abin_expty(op, other_e, expty, lenv, sigs) = if op == "+" then let ot = aquick_ty(other_e, lenv, sigs) in (if tystr(ot) != "?" then ot else if tystr(expty) != "?" then expty else TyName("int")) else if op == "-" or op == "*" or op == "/" or op == "%" then TyName("int") else let ot = aquick_ty(other_e, lenv, sigs) in if tystr(ot) != "?" then ot else TyName("int")
 
-fn achk_hole_var(hnm, expty, lenv, hctx) = let cands = asynth_cands(expty, lenv, hctx.sigs, hctx.fnm) in let best = ohd_s(cands, "0") in if hctx.pubf == 1 or tystr(expty) == "?" then ctfail("lume: hole error [A0001]: unfilled typed hole '" + hnm + "' of expected type " + tystr(expty) + " in '" + hctx.fnm + "' (fix-it: replace '" + hnm + "' with '" + best + "')\n") else 1
+fn achk_hole_var(hnm, expty, lenv, hctx) = let best = aexpr_str(abest_hole_expr(expty, lenv, hnm, hctx)) in if hctx.pubf == 1 or tystr(expty) == "?" then ctfail("lume: hole error [A0001]: unfilled typed hole '" + hnm + "' of expected type " + tystr(expty) + " in '" + hctx.fnm + "' (fix-it: replace '" + hnm + "' with '" + best + "')\n") else 1
 
 fn achk_holes_e(e, expty, lenv, hctx) = match e
     Var(nm)         => if ais_hole_name(nm) == 1 then achk_hole_var(nm, expty, lenv, hctx) else 0
@@ -770,6 +870,14 @@ fn vcollect_invs(prog) = match prog
 fn vcollect_inv1(st, rest) = match st
     VTypeInvariant(nm, fs, inv) => Cons({nm: nm, fs: fs, inv: inv}, rest)
     _                           => rest
+
+fn vcollect_laws(prog) = match prog
+    Nil        => Nil
+    Cons(h, t) => vcollect_law1(h, vcollect_laws(t))
+
+fn vcollect_law1(st, rest) = match st
+    VLawDecl(nm, ps, body) => Cons({nm: nm, ps: ps, body: body}, rest)
+    _                      => rest
 
 fn vsiglookup(nm, vsigs) = match vsigs
     Nil        => Nil
@@ -1139,11 +1247,49 @@ fn aget_fn_lenv(msig) = match msig
     Cons(sg, r) => tparamlenv(sg)
     Nil         => Nil
 
+fn ahas_hole_e(e) = match e
+    Var(nm)         => ais_hole_name(nm)
+    Bin(op, a, b)   => if ahas_hole_e(a) == 1 then 1 else ahas_hole_e(b)
+    If(c, t, e2)    => if ahas_hole_e(c) == 1 then 1 else if ahas_hole_e(t) == 1 then 1 else ahas_hole_e(e2)
+    LetIn(nm, v, b) => if ahas_hole_e(v) == 1 then 1 else ahas_hole_e(b)
+    VarIn(nm, v, b) => if ahas_hole_e(v) == 1 then 1 else ahas_hole_e(b)
+    Call(nm, args)  => ahas_hole_args(args)
+    _               => 0
+
+fn ahas_hole_args(xs) = match xs
+    Nil        => 0
+    Cons(h, t) => if ahas_hole_e(h) == 1 then 1 else ahas_hole_args(t)
+
+fn afill_holes_e(e, expty, lenv, hctx) = match e
+    Var(nm)         => if ais_hole_name(nm) == 1 then (if isnil(vsiglookup(hctx.fnm, hctx.vsigs)) == 1 and isnil(alaws_mention_fn(hctx.fnm, hctx.laws)) == 1 then Num(0) else abest_hole_expr(expty, lenv, nm, hctx)) else e
+    Bin(op, a, b)   => Bin(op, afill_holes_e(a, abin_expty(op, b, expty, lenv, hctx.sigs), lenv, hctx), afill_holes_e(b, abin_expty(op, a, expty, lenv, hctx.sigs), lenv, hctx))
+    If(c, t, e2)    => If(afill_holes_e(c, TyName("int"), lenv, hctx), afill_holes_e(t, expty, lenv, hctx), afill_holes_e(e2, expty, lenv, hctx))
+    LetIn(nm, v, b) => let vt = aquick_ty(v, lenv, hctx.sigs) in LetIn(nm, afill_holes_e(v, vt, lenv, hctx), afill_holes_e(b, expty, Cons({k: nm, v: vt}, lenv), hctx))
+    VarIn(nm, v, b) => let vt = aquick_ty(v, lenv, hctx.sigs) in VarIn(nm, afill_holes_e(v, vt, lenv, hctx), afill_holes_e(b, expty, Cons({k: nm, v: vt}, lenv), hctx))
+    Call(nm, args)  => Call(nm, afill_holes_args(args, expty, lenv, hctx))
+    _               => e
+
+fn afill_holes_args(xs, expty, lenv, hctx) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons(afill_holes_e(h, expty, lenv, hctx), afill_holes_args(t, expty, lenv, hctx))
+
+fn afill_prog_holes(prog, sigs, osigs, vsigs, laws, fns) = match prog
+    Nil        => Nil
+    Cons(h, t) => Cons(afill_stmt_holes(h, sigs, osigs, vsigs, laws, fns), afill_prog_holes(t, sigs, osigs, vsigs, laws, fns))
+
+fn afill_stmt_holes(st, sigs, osigs, vsigs, laws, fns) = match st
+    Fn(nm, ps, body) => if ahas_hole_e(body) == 0 then st else let mosig = osiglookup(nm, osigs) in if apub_osig(mosig) == 1 then st else let msig = tsiglookup(nm, sigs) in let rty = aget_fn_rty(msig, mosig) in if tystr(rty) == "?" then st else let lenv = aget_fn_lenv(msig) in Fn(nm, ps, afill_holes_e(body, rty, lenv, {fnm: nm, pubf: 0, ps: ps, body: body, sigs: sigs, vsigs: vsigs, laws: laws, fns: fns}))
+    _                => st
+
+fn apub_osig(mosig) = match mosig
+    Nil          => 0
+    Cons(osg, r) => osg.pubf
+
 fn ochkfn(nm, ps, body, ot) = ochkfn2(nm, ps, body, osiglookup(nm, ot.osigs), tsiglookup(nm, ot.sigs), ot)
 
 fn ochkfn2(nm, ps, body, mosig, msig, ot) = match mosig
-    Nil          => let zv = vprove_fn_status(nm, ps, body, ot.vsigs, ot.fns) + (if isnil(ot.vsigs) == 1 and isnil(ot.invs) == 1 then 0 else vchk_expr_e(body, nm, ot)) in let zk = kchk_fn_effs(nm, 0, body, ot) in if oanye(body) == 0 and isnil(ot.osigs) == 1 and isnil(ot.otypes) == 1 and isnil(auinit_from_sig(msig)) == 1 then 1 else let rty = aget_sig_rty(msig) in let lenv = aget_fn_lenv(msig) in let zs = schk_conc_e(body, nm, 0, sinit_nonsend_sig(msig), Nil) in let zh = achk_holes_e(body, rty, lenv, {fnm: nm, pubf: 0, sigs: ot.sigs}) in let zp = achk_prov_e(body, nm, auinit_from_sig(msig), ot) in let ctx = {fnm: nm, pubf: 0, freef: 0, halloc: 0, bparams: ps, mvars: Nil, pnames: ps, locals: Nil, origins: oinit_origins(ps), osigs: ot.osigs, otypes: ot.otypes} in let rb = ochke(body, ctx, Nil) in ochk_ret_origin(nm, 0, "", rty, ps, rb.origin)
-    Cons(sg, sr) => if sg.pubf == 1 and oisgctype(sg.rty, ot.otypes) == 1 then ctfail("lume: ownership error [O0030]: public function '" + nm + "' cannot expose '@gc' region type across a public module boundary\n") else let rty = aget_fn_rty(msig, mosig) in let lenv = aget_fn_lenv(msig) in let mvars = omvars_pl(sg.pl) in let zv = vprove_fn_status(nm, ps, body, ot.vsigs, ot.fns) + vchk_expr_e(body, nm, ot) in let zk = kchk_fn_effs(nm, sg.pubf, body, ot) in let zs = schk_conc_e(body, nm, 0, sinit_nonsend_sig(msig), mvars) in let zh = achk_holes_e(body, rty, lenv, {fnm: nm, pubf: sg.pubf, sigs: ot.sigs}) in let zt = (if ois_total(sg.freef) == 1 then achk_total_e(body, {fnm: nm, ps: ps, fns: ot.fns, osigs: ot.osigs}, Nil, Nil) else 0) in let tret = achk_prov_e(body, nm, auinit_from_sig(msig), ot) in if sg.pubf == 1 and ois_llm(sg.freef) == 0 and ois_unverified_ty(rty) == 0 and tret == 1 then ctfail("lume: provenance error [A0003]: unverified AI/probabilistic value cannot be returned from trusted 'pub fn " + nm + "' without verification (fix-it: wrap the return value in 'verify(val, <contract>)' or validate with a contract guard before returning)\n") else let bparams = if isnil(sg.pl) == 1 then ps else obparams_pl(sg.pl) in let ctx = {fnm: nm, pubf: sg.pubf, freef: sg.freef, halloc: 0, bparams: bparams, mvars: mvars, pnames: ps, locals: Nil, origins: oinit_origins(ps), osigs: ot.osigs, otypes: ot.otypes} in let rb = ochke(body, ctx, Nil) in ochk_ret_origin(nm, sg.pubf, sg.fromp, rty, ps, rb.origin)
+    Nil          => let zv = vprove_fn_status(nm, ps, body, ot.vsigs, ot.fns) + (if isnil(ot.vsigs) == 1 and isnil(ot.invs) == 1 then 0 else vchk_expr_e(body, nm, ot)) in let zk = kchk_fn_effs(nm, 0, body, ot) in if oanye(body) == 0 and isnil(ot.osigs) == 1 and isnil(ot.otypes) == 1 and isnil(auinit_from_sig(msig)) == 1 then 1 else let rty = aget_sig_rty(msig) in let lenv = aget_fn_lenv(msig) in let zs = schk_conc_e(body, nm, 0, sinit_nonsend_sig(msig), Nil) in let zh = achk_holes_e(body, rty, lenv, {fnm: nm, pubf: 0, ps: ps, body: body, sigs: ot.sigs, vsigs: ot.vsigs, laws: ot.laws, fns: ot.fns}) in let zp = achk_prov_e(body, nm, auinit_from_sig(msig), ot) in let ctx = {fnm: nm, pubf: 0, freef: 0, halloc: 0, bparams: ps, mvars: Nil, pnames: ps, locals: Nil, origins: oinit_origins(ps), osigs: ot.osigs, otypes: ot.otypes} in let rb = ochke(body, ctx, Nil) in ochk_ret_origin(nm, 0, "", rty, ps, rb.origin)
+    Cons(sg, sr) => if sg.pubf == 1 and oisgctype(sg.rty, ot.otypes) == 1 then ctfail("lume: ownership error [O0030]: public function '" + nm + "' cannot expose '@gc' region type across a public module boundary\n") else let rty = aget_fn_rty(msig, mosig) in let lenv = aget_fn_lenv(msig) in let mvars = omvars_pl(sg.pl) in let zv = vprove_fn_status(nm, ps, body, ot.vsigs, ot.fns) + vchk_expr_e(body, nm, ot) in let zk = kchk_fn_effs(nm, sg.pubf, body, ot) in let zs = schk_conc_e(body, nm, 0, sinit_nonsend_sig(msig), mvars) in let zh = achk_holes_e(body, rty, lenv, {fnm: nm, pubf: sg.pubf, ps: ps, body: body, sigs: ot.sigs, vsigs: ot.vsigs, laws: ot.laws, fns: ot.fns}) in let zt = (if ois_total(sg.freef) == 1 then achk_total_e(body, {fnm: nm, ps: ps, fns: ot.fns, osigs: ot.osigs}, Nil, Nil) else 0) in let tret = achk_prov_e(body, nm, auinit_from_sig(msig), ot) in if sg.pubf == 1 and ois_llm(sg.freef) == 0 and ois_unverified_ty(rty) == 0 and tret == 1 then ctfail("lume: provenance error [A0003]: unverified AI/probabilistic value cannot be returned from trusted 'pub fn " + nm + "' without verification (fix-it: wrap the return value in 'verify(val, <contract>)' or validate with a contract guard before returning)\n") else let bparams = if isnil(sg.pl) == 1 then ps else obparams_pl(sg.pl) in let ctx = {fnm: nm, pubf: sg.pubf, freef: sg.freef, halloc: 0, bparams: bparams, mvars: mvars, pnames: ps, locals: Nil, origins: oinit_origins(ps), osigs: ot.osigs, otypes: ot.otypes} in let rb = ochke(body, ctx, Nil) in ochk_ret_origin(nm, sg.pubf, sg.fromp, rty, ps, rb.origin)
 
 fn ochkstmts(prog, ot, moved) = match prog
     Nil        => 1
@@ -1367,4 +1513,4 @@ fn olowerstmt(st, rest, ufns, osigs, vctx) = match st
     _                                     => Cons(st, rest)
 
 fn ocheck(prog) = if oany(prog) == 0 then prog else ocheckforce(prog)
-fn ocheckforce(prog) = let raw_osigs = ocollects(prog) in let fns = ocollectf(prog) in let osigs = oinfer_priv_osigs(fns, raw_osigs) in let otypes = ocollectt(prog) in let sigs = tcollects(prog) in let ksigs = kcollect_effsigs(prog) in let edecls = kcollect_effdecls(prog) in let caps = kcollect_caps(prog) in let vsigs = vcollect_vsigs(prog) in let invs = vcollect_invs(prog) in let ufns = ocollectfnms(prog) in let z = ochkstmts(prog, {osigs: osigs, otypes: otypes, sigs: sigs, fns: fns, ksigs: ksigs, edecls: edecls, caps: caps, vsigs: vsigs, invs: invs}, Nil) in olowerprog(prog, ufns, osigs, {vsigs: vsigs, fns: fns})
+fn ocheckforce(prog) = let raw_osigs = ocollects(prog) in let raw_fns = ocollectf(prog) in let osigs = oinfer_priv_osigs(raw_fns, raw_osigs) in let otypes = ocollectt(prog) in let sigs = tcollects(prog) in let ksigs = kcollect_effsigs(prog) in let edecls = kcollect_effdecls(prog) in let caps = kcollect_caps(prog) in let vsigs = vcollect_vsigs(prog) in let invs = vcollect_invs(prog) in let laws = vcollect_laws(prog) in let prog2 = afill_prog_holes(prog, sigs, osigs, vsigs, laws, raw_fns) in let fns = ocollectf(prog2) in let ufns = ocollectfnms(prog2) in let z = ochkstmts(prog2, {osigs: osigs, otypes: otypes, sigs: sigs, fns: fns, ksigs: ksigs, edecls: edecls, caps: caps, vsigs: vsigs, invs: invs, laws: laws}, Nil) in olowerprog(prog2, ufns, osigs, {vsigs: vsigs, fns: fns})

@@ -1,0 +1,28 @@
+@proposal 0002_intent_oracle
+@goal Synthesize safe_withdraw, max2, and step_inc from contracts and laws via hole-guided QF_LIA oracle
+@principles P1,P7,P30,P31,P34
+@capability pure
+@max_asm_lines 160
+@approval none
+@baseline
+fn add(a: int, b: int) -> int = a + b
+@end
+@candidate
+fn add(a: int, b: int) -> int = a + b
+pub fn step_inc(x: int) -> int requires x >= 0 ensures result == x + 1 and result > x = _
+fn safe_withdraw(bal: int, amt: int) -> int requires bal >= amt requires amt >= 0 ensures result == bal - amt and result >= 0 = _
+fn max2(a: int, b: int) -> int ensures result >= a and result >= b and (result == a or result == b) = _
+law max2_idemp(x: int) = max2(x, x) == x
+@end
+@tests
+print step_inc(41)
+print safe_withdraw(100, 35)
+print max2(18, 29)
+print max2(40, 12)
+@end
+@expected
+42
+65
+29
+40
+@end

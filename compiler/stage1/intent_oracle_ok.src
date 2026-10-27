@@ -1,0 +1,32 @@
+## intent_oracle_ok.src -- Compiler-as-Oracle & Intent-as-Source synthesis loop (`docs/19-intent-as-source.md`).
+## Verifies that private functions authored purely from intent (`requires`/`ensures` contracts + `law` P34
+## declarations + `_` typed holes) have their holes automatically synthesized and proven by `lumec`'s
+## `QF_LIA` decision procedure (`vqflia_prove_fn` / `vqflia_prove_law`) at compile time with zero runtime
+## contract guards (`call ctfail`) emitted in assembly.
+
+## 1. Single-parameter linear step synthesized from postcondition (`x + 1`)
+fn synth_inc(x: int) -> int requires x >= 0 ensures result == x + 1 and result > x = _
+
+## 2. Two-parameter linear subtraction synthesized from postcondition (`bal - amt`, pruning `amt - bal` and `bal + amt`)
+fn synth_withdraw(bal: int, amt: int) -> int requires bal >= amt requires amt >= 0 ensures result == bal - amt and result >= 0 = _
+
+## 3. Branching maximum synthesized from postcondition (`if a >= b then a else b`, pruning `a`, `b`, `a + b`)
+fn synth_max(a: int, b: int) -> int ensures result >= a and result >= b and (result == a or result == b) = _
+
+## 4. Two-parameter addition synthesized from algebraic `law` (`P34`) + postcondition (`a + b`)
+fn synth_add(a: int, b: int) -> int requires a >= 0 requires b >= 0 ensures result >= a and result >= b = _
+
+law synth_add_comm(x: int, y: int) = synth_add(x, y) == synth_add(y, x)
+law synth_add_zero(x: int) = synth_add(x, 0) == x
+law synth_max_idemp(x: int) = synth_max(x, x) == x
+law synth_withdraw_deposit(b: int, a: int) = (synth_withdraw(b, a) + a) == b
+
+print synth_inc(41)
+print synth_withdraw(100, 35)
+print synth_max(18, 29)
+print synth_max(40, 12)
+print synth_add(23, 19)
+print law_synth_add_comm(7, 13)
+print law_synth_add_zero(99)
+print law_synth_max_idemp(55)
+print law_synth_withdraw_deposit(100, 35)
