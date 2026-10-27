@@ -11,8 +11,8 @@
 
 > **100% Lume.** The compiler that turns Lume into native machine code is itself written in
 > Lume; a program goes from Lume source to a runnable ELF executable with **no C compiler and no
-> external assembler or linker** in the loop. The C seed under `bootstrap/` is a disposable
-> bootstrap that is removed once the language self-hosts. (GitHub's language bar is computed by
+> external assembler or linker** in the loop. The C seed under `bootstrap/` is kept frozen
+> as the reproducibility root and is never on the steady-state path. (GitHub's language bar is computed by
 > Linguist, which only lists languages already in its catalogue, so a new language like Lume does
 > not appear there yet.)
 
@@ -31,7 +31,7 @@ The one-sentence answer:
 > convenience. `lume describe` even teaches the language to a model that has never seen it. See
 > `docs/08-ai-first.md`.
 
-## The ten pillars
+## The eleven pillars
 
 | # | Pillar | Inherited from |
 |---|--------|----------------|
@@ -44,8 +44,8 @@ The one-sentence answer:
 | 7 | Data as a first-class citizen: `record`, `table`, `query`, `decimal`, dates | dBase, Clipper, SQL, COBOL |
 | 8 | Contracts in the code: `requires`, `ensures`, `invariant`, range types | Ada, Eiffel, Pascal |
 | 9 | Full control when needed: `unsafe`, `asm`, explicit memory layout | C, Assembly, Zig |
-| 10 | One tool, one static binary, fast compilation | Go, Cargo (Rust) |
-| 11 | Ship-time protection of your own artifact (opt-in) | ProGuard/R8, LLVM-obfuscator, VMProtect |
+| 10 | One tool, fast compilation (the `lume` driver is a POSIX `sh` script; the native tools are static ELF binaries, but some commands still shell out to the C seed — see Status) | Go, Cargo (Rust) |
+| 11 | Ship-time protection of your own artifact (opt-in) — **planned, not implemented** | ProGuard/R8, LLVM-obfuscator, VMProtect |
 
 ## A taste
 
@@ -94,7 +94,7 @@ lume/
 │   ├── PROJECT_STATE.md       ← the full source of truth: state, rules, pitfalls
 │   ├── 00-catalog.md          ← ~260 languages, by era and family
 │   ├── 01-survey.md           ← what each got right / wrong, and what Lume takes
-│   ├── 02-principles.md       ← P1–P32: the rules the design obeys
+│   ├── 02-principles.md       ← P1–P35: the rules the design obeys
 │   ├── 03-specification.md    ← the language specification v0.1 (normative)
 │   ├── 04-roadmap.md          ← Stages 0–5 and the self-evolution governance
 │   ├── 05-vision.md           ← why: a language for the AI era, from kernel to mind
@@ -111,9 +111,8 @@ lume/
 │   └── 23-horizon.md             ← the horizon: proving whole systems across time, outliving Lume
 ├── grammar/lume.ebnf          ← formal grammar
 ├── examples/                  ← .lume programs per stage (future/ for later stages)
-├── bootstrap/lume0/           ← Stage 0: disposable C interpreter (the seed) — lexer done
-├── compiler/                  ← Stage 1+: lumec, written in Lume
-├── std/                       ← standard library, in Lume
+├── bootstrap/lume0/           ← Stage 0: frozen C seed (lexer, parser, interpreter, resolver, x86-64 asm + ELF writer)
+├── compiler/                  ← Stage 1+: lumec, written in Lume; the std.* modules are .src files in compiler/stage1/ (there is no top-level std/ directory)
 ├── tests/conformance/         ← normative tests, stage-tagged
 └── .github/workflows/ci.yml   ← CI: build + test lume0 on Linux/macOS, docs checks
 ```
@@ -145,8 +144,8 @@ This is a **staged, self-verifying bootstrap** — the model GCC, Rust and Go us
 - [x] **Stage 1 — self-hosting, no C in the loop. ✅ Done.** Both the compiler (`compiler/stage1/lumec.src`) and the assembler + ELF writer (`compiler/stage1/lasm.src`) are written in Lume-Core. `lumec` lexes, parses (functions, `print`, expressions, `match`, records, constructors) and emits x86-64; `lasm` writes the ELF byte-by-byte. `make bootstrap` runs the staged build — the GCC/Rust/Go model: the frozen C seed mints the first tools once, then stages 1–3 rebuild the whole toolchain from Lume source with **no C**, asserting **stage 2 == stage 3, bit for bit**. `lasm`'s ELF is byte-identical to the seed assembler and strictly more correct (nearest GAS `1f`/`1b` resolution, which the seed gets wrong); the 300 KB compiler assembles in ~2.8 s. `make test` 218/0, `make asan` 177/0. See `docs/10-stage1-status.md` and `docs/11-self-hosting-plan.md`.
 - [x] **Stage 2 — comptime, macros, data, tooling, self-evolution, types. ✅ Done.** `comptime` (fold, pure-fn calls, generics via `comptime T: type`, `assert`, precomputed tables), hygienic macros + quasiquote, exact `decimal(p, s)` / `table[T]` / type-checked `query`, the single `lume` CLI (`build`/`run`/`test`/`fmt`/`doc`/`pkg`/`agent`/`evolve`) with capability-audited deps + SHA-256 lockfiles, the `lume evolve` self-evolution loop (compiler-as-a-service + 6 gates + human approval), and the gradual type system (F1 declarations, F2 annotations, F3 Hindley–Milner inference, F4 unified front-ends). Exit criterion met: the `examples/apps/inventory/` business app, built only with `lume`. All keeping `stage 2 == stage 3` and the Zero-C gate green in CI. See `docs/15-phase2-status.md`.
 - [x] **Stage 3 — ownership, effects, concurrency, verification. ✅ Done.** Track O (move/borrow checker, `from` regions, memory tiers), Track A (AI-native authoring: typed holes, `total`, provenance/uncertainty in the type), Track K (effect rows + algebraic handlers + `@capability` + Perceus reuse), Track S (structured concurrency, channels, supervised actors), and Track V (`requires`/`ensures`/`invariant`/`old`, `lume prove`, `LAWS`), plus the `job_server` capstone. The contract verifier is a **sound `QF_LIA` decision procedure** (Fourier–Motzkin / Farkas): `proven` obligations elide their runtime guard, others stay `runtime_checked`, never falsely proven. See `docs/16-phase3-plan.md`.
-- [x] **Stage 4 — tensors, autodiff, GPU kernels, `prob`, `rule`, `llm fn`. ✅ Done.** Shape-typed tensors with compile-time shape unification (`[T0300]`), differentiable `model` + symbolic autodiff (`grad`/`jvp`/`vjp`/`jit`), accelerator `kernel fn` (PTX/SPIR-V), probabilistic programming (`std.prob`), Datalog `rule`, typed `extern llm fn` with contract-repair + provenance, and spiking `std.neuro`; `mnist` and neuro-symbolic `agent` capstones. See `docs/24-phase4-plan.md`.
-- [x] **Stage 5 — systems, interop, realtime, proof certificates, `lume-os`. ✅ Done.** C-ABI + capability-scoped WASM interop (Tracks I1–I5), realtime `@interrupt`/`@bound` WCET, a minimal proof-certificate kernel (`lume certify`/`verify-cert`) + MCP server (`lume mcp`), and the capability-based `lume-os` microkernel capstone. See `docs/25-phase5-plan.md`.
+- [x] **Stage 4 — tensors, autodiff, GPU kernels, `prob`, `rule`, `llm fn`. ✅ Done.** Shape-typed tensors with compile-time shape unification (`[T0300]`), differentiable `model` + symbolic autodiff (`grad`/`jvp`/`vjp`/`jit`), accelerator `kernel fn` (PTX/SPIR-V), probabilistic programming (`std.prob`), Datalog `rule`, typed `extern llm fn` with contract-repair + provenance, and spiking `std.neuro`; `mnist` and neuro-symbolic `agent` capstones. **Caveats (see the hardening item below):** symbolic autodiff covers only `+ - * if` (other operators silently differentiate to 0, #184); `jit` currently lowers to a plain call (identity wrapper, #10); `kernel fn` emits placeholder PTX/SPIR-V text with no body lowering or GPU execution (#8); `std.prob` inference is a closed-form Beta-Bernoulli posterior mean (`infer_svi`/`infer_smc` are aliases of `infer_mcmc`), not sampling (#6); safetensors/ONNX "export" produce descriptor strings, not valid files (#9). See `docs/24-phase4-plan.md`.
+- [x] **Stage 5 — systems, interop, realtime, proof certificates, `lume-os`. ✅ Done.** C-ABI + capability-scoped WASM interop (Tracks I1–I5), realtime `@interrupt`/`@bound` WCET, a minimal proof-certificate kernel (`lume certify`/`verify-cert`) + MCP server (`lume mcp`), and the capability-based `lume-os` microkernel capstone. **Caveats:** interop is parse plus effect/provenance checks only — no native linking, real C-ABI call/export or WASM export yet (#11); the WASM "sandbox" (`std.wasm`) is an in-language model, not real module isolation (#186); `lume-os` is a deterministic user-space *model* of microkernel services (no boot, QEMU, hardware or isolation, #12); `spawn`/`par`/channels are static Send/Sync/scope checking plus a sequential simulation, not OS threads or a parallel runtime (#13). See `docs/25-phase5-plan.md`.
 - [x] **Inflection — the compiler dogfoods its own features. ✅ Done.** Contracts in the lexer/parser/typecheck, effects at the I/O boundary, `own`/Perceus in hot paths, and the **intent-as-source oracle** (hole-guided `QF_LIA` synthesis + `lume prove` + `lume evolve` repair) — the compiler-as-oracle of `docs/19-intent-as-source.md`. See `docs/21-inflection-plan.md`.
 - [ ] **Verification & trust-layer hardening — in progress.** The language's guarantees are sound; the surrounding *trust/presentation* layer is being hardened to match, honestly: making the proof-certificate kernel re-derive proofs **independently** of the compiler (not rubber-stamp its verdict) with real cryptographic hashing, turning the heuristic WCET/WASM-sandbox models into either clearly-labelled models or enforced guarantees, and making symbolic autodiff diagnose (never silently zero) outside its differentiable fragment. Tracked in the open issues. GOLDEN RULE scales from the compiler to the ecosystem: no overclaim ships as a guarantee.
 - **Beyond the roadmap — the horizon.** Vision docs for what comes next: `docs/19` (intent-as-source / compiler-as-oracle), `docs/20` (interop), `docs/22` (AI-first adoption), and `docs/23` (the horizon: proving whole systems across time, in a form that outlives Lume).
@@ -175,7 +174,7 @@ fn eval(e) = match e
     Add(a, b) => eval(a) + eval(b)
 ```
 
-**One tool, all in Lume:** `lume build|run|fmt|test|doc|check|pkg` — a canonical formatter (`lume fmt`), zero-config test discovery (`lume test` finds `fn test_*()`), doc/contract extraction (`lume doc`), and a module system + package manager with **capability-audited dependencies and content-addressed lockfiles** (superior to cargo/go mod). Plus **exact `decimal` arithmetic** for money/data.
+**One tool:** `lume build|run|fmt|test|doc|check|pkg` — the native tools are written in Lume, but the `lume` driver itself is a POSIX `sh` script that still invokes the C seed (`lume0`) for some commands (`check`, `describe`, running `.lume` files) and on hosts other than Linux x86-64. Commands: a canonical formatter (`lume fmt`), zero-config test discovery (`lume test` finds `fn test_*()`), doc/contract extraction (`lume doc`), and a module system + package manager with **capability-audited dependencies and content-addressed lockfiles** (superior to cargo/go mod). Plus **exact `decimal` arithmetic** for money/data.
 
 ## Quickstart
 
