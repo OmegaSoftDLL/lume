@@ -2,7 +2,7 @@
 
 Phase 2 grows Lume from the self-hosted Lume-Core into the AI-first language the pillars
 (`docs/02-principles.md`) promise. This note is the honest capstone: every pillar that is
-**done and proven in CI**, and the two pieces that are genuinely **still open** — stated
+**done and proven in CI**, and the one remaining extension that is genuinely **not implemented** (let-polymorphism; F4 has since shipped) — stated
 plainly, because the project's golden rule forbids claiming a milestone that is not real.
 
 ## Done and proven (one green PR + a regression test each; the self-host fixpoint stays bit-identical)
@@ -26,14 +26,14 @@ stage-1 `SIGSEGV`.
 
 ## Honestly still open (deliberately not claimed as done)
 
-1. **F3c — let-polymorphism / higher-rank generalization.** The Hindley–Milner unification engine
+1. **F3c — let-polymorphism / higher-rank generalization (the HM engine itself is done, #154).** The Hindley–Milner unification engine
    (`TyVar(n)`, `hunify`, `happly`, `tcollecti`/`tinfer`) now infers unannotated function parameter
    types from their body usage (`fn inc(x) = x + 1` -> `x: int`, `fn greet(s) = "hello " + s` ->
    `s: str`, polymorphic `fn id(x) = x` -> `TyAny`) and rejects mismatched call sites with zero
    false positives. Generalizing polymorphic `let`-bound functions across distinct instantiations
    inside a single body remains open for future extension.
 
-2. **F4 — layout, explicit-brace, and string interpolation unification (shipped).** The unified
+2. **F4 — layout, explicit-brace, and string interpolation unification (shipped — all four slices complete; listed here only as a historical former open item).** The unified
    front-end (`compiler/stage1/lume/01_lexer.src`, `02_parser.src`, `04_parser_decls.src`, and
    `compiler/stage1/lfmt.src`) now accepts all three forms — indented layout (`f4_layout.src`),
    explicit-brace (`f4_brace.src`, `docs/05-vision.md:224`), and canonical inline Lume-Core

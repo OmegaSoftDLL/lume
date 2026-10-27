@@ -45,7 +45,7 @@ getting stuck), one green PR with a regression test, and the **self-host fixpoin
   but is declared to return str`. It returns a concrete type only when certain (TyAny otherwise), so it adds real
   checks with **zero false positives**, and `tknown` is preserved as `tknownl(·, Nil)` so every existing checker path
   is byte-identical; a program that declares no types is still returned unchanged, so the self-host fixpoint is
-  untouched. NOT yet (**F3b**): full Hindley–Milner — unification, type variables, let-polymorphism, and inferring
+  untouched. NOT yet *(historical; done in F3b/F3c below)* (**F3b**): full Hindley–Milner — unification, type variables, let-polymorphism, and inferring
   argument types through a function body so anonymous records/field access are checked without annotation. *Ref: OCaml/Haskell, TypeScript gradual typing.*
 - **F3b ✅ done (argument inference)** an argument that is a variable / operator / `let` / `if` whose type infers to
   `int` or `str` is now checked against the parameter's type — but **only when the parameter is also int or str**, so
@@ -53,9 +53,9 @@ getting stuck), one green PR with a regression test, and the **self-host fixpoin
   raise no new error. `fn bad(n: int) -> str = greet(n)` (greet expects str) now fails at compile time. It is purely
   additive: `tchkarg`/`tcompat` and every existing checker path are byte-for-byte unchanged (a new `tchkinferargs`
   reads the function's parameter env via `tt.lenv`), so the self-host fixpoint is untouched. *Ref: TypeScript/Rust
-  gradual argument typing.* NOT yet (**F3c**): full Hindley–Milner — unification, type variables, let-polymorphism,
+  gradual argument typing.* NOT yet *(historical; done in F3c below)* (**F3c**): full Hindley–Milner — unification, type variables, let-polymorphism,
   and inference over decimal/record/list arguments.
-- **F3c ✅ done (#154)** Hindley–Milner inference engine: unification (`hunify`), type variables (`TyVar`), substitution application (`happly`), and body inference (`tcollecti`/`tinfer`) for unannotated functions, plus anonymous-record structural field checking. *Ref: OCaml/Haskell.*
+- **F3c ✅ done (#154)** Hindley–Milner inference engine: unification (`hunify`), type variables (`TyVar`), substitution application (`happly`), and body inference (`tcollecti`/`tinfer`) for unannotated functions, plus anonymous-record structural field checking. *Ref: OCaml/Haskell.* (Generalising polymorphic `let`-bound functions across distinct instantiations is not implemented — no generalisation/instantiation code in `06_typecheck.src`.)
 - **F4 ✅ done** unify the two front-ends (surface Lume vs ML-core) into one grammar/AST (`docs/05-vision.md:224`, `docs/17-frontend-unification.md`).
   - **Slice 1 ✅ done (#143):** named enum payloads (`Leaf(value: int)`) normalise to `{tag, ar}` (byte-identical codegen).
   - **Slice 2 ✅ done:** string interpolation (`"hi {who()}, the answer is {answer()}!"` + `{{`/`}}` escaping) desugars into a left-associative `+` chain with `str(...)`, emitting byte-identical assembly to explicit concatenation.

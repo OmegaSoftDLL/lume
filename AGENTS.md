@@ -15,7 +15,7 @@ is the short version.
   `compiler/stage1/lumec.src`.** `lumec.src` is a build artifact (git-ignored), amalgamated
   from the modules in numeric order by `scripts/amalgamate.sh` (`make amalgamate`); the
   concatenation is byte-identical to the historical monolith. See `docs/13-module-split-plan.md`.
-- **Do not fake completion.** The triple self-build (Phase 1 exit) is NOT done — never claim it is.
+- **Do not fake completion.** The triple self-build (Phase 1 exit) **is done** — `stage 2 == stage 3` holds in CI (the `bootstrap` gate) — so never regress it, and never claim a milestone that is not real. Phases 1–5 and the compiler-self-hosting inflection are complete; what remains is **verification/trust-layer hardening** (the proof-certificate kernel must verify independently, WCET/WASM models must be labelled or enforced, autodiff must diagnose outside its fragment, P33 protection is unbuilt) — tracked in the open issues. State features at their real level: shipped, a model/stub, or planned.
 - **C is the disposable seed only.** The end state is no C and no external `as`/`ld` (Lume
   emits native ELF itself — see `lume0 asm`). Move work toward native, not toward C.
 - For each feature borrowed from another language, make ours **superior**, not a shallow clone.

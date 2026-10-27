@@ -3,8 +3,7 @@
 Stage 1's exit criterion is the **triple self-build**: `lume0` runs `lumec` to compile `lumec`,
 which compiles itself, bit-identical. Reaching that fixpoint means the Lume-written `lumec` must
 compile the *entire* language `lumec` is written in. That is a large, multi-session effort. This
-document is the honest running inventory of how far the self-hosted front-end has come, so no one
-mistakes the current milestone for the fixpoint.
+document is the honest running inventory of how far the self-hosted front-end has come. *(Historical framing: the triple self-build below has since been reached; see the Status list.)*
 
 ## Written in Lume, running on `lume0` today
 
@@ -31,9 +30,11 @@ recursion (e.g. `fib`); `if`/`while` iterative programs (e.g. iterative factoria
 run under the Lume-written interpreters today: all of the above plus algebraic data types and
 pattern matching.
 
-## What the fixpoint still needs (not yet done)
+## What the fixpoint needed (historical — now done)
 
-To compile `lumec` itself, the Lume-written compiler still needs, roughly in order:
+> **Historical.** This list was written before the triple self-build; the fixpoint is reached (see Status) and the unified front-end (F4) has shipped. It is kept as a record, not as open work.
+
+To compile `lumec` itself, the Lume-written compiler needed, roughly in order:
 - a single unified front-end (today there are subset-specific parsers/evaluators to keep each
   increment small and tested) — merge them into one grammar and one AST;
 - the value types `lumec` uses: strings, lists, maps, records with named fields, optionals/results;
