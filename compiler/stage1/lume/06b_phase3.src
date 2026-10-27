@@ -22,6 +22,8 @@ fn ois_free(mflags) = mflags % 2
 fn ois_total(mflags) = (mflags / 2) % 2
 fn ois_llm(mflags) = (mflags / 4) % 2
 fn ois_kernel(mflags) = (mflags / 8) % 2
+fn ois_interrupt(mflags) = (mflags / 16) % 2
+fn ois_ffi(mflags) = (mflags / 32) % 2
 
 fn ais_hole_name(nm) = if nm == "_" or ostarts(nm, "_hole") == 1 then 1 else 0
 
@@ -54,6 +56,7 @@ fn oanystmt(st) = match st
     VContractSig(nm, ps, reqs, enss)      => 1
     VTypeInvariant(nm, fs, inv)           => 1
     VLawDecl(nm, ps, body)                => 1
+    WcetSig(nm, bound)                    => 1
     Sig(nm, ps, ts, rt)                   => if ohas_unverified_tys(ts) == 1 or ois_unverified_ty(rt) == 1 or ohas_tensor_tys(ts) == 1 or ois_tensor_ty(rt) == 1 then 1 else 0
     Fn(nm, ps, body)                      => oanye(body)
     Print(v)                              => oanye(v)
@@ -74,7 +77,7 @@ fn oanye(e) = match e
     LetIn(nm, v, b)         => if oanye(v) == 1 then 1 else oanye(b)
     If(c, t, e2)            => if oanye(c) == 1 then 1 else if oanye(t) == 1 then 1 else oanye(e2)
     Bin(op, l, r)           => if oanye(l) == 1 then 1 else oanye(r)
-    Call(nm, args)          => if nm == "borrow" or nm == "borrow_mut" or nm == "move" or nm == "clone" or nm == "verify" or nm == "law_check" or nm == "evolve_approve" or nm == "llm_complete" or nm == "prob_sample" or nm == "sample_dist" or nm == "observe_lik" or nm == "old" or nm == "grad" or nm == "jvp" or nm == "vjp" or nm == "vmap" or nm == "jit" or nm == "matmul" or nm == "tensor_matmul" or nm == "tensor_add" or nm == "tensor_sub" or nm == "tensor_mul" or nm == "tensor_add_bias" then 1 else oanyargs(args)
+    Call(nm, args)          => if nm == "borrow" or nm == "borrow_mut" or nm == "move" or nm == "clone" or nm == "verify" or nm == "law_check" or nm == "evolve_approve" or nm == "llm_complete" or nm == "prob_sample" or nm == "sample_dist" or nm == "observe_lik" or nm == "old" or nm == "grad" or nm == "jvp" or nm == "vjp" or nm == "vmap" or nm == "jit" or nm == "matmul" or nm == "tensor_matmul" or nm == "tensor_add" or nm == "tensor_sub" or nm == "tensor_mul" or nm == "tensor_add_bias" or nm == "cap_page_map" then 1 else oanyargs(args)
     Field(o, fld)           => oanye(o)
     Rec(items)              => oanyrec(items)
     RecT(tn, items)         => oanyrec(items)
@@ -181,7 +184,7 @@ fn keff_join(xs) = match xs
     Nil        => ""
     Cons(h, t) => if isnil(t) == 1 then h else h + ", " + keff_join(t)
 
-fn kprim_eff(cnm) = if cnm == "io_write" or cnm == "io_read" or cnm == "println" or cnm == "read" or cnm == "readall" or cnm == "emit" or cnm == "flush" then "io" else if cnm == "fs_read" or cnm == "fs_write" or cnm == "fs_open" then "fs" else if cnm == "net_send" or cnm == "net_recv" or cnm == "net_connect" or cnm == "db_exec" then "net" else if cnm == "rc_new" or cnm == "arc_new" or cnm == "alloc_heap" or cnm == "table_new" or cnm == "box_new" then "alloc" else if cnm == "rand_int" or cnm == "prob_sample" or cnm == "llm_complete" then "rand" else if cnm == "sample_dist" or cnm == "observe_lik" then "prob" else if cnm == "llm_prompt" then "llm" else if cnm == "time_now" or cnm == "clock_now" or cnm == "sleep_ms" then "time" else if cnm == "fail_err" or cnm == "raise_err" then "fail" else if cnm == "panic_msg" then "panic" else if cnm == "async_await" or cnm == "spawn_task" then "async" else ""
+fn kprim_eff(cnm) = if cnm == "io_write" or cnm == "io_read" or cnm == "println" or cnm == "read" or cnm == "readall" or cnm == "emit" or cnm == "flush" then "io" else if cnm == "fs_read" or cnm == "fs_write" or cnm == "fs_open" then "fs" else if cnm == "net_send" or cnm == "net_recv" or cnm == "net_connect" or cnm == "db_exec" then "net" else if cnm == "rc_new" or cnm == "arc_new" or cnm == "alloc_heap" or cnm == "table_new" or cnm == "box_new" then "alloc" else if cnm == "rand_int" or cnm == "prob_sample" or cnm == "llm_complete" then "rand" else if cnm == "sample_dist" or cnm == "observe_lik" then "prob" else if cnm == "llm_prompt" then "llm" else if cnm == "wasm_module_new" or cnm == "wasm_call_add" or cnm == "wasm_store32" or cnm == "wasm_load32" or cnm == "wasm_call_host_fs" then "wasm" else if cnm == "ffi_call" then "ffi" else if cnm == "time_now" or cnm == "clock_now" or cnm == "sleep_ms" then "time" else if cnm == "fail_err" or cnm == "raise_err" then "fail" else if cnm == "panic_msg" then "panic" else if cnm == "async_await" or cnm == "spawn_task" then "async" else ""
 
 fn kinfer_call_effs(cnm, ksigs, edecls, fns, d) = let pe = kprim_eff(cnm) in let ue = kop_effect(cnm, edecls) in let base = keff_add(pe, keff_add(ue, Nil)) in let mks = keffsig_lookup(cnm, ksigs) in match mks
     Cons(ks, r) => keff_union(base, keff_diff(ks.effs, Cons("pure", Nil)))
@@ -225,7 +228,23 @@ fn kinfer_rec(xs, ksigs, edecls, fns, d) = match xs
     Nil        => Nil
     Cons(h, t) => keff_union(kinfer_effs_e(h.val, ksigs, edecls, fns, d), kinfer_rec(t, ksigs, edecls, fns, d))
 
-fn kchk_fn_effs(nm, pubf, body, ot) = let mks = keffsig_lookup(nm, ot.ksigs) in if pubf == 0 and isnil(mks) == 1 and isnil(ot.caps) == 1 then 1 else let inf = kinfer_effs_e(body, ot.ksigs, ot.edecls, ot.fns, 4) in let dec = kget_dec_effs(mks) in let missing_pub = if pubf == 1 and isnil(mks) == 1 then inf else keff_diff(inf, dec) in if (pubf == 1 or isnil(mks) == 0) and isnil(missing_pub) == 0 then ctfail("lume: effect error [E0200]: function '" + nm + "' performs undeclared effect '{" + keff_join(missing_pub) + "}' (fix-it: add '/ {" + keff_join(keff_union(dec, inf)) + "}' to the signature of '" + nm + "' or handle it with 'with handler')\n") else if isnil(ot.caps) == 0 and isnil(keff_diff(inf, ot.caps)) == 0 then let uncap = keff_diff(inf, ot.caps) in ctfail("lume: capability error [E0200]: function '" + nm + "' requires capability '{" + keff_join(uncap) + "}' not granted to this module (fix-it: add '@capability " + ohd_s(uncap, "io") + "' or declare it in lume.toml)\n") else 1
+fn ais_ffi_osig(msig) = match msig
+    Nil        => 0
+    Cons(sg, r) => if ois_ffi(sg.freef) == 1 and sg.pubf == 0 then 1 else 0
+
+fn kuses_ffi_e(e, osigs) = match e
+    Call(cnm, args) => if ais_ffi_osig(osiglookup(cnm, osigs)) == 1 then 1 else kuses_ffi_args(args, osigs)
+    Bin(op, l, r)   => if kuses_ffi_e(l, osigs) == 1 then 1 else kuses_ffi_e(r, osigs)
+    If(c, t, e2)    => if kuses_ffi_e(c, osigs) == 1 then 1 else if kuses_ffi_e(t, osigs) == 1 then 1 else kuses_ffi_e(e2, osigs)
+    LetIn(nm, v, b) => if kuses_ffi_e(v, osigs) == 1 then 1 else kuses_ffi_e(b, osigs)
+    VarIn(nm, v, b) => if kuses_ffi_e(v, osigs) == 1 then 1 else kuses_ffi_e(b, osigs)
+    _               => 0
+
+fn kuses_ffi_args(xs, osigs) = match xs
+    Nil        => 0
+    Cons(h, t) => if kuses_ffi_e(h, osigs) == 1 then 1 else kuses_ffi_args(t, osigs)
+
+fn kchk_fn_effs(nm, pubf, body, ot) = let mks = keffsig_lookup(nm, ot.ksigs) in if pubf == 0 and isnil(mks) == 1 and isnil(ot.caps) == 1 then 1 else let inf0 = kinfer_effs_e(body, ot.ksigs, ot.edecls, ot.fns, 4) in let inf = if kuses_ffi_e(body, ot.osigs) == 1 then keff_add("ffi", inf0) else inf0 in let dec = kget_dec_effs(mks) in let missing_pub = if pubf == 1 and isnil(mks) == 1 then inf else keff_diff(inf, dec) in if (pubf == 1 or isnil(mks) == 0) and isnil(missing_pub) == 0 then ctfail("lume: effect error [E0200]: function '" + nm + "' performs undeclared effect '{" + keff_join(missing_pub) + "}' (fix-it: add '/ {" + keff_join(keff_union(dec, inf)) + "}' to the signature of '" + nm + "' or handle it with 'with handler')\n") else if isnil(ot.caps) == 0 and isnil(keff_diff(inf, ot.caps)) == 0 then let uncap = keff_diff(inf, ot.caps) in ctfail("lume: capability error [E0200]: function '" + nm + "' requires capability '{" + keff_join(uncap) + "}' not granted to this module (fix-it: add '@capability " + ohd_s(uncap, "io") + "' or declare it in lume.toml)\n") else 1
 
 fn kget_dec_effs(mks) = match mks
     Nil         => Nil
@@ -448,7 +467,7 @@ fn ochkargs(args, ctx, moved) = match args
     Nil        => moved
     Cons(h, t) => let r = ochke(h, ctx, moved) in ochkargs(t, ctx, r.moved)
 
-fn ochkcall(fnm, args, ctx, moved) = if ois_free(ctx.freef) == 1 and ctx.halloc == 0 and ois_heap_alloc(fnm) == 1 then ctfail("lume: ownership error [O0030]: ambient heap allocation '" + fnm + "' in '@freestanding' function '" + ctx.fnm + "' (help: pass an explicit allocator via 'with alloc = <arena> in ...')\n") else if fnm == "move" and len(args) == 1 then ochk_own_target(ohd_e(args), ctx, moved) else if fnm == "borrow" and len(args) == 1 then let ra = ochke(ohd_e(args), ctx, moved) in {moved: ra.moved, origin: "borrow:" + ra.origin} else if fnm == "borrow_mut" and len(args) == 1 then ochk_mut_target(ohd_e(args), ctx, moved) else ochkcall_sig(fnm, args, osiglookup(fnm, ctx.osigs), ctx, moved)
+fn ochkcall(fnm, args, ctx, moved) = if ois_free(ctx.freef) == 1 and ctx.halloc == 0 and ois_heap_alloc(fnm) == 1 then ctfail("lume: ownership error [O0030]: ambient heap allocation '" + fnm + "' in '@freestanding' function '" + ctx.fnm + "' (help: pass an explicit allocator via 'with alloc = <arena> in ...')\n") else if fnm == "move" and len(args) == 1 then ochk_own_target(ohd_e(args), ctx, moved) else if fnm == "cap_page_map" and len(args) >= 1 then let r0 = ochk_own_target(ohd_e(args), ctx, moved) in {moved: ochkargs(ptl(args), ctx, r0.moved), origin: ""} else if fnm == "borrow" and len(args) == 1 then let ra = ochke(ohd_e(args), ctx, moved) in {moved: ra.moved, origin: "borrow:" + ra.origin} else if fnm == "borrow_mut" and len(args) == 1 then ochk_mut_target(ohd_e(args), ctx, moved) else ochkcall_sig(fnm, args, osiglookup(fnm, ctx.osigs), ctx, moved)
 
 fn ochkcall_sig(fnm, args, msig, ctx, moved) = match msig
     Nil          => let z = ochk_conflicts(fnm, ocollect_mut_args(args, Nil), args) in {moved: ochkargs(args, ctx, moved), origin: ""}
@@ -739,7 +758,7 @@ fn vhas_ensures_sig(mvs) = match mvs
     Nil          => 0
     Cons(vsg, r) => if isnil(vsg.enss) == 0 then 1 else 0
 
-fn ais_unverified_fn(cnm, osigs, sigs, vsigs) = if cnm == "llm_complete" or cnm == "prob_sample" or cnm == "sample_dist" or cnm == "llm_prompt" then 1 else if ais_llm_osig(osiglookup(cnm, osigs)) == 1 then (if vhas_ensures_sig(vsiglookup(cnm, vsigs)) == 1 then 0 else 1) else ais_unverified_ret(tsiglookup(cnm, sigs))
+fn ais_unverified_fn(cnm, osigs, sigs, vsigs) = if cnm == "llm_complete" or cnm == "prob_sample" or cnm == "sample_dist" or cnm == "llm_prompt" or cnm == "ffi_call" then 1 else if ais_llm_osig(osiglookup(cnm, osigs)) == 1 or ais_ffi_osig(osiglookup(cnm, osigs)) == 1 then (if vhas_ensures_sig(vsiglookup(cnm, vsigs)) == 1 then 0 else 1) else ais_unverified_ret(tsiglookup(cnm, sigs))
 
 fn ais_llm_osig(msig) = match msig
     Nil        => 0
@@ -1469,13 +1488,51 @@ fn n4_var_name(e) = match e
     Var(nm) => nm
     _       => ""
 
-fn n4_chk_kernel_fn(nm, freef, body, ot) = if ois_kernel(freef) == 0 then 0 else let inf = kinfer_effs_e(body, ot.ksigs, ot.edecls, ot.fns, 4) in if omem("io", inf) == 1 or omem("fs", inf) == 1 or omem("net", inf) == 1 then ctfail("lume: effect error [E0200]: accelerator 'kernel fn " + nm + "' cannot perform host I/O effect '{" + keff_join(inf) + "}' (fix-it: keep 'kernel fn' pure/data-parallel and move host I/O outside the kernel)\n") else 0
+fn n4_chk_kernel_fn(nm, freef, body, ot) = let inf = kinfer_effs_e(body, ot.ksigs, ot.edecls, ot.fns, 4) in if ois_kernel(freef) == 1 and (omem("io", inf) == 1 or omem("fs", inf) == 1 or omem("net", inf) == 1) then ctfail("lume: effect error [E0200]: accelerator 'kernel fn " + nm + "' cannot perform host I/O effect '{" + keff_join(inf) + "}' (fix-it: keep 'kernel fn' pure/data-parallel and move host I/O outside the kernel)\n") else if ois_interrupt(freef) == 1 and (omem("alloc", inf) == 1 or omem("io", inf) == 1 or omem("fs", inf) == 1 or omem("net", inf) == 1 or omem("async", inf) == 1) then ctfail("lume: effect error [E0200]: interrupt handler '@interrupt fn " + nm + "' cannot allocate or block (performs '{" + keff_join(inf) + "}') (fix-it: pre-allocate state in a static capability region and remove blocking I/O from the ISR)\n") else 0
+
+fn vcollect_wcets(prog) = match prog
+    Nil        => Nil
+    Cons(h, t) => vcollect_wcet1(h, vcollect_wcets(t))
+
+fn vcollect_wcet1(st, rest) = match st
+    WcetSig(nm, bound) => Cons({nm: nm, bound: bound}, rest)
+    _                  => rest
+
+fn vwcet_lookup(nm, wcets) = match wcets
+    Nil        => 0
+    Cons(h, t) => if h.nm == nm then h.bound else vwcet_lookup(nm, t)
+
+fn vwcet_max(a, b) = if a >= b then a else b
+
+fn vwcet_e(e, fns, d) = if d <= 0 then 100000 else vwcet_e1(e, fns, d)
+
+fn vwcet_e1(e, fns, d) = match e
+    Num(n)          => 1
+    Str(s)          => 1
+    Var(x)          => 1
+    Field(o, fld)   => 2 + vwcet_e(o, fns, d)
+    Bin(op, l, r)   => (if op == "*" or op == "/" or op == "%" then 4 else 1) + vwcet_e(l, fns, d) + vwcet_e(r, fns, d)
+    If(c, t, e2)    => 2 + vwcet_e(c, fns, d) + vwcet_max(vwcet_e(t, fns, d), vwcet_e(e2, fns, d))
+    LetIn(nm, v, b) => 1 + vwcet_e(v, fns, d) + vwcet_e(b, fns, d)
+    VarIn(nm, v, b) => 1 + vwcet_e(v, fns, d) + vwcet_e(b, fns, d)
+    Call(cnm, args) => 4 + vwcet_args(args, fns, d) + vwcet_call(cnm, vfnlookup(cnm, fns), fns, d)
+    _               => 2
+
+fn vwcet_args(xs, fns, d) = match xs
+    Nil        => 0
+    Cons(h, t) => vwcet_e(h, fns, d) + vwcet_args(t, fns, d)
+
+fn vwcet_call(cnm, mf, fns, d) = match mf
+    Nil        => 0
+    Cons(f, r) => if afn_calls_self(cnm, f.body) == 1 then 100000 else vwcet_e(f.body, fns, d - 1)
+
+fn vwcet_chk_fn(nm, body, wcets, fns) = let bound = vwcet_lookup(nm, wcets) in if bound <= 0 then 0 else let est = (if afn_calls_self(nm, body) == 1 then 100000 else vwcet_e(body, fns, 4)) in if est > bound then ctfail("lume: wcet error [V0002]: function '" + nm + "' has worst-case execution time of " + str(est) + " cycles, exceeding '@bound(cycles: " + str(bound) + ")' (fix-it: remove recursion/loops on the critical path or increase '@bound(cycles: " + str(est) + ")')\n") else 1
 
 fn ochkfn(nm, ps, body, ot) = ochkfn2(nm, ps, body, osiglookup(nm, ot.osigs), tsiglookup(nm, ot.sigs), ot)
 
 fn ochkfn2(nm, ps, body, mosig, msig, ot) = match mosig
-    Nil          => let ztn = n4_chk_fn_tensors(nm, body, msig, ot) in let zv = vprove_fn_status(nm, ps, body, ot.vsigs, ot.fns) + (if isnil(ot.vsigs) == 1 and isnil(ot.invs) == 1 then 0 else vchk_expr_e(body, nm, ot)) in let zk = kchk_fn_effs(nm, 0, body, ot) in if oanye(body) == 0 and isnil(ot.osigs) == 1 and isnil(ot.otypes) == 1 and isnil(auinit_from_sig(msig)) == 1 then 1 else let rty = aget_sig_rty(msig) in let lenv = aget_fn_lenv(msig) in let zs = schk_conc_e(body, nm, 0, sinit_nonsend_sig(msig), Nil) in let zh = achk_holes_e(body, rty, lenv, {fnm: nm, pubf: 0, ps: ps, body: body, sigs: ot.sigs, vsigs: ot.vsigs, laws: ot.laws, fns: ot.fns}) in let zp = achk_prov_e(body, nm, auinit_from_sig(msig), ot) in let ctx = {fnm: nm, pubf: 0, freef: 0, halloc: 0, bparams: ps, mvars: Nil, pnames: ps, locals: Nil, origins: oinit_origins(ps), osigs: ot.osigs, otypes: ot.otypes} in let rb = ochke(body, ctx, Nil) in ochk_ret_origin(nm, 0, "", rty, ps, rb.origin)
-    Cons(sg, sr) => if sg.pubf == 1 and oisgctype(sg.rty, ot.otypes) == 1 then ctfail("lume: ownership error [O0030]: public function '" + nm + "' cannot expose '@gc' region type across a public module boundary\n") else let ztn = n4_chk_fn_tensors(nm, body, msig, ot) in let zkn = n4_chk_kernel_fn(nm, sg.freef, body, ot) in let rty = aget_fn_rty(msig, mosig) in let lenv = aget_fn_lenv(msig) in let mvars = omvars_pl(sg.pl) in let zv = vprove_fn_status(nm, ps, body, ot.vsigs, ot.fns) + vchk_expr_e(body, nm, ot) in let zk = kchk_fn_effs(nm, sg.pubf, body, ot) in let zs = schk_conc_e(body, nm, 0, sinit_nonsend_sig(msig), mvars) in let zh = achk_holes_e(body, rty, lenv, {fnm: nm, pubf: sg.pubf, ps: ps, body: body, sigs: ot.sigs, vsigs: ot.vsigs, laws: ot.laws, fns: ot.fns}) in let zt = (if ois_total(sg.freef) == 1 then achk_total_e(body, {fnm: nm, ps: ps, fns: ot.fns, osigs: ot.osigs}, Nil, Nil) else 0) in let tret = achk_prov_e(body, nm, auinit_from_sig(msig), ot) in if sg.pubf == 1 and ois_llm(sg.freef) == 0 and ois_unverified_ty(rty) == 0 and tret == 1 then ctfail("lume: provenance error [A0003]: unverified AI/probabilistic value cannot be returned from trusted 'pub fn " + nm + "' without verification (fix-it: wrap the return value in 'verify(val, <contract>)' or validate with a contract guard before returning)\n") else let bparams = if isnil(sg.pl) == 1 then ps else obparams_pl(sg.pl) in let ctx = {fnm: nm, pubf: sg.pubf, freef: sg.freef, halloc: 0, bparams: bparams, mvars: mvars, pnames: ps, locals: Nil, origins: oinit_origins(ps), osigs: ot.osigs, otypes: ot.otypes} in let rb = ochke(body, ctx, Nil) in ochk_ret_origin(nm, sg.pubf, sg.fromp, rty, ps, rb.origin)
+    Nil          => let zwc = vwcet_chk_fn(nm, body, ot.wcets, ot.fns) in let ztn = n4_chk_fn_tensors(nm, body, msig, ot) in let zv = vprove_fn_status(nm, ps, body, ot.vsigs, ot.fns) + (if isnil(ot.vsigs) == 1 and isnil(ot.invs) == 1 then 0 else vchk_expr_e(body, nm, ot)) in let zk = kchk_fn_effs(nm, 0, body, ot) in if oanye(body) == 0 and isnil(ot.osigs) == 1 and isnil(ot.otypes) == 1 and isnil(auinit_from_sig(msig)) == 1 then 1 else let rty = aget_sig_rty(msig) in let lenv = aget_fn_lenv(msig) in let zs = schk_conc_e(body, nm, 0, sinit_nonsend_sig(msig), Nil) in let zh = achk_holes_e(body, rty, lenv, {fnm: nm, pubf: 0, ps: ps, body: body, sigs: ot.sigs, vsigs: ot.vsigs, laws: ot.laws, fns: ot.fns}) in let zp = achk_prov_e(body, nm, auinit_from_sig(msig), ot) in let ctx = {fnm: nm, pubf: 0, freef: 0, halloc: 0, bparams: ps, mvars: Nil, pnames: ps, locals: Nil, origins: oinit_origins(ps), osigs: ot.osigs, otypes: ot.otypes} in let rb = ochke(body, ctx, Nil) in ochk_ret_origin(nm, 0, "", rty, ps, rb.origin)
+    Cons(sg, sr) => if sg.pubf == 1 and oisgctype(sg.rty, ot.otypes) == 1 then ctfail("lume: ownership error [O0030]: public function '" + nm + "' cannot expose '@gc' region type across a public module boundary\n") else let zwc = vwcet_chk_fn(nm, body, ot.wcets, ot.fns) in let ztn = n4_chk_fn_tensors(nm, body, msig, ot) in let zkn = n4_chk_kernel_fn(nm, sg.freef, body, ot) in let rty = aget_fn_rty(msig, mosig) in let lenv = aget_fn_lenv(msig) in let mvars = omvars_pl(sg.pl) in let zv = vprove_fn_status(nm, ps, body, ot.vsigs, ot.fns) + vchk_expr_e(body, nm, ot) in let zk = kchk_fn_effs(nm, sg.pubf, body, ot) in let zs = schk_conc_e(body, nm, 0, sinit_nonsend_sig(msig), mvars) in let zh = achk_holes_e(body, rty, lenv, {fnm: nm, pubf: sg.pubf, ps: ps, body: body, sigs: ot.sigs, vsigs: ot.vsigs, laws: ot.laws, fns: ot.fns}) in let zt = (if ois_total(sg.freef) == 1 then achk_total_e(body, {fnm: nm, ps: ps, fns: ot.fns, osigs: ot.osigs}, Nil, Nil) else 0) in let tret = achk_prov_e(body, nm, auinit_from_sig(msig), ot) in if sg.pubf == 1 and ois_llm(sg.freef) == 0 and ois_unverified_ty(rty) == 0 and tret == 1 then ctfail("lume: provenance error [A0003]: unverified AI/probabilistic value cannot be returned from trusted 'pub fn " + nm + "' without verification (fix-it: wrap the return value in 'verify(val, <contract>)' or validate with a contract guard before returning)\n") else let bparams = if isnil(sg.pl) == 1 then ps else obparams_pl(sg.pl) in let ctx = {fnm: nm, pubf: sg.pubf, freef: sg.freef, halloc: 0, bparams: bparams, mvars: mvars, pnames: ps, locals: Nil, origins: oinit_origins(ps), osigs: ot.osigs, otypes: ot.otypes} in let rb = ochke(body, ctx, Nil) in ochk_ret_origin(nm, sg.pubf, sg.fromp, rty, ps, rb.origin)
 
 fn ochkstmts(prog, ot, moved) = match prog
     Nil        => 1
@@ -1695,10 +1752,11 @@ fn olowerstmt(st, rest, ufns, osigs, vctx) = match st
     VContractSig(nm, ps, reqs, enss)      => rest
     VTypeInvariant(nm, fs, inv)           => rest
     VLawDecl(nm, ps, body)                => rest
+    WcetSig(nm, bound)                    => rest
     Fn(nm, ps, body)                      => let lctx = {ufns: ufns, hops: Nil, ownps: kfn_ownps(nm, osigs), fns: vctx.fns} in let lb = if oanye(body) == 0 and isnil(lctx.ownps) == 1 then body else olowere(body, lctx, 0) in let wb = vwrap_fn_contract(nm, ps, body, lb, lctx, vctx) in Cons(Fn(nm, ps, wb), rest)
     Print(v)                              => Cons(Print(olowere(v, {ufns: ufns, hops: Nil, ownps: Nil, fns: vctx.fns}, 0)), rest)
     ExprS(v)                              => Cons(ExprS(olowere(v, {ufns: ufns, hops: Nil, ownps: Nil, fns: vctx.fns}, 0)), rest)
     _                                     => Cons(st, rest)
 
 fn ocheck(prog) = if oany(prog) == 0 then prog else ocheckforce(prog)
-fn ocheckforce(prog) = let raw_osigs = ocollects(prog) in let raw_fns0 = ocollectf(prog) in let grad_fns = n4_synth_grad_fns(n4_collect_grads_prog(prog, Nil), raw_fns0) in let prog1 = app(grad_fns, prog) in let raw_fns = ocollectf(prog1) in let osigs = oinfer_priv_osigs(raw_fns, raw_osigs) in let otypes = ocollectt(prog1) in let recs = tcollectr(prog1) in let sigs = tcollects(prog1) in let ksigs = kcollect_effsigs(prog1) in let edecls = kcollect_effdecls(prog1) in let caps = kcollect_caps(prog1) in let vsigs = vcollect_vsigs(prog1) in let invs = vcollect_invs(prog1) in let laws = vcollect_laws(prog1) in let prog2 = afill_prog_holes(prog1, sigs, osigs, vsigs, laws, raw_fns) in let fns = ocollectf(prog2) in let ufns = ocollectfnms(prog2) in let z = ochkstmts(prog2, {osigs: osigs, otypes: otypes, recs: recs, sigs: sigs, fns: fns, ksigs: ksigs, edecls: edecls, caps: caps, vsigs: vsigs, invs: invs, laws: laws}, Nil) in olowerprog(prog2, ufns, osigs, {vsigs: vsigs, fns: fns})
+fn ocheckforce(prog) = let raw_osigs = ocollects(prog) in let raw_fns0 = ocollectf(prog) in let grad_fns = n4_synth_grad_fns(n4_collect_grads_prog(prog, Nil), raw_fns0) in let prog1 = app(grad_fns, prog) in let raw_fns = ocollectf(prog1) in let osigs = oinfer_priv_osigs(raw_fns, raw_osigs) in let otypes = ocollectt(prog1) in let recs = tcollectr(prog1) in let sigs = tcollects(prog1) in let ksigs = kcollect_effsigs(prog1) in let edecls = kcollect_effdecls(prog1) in let caps = kcollect_caps(prog1) in let vsigs = vcollect_vsigs(prog1) in let invs = vcollect_invs(prog1) in let laws = vcollect_laws(prog1) in let wcets = vcollect_wcets(prog1) in let prog2 = afill_prog_holes(prog1, sigs, osigs, vsigs, laws, raw_fns) in let fns = ocollectf(prog2) in let ufns = ocollectfnms(prog2) in let z = ochkstmts(prog2, {osigs: osigs, otypes: otypes, recs: recs, sigs: sigs, fns: fns, ksigs: ksigs, edecls: edecls, caps: caps, vsigs: vsigs, invs: invs, laws: laws, wcets: wcets}, Nil) in olowerprog(prog2, ufns, osigs, {vsigs: vsigs, fns: fns})

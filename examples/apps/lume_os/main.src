@@ -1,0 +1,20 @@
+## Stage 5 Capstone: lume-os Capability Microkernel (Exit Criterion §Stage 5.6)
+## Boots deterministic kernel services (verified page allocator, @bound WCET scheduler,
+## @interrupt timer ISR, capability-scoped WASM driver, and typed IPC) and runs the
+## Stage 4 neuro-symbolic agent in isolated user space.
+
+use interop
+use ai_runtime
+use caps
+use scheduler
+use ipc
+
+fn lume_os_boot_and_run() = let pfn1 = kernel_alloc_pfn(0, 64) in let pfn2 = kernel_alloc_pfn(pfn1, 64) in let rem_pages = kernel_region_remaining(64, pfn2) in let u_cap = cap_page_new(pfn2, 7) in let mapped = cap_page_map(u_cap, 16384) in let t1 = kernel_timer_isr(0) in let t2 = kernel_timer_isr(t1) in let next_pid = kernel_schedule_next(0, 3) in let q_left = kernel_deduct_quantum(20, 5) in let ch0 = ipc_channel_new(1, 9001) in let ch1 = user_agent_task_step(ch0, 9001, 180, 130) in let w0 = wasm_module_new(1, 16) in let w1 = wasm_call_add(w0, mapped.ok, ch1.payload, 2) in "lume_os_boot=ok free_pages=" + str(rem_pages) + " pte=" + str(mapped.pte) + " ticks=" + str(t2) + " next_pid=" + str(next_pid) + " quantum=" + str(q_left) + " agent_ipc=" + str(ch1.msg_tag) + " wasm_driver=" + str(w1.last_result)
+
+fn test_kernel_memory_and_caps() = let pfn = kernel_alloc_pfn(0, 64) in let pte = kernel_pte_encode(pfn, 7) in let rem = kernel_region_remaining(64, pfn) in if pfn == 1 and pte == 4103 and rem == 63 then 1 else 0
+
+fn test_kernel_scheduler_and_isr() = let t = kernel_timer_isr(10) in let pid = kernel_schedule_next(1, 3) in let wrap_pid = kernel_schedule_next(2, 3) in let q = kernel_deduct_quantum(10, 4) in if t == 11 and pid == 2 and wrap_pid == 0 and q == 6 then 1 else 0
+
+fn test_user_agent_over_ipc() = let ch0 = ipc_channel_new(1, 9001) in let ch1 = user_agent_task_step(ch0, 9001, 180, 130) in if ch1.msg_tag == 200 and ch1.payload == 32 then 1 else 0
+
+print lume_os_boot_and_run()

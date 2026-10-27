@@ -1,0 +1,12 @@
+## Stage 5 Capstone (lume-os): Deterministic Real-Time Scheduler & Timer Interrupt Handler
+## Verified for both QF_LIA functional contracts and @bound(cycles: N) static WCET bounds.
+
+@interrupt(irq: 32)
+@bound(cycles: 32)
+fn kernel_timer_isr(ticks: int) -> int requires ticks >= 0 ensures result > ticks = ticks + 1
+
+@bound(cycles: 64)
+fn kernel_schedule_next(cur_pid: int, runnable_count: int) -> int requires cur_pid >= 0 requires runnable_count >= 1 ensures result >= 0 = if cur_pid + 1 < runnable_count then cur_pid + 1 else 0
+
+@bound(cycles: 48)
+fn kernel_deduct_quantum(quantum: int, cost: int) -> int requires quantum >= 0 requires cost >= 1 ensures result >= 0 = if quantum >= cost then quantum - cost else 0

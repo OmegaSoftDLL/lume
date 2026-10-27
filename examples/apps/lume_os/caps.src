@@ -1,0 +1,8 @@
+## Stage 5 Capstone (lume-os): Verified Capability-Based Memory & Hardware Manager
+## All kernel memory allocation contracts are discharged statically via QF_LIA (`call ctfail == 0`).
+
+fn kernel_alloc_pfn(next_pfn: int, max_pfn: int) -> int requires next_pfn >= 0 requires max_pfn > next_pfn ensures result >= 0 = next_pfn + 1
+
+fn kernel_pte_encode(pfn: int, flags: int) -> int requires pfn >= 0 requires flags >= 1 ensures result >= 1 = pfn * 4096 + flags
+
+fn kernel_region_remaining(total_pages: int, used_pages: int) -> int requires total_pages >= used_pages requires used_pages >= 0 ensures result >= 0 = total_pages - used_pages
