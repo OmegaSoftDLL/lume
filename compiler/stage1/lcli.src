@@ -69,7 +69,7 @@ fn cli_evolve_propose(goal) = "@proposal 0003_goal_proposal\n@goal " + goal + "\
 
 fn cli_has_fn(ls) = match ls
     Nil        => 0
-    Cons(h, t) => let tr = cli_trim(h) in if cli_startswith(tr, "fn ") == 1 or cli_startswith(tr, "pub fn ") == 1 or cli_startswith(tr, "print ") == 1 then 1 else cli_has_fn(t)
+    Cons(h, t) => let tr = cli_trim(h) in if cli_startswith(tr, "fn ") == 1 or cli_startswith(tr, "pub ") == 1 or cli_startswith(tr, "let ") == 1 or cli_startswith(tr, "var ") == 1 or cli_startswith(tr, "type ") == 1 or cli_startswith(tr, "use ") == 1 or cli_startswith(tr, "print ") == 1 then 1 else cli_has_fn(t)
 
 fn cli_check_surface(st) = let ls = cli_lines(st.src, 0, count(st.src)) in if cli_has_fn(ls) == 1 then st.pkg + ": OK (Lume surface checked by lcli)" else ctfail("lume check: invalid or empty Lume surface file " + st.pkg + "\n")
 
