@@ -123,7 +123,7 @@ must name the principle it breaks.
 
 ## H. Software protection
 
-- **P33 — The author owns the artifact.** The toolchain lets the author of a program control how
+- **P33 — The author owns the artifact.** *(implemented in `compiler/stage1/protect.src`, `compiler/stage1/lprotect.src`, `[W0001]`, and `lume build --protect`)* The toolchain lets the author of a program control how
   much its shipped binary reveals (symbol stripping, obfuscation, constant encryption, selective
   virtualisation, tamper seals), per build profile, opt-in and composable, *without* changing the
   program's meaning (P9/P25), weakening compile-time safety, or hiding anything from the author
@@ -136,6 +136,6 @@ must name the principle it breaks.
   turns into a proof/test obligation on *every* build, so an edit (human or AI) cannot silently break
   a cross-cutting rule. Per-function contracts (P15) guard a function; laws guard the whole program.
   (Modelled on Bend 2.)
-- **P35 — No untested public surface.** Every `pub` function carries at least one test or example
+- **P35 — No untested public surface.** *(design rule, not yet enforced — the compiler does not emit a missing-test diagnostic)* Every `pub` function carries at least one test or example
   the test runner executes; the compiler's JSON diagnostics report a missing one. AI-written code is
   never merged as untested code. (Modelled on NanoLang's mandatory `shadow` block.)

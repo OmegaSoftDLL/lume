@@ -184,7 +184,7 @@ native `.expected` files with a distinct suffix so the generic `.lume` test loop
 
 ## 5. Honest estimate and the biggest risks
 
-**Remaining work: roughly half of Phase 1 (~45–55%).** What exists is real and load-bearing: a
+**Historical estimate (stale — Phase 1 is complete; the triple self-build and the Zero-C staged bootstrap are reached): "remaining work: roughly half of Phase 1 (~45–55%)."** What existed is real and load-bearing: a
 native backend for the functional core, our own ELF writer, and a *proof* (`calc.src`) that a
 compiler compiles natively with no C/as/ld. What remains is the harder half: the full functional
 rewrite surviving real-program scale, a **binary** ELF writer in Lume (the single least-proven

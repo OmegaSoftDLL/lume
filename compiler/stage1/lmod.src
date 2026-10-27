@@ -124,14 +124,14 @@ fn findeq(s, i, n) = if i >= n then n else if at(s, i) == "=" then i else findeq
 fn parse_cap_val(v) = if contains_sub(v, "\"pure\"", 0, count(v)) == 1 then "pure" else "io"
 fn contains_sub(s, sub, i, n) = let m = count(sub) in if i + m > n then 0 else if slicen(s, n, i, i + m) == sub then 1 else contains_sub(s, sub, i + 1, n)
 
-fn scanmanifest(lines, nm, ver, ed, cap) = match lines
-    Nil        => {name: nm, version: ver, edition: ed, cap: cap}
-    Cons(h, t) => let tr = trim(h) in if tr == "" or startswith(tr, "#") or startswith(tr, "[") then scanmanifest(t, nm, ver, ed, cap) else let kv = parse_kv(tr) in if kv.k == "name" then scanmanifest(t, unquote(kv.v), ver, ed, cap) else if kv.k == "version" then scanmanifest(t, nm, unquote(kv.v), ed, cap) else if kv.k == "edition" then scanmanifest(t, nm, ver, unquote(kv.v), cap) else if kv.k == "allow" or kv.k == "capabilities" then scanmanifest(t, nm, ver, ed, parse_cap_val(kv.v)) else scanmanifest(t, nm, ver, ed, cap)
+fn scanmanifest(lines, nm, ver, ed, cap, prot) = match lines
+    Nil        => {name: nm, version: ver, edition: ed, cap: cap, protect: prot}
+    Cons(h, t) => let tr = trim(h) in if tr == "" or startswith(tr, "#") or startswith(tr, "[") then scanmanifest(t, nm, ver, ed, cap, prot) else let kv = parse_kv(tr) in if kv.k == "name" then scanmanifest(t, unquote(kv.v), ver, ed, cap, prot) else if kv.k == "version" then scanmanifest(t, nm, unquote(kv.v), ed, cap, prot) else if kv.k == "edition" then scanmanifest(t, nm, ver, unquote(kv.v), cap, prot) else if kv.k == "allow" or kv.k == "capabilities" then scanmanifest(t, nm, ver, ed, parse_cap_val(kv.v), prot) else if kv.k == "protect" or kv.k == "level" then scanmanifest(t, nm, ver, ed, cap, unquote(kv.v)) else scanmanifest(t, nm, ver, ed, cap, prot)
 
-fn checkmanifest(m) = if m.name == "" then ctfail("lume: manifest error: missing 'name' in lume.toml\n") else if m.version == "" then ctfail("lume: manifest error: missing 'version' in lume.toml\n") else if m.edition != "" and m.edition != "2026" then ctfail("lume: manifest error: unsupported edition '" + m.edition + "' in lume.toml (expected \"2026\")\n") else "{\"name\":\"" + m.name + "\",\"version\":\"" + m.version + "\",\"edition\":\"" + (if m.edition == "" then "2026" else m.edition) + "\",\"capabilities\":\"" + m.cap + "\"}"
+fn checkmanifest(m) = if m.name == "" then ctfail("lume: manifest error: missing 'name' in lume.toml\n") else if m.version == "" then ctfail("lume: manifest error: missing 'version' in lume.toml\n") else if m.edition != "" and m.edition != "2026" then ctfail("lume: manifest error: unsupported edition '" + m.edition + "' in lume.toml (expected \"2026\")\n") else if m.protect != "" and m.protect != "none" and m.protect != "standard" and m.protect != "hardened" and m.protect != "max" then ctfail("lume: manifest error: unsupported protect level '" + m.protect + "' in lume.toml (expected \"none\", \"standard\", \"hardened\", or \"max\")\n") else "{\"name\":\"" + m.name + "\",\"version\":\"" + m.version + "\",\"edition\":\"" + (if m.edition == "" then "2026" else m.edition) + "\",\"capabilities\":\"" + m.cap + "\"" + (if m.protect != "" then ",\"protect\":\"" + m.protect + "\"" else "") + "}"
 
 fn run_lmod(lines) = match lines
     Nil        => ""
-    Cons(h, t) => if trim(h) == "@manifest" then checkmanifest(scanmanifest(t, "", "", "", "io")) else bundle(lines)
+    Cons(h, t) => if trim(h) == "@manifest" then checkmanifest(scanmanifest(t, "", "", "", "io", "")) else bundle(lines)
 
 print chomp(run_lmod(splitlines(readall())))

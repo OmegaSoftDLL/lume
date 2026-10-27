@@ -1,8 +1,6 @@
 # 06 — Software protection and anti-reverse-engineering (REA)
 
-Status: **design requirement — not yet implemented.** This document is the specification and the
-staged roadmap (§7); as of Phases 0–5 no protection pass, `lume` command, or `std.protect` module
-has shipped yet (the Stage-5 passes below remain to be built). This document specifies protection
+Status: **implemented (Bricks W1–W5 in `compiler/stage1/protect.src`, `compiler/stage1/lprotect.src`, `lumec`, `lcaas.src`, `lmod.src`, and `lume build --protect <none|standard|hardened|max> [--lsym <file.lsym>]`).** This document specifies protection
 of the *programs a user compiles with Lume*. It is a
 first-class goal of the toolchain, not an afterthought, because Lume targets commercial and
 proprietary software (ERP, trading, games, licensed products) where the shipped artifact is

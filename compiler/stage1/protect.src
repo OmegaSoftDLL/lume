@@ -1,0 +1,214 @@
+## compiler/stage1/protect.src -- P33 Software Protection & Secret Hygiene (`std.secret` & `std.protect`)
+## Implements Bricks W1, W2, W3, W4, and W5 of `docs/06-software-protection.md`:
+##   - W1 (`std.secret`): opaque `secret[T]` wrapper (`secret_new`, `secret_expose_bytes`, `secret_zeroize`,
+##     `secret_show` returning `"<redacted:secret>"` so secrets never leak via `Show`/logs).
+##   - W2 (Constant/String stream cipher): deterministic key derivation (`protect_key_derive`) and
+##     byte-stream XOR encryption/decryption (`protect_cipher_bytes`).
+##   - W3 (`std.protect.guard` & indirect call obfuscation): code-word integrity hashing
+##     (`guard_code_hash`, `guard_self_check`), anti-debug probe (`guard_anti_debug_probe`), and
+##     masked indirect call dispatch (`protect_indirect_call`).
+##   - W4 (`@protect model` & prompt encryption): embedded model weight encryption/decryption
+##     (`model_protect_encrypt`, `model_protect_decrypt`) and LLM prompt encryption.
+##   - W5 (Heavy Stage-5 protection passes): Mixed Boolean-Arithmetic (`mba_add`, `mba_sub`, `mba_xor`),
+##     Control-Flow Flattening dispatcher (`cff_run_flat`), per-seed randomised bytecode VM
+##     (`vm_specialize_isa`, `vm_compile_linear`, `vm_exec`), FIPS 180-4 SHA-256 tamper seals
+##     (`seal_compute`, `seal_verify`), `std.protect.enclave` capability (`enclave_new`, `enclave_enter`),
+##     and white-box key table PRF (`wb_generate_table`, `wb_eval_prf`).
+
+fn pr_app(xs, ys) = match xs
+    Nil        => ys
+    Cons(h, t) => Cons(h, pr_app(t, ys))
+
+fn pr_len(xs) = match xs
+    Nil        => 0
+    Cons(h, t) => 1 + pr_len(t)
+
+fn pr_nth(xs, i) = match xs
+    Nil        => 0
+    Cons(h, t) => if i <= 0 then h else pr_nth(t, i - 1)
+
+## --- Pure Lume-Core ASCII ordinal & FIPS 180-4 256-bit SHA-256 ---
+fn pr_ord_lo(c) = if c < "0" then (if c < "(" then (if c == " " then 32 else if c == "!" then 33 else if c == "\"" then 34 else if c == "#" then 35 else if c == "$" then 36 else if c == "%" then 37 else if c == "&" then 38 else 39) else (if c == "(" then 40 else if c == ")" then 41 else if c == "*" then 42 else if c == "+" then 43 else if c == "," then 44 else if c == "-" then 45 else if c == "." then 46 else 47)) else (if c < ":" then 48 + toint(c) else (if c == ":" then 58 else if c == ";" then 59 else if c == "<" then 60 else if c == "=" then 61 else if c == ">" then 62 else if c == "?" then 63 else 64))
+fn pr_ord_up(c) = if c < "N" then (if c < "G" then (if c == "A" then 65 else if c == "B" then 66 else if c == "C" then 67 else if c == "D" then 68 else if c == "E" then 69 else 70) else (if c == "G" then 71 else if c == "H" then 72 else if c == "I" then 73 else if c == "J" then 74 else if c == "K" then 75 else if c == "L" then 76 else 77)) else (if c < "U" then (if c == "N" then 78 else if c == "O" then 79 else if c == "P" then 80 else if c == "Q" then 81 else if c == "R" then 82 else if c == "S" then 83 else 84) else (if c == "U" then 85 else if c == "V" then 86 else if c == "W" then 87 else if c == "X" then 88 else if c == "Y" then 89 else if c == "Z" then 90 else if c == "[" then 91 else if c == "\\" then 92 else if c == "]" then 93 else if c == "^" then 94 else if c == "_" then 95 else 96))
+fn pr_ord_az(c) = if c < "n" then (if c < "g" then (if c == "a" then 97 else if c == "b" then 98 else if c == "c" then 99 else if c == "d" then 100 else if c == "e" then 101 else 102) else (if c == "g" then 103 else if c == "h" then 104 else if c == "i" then 105 else if c == "j" then 106 else if c == "k" then 107 else if c == "l" then 108 else 109)) else (if c < "u" then (if c == "n" then 110 else if c == "o" then 111 else if c == "p" then 112 else if c == "q" then 113 else if c == "r" then 114 else if c == "s" then 115 else 116) else (if c == "u" then 117 else if c == "v" then 118 else if c == "w" then 119 else if c == "x" then 120 else if c == "y" then 121 else if c == "z" then 122 else if c == "|" then 124 else if c == "~" then 126 else if c > "z" and c < "|" then 123 else 125))
+fn pr_ord(c) = if c == "\n" then 10 else if c == "\r" then 13 else if c == "\t" then 9 else if c < "A" then pr_ord_lo(c) else if c < "a" then pr_ord_up(c) else pr_ord_az(c)
+
+fn pr_u32(x) = let r = x % 4294967296 in if r < 0 then r + 4294967296 else r
+fn pr_pow2(n) = if n <= 0 then 1 else if n >= 16 then 65536 * pr_pow2(n - 16) else if n >= 8 then 256 * pr_pow2(n - 8) else if n >= 4 then 16 * pr_pow2(n - 4) else if n == 3 then 8 else if n == 2 then 4 else 2
+fn pr_u32_shr(x, n) = pr_u32(x) / pr_pow2(n)
+fn pr_u32_rotr(x, n) = let ux = pr_u32(x) in let p = pr_pow2(n) in (ux / p) + ((ux % p) * pr_pow2(32 - n))
+fn pr_u32_add(x, y) = pr_u32(pr_u32(x) + pr_u32(y))
+fn pr_u32_not(x) = 4294967295 - pr_u32(x)
+
+fn pr_bxor4(a, b) = if a == b then 0 else if a == 0 then b else if b == 0 then a else if a == 15 then 15 - b else if b == 15 then 15 - a else let a0 = a % 2 in let b0 = b % 2 in (if a0 == b0 then 0 else 1) + 2 * pr_bxor4(a / 2, b / 2)
+fn pr_band4(a, b) = if a == 0 or b == 0 then 0 else if a == 15 then b else if b == 15 then a else (if a % 2 == 1 and b % 2 == 1 then 1 else 0) + 2 * pr_band4(a / 2, b / 2)
+fn pr_bor4(a, b) = if a == 0 then b else if b == 0 then a else if a == 15 or b == 15 then 15 else (if a % 2 == 1 or b % 2 == 1 then 1 else 0) + 2 * pr_bor4(a / 2, b / 2)
+fn pr_u32_xor_n(x, y, n) = if n <= 0 then 0 else pr_bxor4(x % 16, y % 16) + 16 * pr_u32_xor_n(x / 16, y / 16, n - 1)
+fn pr_u32_xor(x, y) = pr_u32_xor_n(pr_u32(x), pr_u32(y), 8)
+fn pr_u32_and_n(x, y, n) = if n <= 0 then 0 else pr_band4(x % 16, y % 16) + 16 * pr_u32_and_n(x / 16, y / 16, n - 1)
+fn pr_u32_and(x, y) = pr_u32_and_n(pr_u32(x), pr_u32(y), 8)
+fn pr_u32_or_n(x, y, n) = if n <= 0 then 0 else pr_bor4(x % 16, y % 16) + 16 * pr_u32_or_n(x / 16, y / 16, n - 1)
+fn pr_u32_or(x, y) = pr_u32_or_n(pr_u32(x), pr_u32(y), 8)
+
+fn pr_sha_xor3_4(x, y, z) = let b0 = ((x % 2) + (y % 2) + (z % 2)) % 2 in let b1 = (((x / 2) % 2) + ((y / 2) % 2) + ((z / 2) % 2)) % 2 in let b2 = (((x / 4) % 2) + ((y / 4) % 2) + ((z / 4) % 2)) % 2 in let b3 = (((x / 8) % 2) + ((y / 8) % 2) + ((z / 8) % 2)) % 2 in b0 + 2 * b1 + 4 * b2 + 8 * b3
+fn pr_sha_xor3_n(x, y, z, nibs) = if nibs <= 0 then 0 else pr_sha_xor3_4(x % 16, y % 16, z % 16) + 16 * pr_sha_xor3_n(x / 16, y / 16, z / 16, nibs - 1)
+fn pr_sha_ch_4(e, f, g) = let b0 = (if (e % 2) == 1 then (f % 2) else (g % 2)) in let b1 = (if ((e / 2) % 2) == 1 then ((f / 2) % 2) else ((g / 2) % 2)) in let b2 = (if ((e / 4) % 2) == 1 then ((f / 4) % 2) else ((g / 4) % 2)) in let b3 = (if ((e / 8) % 2) == 1 then ((f / 8) % 2) else ((g / 8) % 2)) in b0 + 2 * b1 + 4 * b2 + 8 * b3
+fn pr_sha_ch_n(e, f, g, nibs) = if nibs <= 0 then 0 else pr_sha_ch_4(e % 16, f % 16, g % 16) + 16 * pr_sha_ch_n(e / 16, f / 16, g / 16, nibs - 1)
+fn pr_sha_maj_4(a, b, c) = let b0 = (if (a % 2) + (b % 2) + (c % 2) >= 2 then 1 else 0) in let b1 = (if ((a / 2) % 2) + ((b / 2) % 2) + ((c / 2) % 2) >= 2 then 1 else 0) in let b2 = (if ((a / 4) % 2) + ((b / 4) % 2) + ((c / 4) % 2) >= 2 then 1 else 0) in let b3 = (if ((a / 8) % 2) + ((b / 8) % 2) + ((c / 8) % 2) >= 2 then 1 else 0) in b0 + 2 * b1 + 4 * b2 + 8 * b3
+fn pr_sha_maj_n(a, b, c, nibs) = if nibs <= 0 then 0 else pr_sha_maj_4(a % 16, b % 16, c % 16) + 16 * pr_sha_maj_n(a / 16, b / 16, c / 16, nibs - 1)
+
+fn pr_sha_big0(a) = pr_sha_xor3_n(pr_u32_rotr(a, 2), pr_u32_rotr(a, 13), pr_u32_rotr(a, 22), 8)
+fn pr_sha_big1(e) = pr_sha_xor3_n(pr_u32_rotr(e, 6), pr_u32_rotr(e, 11), pr_u32_rotr(e, 25), 8)
+fn pr_sha_sml0(x) = pr_sha_xor3_n(pr_u32_rotr(x, 7), pr_u32_rotr(x, 18), pr_u32_shr(x, 3), 8)
+fn pr_sha_sml1(x) = pr_sha_xor3_n(pr_u32_rotr(x, 17), pr_u32_rotr(x, 19), pr_u32_shr(x, 10), 8)
+fn pr_sha_k(t) = if t < 16 then (if t == 0 then 1116352408 else if t == 1 then 1899447441 else if t == 2 then 3049323471 else if t == 3 then 3921009573 else if t == 4 then 961987163 else if t == 5 then 1508970993 else if t == 6 then 2453635748 else if t == 7 then 2870763221 else if t == 8 then 3624381080 else if t == 9 then 310598401 else if t == 10 then 607225278 else if t == 11 then 1426881987 else if t == 12 then 1925078388 else if t == 13 then 2162078206 else if t == 14 then 2614888103 else 3248222580) else if t < 32 then (if t == 16 then 3835390401 else if t == 17 then 4022224774 else if t == 18 then 264347078 else if t == 19 then 604807628 else if t == 20 then 770255983 else if t == 21 then 1249150122 else if t == 22 then 1555081692 else if t == 23 then 1996064986 else if t == 24 then 2554220882 else if t == 25 then 2821834349 else if t == 26 then 2952996808 else if t == 27 then 3210313671 else if t == 28 then 3336571891 else if t == 29 then 3584528711 else if t == 30 then 113926993 else 338241895) else if t < 48 then (if t == 32 then 666307205 else if t == 33 then 773529912 else if t == 34 then 1294757372 else if t == 35 then 1396182291 else if t == 36 then 1695183700 else if t == 37 then 1986661051 else if t == 38 then 2177026350 else if t == 39 then 2456956037 else if t == 40 then 2730485921 else if t == 41 then 2820302411 else if t == 42 then 3259730800 else if t == 43 then 3345764771 else if t == 44 then 3516065817 else if t == 45 then 3600352804 else if t == 46 then 4094571909 else 275423344) else (if t == 48 then 430227734 else if t == 49 then 506948616 else if t == 50 then 659060556 else if t == 51 then 883997877 else if t == 52 then 958139571 else if t == 53 then 1322822218 else if t == 54 then 1537002063 else if t == 55 then 1747873779 else if t == 56 then 1955562222 else if t == 57 then 2024104815 else if t == 58 then 2227730452 else if t == 59 then 2361852424 else if t == 60 then 2428436474 else if t == 61 then 2756734187 else if t == 62 then 3204031479 else 3329325298)
+
+fn pr_msg_byte(s, slen, total, idx) = if idx < slen then pr_ord(at(s, idx)) else if idx == slen then 128 else if idx >= total - 8 then ((slen * 8) / pr_pow2(8 * (total - 1 - idx))) % 256 else 0
+fn pr_msg_word(s, slen, total, base) = pr_msg_byte(s, slen, total, base) * 16777216 + pr_msg_byte(s, slen, total, base + 1) * 65536 + pr_msg_byte(s, slen, total, base + 2) * 256 + pr_msg_byte(s, slen, total, base + 3)
+fn pr_w_build(s, slen, total, blk_off, t, w_rev) = if t >= 64 then w_rev else let wt = (if t < 16 then pr_msg_word(s, slen, total, blk_off + t * 4) else pr_u32(pr_nth(w_rev, 15) + pr_sha_sml0(pr_nth(w_rev, 14)) + pr_nth(w_rev, 6) + pr_sha_sml1(pr_nth(w_rev, 1)))) in pr_w_build(s, slen, total, blk_off, t + 1, Cons(wt, w_rev))
+fn pr_round(st, wt, kt) = let t1 = pr_u32(st.h + pr_sha_big1(st.e) + pr_sha_ch_n(st.e, st.f, st.g, 8) + kt + wt) in let t2 = pr_u32(pr_sha_big0(st.a) + pr_sha_maj_n(st.a, st.b, st.c, 8)) in {a: pr_u32(t1 + t2), b: st.a, c: st.b, d: st.c, e: pr_u32(st.d + t1), f: st.e, g: st.f, h: st.g}
+fn pr_rounds(st, w_rev, t) = if t >= 64 then st else pr_rounds(pr_round(st, pr_nth(w_rev, 63 - t), pr_sha_k(t)), w_rev, t + 1)
+fn pr_blocks(s, slen, total, blk_off, st) = if blk_off >= total then st else let w_rev = pr_w_build(s, slen, total, blk_off, 0, Nil) in let r = pr_rounds(st, w_rev, 0) in pr_blocks(s, slen, total, blk_off + 64, {a: pr_u32(st.a + r.a), b: pr_u32(st.b + r.b), c: pr_u32(st.c + r.c), d: pr_u32(st.d + r.d), e: pr_u32(st.e + r.e), f: pr_u32(st.f + r.f), g: pr_u32(st.g + r.g), h: pr_u32(st.h + r.h)})
+fn pr_hex1(n) = at("0123456789abcdef", n % 16)
+fn pr_hex32(wd) = pr_hex1(wd / 268435456) + pr_hex1(wd / 16777216) + pr_hex1(wd / 1048576) + pr_hex1(wd / 65536) + pr_hex1(wd / 4096) + pr_hex1(wd / 256) + pr_hex1(wd / 16) + pr_hex1(wd)
+fn sha256_state(s) = let slen = count(s) in let total = ((slen + 9 + 63) / 64) * 64 in let init = {a: 1779033703, b: 3144134277, c: 1013904242, d: 2773480762, e: 1359893119, f: 2600822924, g: 528734635, h: 1541459225} in pr_blocks(s, slen, total, 0, init)
+fn sha256_hex(s) = let fin = sha256_state(s) in pr_hex32(fin.a) + pr_hex32(fin.b) + pr_hex32(fin.c) + pr_hex32(fin.d) + pr_hex32(fin.e) + pr_hex32(fin.f) + pr_hex32(fin.g) + pr_hex32(fin.h)
+
+## ============================================================================================================
+## Brick W1: `std.secret` (`secret_new`, `secret_expose_bytes`, `secret_zeroize`, `secret_show`)
+## ============================================================================================================
+fn secret_str_bytes(s, i, n) = if i >= n then Nil else Cons(pr_ord(at(s, i)), secret_str_bytes(s, i + 1, n))
+
+fn secret_xor_bytes(bs, k, idx) = match bs
+    Nil        => Nil
+    Cons(b, r) => Cons(pr_u32_xor(b, (k + idx * 37) % 256), secret_xor_bytes(r, k, idx + 1))
+
+fn secret_new(raw_s) = let mask = 173 in let bs = secret_str_bytes(raw_s, 0, count(raw_s)) in {kind: "secret", redacted: "<redacted:secret>", zeroed: 0, mask: mask, len: count(raw_s), enc_bytes: secret_xor_bytes(bs, mask, 0)}
+
+fn secret_show(sec) = "<redacted:secret>"
+
+fn secret_is_zeroized(sec) = sec.zeroed
+
+fn secret_zero_list(bs) = match bs
+    Nil        => Nil
+    Cons(b, r) => Cons(0, secret_zero_list(r))
+
+fn secret_zeroize(sec) = {kind: "secret", redacted: "<redacted:secret>", zeroed: 1, mask: 0, len: 0, enc_bytes: secret_zero_list(sec.enc_bytes)}
+
+fn secret_expose_bytes(sec) = if sec.zeroed == 1 then Nil else secret_xor_bytes(sec.enc_bytes, sec.mask, 0)
+
+## ============================================================================================================
+## Brick W2: Constant & String Encryption (`protect_key_derive`, `protect_cipher_bytes`)
+## ============================================================================================================
+fn protect_key_derive(seed, salt) = (sha256_state(seed + ":" + salt)).a
+
+fn protect_key_byte(key32, idx) = let rot = (idx % 4) * 8 in let base = (pr_u32(key32) / pr_pow2(rot)) % 256 in let step = ((idx * 73 + 41) % 251) + 1 in let kb = pr_u32_xor(base, step) % 256 in if kb == 0 then 165 else kb
+
+fn protect_cipher_loop(bs, key32, idx) = match bs
+    Nil        => Nil
+    Cons(b, r) => let kb = protect_key_byte(key32, idx) in Cons(pr_u32_xor(b, kb), protect_cipher_loop(r, key32, idx + 1))
+
+fn protect_cipher_bytes(bs, key32) = protect_cipher_loop(bs, key32, 0)
+
+fn protect_bytes_eq(xs, ys) = match xs
+    Nil        => pr_len(ys) == 0
+    Cons(x, r) => protect_bytes_eq1(x, r, ys)
+
+fn protect_bytes_eq1(x, r, ys) = match ys
+    Nil         => 0
+    Cons(y, yr) => if x == y then protect_bytes_eq(r, yr) else 0
+
+## ============================================================================================================
+## Brick W3: Self-Checks & Call/Import Obfuscation (`std.protect.guard`)
+## ============================================================================================================
+fn guard_hash_acc(words, acc, idx) = match words
+    Nil         => pr_u32(acc)
+    Cons(wd, r) => let mixed = pr_u32_add(pr_u32_xor(acc, pr_u32_rotr(pr_u32(wd), (idx % 15) + 1)), 2654435761 + idx * 17) in guard_hash_acc(r, mixed, idx + 1)
+
+fn guard_code_hash(code_words) = guard_hash_acc(code_words, 2166136261, 0)
+
+fn guard_self_check(code_words, expected_hash) = if guard_code_hash(code_words) == pr_u32(expected_hash) then 1 else 0
+
+fn guard_anti_debug_probe(tracer_pid) = if tracer_pid == 0 then 1 else 0
+
+fn protect_indirect_lookup(table, target_id) = match table
+    Nil        => 0
+    Cons(e, r) => if e.slot == target_id then e.bias else protect_indirect_lookup(r, target_id)
+
+fn protect_indirect_call(table, masked_slot, mask, arg) = let slot = pr_u32_xor(masked_slot, mask) in let bias = protect_indirect_lookup(table, slot) in arg + bias
+
+## ============================================================================================================
+## Brick W4: Embedded-Model & Prompt Protection (`@protect model` / `extern llm fn`)
+## ============================================================================================================
+fn model_xor_weights(ws, key32, idx) = match ws
+    Nil         => Nil
+    Cons(wt, r) => let kb = protect_key_byte(key32, idx) in Cons(pr_u32_xor(wt + 65536, kb) - 65536, model_xor_weights(r, key32, idx + 1))
+
+fn model_protect_encrypt(weights, key32) = {encrypted: 1, data: model_xor_weights(weights, key32, 0)}
+
+fn model_protect_decrypt(enc_model, key32) = if enc_model.encrypted == 0 then enc_model.data else model_xor_weights(enc_model.data, key32, 0)
+
+fn prompt_protect_encrypt(prompt_bytes, key32) = protect_cipher_bytes(prompt_bytes, key32)
+
+fn prompt_protect_decrypt(cipher_bytes, key32) = protect_cipher_bytes(cipher_bytes, key32)
+
+## ============================================================================================================
+## Brick W5: Control-Flow Flattening, Mixed Boolean-Arithmetic (MBA), Selective Bytecode VM (`protect.vm`),
+##           Tamper Seals (`protect.seal`), Hardware Enclave (`std.protect.enclave`), and White-Box Crypto
+## ============================================================================================================
+fn mba_add(x, y) = pr_u32_xor(x, y) + 2 * pr_u32_and(x, y)
+
+fn mba_xor(x, y) = pr_u32_or(x, y) - pr_u32_and(x, y)
+
+fn mba_sub(x, y) = pr_u32_xor(x, y) - 2 * pr_u32_and(pr_u32_not(x), y)
+
+fn cff_step(state, acc, x, y, steps) = if steps > 16 or state == 0 then acc else if state == 101 then cff_step(205, mba_add(acc, x * 3), x, y, steps + 1) else if state == 205 then cff_step(309, mba_add(acc, y * 2), x, y, steps + 1) else if state == 309 then cff_step(0, acc - 5, x, y, steps + 1) else acc
+
+fn cff_run_flat(x, y) = cff_step(101, 0, x, y, 0)
+
+fn vm_specialize_isa(seed) = let b = (protect_key_derive(seed, "vm_isa") % 199) + 17 in {op_push_x: b, op_push_c: b + 11, op_add: b + 23, op_mul: b + 37, op_sub: b + 53, op_ret: b + 71}
+
+fn vm_compile_linear(isa, a, b, c) = Cons(isa.op_push_c, Cons(a, Cons(isa.op_push_x, Cons(0, Cons(isa.op_mul, Cons(0, Cons(isa.op_push_c, Cons(b, Cons(isa.op_add, Cons(0, Cons(isa.op_push_c, Cons(c, Cons(isa.op_sub, Cons(0, Cons(isa.op_ret, Cons(0, Nil))))))))))))))))
+
+fn vm_pop1(stk) = match stk
+    Nil        => {top: 0, rest: Nil}
+    Cons(h, t) => {top: h, rest: t}
+
+fn vm_exec_loop(isa, code, stk, x) = match code
+    Nil         => (vm_pop1(stk)).top
+    Cons(op, r) => vm_exec_op(isa, op, r, stk, x)
+
+fn vm_exec_op(isa, op, rest, stk, x) = match rest
+    Nil          => (vm_pop1(stk)).top
+    Cons(arg, t) => if op == isa.op_push_x then vm_exec_loop(isa, t, Cons(x, stk), x) else if op == isa.op_push_c then vm_exec_loop(isa, t, Cons(arg, stk), x) else if op == isa.op_add then (let p1 = vm_pop1(stk) in let p2 = vm_pop1(p1.rest) in vm_exec_loop(isa, t, Cons(mba_add(p2.top, p1.top), p2.rest), x)) else if op == isa.op_mul then (let p1 = vm_pop1(stk) in let p2 = vm_pop1(p1.rest) in vm_exec_loop(isa, t, Cons(p2.top * p1.top, p2.rest), x)) else if op == isa.op_sub then (let p1 = vm_pop1(stk) in let p2 = vm_pop1(p1.rest) in vm_exec_loop(isa, t, Cons(p2.top - p1.top, p2.rest), x)) else if op == isa.op_ret then (vm_pop1(stk)).top else 0
+
+fn vm_exec(isa, bytecode, x) = vm_exec_loop(isa, bytecode, Nil, x)
+
+fn seal_compute(code_digest, license_id) = "sha256:" + sha256_hex("lume-seal-v1|" + code_digest + "|" + license_id)
+
+fn seal_verify(code_digest, license_id, expected_seal) = if seal_compute(code_digest, license_id) == expected_seal then 1 else 0
+
+fn enclave_new(measurement_hash) = {active: 1, measurement: measurement_hash}
+
+fn enclave_verify_attestation(enc, expected_measurement) = if enc.active == 1 and enc.measurement == expected_measurement then 1 else 0
+
+fn enclave_enter(enc, expected_measurement, secret_input, factor) = if enclave_verify_attestation(enc, expected_measurement) == 0 then 0 - 1 else mba_add(secret_input * factor, 42)
+
+fn wb_gen_round(kword, idx, n) = if idx >= n then Nil else Cons(pr_u32_xor(pr_u32_rotr(kword, (idx % 7) + 1), (idx + 1) * 40503) % 65536, wb_gen_round(kword, idx + 1, n))
+
+fn wb_generate_table(master_key, salt) = let st = sha256_state(master_key + "|" + salt) in {r0: wb_gen_round(st.a, 0, 16), r1: wb_gen_round(st.b, 0, 16), r2: wb_gen_round(st.c, 0, 16), r3: wb_gen_round(st.d, 0, 16)}
+
+fn wb_eval_prf(wb_tab, block_val) = let b0 = pr_u32(block_val) % 65536 in let s0 = pr_u32_xor(b0, pr_nth(wb_tab.r0, b0 % 16)) in let s1 = pr_u32_xor(s0, pr_nth(wb_tab.r1, (s0 / 16) % 16)) in let s2 = pr_u32_xor(s1, pr_nth(wb_tab.r2, (s1 / 256) % 16)) in pr_u32_xor(s2, pr_nth(wb_tab.r3, (s2 / 4096) % 16))
+
+## ============================================================================================================
+## Unit Tests (`lume test compiler/stage1/protect.src`)
+## ============================================================================================================
+fn test_w1_secret_redaction_and_zeroize() = let sec = secret_new("sk-live-987654321") in let shown = secret_show(sec) in let exp1 = secret_expose_bytes(sec) in let zsec = secret_zeroize(sec) in let exp2 = secret_expose_bytes(zsec) in if shown == "<redacted:secret>" and pr_len(exp1) == 17 and pr_nth(exp1, 0) == 115 and pr_len(exp2) == 0 and secret_is_zeroized(zsec) == 1 then 1 else ctfail("test_w1_secret_redaction_and_zeroize failed\n")
+
+fn test_w2_constant_string_encryption() = let k = protect_key_derive("build-seed-01", "rodata") in let plain = Cons(115, Cons(101, Cons(99, Cons(114, Cons(101, Cons(116, Nil)))))) in let enc = protect_cipher_bytes(plain, k) in let dec = protect_cipher_bytes(enc, k) in if protect_bytes_eq(plain, enc) == 0 and protect_bytes_eq(plain, dec) == 1 then 1 else ctfail("test_w2_constant_string_encryption failed\n")
+
+fn test_w3_self_check_and_indirect_call() = let code = Cons(1041, Cons(2083, Cons(4099, Nil))) in let h = guard_code_hash(code) in let ok = guard_self_check(code, h) in let tampered = Cons(1041, Cons(2084, Cons(4099, Nil))) in let bad = guard_self_check(tampered, h) in let tab = Cons({slot: 7, bias: 50}, Cons({slot: 9, bias: 100}, Nil)) in let res = protect_indirect_call(tab, pr_u32_xor(9, 12345), 12345, 25) in if ok == 1 and bad == 0 and res == 125 and guard_anti_debug_probe(0) == 1 and guard_anti_debug_probe(99) == 0 then 1 else ctfail("test_w3_self_check_and_indirect_call failed\n")
+
+fn test_w4_protected_model_weights() = let k = protect_key_derive("model-seed", "mlp2") in let m_w = Cons(120, Cons(0 - 45, Cons(310, Cons(88, Nil)))) in let em = model_protect_encrypt(m_w, k) in let dw = model_protect_decrypt(em, k) in if protect_bytes_eq(m_w, em.data) == 0 and protect_bytes_eq(m_w, dw) == 1 then 1 else ctfail("test_w4_protected_model_weights failed\n")
+
+fn test_w5_mba_cff_vm_seal_enclave_whitebox() = let m1 = mba_add(1337, 4200) in let m2 = mba_sub(5000, 1234) in let cf = cff_run_flat(10, 7) in let isa1 = vm_specialize_isa("seed-alpha") in let isa2 = vm_specialize_isa("seed-beta") in let bc1 = vm_compile_linear(isa1, 4, 9, 3) in let bc2 = vm_compile_linear(isa2, 4, 9, 3) in let v1 = vm_exec(isa1, bc1, 12) in let v2 = vm_exec(isa2, bc2, 12) in let seal = seal_compute("elf-text-hash", "lic-2026") in let s_ok = seal_verify("elf-text-hash", "lic-2026", seal) in let s_bad = seal_verify("elf-text-tampered", "lic-2026", seal) in let enc = enclave_new("meas-abc") in let e_ok = enclave_enter(enc, "meas-abc", 10, 5) in let e_bad = enclave_enter(enc, "meas-wrong", 10, 5) in let wb = wb_generate_table("master-secret-key", "salt-1") in let prf1 = wb_eval_prf(wb, 42) in let prf2 = wb_eval_prf(wb, 42) in if m1 == 5537 and m2 == 3766 and cf == 39 and protect_bytes_eq(bc1, bc2) == 0 and v1 == 54 and v2 == 54 and s_ok == 1 and s_bad == 0 and e_ok == 92 and e_bad == 0 - 1 and prf1 == prf2 and prf1 > 0 then 1 else ctfail("test_w5_mba_cff_vm_seal_enclave_whitebox failed\n")

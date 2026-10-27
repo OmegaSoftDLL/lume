@@ -24,6 +24,22 @@ fn ois_llm(mflags) = (mflags / 4) % 2
 fn ois_kernel(mflags) = (mflags / 8) % 2
 fn ois_interrupt(mflags) = (mflags / 16) % 2
 fn ois_ffi(mflags) = (mflags / 32) % 2
+fn ois_protect(mflags) = (mflags / 64) % 2
+
+fn w33_is_cred_lit(s) = if count(s) < 6 then 0 else if ostarts(s, "sk-") == 1 or ostarts(s, "ghp_") == 1 or ostarts(s, "AKIA") == 1 or ostarts(s, "-----BEGIN ") == 1 then 1 else 0
+
+fn w33_chk_sec_e(e, fnm) = match e
+    Str(s)          => if w33_is_cred_lit(s) == 1 then ctfail("lume: secret hygiene error [W0001]: hardcoded credential literal in '" + fnm + "' must be wrapped in 'secret_new(...)' from 'std.secret' so it never leaks to plaintext '.rodata' or logs (fix-it: replace literal with 'secret_new(\"<redacted>\")' or load via 'env.secret')\n") else 0
+    Bin(op, l, r)   => w33_chk_sec_e(l, fnm) + w33_chk_sec_e(r, fnm)
+    If(c, t, e2)    => w33_chk_sec_e(c, fnm) + w33_chk_sec_e(t, fnm) + w33_chk_sec_e(e2, fnm)
+    LetIn(nm, v, b) => w33_chk_sec_e(v, fnm) + w33_chk_sec_e(b, fnm)
+    VarIn(nm, v, b) => w33_chk_sec_e(v, fnm) + w33_chk_sec_e(b, fnm)
+    Call(cnm, args) => if cnm == "secret_new" then 0 else w33_chk_sec_args(args, fnm)
+    _               => 0
+
+fn w33_chk_sec_args(xs, fnm) = match xs
+    Nil        => 0
+    Cons(h, t) => w33_chk_sec_e(h, fnm) + w33_chk_sec_args(t, fnm)
 
 fn ais_hole_name(nm) = if nm == "_" or ostarts(nm, "_hole") == 1 then 1 else 0
 
@@ -1536,7 +1552,7 @@ fn ochkfn(nm, ps, body, ot) = ochkfn2(nm, ps, body, osiglookup(nm, ot.osigs), ts
 
 fn ochkfn2(nm, ps, body, mosig, msig, ot) = match mosig
     Nil          => let zwc = vwcet_chk_fn(nm, body, ot.wcets, ot.fns) in let ztn = n4_chk_fn_tensors(nm, body, msig, ot) in let zv = vprove_fn_status(nm, ps, body, ot.vsigs, ot.fns) + (if isnil(ot.vsigs) == 1 and isnil(ot.invs) == 1 then 0 else vchk_expr_e(body, nm, ot)) in let zk = kchk_fn_effs(nm, 0, body, ot) in if oanye(body) == 0 and isnil(ot.osigs) == 1 and isnil(ot.otypes) == 1 and isnil(auinit_from_sig(msig)) == 1 then 1 else let rty = aget_sig_rty(msig) in let lenv = aget_fn_lenv(msig) in let zs = schk_conc_e(body, nm, 0, sinit_nonsend_sig(msig), Nil) in let zh = achk_holes_e(body, rty, lenv, {fnm: nm, pubf: 0, ps: ps, body: body, sigs: ot.sigs, vsigs: ot.vsigs, laws: ot.laws, fns: ot.fns}) in let zp = achk_prov_e(body, nm, auinit_from_sig(msig), ot) in let ctx = {fnm: nm, pubf: 0, freef: 0, halloc: 0, bparams: ps, mvars: Nil, pnames: ps, locals: Nil, origins: oinit_origins(ps), osigs: ot.osigs, otypes: ot.otypes} in let rb = ochke(body, ctx, Nil) in ochk_ret_origin(nm, 0, "", rty, ps, rb.origin)
-    Cons(sg, sr) => if sg.pubf == 1 and oisgctype(sg.rty, ot.otypes) == 1 then ctfail("lume: ownership error [O0030]: public function '" + nm + "' cannot expose '@gc' region type across a public module boundary\n") else let zwc = vwcet_chk_fn(nm, body, ot.wcets, ot.fns) in let ztn = n4_chk_fn_tensors(nm, body, msig, ot) in let zkn = n4_chk_kernel_fn(nm, sg.freef, body, ot) in let rty = aget_fn_rty(msig, mosig) in let lenv = aget_fn_lenv(msig) in let mvars = omvars_pl(sg.pl) in let zv = vprove_fn_status(nm, ps, body, ot.vsigs, ot.fns) + vchk_expr_e(body, nm, ot) in let zk = kchk_fn_effs(nm, sg.pubf, body, ot) in let zs = schk_conc_e(body, nm, 0, sinit_nonsend_sig(msig), mvars) in let zh = achk_holes_e(body, rty, lenv, {fnm: nm, pubf: sg.pubf, ps: ps, body: body, sigs: ot.sigs, vsigs: ot.vsigs, laws: ot.laws, fns: ot.fns}) in let zt = (if ois_total(sg.freef) == 1 then achk_total_e(body, {fnm: nm, ps: ps, fns: ot.fns, osigs: ot.osigs}, Nil, Nil) else 0) in let tret = achk_prov_e(body, nm, auinit_from_sig(msig), ot) in if sg.pubf == 1 and ois_llm(sg.freef) == 0 and ois_unverified_ty(rty) == 0 and tret == 1 then ctfail("lume: provenance error [A0003]: unverified AI/probabilistic value cannot be returned from trusted 'pub fn " + nm + "' without verification (fix-it: wrap the return value in 'verify(val, <contract>)' or validate with a contract guard before returning)\n") else let bparams = if isnil(sg.pl) == 1 then ps else obparams_pl(sg.pl) in let ctx = {fnm: nm, pubf: sg.pubf, freef: sg.freef, halloc: 0, bparams: bparams, mvars: mvars, pnames: ps, locals: Nil, origins: oinit_origins(ps), osigs: ot.osigs, otypes: ot.otypes} in let rb = ochke(body, ctx, Nil) in ochk_ret_origin(nm, sg.pubf, sg.fromp, rty, ps, rb.origin)
+    Cons(sg, sr) => if sg.pubf == 1 and oisgctype(sg.rty, ot.otypes) == 1 then ctfail("lume: ownership error [O0030]: public function '" + nm + "' cannot expose '@gc' region type across a public module boundary\n") else let zsec = (if sg.pubf == 1 or ois_protect(sg.freef) == 1 then w33_chk_sec_e(body, nm) else 0) in let zwc = vwcet_chk_fn(nm, body, ot.wcets, ot.fns) in let ztn = n4_chk_fn_tensors(nm, body, msig, ot) in let zkn = n4_chk_kernel_fn(nm, sg.freef, body, ot) in let rty = aget_fn_rty(msig, mosig) in let lenv = aget_fn_lenv(msig) in let mvars = omvars_pl(sg.pl) in let zv = vprove_fn_status(nm, ps, body, ot.vsigs, ot.fns) + vchk_expr_e(body, nm, ot) in let zk = kchk_fn_effs(nm, sg.pubf, body, ot) in let zs = schk_conc_e(body, nm, 0, sinit_nonsend_sig(msig), mvars) in let zh = achk_holes_e(body, rty, lenv, {fnm: nm, pubf: sg.pubf, ps: ps, body: body, sigs: ot.sigs, vsigs: ot.vsigs, laws: ot.laws, fns: ot.fns}) in let zt = (if ois_total(sg.freef) == 1 then achk_total_e(body, {fnm: nm, ps: ps, fns: ot.fns, osigs: ot.osigs}, Nil, Nil) else 0) in let tret = achk_prov_e(body, nm, auinit_from_sig(msig), ot) in if sg.pubf == 1 and ois_llm(sg.freef) == 0 and ois_unverified_ty(rty) == 0 and tret == 1 then ctfail("lume: provenance error [A0003]: unverified AI/probabilistic value cannot be returned from trusted 'pub fn " + nm + "' without verification (fix-it: wrap the return value in 'verify(val, <contract>)' or validate with a contract guard before returning)\n") else let bparams = if isnil(sg.pl) == 1 then ps else obparams_pl(sg.pl) in let ctx = {fnm: nm, pubf: sg.pubf, freef: sg.freef, halloc: 0, bparams: bparams, mvars: mvars, pnames: ps, locals: Nil, origins: oinit_origins(ps), osigs: ot.osigs, otypes: ot.otypes} in let rb = ochke(body, ctx, Nil) in ochk_ret_origin(nm, sg.pubf, sg.fromp, rty, ps, rb.origin)
 
 fn ochkstmts(prog, ot, moved) = match prog
     Nil        => 1

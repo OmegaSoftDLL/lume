@@ -45,8 +45,9 @@ protection. License: dual **MIT OR Apache-2.0** (like Rust).
 - Do **not** use Rust to implement Lume.
 - Do **not** edit the generated `compiler/stage1/lumec.src` by hand — your change would be
   overwritten by the next amalgamation. Edit the module under `compiler/stage1/lume/`.
-- Do **not** fake completion or claim a milestone that is not real (e.g. the triple
-  self-build / fixpoint is NOT done — never say it is).
+- Do **not** fake completion or claim a milestone that is not real. (The triple
+  self-build / fixpoint **is reached** — `stage 2 == stage 3` in CI — so never regress it;
+  state every other feature at its real level: shipped, a model/stub, or planned.)
 - Do **not** let `check` regress; all 9 `examples/0*.lume` must `check` clean (name
   resolution has zero false positives by design — keep it that way).
 - Do **not** add a predictive lottery-number feature (unrelated; a standing user rule).
@@ -86,8 +87,10 @@ Seed CLI (`bootstrap/lume0/lume0`):
 - **Block language** — `compiler/stage1/block_*.lume`: an imperative mini-language
   (var/while/for/if/arrays) compiled to C by `block_cc.lume`.
 
-The honest gap (`docs/10`): Layer A and the ML-core are not unified; `lumec` compiles only a
-subset; the triple self-build is not reached.
+Historical note (`docs/10`): an earlier gap had Layer A and the ML-core not unified and `lumec`
+compiling only a subset. The triple self-build **has since been reached** (`stage 2 == stage 3`
+in CI); sections 6 and "Next bricks" below predate Phases 1–5 and are kept only as history —
+see the Phase 1–5 entries in §5 for the current state.
 
 ## 5. What is DONE (verified, with tests)
 
@@ -187,8 +190,8 @@ subset; the triple self-build is not reached.
 - **Stages 1–5, Inflection Stages A–D & Intent-as-Source Oracle are 100% done**:
   - **Stage 1 & 2:** Self-hosted `lumec` + `lasm` (`stage2 == stage3` fixpoint, Zero-C gate), Comptime (`C1–C4`), Hygienic Macros (`M1–M2`), Data/Queries (`D1–D3`), Single-Binary CLI (`T1–T3`), `lume evolve` (`E1–E3`), Hindley–Milner + F4 Unification (`F1–F4`), and `examples/apps/inventory/`.
   - **Stage 3 & Inflection Plan (`docs/21-inflection-plan.md`, `docs/19-intent-as-source.md`):** Ownership & Borrows (`O1–O3`), AI Authoring & Provenance (`A1–A3`), Algebraic Effects & Perceus Reuse (`K1–K3`), Concurrency & Supervised Actors (`S1–S3`), Sound `QF_LIA` Contract & `law` Verification (`V1–V3`), Hole-Guided Synthesis (`intent_oracle_ok.src`), and `examples/apps/job_server/`.
-  - **Stage 4 (`docs/24-phase4-plan.md`):** Shape-typed `tensor[DType, D1, ...]` (`[T0300]`, `tensor.src`), differentiable `model` + `grad`/`value_and_grad`/`jvp`/`vjp`/`jit` over the polynomial fragment (`+`, `-`, `*`, `if`, `let`, `relu`, `sq`) with `[N0400]` diagnostics on non-polynomial operators/calls and `QF_LIA` gradient verification + `kernel fn` (`[E0200]`, `nn.src` with cryptographic FIPS 180-4 SHA-256 `model_content_hash`), `prob` effect + Datalog `rule` + `extern llm fn` + LIF `std.neuro` (`ai_runtime.src`), and capstones `examples/apps/mnist/` & `examples/apps/agent/`.
-  - **Stage 5 (`docs/25-phase5-plan.md`, `docs/20-interop.md`, `docs/22-adoption.md`, `docs/23-horizon.md`):** Machine-level layout & MMIO (`@repr(c)`, `@packed`, `@bits`, `@mmio` in `interop.src`), C/WASM Interop (`extern "c" fn` with `"ffi"` effect `[E0200]` and foreign provenance taint `[A0003]`, `pub extern "c" fn` reverse C-ABI / WAT export, `lume agent bind <header.h>`, `std.wasm` reference sandbox model + `[E0200]` capability gate requiring `"wasm"` and `"fs"`/`"net"`), Realtime & Hardware Capabilities (`@interrupt(irq: N)` `[E0200]` ISR heap/blocking rejection, `@bound(cycles: N)` structural cycle-budget analyzer emitting `"status":"budget_checked"` or `[V0002]`, linear `cap[Page]`/`cap[Port]`/`cap[Irq]` `[O0001]`), Standalone Independent Proof Certificate Kernel & MCP (`lcert.src` with zero compiler imports, FIPS 180-4 SHA-256 tamper verification, and standalone `QF_LIA` solver; `lume certify`, `lume verify-cert`, `lume mcp`), and Stage 5 capstone `examples/apps/lume_os/`.
+  - **Stage 4 (`docs/24-phase4-plan.md`):** Shape-typed `tensor[DType, D1, ...]` (`[T0300]`, `tensor.src`), differentiable `model` + `grad`/`value_and_grad`/`jvp`/`vjp`/`jit` over the polynomial fragment (`+`, `-`, `*`, `if`, `let`, `relu`, `sq`, and division/modulo by constants) with `[D0001]` / `[N0400]` diagnostics on non-differentiable operators/calls and `QF_LIA` gradient verification + `kernel fn` (`[E0200]`, `nn.src` with cryptographic FIPS 180-4 SHA-256 `model_content_hash`), `prob` effect + Datalog `rule` + `extern llm fn` + LIF `std.neuro` (`ai_runtime.src`), and capstones `examples/apps/mnist/` & `examples/apps/agent/`.
+  - **Stage 5 (`docs/25-phase5-plan.md`, `docs/06-software-protection.md`, `docs/20-interop.md`, `docs/22-adoption.md`, `docs/23-horizon.md`):** Machine-level layout & MMIO (`@repr(c)`, `@packed`, `@bits`, `@mmio` in `interop.src`), C/WASM Interop (`extern "c" fn` with `"ffi"` effect `[E0200]` and foreign provenance taint `[A0003]`, `pub extern "c" fn` reverse C-ABI / WAT export, `lume agent bind <header.h>`, `std.wasm` capability/fuel/bounds-checked interpreter sandbox model + `[E0200]` capability gate requiring `"wasm"` and `"fs"`/`"net"`), Realtime & Hardware Capabilities (`@interrupt(irq: N)` `[E0200]` ISR heap/blocking rejection, `@bound(cycles: N)` structural cycle-budget analyzer emitting `"status":"budget_checked"` or `[V0002]`, linear `cap[Page]`/`cap[Port]`/`cap[Irq]` `[O0001]`), Standalone Independent Proof Certificate Kernel & MCP (`lcert.src` with zero compiler imports, FIPS 180-4 SHA-256 tamper verification, and standalone `QF_LIA` solver; `lume certify`, `lume verify-cert`, `lume mcp`), P33 Software Protection across Bricks W1–W5 (`compiler/stage1/protect.src`, `compiler/stage1/lprotect.src`, `[W0001]`, `lume build --protect <standard|hardened|max> [--lsym <file.lsym>]`), and Stage 5 capstone `examples/apps/lume_os/`.
 
 ## 7. Genuine differentiators (real, with evidence)
 
