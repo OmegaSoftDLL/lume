@@ -123,7 +123,7 @@ must name the principle it breaks.
 
 ## H. Software protection
 
-- **P33 — The author owns the artifact.** *(design rule, not yet enforced — nothing is implemented)* The toolchain lets the author of a program control how
+- **P33 — The author owns the artifact.** *(implemented in `compiler/stage1/protect.src`, `compiler/stage1/lprotect.src`, `[W0001]`, and `lume build --protect`)* The toolchain lets the author of a program control how
   much its shipped binary reveals (symbol stripping, obfuscation, constant encryption, selective
   virtualisation, tamper seals), per build profile, opt-in and composable, *without* changing the
   program's meaning (P9/P25), weakening compile-time safety, or hiding anything from the author

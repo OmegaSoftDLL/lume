@@ -45,7 +45,7 @@ The one-sentence answer:
 | 8 | Contracts in the code: `requires`, `ensures`, `invariant`, range types | Ada, Eiffel, Pascal |
 | 9 | Full control when needed: `unsafe`, `asm`, explicit memory layout | C, Assembly, Zig |
 | 10 | One tool, fast compilation (the `lume` driver is a POSIX `sh` script; the native tools are static ELF binaries, but some commands still shell out to the C seed — see Status) | Go, Cargo (Rust) |
-| 11 | Ship-time protection of your own artifact (opt-in) — **planned, not implemented** | ProGuard/R8, LLVM-obfuscator, VMProtect |
+| 11 | Ship-time protection of your own artifact (`lume build --protect <standard\|hardened\|max>`, `.lsym`, `std.secret`, `[W0001]`) | ProGuard/R8, LLVM-obfuscator, VMProtect |
 
 ## A taste
 
@@ -147,8 +147,8 @@ This is a **staged, self-verifying bootstrap** — the model GCC, Rust and Go us
 - [x] **Stage 4 — tensors, autodiff, GPU kernels, `prob`, `rule`, `llm fn`. ✅ Done.** Shape-typed tensors with compile-time shape unification (`[T0300]`), differentiable `model` + symbolic autodiff (`grad`/`jvp`/`vjp`/`jit`), accelerator `kernel fn` (PTX/SPIR-V), probabilistic programming (`std.prob`), Datalog `rule`, typed `extern llm fn` with contract-repair + provenance, and spiking `std.neuro`; `mnist` and neuro-symbolic `agent` capstones. **Caveats (see the hardening item below):** symbolic autodiff covers only the `+ - * if` fragment and rejects other operators at compile time with `[N0400]` (#184, fixed); `jit` currently lowers to a plain call (identity wrapper, #10); `kernel fn` emits placeholder PTX/SPIR-V text with no body lowering or GPU execution (#8); `std.prob` inference is a closed-form Beta-Bernoulli posterior mean (`infer_svi`/`infer_smc` are aliases of `infer_mcmc`), not sampling (#6); safetensors/ONNX "export" produce descriptor strings, not valid files (#9). See `docs/24-phase4-plan.md`.
 - [x] **Stage 5 — systems, interop, realtime, proof certificates, `lume-os`. ✅ Done.** C-ABI + capability-scoped WASM interop (Tracks I1–I5), realtime `@interrupt`/`@bound` WCET, a minimal proof-certificate kernel (`lume certify`/`verify-cert`) + MCP server (`lume mcp`), and the capability-based `lume-os` microkernel capstone. **Caveats:** interop is parse plus effect/provenance checks only — no native linking, real C-ABI call/export or WASM export yet (#11); the WASM "sandbox" (`std.wasm`) is a reference model with compile-time `{wasm}`/`{fs}` capability enforcement (`[E0200]`), not a real WASM runtime with module isolation (#186, fixed); `lume-os` is a deterministic user-space *model* of microkernel services (no boot, QEMU, hardware or isolation, #12); `spawn`/`par`/channels are static Send/Sync/scope checking plus a sequential simulation, not OS threads or a parallel runtime (#13). See `docs/25-phase5-plan.md`.
 - [x] **Inflection — the compiler dogfoods its own features. ✅ Done.** Contracts in the lexer/parser/typecheck, effects at the I/O boundary, `own`/Perceus in hot paths, and the **intent-as-source oracle** (hole-guided `QF_LIA` synthesis + `lume prove` + `lume evolve` repair) — the compiler-as-oracle of `docs/19-intent-as-source.md`. See `docs/21-inflection-plan.md`.
-- [x] **Verification trust-layer hardening (first round). ✅** The proof-certificate kernel now re-derives each proof **independently** (standalone S-expression parser + Fourier–Motzkin `QF_LIA` solver) with FIPS-180-4 SHA-256, rejecting any term its own solver can't confirm (#183); autodiff rejects non-differentiable operators with `[N0400]` instead of silently zeroing (#184); WCET reports `budget_checked`, not a sound-WCET claim (#185); `std.wasm` is a labelled reference model with compile-time capability enforcement (#186).
-- [ ] **Remaining hardening & build-out — in progress.** Software protection (P33) is unbuilt (#188); interop is parse/check only, no real linking/export (#191); the Phase-4 numeric ops (`jit`, GPU `kernel`, `prob`, Datalog, safetensors) are stubs (#192); concurrency runs sequentially (#193); `lume evolve` approval is unsigned and its fixpoint gate isn't `stage2==stage3` (#194); the oracle lacks `witness`/`repair`/`impact` (#195). GOLDEN RULE scales from the compiler to the ecosystem: no overclaim ships as a guarantee.
+- [x] **Verification trust-layer hardening (first round + P33 software protection). ✅** The proof-certificate kernel now re-derives each proof **independently** (standalone S-expression parser + Fourier–Motzkin `QF_LIA` solver) with FIPS-180-4 SHA-256, rejecting any term its own solver can't confirm (#183); autodiff rejects non-differentiable operators with `[N0400]` / `[D0001]` instead of silently zeroing (#184); WCET reports `budget_checked`, not a sound-WCET claim (#185); `std.wasm` is a labelled reference model with compile-time capability enforcement (#186); and P33 software protection (`lume build --protect <standard|hardened|max> [--lsym]`, `.rodata` string encryption, `.lsym` sidecars, `std.secret` + `[W0001]`, `std.protect.guard`, `@protect model`, MBA/CFF/VM/tamper seals/white-box PRF) is implemented across Bricks W1–W5 (#188).
+- [ ] **Remaining hardening & build-out — in progress.** Interop is parse/check only, no real linking/export (#191); the Phase-4 numeric ops (`jit`, GPU `kernel`, `prob`, Datalog, safetensors) are stubs (#192); concurrency runs sequentially (#193); `lume evolve` approval is unsigned and its fixpoint gate isn't `stage2==stage3` (#194); the oracle lacks `witness`/`repair`/`impact` (#195). GOLDEN RULE scales from the compiler to the ecosystem: no overclaim ships as a guarantee.
 - **Beyond the roadmap — the horizon.** Vision docs for what comes next: `docs/19` (intent-as-source / compiler-as-oracle), `docs/20` (interop), `docs/22` (AI-first adoption), and `docs/23` (the horizon: proving whole systems across time, in a form that outlives Lume).
 
 ## What works today (self-hosted, no C in the loop)
@@ -212,13 +212,15 @@ the same scheme as the Rust project (Go uses BSD-3-Clause; both are permissive).
 The license covers the Lume toolchain, standard library and docs; it does not restrict what you do
 with programs you write in Lume or the binaries it produces for you.
 
-## Software protection (anti-reverse-engineering) — planned, not yet implemented
+## Software protection (anti-reverse-engineering)
 
-Protecting the programs you ship is a **design-stage** toolchain goal (`docs/06-software-protection.md`,
-principle P33) — **not yet implemented**. The plan: per-profile symbol stripping, constant/string
-encryption, control-flow obfuscation, selective bytecode virtualisation and tamper seals — opt-in,
-composable, and applied only to your own artifact without changing its behaviour or weakening
-compile-time safety, with embedded models and LLM prompts protected the same way. **No `lume`
-command, compiler pass, or `std.protect` module ships today**; `docs/06` holds the staged roadmap.
-When it does ship, Lume will ship no tooling for attacking, deobfuscating or evading anyone else's
-software.
+Protecting the programs you ship is a first-class toolchain feature (`docs/06-software-protection.md`,
+principle P33): `lume build --protect <standard|hardened|max> [--lsym <file.lsym>]` (`compiler/stage1/lprotect.src`)
+and `use protect` (`compiler/stage1/protect.src`) provide per-profile symbol stripping with a `.lsym`
+crash-symbolication sidecar, secret-hygiene diagnostics (`[W0001]` + `std.secret`), `.rodata` string/constant
+stream encryption with in-memory decrypt-on-use (`mkstr_enc`), self-check guards (`std.protect.guard`),
+encrypted `@protect model` weights and prompt templates, Mixed Boolean-Arithmetic (MBA), control-flow
+flattening, randomised bytecode virtualisation (`protect.vm`), FIPS 180-4 SHA-256 tamper seals, and
+white-box key tables — opt-in, composable, and applied only to your own artifact without changing its
+behaviour or weakening compile-time safety. Lume ships no tooling for attacking, deobfuscating or
+evading anyone else's software.

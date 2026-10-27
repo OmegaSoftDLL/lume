@@ -1,0 +1,157 @@
+## compiler/stage1/lprotect.src -- P33 Software Protection & Obfuscation Transformer
+## Invoked by `lume build --protect <standard|hardened|max> [--lsym <file.lsym>]`.
+## Operates on the AT&T x86-64 assembly emitted by `lumec` before `lasm` assembles the ELF64 binary:
+##   - Brick W1 (`standard` / `--lsym`):
+##     - Collects all user function labels and runtime panic/contract messages,
+##     - Emits a deterministic `.lsym` JSON sidecar mapping symbol IDs (`F1..Fn`) and numeric panic
+##       codes (`E#1..E#k`) back to source function names and full assertion strings,
+##     - Strips assembly comments and replaces verbose `lume: ...` `.rodata` panic strings with
+##       compact numeric codes (`"E#1\n"`) so `strings <binary>` reveals zero source paths,
+##       contract expressions, or internal panic text.
+##   - Brick W2 (`hardened` / `max`):
+##     - Derives a deterministic per-build stream key `k` (131..250) from the seed via FIPS 180-4 SHA-256,
+##     - Encrypts every `.rodata` user string literal (`.LsN` referenced by `mkstr`) into `.byte b0, b1, ..., 0`
+##       where each non-zero byte is XOR-masked with `k`,
+##     - Injects `mkstr_enc:` before `mkstr:` in `.text` and rewrites `call mkstr` on `.rodata` literals to
+##       `call mkstr_enc`, which allocates a fresh copy in the Lume heap and XOR-unmasks each byte with `k`,
+##       so `strings <binary>` NEVER sees plaintext strings in `.rodata` while running the binary produces
+##       100% identical stdout!
+##   - Brick W3 & W5 (`hardened` / `max`):
+##     - Injects Mixed Boolean-Arithmetic (MBA) instruction sequences into function prologues in `max` mode
+##       and embeds a deterministic FIPS 180-4 SHA-256 tamper seal (`LUME_SEAL:<hex>`) in `.rodata`.
+
+fn lp_isws(c) = c == " " or c == "\t" or c == "\r"
+fn lp_isdigit(c) = c >= "0" and c <= "9"
+fn lp_nlpos(s, n, i) = if i >= n then i else if at(s, i) == "\n" then i else lp_nlpos(s, n, i + 1)
+fn lp_skipws(s, i, n) = if i >= n then i else if lp_isws(at(s, i)) then lp_skipws(s, i + 1, n) else i
+fn lp_rtrimend(s, e) = if e <= 0 then 0 else if lp_isws(at(s, e - 1)) then lp_rtrimend(s, e - 1) else e
+fn lp_trim(s) = let n = count(s) in let a = lp_skipws(s, 0, n) in let b = lp_rtrimend(s, n) in if a >= b then "" else slicen(s, n, a, b)
+fn lp_startswith(s, p) = if count(s) < count(p) then 0 else slice(s, 0, count(p)) == p
+fn lp_endswith(s, p) = if count(s) < count(p) then 0 else slice(s, count(s) - count(p), count(s)) == p
+
+fn lp_app(xs, ys) = match xs
+    Nil        => ys
+    Cons(h, t) => Cons(h, lp_app(t, ys))
+fn lp_isnil(xs) = match xs
+    Nil        => 1
+    Cons(h, t) => 0
+fn lp_revacc(xs, acc) = match xs
+    Nil        => acc
+    Cons(h, t) => lp_revacc(t, Cons(h, acc))
+fn lp_rev(xs) = lp_revacc(xs, Nil)
+fn lp_has(xs, v) = match xs
+    Nil        => 0
+    Cons(h, t) => if h == v then 1 else lp_has(t, v)
+fn lp_pairs(xs) = match xs
+    Nil        => Nil
+    Cons(a, t) => lp_pairs2(a, t)
+fn lp_pairs2(a, t) = match t
+    Nil        => Cons(a, Nil)
+    Cons(b, r) => Cons(a + b, lp_pairs(r))
+fn lp_joinall(xs) = match xs
+    Nil        => ""
+    Cons(a, t) => if lp_isnil(t) == 1 then a else lp_joinall(lp_pairs(xs))
+fn lp_addsep(xs, sep) = match xs
+    Nil        => Nil
+    Cons(h, t) => if lp_isnil(t) == 1 then Cons(h, Nil) else Cons(h + sep, lp_addsep(t, sep))
+fn lp_joinsep(xs, sep) = lp_joinall(lp_addsep(xs, sep))
+
+fn lp_splitlinesn(s, n, i) = if i >= n then Nil else let e = lp_nlpos(s, n, i) in Cons(slicen(s, n, i, e), lp_splitlinesn(s, n, if e >= n then e else e + 1))
+fn lp_splitlines(s) = lp_splitlinesn(s, count(s), 0)
+
+## --- Pure Lume-Core ASCII ordinal & FIPS 180-4 SHA-256 ---
+fn lp_ord_lo(c) = if c < "0" then (if c < "(" then (if c == " " then 32 else if c == "!" then 33 else if c == "\"" then 34 else if c == "#" then 35 else if c == "$" then 36 else if c == "%" then 37 else if c == "&" then 38 else 39) else (if c == "(" then 40 else if c == ")" then 41 else if c == "*" then 42 else if c == "+" then 43 else if c == "," then 44 else if c == "-" then 45 else if c == "." then 46 else 47)) else (if c < ":" then 48 + toint(c) else (if c == ":" then 58 else if c == ";" then 59 else if c == "<" then 60 else if c == "=" then 61 else if c == ">" then 62 else if c == "?" then 63 else 64))
+fn lp_ord_up(c) = if c < "N" then (if c < "G" then (if c == "A" then 65 else if c == "B" then 66 else if c == "C" then 67 else if c == "D" then 68 else if c == "E" then 69 else 70) else (if c == "G" then 71 else if c == "H" then 72 else if c == "I" then 73 else if c == "J" then 74 else if c == "K" then 75 else if c == "L" then 76 else 77)) else (if c < "U" then (if c == "N" then 78 else if c == "O" then 79 else if c == "P" then 80 else if c == "Q" then 81 else if c == "R" then 82 else if c == "S" then 83 else 84) else (if c == "U" then 85 else if c == "V" then 86 else if c == "W" then 87 else if c == "X" then 88 else if c == "Y" then 89 else if c == "Z" then 90 else if c == "[" then 91 else if c == "\\" then 92 else if c == "]" then 93 else if c == "^" then 94 else if c == "_" then 95 else 96))
+fn lp_ord_az(c) = if c < "n" then (if c < "g" then (if c == "a" then 97 else if c == "b" then 98 else if c == "c" then 99 else if c == "d" then 100 else if c == "e" then 101 else 102) else (if c == "g" then 103 else if c == "h" then 104 else if c == "i" then 105 else if c == "j" then 106 else if c == "k" then 107 else if c == "l" then 108 else 109)) else (if c < "u" then (if c == "n" then 110 else if c == "o" then 111 else if c == "p" then 112 else if c == "q" then 113 else if c == "r" then 114 else if c == "s" then 115 else 116) else (if c == "u" then 117 else if c == "v" then 118 else if c == "w" then 119 else if c == "x" then 120 else if c == "y" then 121 else if c == "z" then 122 else if c == "|" then 124 else if c == "~" then 126 else if c > "z" and c < "|" then 123 else 125))
+fn lp_ord(c) = if c == "\n" then 10 else if c == "\r" then 13 else if c == "\t" then 9 else if c < "A" then lp_ord_lo(c) else if c < "a" then lp_ord_up(c) else lp_ord_az(c)
+
+fn lp_u32(x) = let r = x % 4294967296 in if r < 0 then r + 4294967296 else r
+fn lp_pow2(n) = if n <= 0 then 1 else if n >= 16 then 65536 * lp_pow2(n - 16) else if n >= 8 then 256 * lp_pow2(n - 8) else if n >= 4 then 16 * lp_pow2(n - 4) else if n == 3 then 8 else if n == 2 then 4 else 2
+fn lp_shr(x, n) = lp_u32(x) / lp_pow2(n)
+fn lp_rotr(x, n) = let ux = lp_u32(x) in let p = lp_pow2(n) in (ux / p) + ((ux % p) * lp_pow2(32 - n))
+fn lp_bxor4(a, b) = if a == b then 0 else if a == 0 then b else if b == 0 then a else if a == 15 then 15 - b else if b == 15 then 15 - a else let a0 = a % 2 in let b0 = b % 2 in (if a0 == b0 then 0 else 1) + 2 * lp_bxor4(a / 2, b / 2)
+fn lp_xor8(a, b) = lp_bxor4(a % 16, b % 16) + 16 * lp_bxor4((a / 16) % 16, (b / 16) % 16)
+
+fn lp_sha_xor3_4(x, y, z) = let b0 = ((x % 2) + (y % 2) + (z % 2)) % 2 in let b1 = (((x / 2) % 2) + ((y / 2) % 2) + ((z / 2) % 2)) % 2 in let b2 = (((x / 4) % 2) + ((y / 4) % 2) + ((z / 4) % 2)) % 2 in let b3 = (((x / 8) % 2) + ((y / 8) % 2) + ((z / 8) % 2)) % 2 in b0 + 2 * b1 + 4 * b2 + 8 * b3
+fn lp_sha_xor3_n(x, y, z, nibs) = if nibs <= 0 then 0 else lp_sha_xor3_4(x % 16, y % 16, z % 16) + 16 * lp_sha_xor3_n(x / 16, y / 16, z / 16, nibs - 1)
+fn lp_sha_ch_4(e, f, g) = let b0 = (if (e % 2) == 1 then (f % 2) else (g % 2)) in let b1 = (if ((e / 2) % 2) == 1 then ((f / 2) % 2) else ((g / 2) % 2)) in let b2 = (if ((e / 4) % 2) == 1 then ((f / 4) % 2) else ((g / 4) % 2)) in let b3 = (if ((e / 8) % 2) == 1 then ((f / 8) % 2) else ((g / 8) % 2)) in b0 + 2 * b1 + 4 * b2 + 8 * b3
+fn lp_sha_ch_n(e, f, g, nibs) = if nibs <= 0 then 0 else lp_sha_ch_4(e % 16, f % 16, g % 16) + 16 * lp_sha_ch_n(e / 16, f / 16, g / 16, nibs - 1)
+fn lp_sha_maj_4(a, b, c) = let b0 = (if (a % 2) + (b % 2) + (c % 2) >= 2 then 1 else 0) in let b1 = (if ((a / 2) % 2) + ((b / 2) % 2) + ((c / 2) % 2) >= 2 then 1 else 0) in let b2 = (if ((a / 4) % 2) + ((b / 4) % 2) + ((c / 4) % 2) >= 2 then 1 else 0) in let b3 = (if ((a / 8) % 2) + ((b / 8) % 2) + ((c / 8) % 2) >= 2 then 1 else 0) in b0 + 2 * b1 + 4 * b2 + 8 * b3
+fn lp_sha_maj_n(a, b, c, nibs) = if nibs <= 0 then 0 else lp_sha_maj_4(a % 16, b % 16, c % 16) + 16 * lp_sha_maj_n(a / 16, b / 16, c / 16, nibs - 1)
+fn lp_sha_big0(a) = lp_sha_xor3_n(lp_rotr(a, 2), lp_rotr(a, 13), lp_rotr(a, 22), 8)
+fn lp_sha_big1(e) = lp_sha_xor3_n(lp_rotr(e, 6), lp_rotr(e, 11), lp_rotr(e, 25), 8)
+fn lp_sha_sml0(x) = lp_sha_xor3_n(lp_rotr(x, 7), lp_rotr(x, 18), lp_shr(x, 3), 8)
+fn lp_sha_sml1(x) = lp_sha_xor3_n(lp_rotr(x, 17), lp_rotr(x, 19), lp_shr(x, 10), 8)
+fn lp_sha_k(t) = if t < 16 then (if t == 0 then 1116352408 else if t == 1 then 1899447441 else if t == 2 then 3049323471 else if t == 3 then 3921009573 else if t == 4 then 961987163 else if t == 5 then 1508970993 else if t == 6 then 2453635748 else if t == 7 then 2870763221 else if t == 8 then 3624381080 else if t == 9 then 310598401 else if t == 10 then 607225278 else if t == 11 then 1426881987 else if t == 12 then 1925078388 else if t == 13 then 2162078206 else if t == 14 then 2614888103 else 3248222580) else if t < 32 then (if t == 16 then 3835390401 else if t == 17 then 4022224774 else if t == 18 then 264347078 else if t == 19 then 604807628 else if t == 20 then 770255983 else if t == 21 then 1249150122 else if t == 22 then 1555081692 else if t == 23 then 1996064986 else if t == 24 then 2554220882 else if t == 25 then 2821834349 else if t == 26 then 2952996808 else if t == 27 then 3210313671 else if t == 28 then 3336571891 else if t == 29 then 3584528711 else if t == 30 then 113926993 else 338241895) else if t < 48 then (if t == 32 then 666307205 else if t == 33 then 773529912 else if t == 34 then 1294757372 else if t == 35 then 1396182291 else if t == 36 then 1695183700 else if t == 37 then 1986661051 else if t == 38 then 2177026350 else if t == 39 then 2456956037 else if t == 40 then 2730485921 else if t == 41 then 2820302411 else if t == 42 then 3259730800 else if t == 43 then 3345764771 else if t == 44 then 3516065817 else if t == 45 then 3600352804 else if t == 46 then 4094571909 else 275423344) else (if t == 48 then 430227734 else if t == 49 then 506948616 else if t == 50 then 659060556 else if t == 51 then 883997877 else if t == 52 then 958139571 else if t == 53 then 1322822218 else if t == 54 then 1537002063 else if t == 55 then 1747873779 else if t == 56 then 1955562222 else if t == 57 then 2024104815 else if t == 58 then 2227730452 else if t == 59 then 2361852424 else if t == 60 then 2428436474 else if t == 61 then 2756734187 else if t == 62 then 3204031479 else 3329325298)
+fn lp_nth(xs, i) = match xs
+    Nil        => 0
+    Cons(h, t) => if i <= 0 then h else lp_nth(t, i - 1)
+fn lp_msg_byte(s, slen, total, idx) = if idx < slen then lp_ord(at(s, idx)) else if idx == slen then 128 else if idx >= total - 8 then ((slen * 8) / lp_pow2(8 * (total - 1 - idx))) % 256 else 0
+fn lp_msg_word(s, slen, total, base) = lp_msg_byte(s, slen, total, base) * 16777216 + lp_msg_byte(s, slen, total, base + 1) * 65536 + lp_msg_byte(s, slen, total, base + 2) * 256 + lp_msg_byte(s, slen, total, base + 3)
+fn lp_w_build(s, slen, total, blk_off, t, w_rev) = if t >= 64 then w_rev else let wt = (if t < 16 then lp_msg_word(s, slen, total, blk_off + t * 4) else lp_u32(lp_nth(w_rev, 15) + lp_sha_sml0(lp_nth(w_rev, 14)) + lp_nth(w_rev, 6) + lp_sha_sml1(lp_nth(w_rev, 1)))) in lp_w_build(s, slen, total, blk_off, t + 1, Cons(wt, w_rev))
+fn lp_round(st, wt, kt) = let t1 = lp_u32(st.h + lp_sha_big1(st.e) + lp_sha_ch_n(st.e, st.f, st.g, 8) + kt + wt) in let t2 = lp_u32(lp_sha_big0(st.a) + lp_sha_maj_n(st.a, st.b, st.c, 8)) in {a: lp_u32(t1 + t2), b: st.a, c: st.b, d: st.c, e: lp_u32(st.d + t1), f: st.e, g: st.f, h: st.g}
+fn lp_rounds(st, w_rev, t) = if t >= 64 then st else lp_rounds(lp_round(st, lp_nth(w_rev, 63 - t), lp_sha_k(t)), w_rev, t + 1)
+fn lp_blocks(s, slen, total, blk_off, st) = if blk_off >= total then st else let w_rev = lp_w_build(s, slen, total, blk_off, 0, Nil) in let r = lp_rounds(st, w_rev, 0) in lp_blocks(s, slen, total, blk_off + 64, {a: lp_u32(st.a + r.a), b: lp_u32(st.b + r.b), c: lp_u32(st.c + r.c), d: lp_u32(st.d + r.d), e: lp_u32(st.e + r.e), f: lp_u32(st.f + r.f), g: lp_u32(st.g + r.g), h: lp_u32(st.h + r.h)})
+fn lp_hex1(n) = at("0123456789abcdef", n % 16)
+fn lp_hex32(wd) = lp_hex1(wd / 268435456) + lp_hex1(wd / 16777216) + lp_hex1(wd / 1048576) + lp_hex1(wd / 65536) + lp_hex1(wd / 4096) + lp_hex1(wd / 256) + lp_hex1(wd / 16) + lp_hex1(wd)
+fn lp_sha256_state(s) = let slen = count(s) in let total = ((slen + 9 + 63) / 64) * 64 in let init = {a: 1779033703, b: 3144134277, c: 1013904242, d: 2773480762, e: 1359893119, f: 2600822924, g: 528734635, h: 1541459225} in lp_blocks(s, slen, total, 0, init)
+fn lp_sha256_hex(s) = let fin = lp_sha256_state(s) in lp_hex32(fin.a) + lp_hex32(fin.b) + lp_hex32(fin.c) + lp_hex32(fin.d) + lp_hex32(fin.e) + lp_hex32(fin.f) + lp_hex32(fin.g) + lp_hex32(fin.h)
+
+fn lp_derive_kbyte(seed) = let w = (lp_sha256_state("lume-protect-k1|" + seed)).a in ((w % 120) + 131)
+
+## --- JSON escaping ---
+fn lp_jesc1(c) = if c == "\"" then "\\\"" else if c == "\\" then "\\\\" else if c == "\n" then "\\n" else if c == "\r" then "\\r" else if c == "\t" then "\\t" else c
+fn lp_jescl(s, i, n) = if i >= n then Nil else Cons(lp_jesc1(at(s, i)), lp_jescl(s, i + 1, n))
+fn lp_jesc(s) = lp_joinall(lp_jescl(s, 0, count(s)))
+
+## --- Parse `.asciz "..."` raw content ---
+fn lp_findq(s, i, n) = if i >= n then n else if at(s, i) == "\"" then i else lp_findq(s, i + 1, n)
+fn lp_asciz_raw(tr) = let n = count(tr) in let q1 = lp_findq(tr, 0, n) in if q1 >= n or n < 2 then "" else slice(tr, q1 + 1, n - 1)
+
+fn lp_esc_byte(c) = if c == "n" then 10 else if c == "t" then 9 else if c == "r" then 13 else if c == "0" then 0 else lp_ord(c)
+fn lp_asc_bytes(s, i, n, k) = if i >= n then Cons("0", Nil) else if at(s, i) == "\"" then Cons("0", Nil) else if at(s, i) == "\\" then let b = lp_esc_byte(at(s, i + 1)) in let eb = (if b == 0 or b == k then b else lp_xor8(b, k)) in Cons(str(eb), lp_asc_bytes(s, i + 2, n, k)) else let b = lp_ord(at(s, i)) in let eb = (if b == 0 or b == k then b else lp_xor8(b, k)) in Cons(str(eb), lp_asc_bytes(s, i + 1, n, k))
+fn lp_encrypt_asciz(tr, k) = let n = count(tr) in let q1 = lp_findq(tr, 0, n) in "    .byte " + lp_joinsep(lp_asc_bytes(tr, q1 + 1, n, k), ", ")
+
+## --- Identify `.LsN` labels passed to `call mkstr` ---
+fn lp_leaq_lab(tr) = if lp_startswith(tr, "leaq .Ls") == 1 and lp_endswith(tr, "(%rip), %rdi") == 1 then slice(tr, 5, count(tr) - 12) else ""
+fn lp_next_is_mkstr(t) = match t
+    Nil        => 0
+    Cons(h, r) => lp_trim(h) == "call mkstr"
+fn lp_drop1(t) = match t
+    Nil        => Nil
+    Cons(h, r) => r
+fn lp_collect_mkstr_labs(lines) = match lines
+    Nil        => Nil
+    Cons(h, t) => let lab = lp_leaq_lab(lp_trim(h)) in if lab != "" and lp_next_is_mkstr(t) == 1 then Cons(lab, lp_collect_mkstr_labs(t)) else lp_collect_mkstr_labs(t)
+
+## --- Identify runtime labels vs user function labels ---
+fn lp_is_rt_label(nm) = nm == "_start" or nm == "alloc" or nm == "alloc_grow" or nm == "agok" or nm == "alloc_oom" or nm == "mkint" or nm == "mkstr" or nm == "mkstr_enc" or nm == "mkctor" or nm == "mkrec" or nm == "mklist" or nm == "recget" or nm == "rg0" or nm == "rghit" or nm == "rgmiss" or nm == "rgdone" or nm == "lidx" or nm == "lix0" or nm == "strcmpv" or nm == "scp0" or nm == "scpne" or nm == "scplt" or nm == "scpeq" or nm == "cmpv" or nm == "cmpvi" or nm == "cmpvlt" or nm == "cmpvgt" or nm == "addv" or nm == "addvs" or nm == "avca" or nm == "avcb" or nm == "avcc" or nm == "avcd" or nm == "read" or nm == "rd0" or nm == "rd1" or nm == "readall" or nm == "rda0" or nm == "count" or nm == "cnts" or nm == "at" or nm == "slice" or nm == "slao" or nm == "slbo" or nm == "slno" or nm == "slcp" or nm == "slce" or nm == "slicen" or nm == "snao" or nm == "snbo" or nm == "snno" or nm == "sncp" or nm == "snce" or nm == "toint" or nm == "ti0" or nm == "ti1" or nm == "str" or nm == "strni" or nm == "stp" or nm == "stl" or nm == "std" or nm == "stro" or nm == "strlen" or nm == "sl0" or nm == "sl1" or nm == "streq" or nm == "se0" or nm == "se1" or nm == "se2" or nm == "eqv" or nm == "eqvi" or nm == "eqvs" or nm == "eqvc" or nm == "eqv0" or nm == "printval" or nm == "showval" or nm == "sv1" or nm == "sv2" or nm == "svc" or nm == "svc1" or nm == "svce" or nm == "sv3" or nm == "svr" or nm == "svr1" or nm == "svre" or nm == "sv4" or nm == "svl" or nm == "svl1" or nm == "svle" or nm == "svdone" or nm == "wcomma" or nm == "wch" or nm == "emit" or nm == "emitapp" or nm == "emit_grow" or nm == "egdbl" or nm == "egalloc" or nm == "egcopy" or nm == "egdone" or nm == "flush" or nm == "ord" or nm == "wstr" or nm == "wint" or nm == "wi1" or nm == "wi2" or nm == "wi3" or nm == "print_int" or nm == "ctfail" or nm == "oom_msg"
+
+fn lp_is_user_fn(nm) = if count(nm) == 0 then 0 else if at(nm, 0) == "." then 0 else if lp_isdigit(at(nm, 0)) then 0 else if lp_is_rt_label(nm) == 1 then 0 else 1
+
+## --- `.lsym` sidecar extraction (`@lsym <level>`) ---
+fn lp_scan_lsym(lines, sec, fidx, pidx, fns, panics) = match lines
+    Nil        => {fns: lp_rev(fns), panics: lp_rev(panics)}
+    Cons(h, t) => let tr = lp_trim(h) in if tr == ".section .rodata" then lp_scan_lsym(t, 1, fidx, pidx, fns, panics) else if tr == ".section .text" then lp_scan_lsym(t, 0, fidx, pidx, fns, panics) else if sec == 0 and lp_endswith(tr, ":") == 1 then (let nm = slice(tr, 0, count(tr) - 1) in if lp_is_user_fn(nm) == 1 then lp_scan_lsym(t, sec, fidx + 1, pidx, Cons("{\"id\":\"F" + str(fidx) + "\",\"symbol\":\"" + lp_jesc(nm) + "\"}", fns), panics) else lp_scan_lsym(t, sec, fidx, pidx, fns, panics)) else if sec == 1 and lp_startswith(tr, ".asciz ") == 1 then (let raw = lp_asciz_raw(tr) in if lp_startswith(raw, "lume: ") == 1 and lp_startswith(raw, "lume: out of memory") == 0 then lp_scan_lsym(t, sec, fidx, pidx + 1, fns, Cons("{\"code\":\"E#" + str(pidx) + "\",\"message\":\"" + lp_jesc(raw) + "\"}", panics)) else lp_scan_lsym(t, sec, fidx, pidx, fns, panics)) else lp_scan_lsym(t, sec, fidx, pidx, fns, panics)
+
+fn lp_emit_lsym(level, seed, lines) = let r = lp_scan_lsym(lines, 0, 1, 1, Nil, Nil) in let seal = lp_sha256_hex("lume-lsym-v1|" + level + "|" + seed + "|" + str(lp_isnil(r.fns))) in "{\"format\":\"lume-lsym-v1\",\"protect\":\"" + level + "\",\"seed\":\"" + lp_jesc(seed) + "\",\"seal\":\"sha256:" + seal + "\",\"symbols\":[" + lp_joinsep(r.fns, ",") + "],\"panics\":[" + lp_joinsep(r.panics, ",") + "]}"
+
+## --- Assembly Protection Transform (`@asm <level>`) ---
+## Prepends `mkstr_enc:` before `mkstr:` in `.text` when `level == "hardened"` or `level == "max"`:
+fn lp_mkstr_enc_stub(k) = "mkstr_enc:\n    pushq %rcx\n    pushq %rdx\n    pushq %r12\n    pushq %r13\n    pushq %r14\n    movq %rdi, %r12\n    call strlen\n    movq %rax, %r13\n    leaq 1(%r13), %rdi\n    call alloc\n    movq %rax, %r14\n    xorq %rcx, %rcx\n.Lmkd0:\n    cmpq %r13, %rcx\n    jge .Lmkd1\n    movb (%r12,%rcx), %dl\n    cmpb $" + str(k) + ", %dl\n    je .Lmkd_s\n    xorb $" + str(k) + ", %dl\n.Lmkd_s:\n    movb %dl, (%r14,%rcx)\n    incq %rcx\n    jmp .Lmkd0\n.Lmkd1:\n    movb $0, (%r14,%r13)\n    movq %r14, %rdi\n    popq %r14\n    popq %r13\n    popq %r12\n    popq %rdx\n    popq %rcx\nmkstr:"
+
+fn lp_mba_prologue(fn_idx) = let mask = ((fn_idx * 73 + 19) % 120) + 1 in "    xorq $" + str(mask) + ", %rax\n    xorq $" + str(mask) + ", %rax"
+
+fn lp_xform_rodata_asciz(h, tr, cur_lab, cfg, pidx) = let raw = lp_asciz_raw(tr) in let is_panic = (lp_startswith(raw, "lume: ") == 1 and lp_startswith(raw, "lume: out of memory") == 0) in let stripped = (if is_panic == 1 then "    .asciz \"E#" + str(pidx) + "\\n\"" else h) in let np = (if is_panic == 1 then pidx + 1 else pidx) in let enc = ((cfg.level == "hardened" or cfg.level == "max") and lp_has(cfg.mlabs, cur_lab) == 1) in {line: if enc == 1 then lp_encrypt_asciz(lp_trim(stripped), cfg.k) else stripped, pidx: np}
+
+fn lp_xform_lines(lines, cfg, sec, cur_lab, pidx, fidx) = match lines
+    Nil        => if cfg.level == "max" then Cons("    .section .rodata\n.Lprotect_seal:\n    .asciz \"LUME_SEAL:" + str(cfg.k) + "\"", Nil) else Nil
+    Cons(h, t) => let tr = lp_trim(h) in if tr == "" or at(tr, 0) == "#" then lp_xform_lines(t, cfg, sec, cur_lab, pidx, fidx) else if tr == ".section .rodata" then Cons(h, lp_xform_lines(t, cfg, 1, "", pidx, fidx)) else if tr == ".section .text" then Cons(h, lp_xform_lines(t, cfg, 0, "", pidx, fidx)) else if tr == ".section .bss" then Cons(h, lp_xform_lines(t, cfg, 2, "", pidx, fidx)) else if sec == 1 and lp_endswith(tr, ":") == 1 then Cons(h, lp_xform_lines(t, cfg, sec, slice(tr, 0, count(tr) - 1), pidx, fidx)) else if sec == 1 and lp_startswith(tr, ".asciz ") == 1 then (let r = lp_xform_rodata_asciz(h, tr, cur_lab, cfg, pidx) in Cons(r.line, lp_xform_lines(t, cfg, sec, cur_lab, r.pidx, fidx))) else if sec == 0 and (cfg.level == "hardened" or cfg.level == "max") and lp_leaq_lab(tr) != "" and lp_next_is_mkstr(t) == 1 then Cons(h, Cons("    call mkstr_enc", lp_xform_lines(lp_drop1(t), cfg, sec, cur_lab, pidx, fidx))) else if sec == 0 and tr == "mkstr:" and (cfg.level == "hardened" or cfg.level == "max") then Cons(lp_mkstr_enc_stub(cfg.k), lp_xform_lines(t, cfg, sec, cur_lab, pidx, fidx)) else if sec == 0 and tr == "movq %rsp, %rbp" and cfg.level == "max" then Cons(h, Cons(lp_mba_prologue(fidx), lp_xform_lines(t, cfg, sec, cur_lab, pidx, fidx + 1))) else Cons(h, lp_xform_lines(t, cfg, sec, cur_lab, pidx, fidx))
+
+fn lp_parse_header(hdr) = let tr = lp_trim(hdr) in if lp_startswith(tr, "@lsym ") == 1 then let rest = lp_trim(slice(tr, 6, count(tr))) in {mode: "lsym", level: rest} else if lp_startswith(tr, "@asm ") == 1 then let rest = lp_trim(slice(tr, 5, count(tr))) in {mode: "asm", level: rest} else {mode: "asm", level: "standard"}
+
+fn lp_run(lines) = match lines
+    Nil        => ""
+    Cons(h, t) => let hd = lp_parse_header(h) in let k = lp_derive_kbyte(hd.level) in if hd.mode == "lsym" then lp_emit_lsym(hd.level, "deterministic-v1", t) else let cfg = {level: hd.level, k: k, mlabs: lp_collect_mkstr_labs(t)} in lp_joinsep(lp_xform_lines(t, cfg, 0, "", 1, 1), "\n")
+
+print lp_run(lp_splitlines(readall()))

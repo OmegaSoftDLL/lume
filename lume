@@ -227,12 +227,46 @@ bundle_src_if_needed() {
 cmd_build() {
     _src=""
     _out=""
+    _protect=""
+    _profile=""
+    _lsym=""
     while [ $# -gt 0 ]; do
         case "$1" in
             -o)
                 [ $# -ge 2 ] || usage
                 _out=$2
                 shift 2
+                ;;
+            --protect)
+                if [ $# -ge 2 ] && case "$2" in none|standard|hardened|max) true ;; *) false ;; esac; then
+                    _protect=$2
+                    shift 2
+                else
+                    _protect="standard"
+                    shift
+                fi
+                ;;
+            --protect=*)
+                _protect=${1#--protect=}
+                shift
+                ;;
+            --profile)
+                [ $# -ge 2 ] || usage
+                _profile=$2
+                shift 2
+                ;;
+            --profile=*)
+                _profile=${1#--profile=}
+                shift
+                ;;
+            --lsym)
+                [ $# -ge 2 ] || usage
+                _lsym=$2
+                shift 2
+                ;;
+            --lsym=*)
+                _lsym=${1#--lsym=}
+                shift
                 ;;
             -*)
                 usage
@@ -255,6 +289,35 @@ cmd_build() {
             _out="$_src.out"
         fi
     fi
+    if [ -z "$_protect" ] && [ -n "$_profile" ]; then
+        case "$_profile" in
+            release) _protect="standard" ;;
+            ship)    _protect="hardened" ;;
+            debug)   _protect="none" ;;
+        esac
+    fi
+    if [ -z "$_protect" ]; then
+        _bdir=$(dirname -- "$_src")
+        _btoml=""
+        if [ -f "$_bdir/lume.toml" ]; then
+            _btoml="$_bdir/lume.toml"
+        elif [ -f "$_bdir/../lume.toml" ]; then
+            _btoml="$_bdir/../lume.toml"
+        fi
+        if [ -n "$_btoml" ] && grep -Eq '^[ \t]*protect[ \t]*=' "$_btoml"; then
+            _mtmp=$(mktemp)
+            printf '@manifest\n' > "$_mtmp"
+            cat "$_btoml" >> "$_mtmp"
+            if _mjson=$(run_core_tool lmod "$_mtmp" 2>/dev/null); then
+                case "$_mjson" in
+                    *'"protect":"max"'*)      _protect="max" ;;
+                    *'"protect":"hardened"'*) _protect="hardened" ;;
+                    *'"protect":"standard"'*) _protect="standard" ;;
+                esac
+            fi
+            rm -f "$_mtmp"
+        fi
+    fi
     _bundled=$(mktemp)
     if ! bundle_src_if_needed "$_src" "$_bundled"; then
         rm -f "$_bundled" "$_out"
@@ -265,6 +328,29 @@ cmd_build() {
     if ! "$LUMEC" < "$_bundled" > "$_tmps"; then
         rm -f "$_bundled" "$_tmps" "$_out"
         exit 1
+    fi
+    if [ -n "$_protect" ] && [ "$_protect" != "none" ]; then
+        case "$_protect" in
+            standard|hardened|max) ;;
+            *)
+                echo "lume build: invalid --protect level '$_protect' (expected none|standard|hardened|max)" >&2
+                rm -f "$_bundled" "$_tmps" "$_out"
+                exit 64
+                ;;
+        esac
+        if [ -z "$_lsym" ]; then
+            _lsym="$_out.lsym"
+        fi
+        _pin=$(mktemp)
+        printf '@lsym %s\n' "$_protect" > "$_pin"
+        cat "$_tmps" >> "$_pin"
+        run_core_tool lprotect "$_pin" | tr -d '\r' > "$_lsym"
+        printf '@asm %s\n' "$_protect" > "$_pin"
+        cat "$_tmps" >> "$_pin"
+        _tmps_prot=$(mktemp)
+        run_core_tool lprotect "$_pin" > "$_tmps_prot"
+        mv "$_tmps_prot" "$_tmps"
+        rm -f "$_pin"
     fi
     "$LASM" < "$_tmps" > "$_out"
     chmod +x "$_out"
