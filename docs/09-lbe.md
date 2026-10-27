@@ -50,7 +50,7 @@ already here: **reparse-free, structurally valid by construction.**
 ## Why this is "the easiest possible for an AI to program"
 
 1. **Invalid syntax is impossible.** The AI emits nodes, not characters. There is no "forgot a
-   bracket" failure mode. (The next step, Stage 2+, is constrained decoding over the grammar as a
+   bracket" failure mode. (The planned next step, not delivered, is constrained decoding over the grammar as a
    state machine, so the model literally cannot emit an ill-formed node sequence.)
 2. **Edits are structural and local.** Combined with content-addressing (`08-ai-first.md`), the AI
    changes one node; the rest is untouched, and its cached tests/proofs stay valid.
@@ -71,9 +71,9 @@ already here: **reparse-free, structurally valid by construction.**
   Lume-written lexer → parser → codegen pipeline emits C that the system compiler turns into a native
   binary with correct output (conformance: `codegen -> C -> native binary`). Structure in, bits out,
   with the compiler itself written in Lume.
-- Stage 2: content-addressed definitions (per-AST-hash) + constrained-decoding grammar so an AI
+- Stage 2 *(planned, not delivered; only a per-file SHA-256 lockfile exists)*: content-addressed definitions (per-AST-hash) + constrained-decoding grammar so an AI
   emits only valid node sequences.
-- Stage 2+: projectional editing — the AI edits LBE, the human sees the text projection.
+- Stage 2+ *(planned, not delivered)*: projectional editing — the AI edits LBE, the human sees the text projection.
 
 So: the AI does program at the level of structure that becomes 0s and 1s — just not by typing the
 bits by hand, which would be the one way to lose everything the language is for.
