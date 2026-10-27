@@ -1,7 +1,9 @@
 # 06 — Software protection and anti-reverse-engineering (REA)
 
-Status: **design requirement**, implemented across stages (hooks in Stage 1, full passes in
-Stage 5). This document specifies protection of the *programs a user compiles with Lume*. It is a
+Status: **design requirement — not yet implemented.** This document is the specification and the
+staged roadmap (§7); as of Phases 0–5 no protection pass, `lume` command, or `std.protect` module
+has shipped yet (the Stage-5 passes below remain to be built). This document specifies protection
+of the *programs a user compiles with Lume*. It is a
 first-class goal of the toolchain, not an afterthought, because Lume targets commercial and
 proprietary software (ERP, trading, games, licensed products) where the shipped artifact is
 intellectual property its author is entitled to protect.

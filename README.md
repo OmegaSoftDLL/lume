@@ -5,7 +5,7 @@
   <img alt="Built with 100% Lume" src="https://img.shields.io/badge/built%20with-100%25%20Lume-8A2BE2">
   <a href="https://github.com/OmegaSoftDLL/lume/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/OmegaSoftDLL/lume/actions/workflows/ci.yml/badge.svg"></a>
   <img alt="License: MIT OR Apache-2.0" src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue">
-  <img alt="Status: Phase 2 complete, Phase 3 in progress" src="https://img.shields.io/badge/status-phase%202%20complete%20%C2%B7%20phase%203%20in%20progress-8A2BE2">
+  <img alt="Status: Phases 0–5 complete · verification hardening in progress" src="https://img.shields.io/badge/status-phases%200--5%20complete%20%C2%B7%20verification%20hardening-8A2BE2">
   <img alt="PRs welcome" src="https://img.shields.io/badge/PRs-welcome-brightgreen">
 </p>
 
@@ -104,7 +104,11 @@ lume/
 │   ├── 09-lbe.md                 ← LBE: the AI emits structure (binary AST), the machine emits the bits
 │   ├── 10-stage1-status.md       ← honest inventory of what the Lume-written compiler covers
 │   ├── 11-self-hosting-plan.md   ← how the compiler was rewritten in Lume and reached the fixpoint
-│   └── 12-phase2-plan.md         ← Phase 2 roadmap: comptime, macros, data, tooling, self-evolution
+│   ├── 16-phase3-plan.md         ← Phase 3: ownership, effects, concurrency, verification (lume prove)
+│   ├── 19-intent-as-source.md    ← north star: intent as source, the compiler as an oracle
+│   ├── 21-inflection-plan.md     ← the compiler dogfoods its own features (contracts/effects/Perceus)
+│   ├── 22-adoption.md            ← AI-first go-to-market: oracle/MCP, verified certificates, flywheel
+│   └── 23-horizon.md             ← the horizon: proving whole systems across time, outliving Lume
 ├── grammar/lume.ebnf          ← formal grammar
 ├── examples/                  ← .lume programs per stage (future/ for later stages)
 ├── bootstrap/lume0/           ← Stage 0: disposable C interpreter (the seed) — lexer done
@@ -127,9 +131,12 @@ This is a **staged, self-verifying bootstrap** — the model GCC, Rust and Go us
    (`lumec.src` + `lasm.src`) from Lume source; stage 2 and stage 3 then build it again, and the
    bootstrap asserts **stage 2 == stage 3, bit for bit**. `lumec` emits x86-64 and `lasm` writes
    the ELF — no C compiler, assembler or linker in the loop. This fixpoint holds today.
-3. **Stage 4+ — `lume evolve`** (future): the language evolves through its own tooling. AI proposes
-   changes via the compiler-as-a-service API; automated gates (conformance, the staged self-build,
-   proofs, benchmarks, size budget) verify; humans decide. See `docs/04-roadmap.md`.
+3. **Self-evolution — `lume evolve`** (implemented): the language evolves through its own tooling.
+   AI proposes changes via the compiler-as-a-service API; automated gates (conformance, the staged
+   self-build, proofs, benchmarks, size budget) verify; humans decide. The compiler now also
+   **dogfoods its own features** — its passes carry `requires`/`ensures` contracts, its I/O boundary
+   is an algebraic effect, and hot paths use `own`/Perceus reuse. See `docs/04-roadmap.md` and
+   `docs/21-inflection-plan.md`.
 
 ## Status
 
@@ -137,9 +144,12 @@ This is a **staged, self-verifying bootstrap** — the model GCC, Rust and Go us
 - [x] **Stage 0 — seed `lume0`** (C, disposable; now frozen as the reproducibility root). Lexer, parser, tree-walking interpreter, a semantic `check` (undefined names, literal/annotation types, call arity, duplicate and immutable-assignment errors — the AI-first edit→check→fix loop), and the seed's own x86-64 assembler + ELF64 writer (`lume0 asm`), so no external `as`/`ld`/`cc` is ever needed.
 - [x] **Stage 1 — self-hosting, no C in the loop. ✅ Done.** Both the compiler (`compiler/stage1/lumec.src`) and the assembler + ELF writer (`compiler/stage1/lasm.src`) are written in Lume-Core. `lumec` lexes, parses (functions, `print`, expressions, `match`, records, constructors) and emits x86-64; `lasm` writes the ELF byte-by-byte. `make bootstrap` runs the staged build — the GCC/Rust/Go model: the frozen C seed mints the first tools once, then stages 1–3 rebuild the whole toolchain from Lume source with **no C**, asserting **stage 2 == stage 3, bit for bit**. `lasm`'s ELF is byte-identical to the seed assembler and strictly more correct (nearest GAS `1f`/`1b` resolution, which the seed gets wrong); the 300 KB compiler assembles in ~2.8 s. `make test` 218/0, `make asan` 177/0. See `docs/10-stage1-status.md` and `docs/11-self-hosting-plan.md`.
 - [x] **Stage 2 — comptime, macros, data, tooling, self-evolution, types. ✅ Done.** `comptime` (fold, pure-fn calls, generics via `comptime T: type`, `assert`, precomputed tables), hygienic macros + quasiquote, exact `decimal(p, s)` / `table[T]` / type-checked `query`, the single `lume` CLI (`build`/`run`/`test`/`fmt`/`doc`/`pkg`/`agent`/`evolve`) with capability-audited deps + SHA-256 lockfiles, the `lume evolve` self-evolution loop (compiler-as-a-service + 6 gates + human approval), and the gradual type system (F1 declarations, F2 annotations, F3 Hindley–Milner inference, F4 unified front-ends). Exit criterion met: the `examples/apps/inventory/` business app, built only with `lume`. All keeping `stage 2 == stage 3` and the Zero-C gate green in CI. See `docs/15-phase2-status.md`.
-- [ ] **Stage 3 — ownership, effects, concurrency, verification.** *In progress:* Track O (move/borrow checker, `from` regions, memory tiers) ✅ and Track A (AI-native authoring: typed holes, `total`, provenance/uncertainty in the type) ✅ merged; effect handlers (K), structured concurrency + actors (S), and `lume prove`/SMT contract verification (V) remaining, plus the `job_server` capstone. See `docs/16-phase3-plan.md` and the AI-first north star `docs/19-intent-as-source.md`.
-- [ ] **Stage 4** — tensors, autodiff, GPU kernels, `prob`, `rule`, `llm fn`.
-- [ ] **Stage 5** — bare metal, `lume-os`, verified core.
+- [x] **Stage 3 — ownership, effects, concurrency, verification. ✅ Done.** Track O (move/borrow checker, `from` regions, memory tiers), Track A (AI-native authoring: typed holes, `total`, provenance/uncertainty in the type), Track K (effect rows + algebraic handlers + `@capability` + Perceus reuse), Track S (structured concurrency, channels, supervised actors), and Track V (`requires`/`ensures`/`invariant`/`old`, `lume prove`, `LAWS`), plus the `job_server` capstone. The contract verifier is a **sound `QF_LIA` decision procedure** (Fourier–Motzkin / Farkas): `proven` obligations elide their runtime guard, others stay `runtime_checked`, never falsely proven. See `docs/16-phase3-plan.md`.
+- [x] **Stage 4 — tensors, autodiff, GPU kernels, `prob`, `rule`, `llm fn`. ✅ Done.** Shape-typed tensors with compile-time shape unification (`[T0300]`), differentiable `model` + symbolic autodiff (`grad`/`jvp`/`vjp`/`jit`), accelerator `kernel fn` (PTX/SPIR-V), probabilistic programming (`std.prob`), Datalog `rule`, typed `extern llm fn` with contract-repair + provenance, and spiking `std.neuro`; `mnist` and neuro-symbolic `agent` capstones. See `docs/24-phase4-plan.md`.
+- [x] **Stage 5 — systems, interop, realtime, proof certificates, `lume-os`. ✅ Done.** C-ABI + capability-scoped WASM interop (Tracks I1–I5), realtime `@interrupt`/`@bound` WCET, a minimal proof-certificate kernel (`lume certify`/`verify-cert`) + MCP server (`lume mcp`), and the capability-based `lume-os` microkernel capstone. See `docs/25-phase5-plan.md`.
+- [x] **Inflection — the compiler dogfoods its own features. ✅ Done.** Contracts in the lexer/parser/typecheck, effects at the I/O boundary, `own`/Perceus in hot paths, and the **intent-as-source oracle** (hole-guided `QF_LIA` synthesis + `lume prove` + `lume evolve` repair) — the compiler-as-oracle of `docs/19-intent-as-source.md`. See `docs/21-inflection-plan.md`.
+- [ ] **Verification & trust-layer hardening — in progress.** The language's guarantees are sound; the surrounding *trust/presentation* layer is being hardened to match, honestly: making the proof-certificate kernel re-derive proofs **independently** of the compiler (not rubber-stamp its verdict) with real cryptographic hashing, turning the heuristic WCET/WASM-sandbox models into either clearly-labelled models or enforced guarantees, and making symbolic autodiff diagnose (never silently zero) outside its differentiable fragment. Tracked in the open issues. GOLDEN RULE scales from the compiler to the ecosystem: no overclaim ships as a guarantee.
+- **Beyond the roadmap — the horizon.** Vision docs for what comes next: `docs/19` (intent-as-source / compiler-as-oracle), `docs/20` (interop), `docs/22` (AI-first adoption), and `docs/23` (the horizon: proving whole systems across time, in a form that outlives Lume).
 
 ## What works today (self-hosted, no C in the loop)
 
@@ -202,11 +212,13 @@ the same scheme as the Rust project (Go uses BSD-3-Clause; both are permissive).
 The license covers the Lume toolchain, standard library and docs; it does not restrict what you do
 with programs you write in Lume or the binaries it produces for you.
 
-## Software protection (anti-reverse-engineering)
+## Software protection (anti-reverse-engineering) — planned, not yet implemented
 
-Protecting the programs you ship is a first-class toolchain goal (`docs/06-software-protection.md`,
-principle P33): per-profile symbol stripping, constant/string encryption, control-flow obfuscation,
-selective bytecode virtualisation and tamper seals — opt-in, composable, and applied only to your
-own artifact without changing its behaviour or weakening compile-time safety. Models and LLM
-prompts embedded in a program are protected the same way. Lume ships no tooling for attacking,
-deobfuscating or evading anyone else's software.
+Protecting the programs you ship is a **design-stage** toolchain goal (`docs/06-software-protection.md`,
+principle P33) — **not yet implemented**. The plan: per-profile symbol stripping, constant/string
+encryption, control-flow obfuscation, selective bytecode virtualisation and tamper seals — opt-in,
+composable, and applied only to your own artifact without changing its behaviour or weakening
+compile-time safety, with embedded models and LLM prompts protected the same way. **No `lume`
+command, compiler pass, or `std.protect` module ships today**; `docs/06` holds the staged roadmap.
+When it does ship, Lume will ship no tooling for attacking, deobfuscating or evading anyone else's
+software.
