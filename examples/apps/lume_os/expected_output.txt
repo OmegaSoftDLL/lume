@@ -1,0 +1,1 @@
+lume_os_boot=ok free_pages=62 pte=8199 ticks=2 next_pid=1 quantum=15 agent_ipc=200 wasm_driver=33

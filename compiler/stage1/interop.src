@@ -1,0 +1,112 @@
+## Stage 5: Track I (I1-I5 Interop: C ABI, Wasm Sandbox, Reverse Export) & Track K5 (std.os.cap Linear Hardware Capabilities)
+## Provides deterministic, zero-C implementations of:
+## - C ABI layout & struct packing (@repr(c), @packed, @bits, @mmio)
+## - Capability-scoped WebAssembly sandbox host (std.wasm) with deterministic fuel & bounds checking
+## - Reverse C header & WAT export (Track I5: ffi_export_c_header, wasm_export_wat)
+## - Linear hardware capabilities (std.os.cap: cap[Page], cap[Port], cap[Irq])
+
+type List = enum Nil | Cons(int, List)
+
+fn io_len(xs) = match xs
+    Nil        => 0
+    Cons(h, t) => 1 + io_len(t)
+
+fn io_nth(xs, idx) = match xs
+    Nil        => 0
+    Cons(h, t) => if idx <= 0 then h else io_nth(t, idx - 1)
+
+fn io_set(xs, idx, val) = match xs
+    Nil        => Nil
+    Cons(h, t) => if idx <= 0 then Cons(val, t) else Cons(h, io_set(t, idx - 1, val))
+
+## --- 1. Machine-Level Layout, Bitfields & MMIO (@repr(c), @packed, @bits, @mmio) ---
+
+fn c_align_up(offset, align) = let rem = offset % align in if rem == 0 then offset else offset + (align - rem)
+
+fn repr_c_size_loop(fields, offset, max_align) = match fields
+    Nil            => c_align_up(offset, max_align)
+    Cons(sz, rest) => repr_c_size_step(sz, rest, offset, max_align)
+
+fn repr_c_size_step(sz, rest, offset, max_align) = match rest
+    Nil            => c_align_up(offset + sz, max_align)
+    Cons(al, tail) => let aligned = c_align_up(offset, al) in let next_max = if al > max_align then al else max_align in repr_c_size_loop(tail, aligned + sz, next_max)
+
+fn repr_c_sizeof(fields) = repr_c_size_loop(fields, 0, 1)
+
+fn repr_packed_sizeof(fields) = match fields
+    Nil            => 0
+    Cons(sz, rest) => repr_packed_step(sz, rest)
+
+fn repr_packed_step(sz, rest) = match rest
+    Nil            => sz
+    Cons(al, tail) => sz + repr_packed_sizeof(tail)
+
+fn bits_mask(width) = if width <= 0 then 0 else (1 + bits_mask(width - 1) * 2)
+
+fn bits_shr(word, shift) = if shift <= 0 then word else bits_shr(word / 2, shift - 1)
+
+fn bits_shl(val, shift) = if shift <= 0 then val else bits_shl(val * 2, shift - 1)
+
+fn bits_extract(word, bit_offset, width) = let shifted = bits_shr(word, bit_offset) in let mask = bits_mask(width) + 1 in shifted % mask
+
+fn bits_insert(word, bit_offset, width, val) = let mask = bits_mask(width) + 1 in let clamped = val % mask in word + bits_shl(clamped, bit_offset)
+
+fn mmio_bank_new() = Cons(0, Cons(0, Cons(0, Cons(0, Nil))))
+
+fn mmio_slot(addr) = let a = if addr < 0 then 0 - addr else addr in (a / 4) % 4
+
+fn mmio_read32(bank, addr) = io_nth(bank, mmio_slot(addr))
+
+fn mmio_write32(bank, addr, val) = io_set(bank, mmio_slot(addr), val)
+
+## --- 2. Track I1 & I5: System V AMD64 C ABI & Reverse Export ---
+
+fn ffi_wrap_foreign(raw_val, symbol) = {value: raw_val, provenance: "foreign", symbol: symbol, verified: 0}
+
+fn ffi_verify_range(fval, lo, hi) = let ok = if fval.value >= lo then (if fval.value <= hi then 1 else 0) else 0 in {value: fval.value, provenance: if ok == 1 then "verified" else "foreign", symbol: fval.symbol, verified: ok}
+
+fn ffi_export_c_header(fn_name, arity) = let params = if arity == 0 then "void" else if arity == 1 then "int64_t a0" else if arity == 2 then "int64_t a0, int64_t a1" else "int64_t a0, int64_t a1, int64_t a2" in "/* Lume Verified C-ABI Export (Track I5) */\nextern int64_t " + fn_name + "(" + params + ");\n"
+
+fn wasm_export_wat(fn_name) = "(module (func $" + fn_name + " (export \"" + fn_name + "\") (param i64 i64) (result i64) local.get 0 local.get 1 i64.add))"
+
+## --- 3. Track I4: Capability-Scoped WebAssembly Sandbox Host (std.wasm) ---
+
+fn wasm_module_new(mem_pages, fuel_limit) = {mem: Cons(0, Cons(0, Cons(0, Cons(0, Nil)))), pages: mem_pages, fuel: fuel_limit, cap_fs: 0, cap_net: 0, trapped: 0, last_result: 0}
+
+fn wasm_grant_cap(inst, cap_name) = if cap_name == "fs" then {mem: inst.mem, pages: inst.pages, fuel: inst.fuel, cap_fs: 1, cap_net: inst.cap_net, trapped: inst.trapped, last_result: inst.last_result} else if cap_name == "net" then {mem: inst.mem, pages: inst.pages, fuel: inst.fuel, cap_fs: inst.cap_fs, cap_net: 1, trapped: inst.trapped, last_result: inst.last_result} else inst
+
+fn wasm_call_add(inst, a, b, cost) = if inst.trapped == 1 then inst else if inst.fuel < cost then {mem: inst.mem, pages: inst.pages, fuel: 0, cap_fs: inst.cap_fs, cap_net: inst.cap_net, trapped: 1, last_result: 0} else {mem: inst.mem, pages: inst.pages, fuel: inst.fuel - cost, cap_fs: inst.cap_fs, cap_net: inst.cap_net, trapped: 0, last_result: a + b}
+
+fn wasm_store32(inst, offset, val) = if inst.trapped == 1 then inst else if offset < 0 then {mem: inst.mem, pages: inst.pages, fuel: inst.fuel, cap_fs: inst.cap_fs, cap_net: inst.cap_net, trapped: 1, last_result: 0} else if offset >= 4 then {mem: inst.mem, pages: inst.pages, fuel: inst.fuel, cap_fs: inst.cap_fs, cap_net: inst.cap_net, trapped: 1, last_result: 0} else if inst.fuel < 1 then {mem: inst.mem, pages: inst.pages, fuel: 0, cap_fs: inst.cap_fs, cap_net: inst.cap_net, trapped: 1, last_result: 0} else {mem: io_set(inst.mem, offset, val), pages: inst.pages, fuel: inst.fuel - 1, cap_fs: inst.cap_fs, cap_net: inst.cap_net, trapped: 0, last_result: val}
+
+fn wasm_load32(inst, offset) = if inst.trapped == 1 then 0 - 1 else if offset < 0 then 0 - 1 else if offset >= 4 then 0 - 1 else io_nth(inst.mem, offset)
+
+fn wasm_call_host_fs(inst) = if inst.cap_fs == 1 then {mem: inst.mem, pages: inst.pages, fuel: inst.fuel - 1, cap_fs: inst.cap_fs, cap_net: inst.cap_net, trapped: 0, last_result: 200} else {mem: inst.mem, pages: inst.pages, fuel: inst.fuel, cap_fs: inst.cap_fs, cap_net: inst.cap_net, trapped: 1, last_result: 0 - 403}
+
+## --- 4. Track K5: Linear Hardware Capabilities (std.os.cap: cap[Page], cap[Port], cap[Irq]) ---
+
+fn cap_page_new(pfn, perms) = {kind: "cap[Page]", pfn: pfn, perms: perms, linear_alive: 1}
+
+fn cap_page_map(cpage, vaddr) = if cpage.linear_alive == 0 then {ok: 0, pte: 0, pfn: cpage.pfn, vaddr: vaddr, linear_alive: 0} else {ok: 1, pte: cpage.pfn * 4096 + cpage.perms, pfn: cpage.pfn, vaddr: vaddr, linear_alive: 0}
+
+fn cap_port_new(port_num) = {kind: "cap[Port]", port: port_num, last_val: 0, linear_alive: 1}
+
+fn cap_port_out(cport, byte_val) = {kind: "cap[Port]", port: cport.port, last_val: byte_val % 256, linear_alive: cport.linear_alive}
+
+fn cap_port_in(cport) = cport.last_val
+
+fn cap_irq_new(irq_num) = {kind: "cap[Irq]", irq: irq_num, ack_count: 0, linear_alive: 1}
+
+fn cap_irq_ack(cirq) = {kind: "cap[Irq]", irq: cirq.irq, ack_count: cirq.ack_count + 1, linear_alive: cirq.linear_alive}
+
+## --- 5. Unit Tests (lume test compiler/stage1/interop.src) ---
+
+fn test_repr_c_and_packed_layout() = let fields = Cons(1, Cons(1, Cons(8, Cons(8, Cons(2, Cons(2, Nil)))))) in let c_sz = repr_c_sizeof(fields) in let p_sz = repr_packed_sizeof(fields) in if c_sz == 24 and p_sz == 11 then 1 else 0
+
+fn test_bits_and_mmio_registers() = let w0 = bits_insert(0, 4, 3, 5) in let ext = bits_extract(w0, 4, 3) in let bank0 = mmio_bank_new() in let bank1 = mmio_write32(bank0, 8, 42) in if ext == 5 and mmio_read32(bank1, 8) == 42 then 1 else 0
+
+fn test_ffi_provenance_and_reverse_export() = let raw = ffi_wrap_foreign(42, "sqlite3_open") in let checked = ffi_verify_range(raw, 0, 100) in let hdr = ffi_export_c_header("lume_verified_pay", 2) in if raw.verified == 0 and checked.verified == 1 and count(hdr) > 20 then 1 else 0
+
+fn test_wasm_sandbox_capabilities_and_fuel() = let w0 = wasm_module_new(1, 10) in let w1 = wasm_call_add(w0, 19, 23, 3) in let w2 = wasm_store32(w1, 2, w1.last_result) in let loaded = wasm_load32(w2, 2) in let denied = wasm_call_host_fs(w2) in let granted = wasm_call_host_fs(wasm_grant_cap(w2, "fs")) in if loaded == 42 and denied.trapped == 1 and granted.last_result == 200 then 1 else 0
+
+fn test_linear_hardware_capabilities() = let pg = cap_page_new(7, 3) in let mapped = cap_page_map(pg, 4096) in let irq0 = cap_irq_new(32) in let irq1 = cap_irq_ack(irq0) in if mapped.ok == 1 and mapped.pte == 28675 and irq1.ack_count == 1 then 1 else 0

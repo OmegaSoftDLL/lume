@@ -1,0 +1,29 @@
+## Stage 5 Conformance Test: Machine-level attributes, Interop (Track I1-I5),
+## Realtime/Interrupts/WCET (@bound, @interrupt), Linear Capabilities (cap[Page]),
+## and QF_LIA-proven kernel contracts with zero runtime ctfail guards.
+
+@capability(allow: ["ffi", "wasm", "interrupt", "realtime"])
+
+type List = enum Nil | Cons(int, List)
+
+@repr(c)
+type MmioReg = {addr: int, val: int}
+
+extern "c" fn c_timer_ticks(scale: int) -> int
+
+pub extern "c" fn lume_verified_clamp(x: int, hi: int) -> int requires hi >= 0 ensures result <= hi = if x > hi then hi else x
+
+@interrupt(irq: 32)
+@bound(cycles: 32)
+fn timer_isr(ticks: int) -> int / {interrupt} requires ticks >= 0 ensures result > ticks = ticks + 1
+
+@bound(cycles: 64)
+pub fn sched_next_slot(cur: int, n_procs: int) -> int / {realtime} requires cur >= 0 requires n_procs > 0 ensures result >= 0 = if cur + 1 < n_procs then cur + 1 else 0
+
+pub fn safe_timer_read(scale: int) -> int / {ffi} requires scale >= 1 ensures result >= 0 = let raw = verify(c_timer_ticks(scale)) in if raw >= 0 then raw else 0
+
+fn c_timer_ticks(scale: int) -> int = scale * 100
+
+fn main_sys() -> int = let isr_t = timer_isr(41) in let slot = sched_next_slot(2, 4) in let clamped = lume_verified_clamp(500, 255) in let ext_v = safe_timer_read(2) in isr_t + slot + clamped + ext_v
+
+print main_sys()

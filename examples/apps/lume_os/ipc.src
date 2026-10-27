@@ -1,0 +1,8 @@
+## Stage 5 Capstone (lume-os): Typed Capability IPC, Process Table & Hosted Stage-4 Agent App
+
+fn ipc_channel_new(chan_id, cap_badge) = {chan_id: chan_id, badge: cap_badge, msg_tag: 0, payload: 0, delivered: 0}
+
+fn ipc_send_checked(chan, badge, tag, payload) = if chan.badge == badge then {chan_id: chan.chan_id, badge: chan.badge, msg_tag: tag, payload: payload, delivered: chan.delivered + 1} else chan
+
+## Runs the Stage 4 neuro-symbolic agent inside an isolated user-space task and returns its decision over IPC
+fn user_agent_task_step(chan, badge, item1, item2) = let edges = Cons(dl_edge("n1", "n2"), Cons(dl_edge("n2", "n3"), Nil)) in let cl = datalog_closure(edges, 4) in let reach = datalog_query_from("n1", cl) in let inv = llm_extract_invoice_repaired("INV-OS", 999, item1, item2) in let n0 = lif_neuron_new(0, 100, 8, 10) in let n1 = lif_run_Currents(n0, Cons(60, Cons(60, Cons(60, Nil))), 1) in let status_code = if reach == 2 and inv.repaired == 1 and n1.spikes >= 1 then 200 else 500 in ipc_send_checked(chan, badge, status_code, (inv.total / 10) + n1.spikes)

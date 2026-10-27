@@ -41,7 +41,10 @@ usage:
   lume fmt   [--check] <file>               format a Lume source file in place (or verify with --check)
   lume pkg   <init|check|lock|verify|tree>  manage lume.toml manifest, capabilities & SHA-256 lume.lock
   lume agent [check|compile|ast|...] <file> query in-process compiler-as-a-service JSON protocol
-  lume prove [--json] <file.src>            verify requires/ensures/invariant/law contracts statically
+  lume prove [--json] <file.src>            verify requires/ensures/invariant/law/wcet contracts statically
+  lume certify [--json] <file.src>          emit machine-checkable proof certificate & Lume Verified badge
+  lume verify-cert [--json] <file.src>      independently verify proof certificate via minimal proof kernel
+  lume mcp   [--json] <file.src>            serve Model Context Protocol (MCP) tools & diagnostics for AI agents
   lume evolve <verify|approve|goals|...>    run self-evolution gates and human governance loop
   lume check [--json] <file.lume|file.src>  run static semantic checks
   lume compile [--json] [--run] <file.src>  compile-as-a-service: structured {ok, diagnostics, asm, stdout}
@@ -679,8 +682,10 @@ EOF
 cmd_agent() {
     [ $# -ge 1 ] || usage
     _afile=""
+    _amode=""
     for _arg in "$@"; do
         case "$_arg" in
+            bind) _amode="bind" ;;
             check|compile|fill|prove|ast|expand|symbols|eval|--json) ;;
             -*) usage ;;
             *) _afile=$_arg ;;
@@ -691,6 +696,14 @@ cmd_agent() {
         echo "lume agent: cannot read $_afile" >&2
         exit 66
     fi
+    if [ "$_amode" = "bind" ]; then
+        _btmp=$(mktemp)
+        printf '@mode bind\n' > "$_btmp"
+        cat "$_afile" >> "$_btmp"
+        run_core_tool lcert "$_btmp"
+        rm -f "$_btmp"
+        return 0
+    fi
     _abun=$(mktemp)
     if ! bundle_src_if_needed "$_afile" "$_abun"; then
         rm -f "$_abun"
@@ -698,6 +711,91 @@ cmd_agent() {
     fi
     run_core_tool lcaas "$_abun"
     rm -f "$_abun"
+}
+
+cmd_certify() {
+    [ $# -ge 1 ] || usage
+    _cfile=""
+    for _arg in "$@"; do
+        case "$_arg" in
+            --json) ;;
+            -*) usage ;;
+            *) _cfile=$_arg ;;
+        esac
+    done
+    [ -n "$_cfile" ] || usage
+    if [ ! -f "$_cfile" ]; then
+        echo "lume certify: cannot read $_cfile" >&2
+        exit 66
+    fi
+    _cbun=$(mktemp)
+    if ! bundle_src_if_needed "$_cfile" "$_cbun"; then
+        rm -f "$_cbun"
+        exit 1
+    fi
+    _cjson=$(run_core_tool lcert "$_cbun")
+    rm -f "$_cbun"
+    printf '%s\n' "$_cjson"
+    case "$_cjson" in
+        *'"ok":true'*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+cmd_verify_cert() {
+    [ $# -ge 1 ] || usage
+    _cfile=""
+    for _arg in "$@"; do
+        case "$_arg" in
+            --json) ;;
+            -*) usage ;;
+            *) _cfile=$_arg ;;
+        esac
+    done
+    [ -n "$_cfile" ] || usage
+    if [ ! -f "$_cfile" ]; then
+        echo "lume verify-cert: cannot read $_cfile" >&2
+        exit 66
+    fi
+    _cbun=$(mktemp)
+    if ! bundle_src_if_needed "$_cfile" "$_cbun"; then
+        rm -f "$_cbun"
+        exit 1
+    fi
+    _cjson=$(run_core_tool lcert "$_cbun")
+    rm -f "$_cbun"
+    printf '%s\n' "$_cjson"
+    case "$_cjson" in
+        *'"kernel_verified":true'*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+cmd_mcp() {
+    [ $# -ge 1 ] || usage
+    _mfile=""
+    for _arg in "$@"; do
+        case "$_arg" in
+            --json) ;;
+            -*) usage ;;
+            *) _mfile=$_arg ;;
+        esac
+    done
+    [ -n "$_mfile" ] || usage
+    if [ ! -f "$_mfile" ]; then
+        echo "lume mcp: cannot read $_mfile" >&2
+        exit 66
+    fi
+    _mbun=$(mktemp)
+    if ! bundle_src_if_needed "$_mfile" "$_mbun"; then
+        rm -f "$_mbun"
+        exit 1
+    fi
+    _mtmp=$(mktemp)
+    printf '@mode mcp\n' > "$_mtmp"
+    cat "$_mbun" >> "$_mtmp"
+    run_core_tool lcert "$_mtmp"
+    rm -f "$_mbun" "$_mtmp"
 }
 
 cmd_prove() {
@@ -847,6 +945,15 @@ case "$_sub" in
         ;;
     prove)
         cmd_prove "$@"
+        ;;
+    certify)
+        cmd_certify "$@"
+        ;;
+    verify-cert)
+        cmd_verify_cert "$@"
+        ;;
+    mcp)
+        cmd_mcp "$@"
         ;;
     evolve)
         cmd_evolve "$@"

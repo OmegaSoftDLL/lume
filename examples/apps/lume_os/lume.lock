@@ -1,0 +1,8 @@
+# lume.lock — deterministic content-addressed lockfile (P26, P32)
+version = 1
+manifest = {"name":"lume_os","version":"0.5.0","edition":"2026","capabilities":"io"}
+manifest_sha256 = "e3ab4c8744fb029d92292d48a2333beca5230c3d010a67c67dbd9896ce7aca25"
+module "caps.src" sha256 = "c6fd184e96c62c3a37330ad43de5c8f8a0ea6696f039754d2c6f8b7a9b800873"
+module "ipc.src" sha256 = "08a1b545d197cd123d360cacfb0338df9c3d8f911bfba43950f4fe5c02f6a55e"
+module "main.src" sha256 = "21568532664596f5a8451879378ab11b1a9b6d3e6f607f1bc7e875a1484afaee"
+module "scheduler.src" sha256 = "1f5a6f8567cee90b4a93172d155ff61ac7d52a04d962533c8807faf2c23df6ba"
