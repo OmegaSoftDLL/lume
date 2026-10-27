@@ -55,7 +55,7 @@ jobs:
             https://github.com/OmegaSoftDLL/lume.git
           git config --global protocol.file.allow always
           expected_sha="$(git --git-dir="$source_repo" rev-parse refs/heads/main)"
-          resolved_sha="$(git ls-remote https://github.com/OmegaSoftDLL/lume.git HEAD | cut -f1)"
-          test "$resolved_sha" = "$expected_sha"
+          resolved="$(git ls-remote https://github.com/OmegaSoftDLL/lume.git HEAD)"
+          [[ "$resolved" == "$expected_sha"$'\t'* ]]
           cd linguist
           script/add-grammar https://github.com/OmegaSoftDLL/lume
