@@ -1,0 +1,35 @@
+## data_d4_ok.src -- Track D4 (#214): persist table WAL crash-safety, versioned time-travel,
+## unit-typed money[CCY] currency arithmetic & FX conversion, and @soa columnar vectorised layout.
+use decimal
+use table
+use query
+
+@soa type LedgerEntry = record id: int, account: str, amount: decimal(10, 2), units: int
+
+fn ledger_schema() = Cons({name: "id", type: "int"}, Cons({name: "account", type: "str"}, Cons({name: "amount", type: "decimal"}, Cons({name: "units", type: "int"}, Nil))))
+
+fn initial_ledger() -> table[LedgerEntry] = read_csv("id,account,amount,units\n1,Cash,120.50,10\n2,Revenue,340.00,25", ledger_schema())
+
+fn new_row_v2() = Cons({kind: "int", value: 3}, Cons({kind: "str", value: "Tax"}, Cons({kind: "decimal", value: decimal_parse("39.50")}, Cons({kind: "int", value: 5}, Nil))))
+
+fn new_row_v3() = Cons({kind: "int", value: 4}, Cons({kind: "str", value: "Reserve"}, Cons({kind: "decimal", value: decimal_parse("100.00")}, Cons({kind: "int", value: 15}, Nil))))
+
+## 1. Crash-safe WAL persistence (`persist_open`, `persist_commit`, torn write rejection, `persist_recover`)
+fn test_persist_wal_crash_recovery() -> int = let t1 = initial_ledger() in let s1 = persist_open("data/ledger.wal", ledger_schema(), t1) in let t2 = table_insert_row(t1, new_row_v2()) in let s2 = persist_commit(s1, t2) in let crashed = persist_append_torn(s2, "id,account,amount,units\n99,Corrupt,\"unterminated") in let rec = persist_recover(crashed) in rec.ok == 1 and rec.version == 2 and table_row_count(rec.current) == 3 and table_cell(rec.current, 2, 1).value.value == "Tax"
+
+## 2. Versioned tables (`versioned_new`, `versioned_commit`, `versioned_at` time-travel)
+fn test_versioned_table_time_travel() -> int = let t1 = initial_ledger() in let t2 = table_insert_row(t1, new_row_v2()) in let t3 = table_insert_row(t2, new_row_v3()) in let v1 = versioned_new(t1) in let v2 = versioned_commit(v1, t2) in let v3 = versioned_commit(v2, t3) in let snap1 = versioned_at(v3, 1) in let snap2 = versioned_at(v3, 2) in let snap3 = versioned_at(v3, 3) in versioned_latest_version(v3) == 3 and table_row_count(snap1) == 2 and table_row_count(snap2) == 3 and table_row_count(snap3) == 4
+
+## 3. Unit-typed currency `money[CCY]` (`money_parse`, `money_add`, `money_sub`, `money_mul_int`, `money_convert_fx`)
+fn brl_net(gross: money[BRL], tax: money[BRL]) -> money[BRL] = money_sub(gross, tax)
+
+fn test_money_unit_typed_arithmetic() -> int = let price_brl = money_parse("BRL", "150.00") in let tax_brl = money_parse("BRL", "22.50") in let net_brl = brl_net(price_brl, tax_brl) in let batch_brl = money_mul_int(net_brl, 4) in let usd_equiv = money_convert_fx(batch_brl, "USD", 1, 5) in money_format(net_brl) == "BRL 127.50" and money_format(batch_brl) == "BRL 510.00" and money_format(usd_equiv) == "USD 102.00" and money_cmp(batch_brl, price_brl) == 1
+
+## 4. Columnar `@soa` layout (`table_to_soa`, `soa_sum_int`, `soa_sum_decimal`, `soa_filter_count_int`)
+fn test_soa_columnar_vectorised_ops() -> int = let t1 = initial_ledger() in let t2 = table_insert_row(t1, new_row_v2()) in let t3 = table_insert_row(t2, new_row_v3()) in let soa = table_to_soa(t3) in soa.ok == 1 and soa.row_count == 4 and soa_sum_int(soa, "units") == 55 and decimal_format(soa_sum_decimal(soa, "amount")) == "600.00" and soa_filter_count_int(soa, "units", ">=", 10) == 3
+
+print test_persist_wal_crash_recovery()
+print test_versioned_table_time_travel()
+print test_money_unit_typed_arithmetic()
+print test_soa_columnar_vectorised_ops()
+print money_format(brl_net(money_parse("BRL", "500.00"), money_parse("BRL", "75.25")))

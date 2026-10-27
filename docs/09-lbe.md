@@ -71,9 +71,8 @@ already here: **reparse-free, structurally valid by construction.**
   Lume-written lexer → parser → codegen pipeline emits C that the system compiler turns into a native
   binary with correct output (conformance: `codegen -> C -> native binary`). Structure in, bits out,
   with the compiler itself written in Lume.
-- Stage 2 *(planned, not delivered; only a per-file SHA-256 lockfile exists)*: content-addressed definitions (per-AST-hash) + constrained-decoding grammar so an AI
-  emits only valid node sequences.
-- Stage 2+ *(planned, not delivered)*: projectional editing — the AI edits LBE, the human sees the text projection.
+- Stage 2 (shipped in `lcaas.src` / `lume agent`): content-addressed definitions (`lume agent hashes` computing per-definition `sha256:` over canonical AST S-expressions + proof-status cache keys) + constrained-decoding grammar surface (`lume agent grammar` emitting production rules, AST constructor schemas, active symbols, and hole constraints).
+- Stage 2+ (shipped in `lcaas.src` / `lfmt.src`): projectional editing & round-trip projection (`lume agent project` and `lume fmt` verifying `roundtrip_ast_equal: true` between canonical AST S-expressions and formatted surface projections).
 
 So: the AI does program at the level of structure that becomes 0s and 1s — just not by typing the
 bits by hand, which would be the one way to lose everything the language is for.

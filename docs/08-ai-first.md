@@ -55,9 +55,10 @@ in Unison), this gives properties a text-first language cannot:
   tool, or as a compact token stream for another model — all from one canonical structure.
 
 The text syntax (`docs/03-specification.md`) remains the human-review projection and the on-ramp; it
-is not abandoned. But the roadmap treats the structured, content-addressed representation as the
-native substrate the AI author works in (*planned, not delivered:* content-addressed definitions and the
-projectional editing surface; today only a per-file SHA-256 lockfile exists).
+is not abandoned. The roadmap and compiler-as-a-service (`lume agent hashes`, `lume agent grammar`,
+`lume agent project`, `lume fmt`) expose per-definition content-addressed AST hashes (`sha256:` over
+canonical S-expressions + cached proof status), a constrained-decoding grammar surface, and
+round-trip projectional editing alongside the per-file SHA-256 `lume.lock` manifest.
 
 ## Humans are not removed — they are promoted
 

@@ -234,7 +234,8 @@ fn tqjoinoutfields(fields, prefix, out, tt) = match fields
     Cons(field, rest) => if tfieldhas(tqfields(out, tt), prefix + "_" + field.fname) == 1 and tcompat(tqfieldtype(out, prefix + "_" + field.fname, tt), field.fty) == 1 then 1 + tqjoinoutfields(rest, prefix, out, tt) else 0 - 999999
 ## a generic function (has a GSig) is checked with the generic rule (bind type params, then check runtime args);
 ## everything else keeps F2's ordinary signature check.
-fn tchkcallg(nm, args, g, tt) = match g
+fn tchkcallg(nm, args, g, tt) = if nm == "money_add" or nm == "money_sub" or nm == "money_cmp" then (let m = tknown_money_bin(args, tt) in 0) else tchkcallg2(nm, args, g, tt)
+fn tchkcallg2(nm, args, g, tt) = match g
     Nil         => tchksig(nm, args, tsiglookup(nm, tt.sigs), tt)
     Cons(gg, r) => tchkgcall(nm, args, gg, tt)
 fn isastctorar(tag) = if tag == "Nil" then 0 else if tag == "Num" or tag == "Str" or tag == "Var" then 1 else if tag == "Cons" or tag == "Call" then 2 else if tag == "Bin" or tag == "If" or tag == "LetIn" then 3 else 0 - 1
@@ -278,7 +279,16 @@ fn tknown(e, tt) = match e
     RecT(tn, its) => tknownrec(tn, trecptypelookup(tn, tt.recs), its, tt)
     _             => TyAny
 fn tknown_cons_list(h, tt) = let eh = tknown(h, tt) in if isany(eh) == 1 then TyAny else TyList(eh)
-fn tknowncall(nm, xs, tt) = if nm == "decimal" then tknown_decimal_call(xs) else if nm == "decimal_cast" then tknown_decimal_cast(xs) else if nm == "Cons" and len(xs) == 2 and isnil(tctorlookup("Cons", tt.ctors)) == 1 then tknown_cons_list(asthead(xs), tt) else if tqname(nm) then tknownquery(nm, xs) else tknown_call_result(nm, xs, tt)
+fn tknown_money_call(xs) = match xs
+    Cons(Str(ccy), rest) => if ccy != "" then TyApply("money", TyName(ccy)) else TyAny
+    _ => TyAny
+fn tknown_money_fx(xs) = match xs
+    Cons(m, Cons(Str(ccy), rest)) => if ccy != "" then TyApply("money", TyName(ccy)) else TyAny
+    _ => TyAny
+fn tknown_money_bin(xs, tt) = match xs
+    Cons(a, Cons(b, Nil)) => let ka = tknown(a, tt) in let kb = tknown(b, tt) in if isany(ka) == 0 and isany(kb) == 0 and tcompat(ka, kb) == 0 then ctfail("lume: type error: currency mismatch in money operation: cannot mix " + tystr(ka) + " and " + tystr(kb) + "\n") else if isany(ka) == 0 then ka else kb
+    _ => TyAny
+fn tknowncall(nm, xs, tt) = if nm == "decimal" then tknown_decimal_call(xs) else if nm == "decimal_cast" then tknown_decimal_cast(xs) else if nm == "money_parse" or nm == "money_make" then tknown_money_call(xs) else if nm == "money_convert_fx" then tknown_money_fx(xs) else if nm == "money_add" or nm == "money_sub" then tknown_money_bin(xs, tt) else if nm == "money_cmp" then (let m = tknown_money_bin(xs, tt) in TyName("int")) else if nm == "Cons" and len(xs) == 2 and isnil(tctorlookup("Cons", tt.ctors)) == 1 then tknown_cons_list(asthead(xs), tt) else if tqname(nm) then tknownquery(nm, xs) else tknown_call_result(nm, xs, tt)
 fn tqname(nm) = nm == "query_where" or nm == "query_order" or nm == "query_join" or nm == "query_group"
 fn tknownquery(nm, xs) = if nm == "query_join" then tknownqueryout(xs, 2) else if nm == "query_group" then tknownqueryout(xs, 1) else tknownqueryout(xs, 0)
 fn tknownqueryout(xs, index) = match xs
