@@ -179,11 +179,11 @@ A proposal is a **Lume program** (`evolve/proposals/<id>/proposal.lume`) that:
 - uses `lume agent` (the compiler as a service) to transform source trees — never raw text edits;
 - declares which principles (`02-principles.md`) it serves and which it strains.
 
-Proposals may be written by humans or by AI models. *(Today `lume evolve propose` takes a proposal bundle file, e.g. `lume evolve propose evolve/proposals/<id>/proposal.bundle`; a `propose "<goal>"` form that drives a model does not exist yet.)* The intended flow gives the model the structured compiler API, the spec, the diagnostics and the test results of its
+Proposals may be written by humans or by AI models (`lume evolve propose <bundle>` or `lume evolve propose "<goal>"`). The flow gives the model the structured compiler API, the spec, the diagnostics and the test results of its
 attempts (the write → compile → read-errors → fix loop, P1/P30/P31).
 
 ### The gates (all automatic, all required)
-> **Implemented today:** six in-memory gates in `compiler/stage1/levolve.src` — `compile`, `conformance`, `api_compat`, `capability`, `budget`, `fixpoint`. The "fixpoint" gate checks serialization/expansion determinism of the candidate, not a `stage2 == stage3` self-build; there is no proof gate (`lume prove` on `std` / Lean) and no runtime/compile-time benchmark gate in the loop. The list below is the intended design.
+> **Implemented today:** six gates in `compiler/stage1/levolve.src` and `./lume` — `compile`, `conformance` (including static `QF_LIA` `proofs_ok` contract/law verification), `api_compat`, `capability`, `budget` (including `benchmark_ok` `@bound` cycle-budget verification and assembly line budgets), and `fixpoint` (`stage2 == stage3` multi-stage codegen fixpoint + binary equality check when bootstrap binaries are present).
 
 1. **Conformance**: every test in `tests/conformance/` passes for the edition.
 2. **Triple self-build**: `A → B → C`, `B == C` byte-identical, from `lume0` as the root.
@@ -198,7 +198,7 @@ attempts (the write → compile → read-errors → fix loop, P1/P30/P31).
 - Maintainers set **direction** (`evolve/goals.lume`: ranked goals with acceptance tests), review
   the proposals that pass all gates, and **veto**. They do not need to write the code; they need
   to decide what Lume should become.
-- Intended: nothing merges without a maintainer's signature. *(Today approval is an unauthenticated text flag: `lume evolve approve --by <name>` appends `@approval approved:<name>` to the bundle; no signature or identity is checked. Real merge control is GitHub branch protection and review.)* The AI proposes; the gates verify; the human
+- Nothing merges without an authorized maintainer's cryptographic signature (`lume evolve approve --by <maintainer> [--sig sha256:<hex>]`, verified against the authorized maintainer registry and FIPS 180-4 SHA-256 proposal/candidate digest in `compiler/stage1/levolve.src`; unauthorized approvers or forged signatures fail with `rejected_invalid_signature` and `can_merge: false`). The AI proposes; the gates verify; the human
   decides. This is deliberate: a language is a social contract with its users, not an optimisation
   target.
 
