@@ -1,0 +1,17 @@
+## main.src -- Stage 4 Capstone 1: End-to-End Neural Network Training (`examples/apps/mnist/`)
+## Exercises Track N1 (`std.tensor`) and Track N2 (`std.nn`, reverse-mode autodiff `mlp2_grad`,
+## `sgd_step_mlp2`, `safetensors` + `onnx` export, and PTX/SPIR-V accelerator codegen).
+use tensor
+use nn
+use dataset
+use model
+
+fn test_mnist_initial_and_trained_loss() = let x = mnist_train_x() in let y = mnist_train_y() in let m0 = mnist_init_model() in let l0 = mlp2_loss(m0, x, y) in let m1 = mnist_train_epochs(m0, x, y, 2, 1) in let l1 = mlp2_loss(m1, x, y) in if l0 == 120 and l1 == 0 then 1 else 0
+
+fn test_mnist_trained_accuracy_100() = let x = mnist_train_x() in let y = mnist_train_y() in let m1 = mnist_train_epochs(mnist_init_model(), x, y, 2, 1) in if mlp2_accuracy(m1, x, y) == 100 then 1 else 0
+
+fn test_mnist_safetensors_and_onnx_export() = let m1 = mnist_train_epochs(mnist_init_model(), mnist_train_x(), mnist_train_y(), 2, 1) in let st = model_save_safetensors(m1) in let ox = model_export_onnx(m1, "mnist_mlp2") in if st != "" and ox != "" then 1 else 0
+
+fn run_mnist_app() = let x = mnist_train_x() in let y = mnist_train_y() in let m0 = mnist_init_model() in let l0 = mlp2_loss(m0, x, y) in let m1 = mnist_train_epochs(m0, x, y, 2, 1) in let l1 = mlp2_loss(m1, x, y) in let acc = mlp2_accuracy(m1, x, y) in "mnist_loss_init=" + str(l0) + " mnist_loss_final=" + str(l1) + " accuracy=" + str(acc) + "% hash=" + model_content_hash(m1)
+
+print run_mnist_app()

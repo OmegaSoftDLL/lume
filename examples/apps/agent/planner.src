@@ -1,0 +1,6 @@
+## planner.src -- Stage 4 Capstone 2: Probabilistic Risk Estimation (`std.prob`)
+## & Spiking Anomaly Watchdog (`std.neuro`)
+
+fn agent_vendor_reliability_milli() = let prior = dist_beta(2, 2) in infer_mcmc(prior, 6, 2, 100)
+
+fn agent_spiking_watchdog_spikes() = let n0 = lif_neuron_new(0, 100, 8, 10) in let currents = Cons(60, Cons(60, Cons(20, Cons(90, Nil)))) in let n1 = lif_run_Currents(n0, currents, 1) in n1.spikes

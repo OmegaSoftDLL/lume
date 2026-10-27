@@ -1,0 +1,6 @@
+## rules.src -- Stage 4 Capstone 2: Datalog Approval Graph (`std.rules`)
+## Computes transitive authorization reachability across organizational roles.
+
+fn agent_policy_edges() = Cons(dl_edge("analyst", "manager"), Cons(dl_edge("manager", "director"), Cons(dl_edge("director", "cfo"), Nil)))
+
+fn agent_reachable_approvers(role) = let cl = datalog_closure(agent_policy_edges(), 5) in datalog_query_from(role, cl)

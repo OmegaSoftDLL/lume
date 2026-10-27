@@ -21,6 +21,7 @@ fn ostarts(s, p) = if count(s) < count(p) then 0 else slice(s, 0, count(p)) == p
 fn ois_free(mflags) = mflags % 2
 fn ois_total(mflags) = (mflags / 2) % 2
 fn ois_llm(mflags) = (mflags / 4) % 2
+fn ois_kernel(mflags) = (mflags / 8) % 2
 
 fn ais_hole_name(nm) = if nm == "_" or ostarts(nm, "_hole") == 1 then 1 else 0
 
@@ -31,6 +32,14 @@ fn ois_unverified_ty(ty) = match ty
 fn ohas_unverified_tys(tys) = match tys
     Nil        => 0
     Cons(h, t) => if ois_unverified_ty(h) == 1 then 1 else ohas_unverified_tys(t)
+
+fn ois_tensor_ty(ty) = match ty
+    TyTensor(e, ds) => 1
+    _               => 0
+
+fn ohas_tensor_tys(tys) = match tys
+    Nil        => 0
+    Cons(h, t) => if ois_tensor_ty(h) == 1 then 1 else ohas_tensor_tys(t)
 
 fn oany(prog) = match prog
     Nil        => 0
@@ -45,7 +54,7 @@ fn oanystmt(st) = match st
     VContractSig(nm, ps, reqs, enss)      => 1
     VTypeInvariant(nm, fs, inv)           => 1
     VLawDecl(nm, ps, body)                => 1
-    Sig(nm, ps, ts, rt)                   => if ohas_unverified_tys(ts) == 1 or ois_unverified_ty(rt) == 1 then 1 else 0
+    Sig(nm, ps, ts, rt)                   => if ohas_unverified_tys(ts) == 1 or ois_unverified_ty(rt) == 1 or ohas_tensor_tys(ts) == 1 or ois_tensor_ty(rt) == 1 then 1 else 0
     Fn(nm, ps, body)                      => oanye(body)
     Print(v)                              => oanye(v)
     ExprS(v)                              => oanye(v)
@@ -65,7 +74,7 @@ fn oanye(e) = match e
     LetIn(nm, v, b)         => if oanye(v) == 1 then 1 else oanye(b)
     If(c, t, e2)            => if oanye(c) == 1 then 1 else if oanye(t) == 1 then 1 else oanye(e2)
     Bin(op, l, r)           => if oanye(l) == 1 then 1 else oanye(r)
-    Call(nm, args)          => if nm == "borrow" or nm == "borrow_mut" or nm == "move" or nm == "clone" or nm == "verify" or nm == "law_check" or nm == "evolve_approve" or nm == "llm_complete" or nm == "prob_sample" or nm == "old" then 1 else oanyargs(args)
+    Call(nm, args)          => if nm == "borrow" or nm == "borrow_mut" or nm == "move" or nm == "clone" or nm == "verify" or nm == "law_check" or nm == "evolve_approve" or nm == "llm_complete" or nm == "prob_sample" or nm == "sample_dist" or nm == "observe_lik" or nm == "old" or nm == "grad" or nm == "jvp" or nm == "vjp" or nm == "vmap" or nm == "jit" or nm == "matmul" or nm == "tensor_matmul" or nm == "tensor_add" or nm == "tensor_sub" or nm == "tensor_mul" or nm == "tensor_add_bias" then 1 else oanyargs(args)
     Field(o, fld)           => oanye(o)
     Rec(items)              => oanyrec(items)
     RecT(tn, items)         => oanyrec(items)
@@ -172,7 +181,7 @@ fn keff_join(xs) = match xs
     Nil        => ""
     Cons(h, t) => if isnil(t) == 1 then h else h + ", " + keff_join(t)
 
-fn kprim_eff(cnm) = if cnm == "io_write" or cnm == "io_read" or cnm == "println" or cnm == "read" or cnm == "readall" or cnm == "emit" or cnm == "flush" then "io" else if cnm == "fs_read" or cnm == "fs_write" or cnm == "fs_open" then "fs" else if cnm == "net_send" or cnm == "net_recv" or cnm == "net_connect" or cnm == "db_exec" then "net" else if cnm == "rc_new" or cnm == "arc_new" or cnm == "alloc_heap" or cnm == "table_new" or cnm == "box_new" then "alloc" else if cnm == "rand_int" or cnm == "prob_sample" or cnm == "llm_complete" then "rand" else if cnm == "time_now" or cnm == "clock_now" or cnm == "sleep_ms" then "time" else if cnm == "fail_err" or cnm == "raise_err" then "fail" else if cnm == "panic_msg" then "panic" else if cnm == "async_await" or cnm == "spawn_task" then "async" else ""
+fn kprim_eff(cnm) = if cnm == "io_write" or cnm == "io_read" or cnm == "println" or cnm == "read" or cnm == "readall" or cnm == "emit" or cnm == "flush" then "io" else if cnm == "fs_read" or cnm == "fs_write" or cnm == "fs_open" then "fs" else if cnm == "net_send" or cnm == "net_recv" or cnm == "net_connect" or cnm == "db_exec" then "net" else if cnm == "rc_new" or cnm == "arc_new" or cnm == "alloc_heap" or cnm == "table_new" or cnm == "box_new" then "alloc" else if cnm == "rand_int" or cnm == "prob_sample" or cnm == "llm_complete" then "rand" else if cnm == "sample_dist" or cnm == "observe_lik" then "prob" else if cnm == "llm_prompt" then "llm" else if cnm == "time_now" or cnm == "clock_now" or cnm == "sleep_ms" then "time" else if cnm == "fail_err" or cnm == "raise_err" then "fail" else if cnm == "panic_msg" then "panic" else if cnm == "async_await" or cnm == "spawn_task" then "async" else ""
 
 fn kinfer_call_effs(cnm, ksigs, edecls, fns, d) = let pe = kprim_eff(cnm) in let ue = kop_effect(cnm, edecls) in let base = keff_add(pe, keff_add(ue, Nil)) in let mks = keffsig_lookup(cnm, ksigs) in match mks
     Cons(ks, r) => keff_union(base, keff_diff(ks.effs, Cons("pure", Nil)))
@@ -726,7 +735,11 @@ fn auinit_from_sig(msig) = match msig
     Nil        => Nil
     Cons(sg, r) => auinit_vars(sg.pn, sg.pt)
 
-fn ais_unverified_fn(cnm, osigs, sigs) = if cnm == "llm_complete" or cnm == "prob_sample" then 1 else if ais_llm_osig(osiglookup(cnm, osigs)) == 1 then 1 else ais_unverified_ret(tsiglookup(cnm, sigs))
+fn vhas_ensures_sig(mvs) = match mvs
+    Nil          => 0
+    Cons(vsg, r) => if isnil(vsg.enss) == 0 then 1 else 0
+
+fn ais_unverified_fn(cnm, osigs, sigs, vsigs) = if cnm == "llm_complete" or cnm == "prob_sample" or cnm == "sample_dist" or cnm == "llm_prompt" then 1 else if ais_llm_osig(osiglookup(cnm, osigs)) == 1 then (if vhas_ensures_sig(vsiglookup(cnm, vsigs)) == 1 then 0 else 1) else ais_unverified_ret(tsiglookup(cnm, sigs))
 
 fn ais_llm_osig(msig) = match msig
     Nil        => 0
@@ -784,7 +797,7 @@ fn achk_sink_args(fnm, cnm, args, pts, uvars, ot) = match args
     Nil        => 0
     Cons(a, r) => let ta = achk_prov_e(a, fnm, uvars, ot) in if ta == 1 and ois_unverified_ty(ohd_ty(pts)) == 0 then ctfail("lume: provenance error [A0003]: unverified AI/probabilistic value in '" + fnm + "' cannot flow into trusted sink '" + cnm + "' without verification (fix-it: validate with 'verify(x, <contract>)' before calling '" + cnm + "')\n") else achk_sink_args(fnm, cnm, r, ptl(pts), uvars, ot)
 
-fn achk_prov_call(cnm, args, fnm, uvars, ot) = if cnm == "verify" or cnm == "law_check" or cnm == "evolve_approve" then let z = achk_prov_args(args, fnm, uvars, ot) in 0 else if ais_trusted_sink(cnm, ot.osigs) == 1 then let z = achk_sink_args(fnm, cnm, args, asig_pts(cnm, ot.sigs), uvars, ot) in ais_unverified_fn(cnm, ot.osigs, ot.sigs) else let ta = achk_prov_args(args, fnm, uvars, ot) in if ais_unverified_fn(cnm, ot.osigs, ot.sigs) == 1 or ta == 1 then 1 else 0
+fn achk_prov_call(cnm, args, fnm, uvars, ot) = if cnm == "verify" or cnm == "law_check" or cnm == "evolve_approve" then let z = achk_prov_args(args, fnm, uvars, ot) in 0 else if ais_trusted_sink(cnm, ot.osigs) == 1 then let z = achk_sink_args(fnm, cnm, args, asig_pts(cnm, ot.sigs), uvars, ot) in ais_unverified_fn(cnm, ot.osigs, ot.sigs, ot.vsigs) else let ta = achk_prov_args(args, fnm, uvars, ot) in if ais_unverified_fn(cnm, ot.osigs, ot.sigs, ot.vsigs) == 1 or ta == 1 then 1 else 0
 
 ## ============================================================================================================
 ## Track S1: Structured concurrency (`scope` / `spawn`) & static `Send`/`Sync` checking (`[S0001]`)
@@ -951,7 +964,7 @@ fn veval_args(args, env, old_env, fns, d) = match args
     Nil        => {ok: 1, vals: Nil}
     Cons(h, t) => let rh = veval(h, env, old_env, fns, d) in if rh.ok == 0 then {ok: 0, vals: Nil} else let rt = veval_args(t, env, old_env, fns, d) in if rt.ok == 0 then {ok: 0, vals: Nil} else {ok: 1, vals: Cons(rh, rt.vals)}
 
-fn veval_call(cnm, args, env, old_env, fns, d) = if cnm == "old" and len(args) == 1 then veval(ohd_e(args), old_env, old_env, fns, d) else if (cnm == "verify" or cnm == "law_check" or cnm == "evolve_approve" or cnm == "borrow" or cnm == "borrow_mut" or cnm == "move" or cnm == "clone") and len(args) >= 1 then veval(ohd_e(args), env, old_env, fns, d) else if cnm == "dec_add" and len(args) == 2 then veval_bin("+", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else if cnm == "dec_sub" and len(args) == 2 then veval_bin("-", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else if cnm == "dec_eq" and len(args) == 2 then veval_bin("==", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else if cnm == "dec_lt" and len(args) == 2 then veval_bin("<", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else if cnm == "dec_le" and len(args) == 2 then veval_bin("<=", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else if cnm == "dec_gt" and len(args) == 2 then veval_bin(">", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else if cnm == "dec_ge" and len(args) == 2 then veval_bin(">=", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else veval_ufn(vfnlookup(cnm, fns), veval_args(args, env, old_env, fns, d), fns, d)
+fn veval_call(cnm, args, env, old_env, fns, d) = if cnm == "old" and len(args) == 1 then veval(ohd_e(args), old_env, old_env, fns, d) else if (cnm == "verify" or cnm == "law_check" or cnm == "evolve_approve" or cnm == "borrow" or cnm == "borrow_mut" or cnm == "move" or cnm == "clone") and len(args) >= 1 then veval(ohd_e(args), env, old_env, fns, d) else if cnm == "grad" and len(args) >= 2 then veval_call("__ad_grad_" + n4_var_name(ohd_e(args)), ptl(args), env, old_env, fns, d) else if cnm == "jit" and len(args) >= 2 then veval_call(n4_var_name(ohd_e(args)), ptl(args), env, old_env, fns, d) else if cnm == "dec_add" and len(args) == 2 then veval_bin("+", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else if cnm == "dec_sub" and len(args) == 2 then veval_bin("-", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else if cnm == "dec_eq" and len(args) == 2 then veval_bin("==", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else if cnm == "dec_lt" and len(args) == 2 then veval_bin("<", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else if cnm == "dec_le" and len(args) == 2 then veval_bin("<=", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else if cnm == "dec_gt" and len(args) == 2 then veval_bin(">", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else if cnm == "dec_ge" and len(args) == 2 then veval_bin(">=", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else veval_ufn(vfnlookup(cnm, fns), veval_args(args, env, old_env, fns, d), fns, d)
 
 fn veval_ufn(mf, ra, fns, d) = match mf
     Nil        => vv_err()
@@ -1086,7 +1099,7 @@ fn vlin_expr1(e, hyps, lenv, fns, d) = match e
     CT(inner)       => vlin_expr(inner, hyps, lenv, fns, d)
     DeferE(c, b)    => vlin_expr(b, hyps, lenv, fns, d)
     ErrDeferE(c, b) => vlin_expr(b, hyps, lenv, fns, d)
-    LetIn(nm, v, b) => let lv = vlin_expr(v, hyps, lenv, fns, d) in if lv.ok == 0 then vlin_err() else vlin_expr(b, hyps, Cons({k: nm, v: lv}, lenv), fns, d)
+    LetIn(nm, v, b) => let gfn = n4_is_grad_let(v) in if gfn != "" then vlin_expr(n4_subst_call(b, nm, "__ad_grad_" + gfn), hyps, lenv, fns, d) else let lv = vlin_expr(v, hyps, lenv, fns, d) in if lv.ok == 0 then vlin_err() else vlin_expr(b, hyps, Cons({k: nm, v: lv}, lenv), fns, d)
     VarIn(nm, v, b) => let lv = vlin_expr(v, hyps, lenv, fns, d) in if lv.ok == 0 then vlin_err() else vlin_expr(b, hyps, Cons({k: nm, v: lv}, lenv), fns, d)
     Bin(op, l, r)   => if op == "+" then vlin_add(vlin_expr(l, hyps, lenv, fns, d), vlin_expr(r, hyps, lenv, fns, d)) else if op == "-" then vlin_sub(vlin_expr(l, hyps, lenv, fns, d), vlin_expr(r, hyps, lenv, fns, d)) else if op == "*" then vlin_mul(vlin_expr(l, hyps, lenv, fns, d), vlin_expr(r, hyps, lenv, fns, d)) else vlin_err()
     If(c, t, e2)    => let rp = vcond_pos(c, hyps, lenv, fns, d) in let rn = vcond_neg(c, hyps, lenv, fns, d) in if rp.ok == 1 and rn.ok == 1 and vfm_check_unsat(app(rn.hyps, hyps)) == 1 then vlin_expr(t, hyps, lenv, fns, d) else if rp.ok == 1 and rn.ok == 1 and vfm_check_unsat(app(rp.hyps, hyps)) == 1 then vlin_expr(e2, hyps, lenv, fns, d) else vlin_err()
@@ -1097,7 +1110,7 @@ fn vlin_args(args, hyps, lenv, fns, d) = match args
     Nil        => {ok: 1, vals: Nil}
     Cons(h, t) => let rh = vlin_expr(h, hyps, lenv, fns, d) in if rh.ok == 0 then {ok: 0, vals: Nil} else let rt = vlin_args(t, hyps, lenv, fns, d) in if rt.ok == 0 then {ok: 0, vals: Nil} else {ok: 1, vals: Cons(rh, rt.vals)}
 
-fn vlin_call(cnm, args, hyps, lenv, fns, d) = if cnm == "old" and len(args) == 1 then vlin_expr(ohd_e(args), hyps, lenv, fns, d) else if (cnm == "verify" or cnm == "law_check" or cnm == "evolve_approve" or cnm == "borrow" or cnm == "borrow_mut" or cnm == "move" or cnm == "clone") and len(args) >= 1 then vlin_expr(ohd_e(args), hyps, lenv, fns, d) else if cnm == "dec_add" and len(args) == 2 then vlin_add(vlin_expr(ohd_e(args), hyps, lenv, fns, d), vlin_expr(ohd_e(ptl(args)), hyps, lenv, fns, d)) else if cnm == "dec_sub" and len(args) == 2 then vlin_sub(vlin_expr(ohd_e(args), hyps, lenv, fns, d), vlin_expr(ohd_e(ptl(args)), hyps, lenv, fns, d)) else vlin_ufn(vfnlookup(cnm, fns), vlin_args(args, hyps, lenv, fns, d), hyps, fns, d)
+fn vlin_call(cnm, args, hyps, lenv, fns, d) = if cnm == "old" and len(args) == 1 then vlin_expr(ohd_e(args), hyps, lenv, fns, d) else if (cnm == "verify" or cnm == "law_check" or cnm == "evolve_approve" or cnm == "borrow" or cnm == "borrow_mut" or cnm == "move" or cnm == "clone") and len(args) >= 1 then vlin_expr(ohd_e(args), hyps, lenv, fns, d) else if cnm == "grad" and len(args) >= 2 then vlin_call("__ad_grad_" + n4_var_name(ohd_e(args)), ptl(args), hyps, lenv, fns, d) else if cnm == "jvp" and len(args) == 3 then vlin_mul(vlin_call("__ad_grad_" + n4_var_name(ohd_e(args)), Cons(ohd_e(ptl(args)), Nil), hyps, lenv, fns, d), vlin_expr(ohd_e(ptl(ptl(args))), hyps, lenv, fns, d)) else if cnm == "vjp" and len(args) == 3 then vlin_mul(vlin_expr(ohd_e(ptl(ptl(args))), hyps, lenv, fns, d), vlin_call("__ad_grad_" + n4_var_name(ohd_e(args)), Cons(ohd_e(ptl(args)), Nil), hyps, lenv, fns, d)) else if cnm == "jit" and len(args) >= 2 then vlin_call(n4_var_name(ohd_e(args)), ptl(args), hyps, lenv, fns, d) else if cnm == "dec_add" and len(args) == 2 then vlin_add(vlin_expr(ohd_e(args), hyps, lenv, fns, d), vlin_expr(ohd_e(ptl(args)), hyps, lenv, fns, d)) else if cnm == "dec_sub" and len(args) == 2 then vlin_sub(vlin_expr(ohd_e(args), hyps, lenv, fns, d), vlin_expr(ohd_e(ptl(args)), hyps, lenv, fns, d)) else vlin_ufn(vfnlookup(cnm, fns), vlin_args(args, hyps, lenv, fns, d), hyps, fns, d)
 
 fn vlin_ufn(mf, ra, hyps, fns, d) = match mf
     Nil        => vlin_err()
@@ -1123,7 +1136,7 @@ fn vprove_reqs_hyps(reqs, lenv, fns) = match reqs
 
 fn vprove_goal(g, hyps, lenv, fns, d) = match g
     Num(n)          => if n != 0 then 1 else 0
-    LetIn(nm, v, b) => let lv = vlin_expr(v, hyps, lenv, fns, d) in if lv.ok == 0 then 0 else vprove_goal(b, hyps, Cons({k: nm, v: lv}, lenv), fns, d)
+    LetIn(nm, v, b) => let gfn = n4_is_grad_let(v) in if gfn != "" then vprove_goal(n4_subst_call(b, nm, "__ad_grad_" + gfn), hyps, lenv, fns, d) else let lv = vlin_expr(v, hyps, lenv, fns, d) in if lv.ok == 0 then 0 else vprove_goal(b, hyps, Cons({k: nm, v: lv}, lenv), fns, d)
     VarIn(nm, v, b) => let lv = vlin_expr(v, hyps, lenv, fns, d) in if lv.ok == 0 then 0 else vprove_goal(b, hyps, Cons({k: nm, v: lv}, lenv), fns, d)
     DeferE(c, b)    => vprove_goal(b, hyps, lenv, fns, d)
     ErrDeferE(c, b) => vprove_goal(b, hyps, lenv, fns, d)
@@ -1137,7 +1150,7 @@ fn vprove_goals_all(enss, hyps, lenv, fns, d) = match enss
     Cons(h, t) => if vprove_goal(h, hyps, lenv, fns, d) == 1 then vprove_goals_all(t, hyps, lenv, fns, d) else 0
 
 fn vprove_body(body, hyps, lenv, enss, fns, d) = match body
-    LetIn(nm, v, b) => let lv = vlin_expr(v, hyps, lenv, fns, d) in if lv.ok == 0 then 0 else vprove_body(b, hyps, Cons({k: nm, v: lv}, lenv), enss, fns, d)
+    LetIn(nm, v, b) => let gfn = n4_is_grad_let(v) in if gfn != "" then vprove_body(n4_subst_call(b, nm, "__ad_grad_" + gfn), hyps, lenv, enss, fns, d) else let lv = vlin_expr(v, hyps, lenv, fns, d) in if lv.ok == 0 then 0 else vprove_body(b, hyps, Cons({k: nm, v: lv}, lenv), enss, fns, d)
     VarIn(nm, v, b) => let lv = vlin_expr(v, hyps, lenv, fns, d) in if lv.ok == 0 then 0 else vprove_body(b, hyps, Cons({k: nm, v: lv}, lenv), enss, fns, d)
     DeferE(c, b)    => vprove_body(b, hyps, lenv, enss, fns, d)
     ErrDeferE(c, b) => vprove_body(b, hyps, lenv, enss, fns, d)
@@ -1285,11 +1298,184 @@ fn apub_osig(mosig) = match mosig
     Nil          => 0
     Cons(osg, r) => osg.pubf
 
+## ============================================================================================================
+## Phase 4 Track N1: Symbolic Tensor Shape Unification & `[T0300]` Shape Verification
+## ============================================================================================================
+fn n4_is_digits(s) = if count(s) == 0 then 0 else isdigit(at(s, 0))
+
+fn n4_tdims(ty) = match ty
+    TyTensor(e, ds) => ds
+    _               => Nil
+
+fn n4_dim0(ds) = phd(ds)
+fn n4_dim1(ds) = phd(ptl(ds))
+
+fn n4_dim_compat(d1, d2) = if d1 == "" or d2 == "" or d1 == d2 then 1 else if n4_is_digits(d1) == 1 and n4_is_digits(d2) == 1 then 0 else 1
+
+fn n4_lookup_tenv(k, tenv) = match tenv
+    Nil        => Nil
+    Cons(h, t) => if h.k == k then h.ds else n4_lookup_tenv(k, t)
+
+fn n4_rec_fields(tn, recs) = match recs
+    Nil        => Nil
+    Cons(h, t) => if h.rname == tn then h.fields else n4_rec_fields(tn, t)
+
+fn n4_bind_rec_fields(p, fields, rest) = match fields
+    Nil        => rest
+    Cons(f, r) => let ds = n4_tdims(f.fty) in let next = n4_bind_rec_fields(p, r, rest) in if isnil(ds) == 0 then Cons({k: p + "." + f.fname, ds: ds}, next) else next
+
+fn n4_init_tenv_ps(pns, pts, recs) = match pns
+    Nil         => Nil
+    Cons(pn, r) => let ty = ohd_ty(pts) in let ds = n4_tdims(ty) in let rest = n4_init_tenv_ps(r, ptl(pts), recs) in if isnil(ds) == 0 then Cons({k: pn, ds: ds}, rest) else n4_init_tenv_rec(pn, ty, recs, rest)
+
+fn n4_init_tenv_rec(pn, ty, recs, rest) = match ty
+    TyName(tn) => n4_bind_rec_fields(pn, n4_rec_fields(tn, recs), rest)
+    _          => rest
+
+fn n4_init_tenv(msig, recs) = match msig
+    Nil        => Nil
+    Cons(sg, r) => n4_init_tenv_ps(sg.pn, sg.pt, recs)
+
+fn n4_num_str(e) = match e
+    Num(n) => str(n)
+    _      => ""
+
+fn n4_infer_dims(e, fnm, tenv, ot) = match e
+    Var(x)          => n4_lookup_tenv(x, tenv)
+    Field(o, fld)   => n4_infer_field_dims(o, fld, tenv)
+    LetIn(nm, v, b) => let dv = n4_infer_dims(v, fnm, tenv, ot) in n4_infer_dims(b, fnm, if isnil(dv) == 0 then Cons({k: nm, ds: dv}, tenv) else tenv, ot)
+    VarIn(nm, v, b) => let dv = n4_infer_dims(v, fnm, tenv, ot) in n4_infer_dims(b, fnm, if isnil(dv) == 0 then Cons({k: nm, ds: dv}, tenv) else tenv, ot)
+    If(c, t, e2)    => let dc = n4_infer_dims(c, fnm, tenv, ot) in let dt = n4_infer_dims(t, fnm, tenv, ot) in let de = n4_infer_dims(e2, fnm, tenv, ot) in dt
+    Bin(op, l, r)   => let dl = n4_infer_dims(l, fnm, tenv, ot) in let dr = n4_infer_dims(r, fnm, tenv, ot) in Nil
+    Call(cnm, args) => n4_infer_call_dims(cnm, args, fnm, tenv, ot)
+    _               => Nil
+
+fn n4_infer_field_dims(o, fld, tenv) = match o
+    Var(x) => n4_lookup_tenv(x + "." + fld, tenv)
+    _      => Nil
+
+fn n4_infer_args_dims(args, fnm, tenv, ot) = match args
+    Nil        => Nil
+    Cons(a, r) => Cons(n4_infer_dims(a, fnm, tenv, ot), n4_infer_args_dims(r, fnm, tenv, ot))
+
+fn n4_senv_lookup(s, senv) = match senv
+    Nil        => s
+    Cons(h, t) => if h.k == s then h.v else n4_senv_lookup(s, t)
+
+fn n4_bind_dim(pat_d, act_d, cnm, fnm, senv) = if act_d == "" then senv else if n4_is_digits(pat_d) == 1 then (if n4_dim_compat(pat_d, act_d) == 0 then ctfail("lume: tensor shape error [T0300]: argument to '" + cnm + "' in '" + fnm + "' has dimension " + act_d + " but parameter expects " + pat_d + " (fix-it: reshape tensor dimension " + act_d + " to " + pat_d + ")\n") else senv) else let prev = n4_senv_lookup(pat_d, senv) in if prev == pat_d then Cons({k: pat_d, v: act_d}, senv) else if n4_dim_compat(prev, act_d) == 0 then ctfail("lume: tensor shape error [T0300]: symbolic tensor dimension '" + pat_d + "' in call to '" + cnm + "' in '" + fnm + "' unified to " + prev + " and conflicts with " + act_d + " (fix-it: ensure all '" + pat_d + "' dimensions match " + prev + ")\n") else senv
+
+fn n4_unify_dims_list(pds, ads, cnm, fnm, senv) = match pds
+    Nil          => senv
+    Cons(pd, pr) => n4_unify_dims_step(pd, pr, ads, cnm, fnm, senv)
+
+fn n4_unify_dims_step(pd, pr, ads, cnm, fnm, senv) = match ads
+    Nil          => senv
+    Cons(ad, ar) => n4_unify_dims_list(pr, ar, cnm, fnm, n4_bind_dim(pd, ad, cnm, fnm, senv))
+
+fn n4_unify_sig_args(pts, adims, cnm, fnm, senv) = match pts
+    Nil          => senv
+    Cons(pt, pr) => n4_unify_sig_arg1(n4_tdims(pt), pr, adims, cnm, fnm, senv)
+
+fn n4_unify_sig_arg1(pds, pr, adims, cnm, fnm, senv) = match adims
+    Nil          => senv
+    Cons(ad, ar) => let senv2 = if isnil(pds) == 0 and isnil(ad) == 0 then (if len(pds) != len(ad) then ctfail("lume: tensor shape error [T0300]: argument to '" + cnm + "' in '" + fnm + "' has rank " + str(len(ad)) + " but parameter expects rank " + str(len(pds)) + "\n") else n4_unify_dims_list(pds, ad, cnm, fnm, senv)) else senv in n4_unify_sig_args(pr, ar, cnm, fnm, senv2)
+
+fn n4_subst_dims(ds, senv) = match ds
+    Nil        => Nil
+    Cons(d, r) => Cons(n4_senv_lookup(d, senv), n4_subst_dims(r, senv))
+
+fn n4_call_sig_dims(cnm, adims, fnm, msig) = match msig
+    Nil        => Nil
+    Cons(sg, r) => let senv = n4_unify_sig_args(sg.pt, adims, cnm, fnm, Nil) in n4_subst_dims(n4_tdims(sg.rt), senv)
+
+fn n4_infer_call_dims(cnm, args, fnm, tenv, ot) = let adims = n4_infer_args_dims(args, fnm, tenv, ot) in if (cnm == "tensor_zeros" or cnm == "tensor_ones" or cnm == "tensor_mat") and len(args) >= 2 then (let r0 = n4_num_str(ohd_e(args)) in let c0 = n4_num_str(ohd_e(ptl(args))) in if r0 != "" and c0 != "" then Cons(r0, Cons(c0, Nil)) else Nil) else if (cnm == "matmul" or cnm == "tensor_matmul" or cnm == "einsum_ij_jk") and len(args) == 2 then (let da = phd_l(adims) in let db = phd_l(ptl(adims)) in if len(da) == 2 and len(db) == 2 then (let r1 = n4_dim0(da) in let c1 = n4_dim1(da) in let r2 = n4_dim0(db) in let c2 = n4_dim1(db) in if n4_dim_compat(c1, r2) == 0 then ctfail("lume: tensor shape error [T0300]: cannot multiply tensor of shape [" + r1 + ", " + c1 + "] by tensor of shape [" + r2 + ", " + c2 + "] in '" + fnm + "' — inner dimensions " + c1 + " != " + r2 + " (fix-it: transpose one operand or change weight shape to [" + c1 + ", " + c2 + "])\n") else Cons(r1, Cons(c2, Nil))) else Nil) else if (cnm == "tensor_add" or cnm == "tensor_sub" or cnm == "tensor_mul") and len(args) == 2 then (let da = phd_l(adims) in let db = phd_l(ptl(adims)) in if len(da) == 2 and len(db) == 2 then (let r1 = n4_dim0(da) in let c1 = n4_dim1(da) in let r2 = n4_dim0(db) in let c2 = n4_dim1(db) in if n4_dim_compat(c1, c2) == 0 or (n4_dim_compat(r1, r2) == 0 and r1 != "1" and r2 != "1") then ctfail("lume: tensor shape error [T0300]: elementwise tensor operation '" + cnm + "' in '" + fnm + "' has incompatible shapes [" + r1 + ", " + c1 + "] and [" + r2 + ", " + c2 + "] (fix-it: align tensor shapes to [" + r1 + ", " + c1 + "])\n") else da) else Nil) else if cnm == "tensor_add_bias" and len(args) == 2 then (let da = phd_l(adims) in let db = phd_l(ptl(adims)) in if len(da) == 2 and len(db) == 2 then (let r1 = n4_dim0(da) in let c1 = n4_dim1(da) in let r2 = n4_dim0(db) in let c2 = n4_dim1(db) in if n4_dim_compat(c1, c2) == 0 then ctfail("lume: tensor shape error [T0300]: bias addition in '" + fnm + "' has matrix columns " + c1 + " != bias columns " + c2 + " (fix-it: change bias shape to [1, " + c1 + "])\n") else da) else Nil) else if cnm == "tensor_transpose" and len(args) == 1 then (let da = phd_l(adims) in if len(da) == 2 then Cons(n4_dim1(da), Cons(n4_dim0(da), Nil)) else Nil) else if (cnm == "tensor_relu" or cnm == "tensor_scale") and len(args) >= 1 then phd_l(adims) else n4_call_sig_dims(cnm, adims, fnm, tsiglookup(cnm, ot.sigs))
+
+fn phd_l(xs) = match xs
+    Nil        => Nil
+    Cons(h, t) => h
+
+fn n4_chk_fn_tensors(nm, body, msig, ot) = let tenv = n4_init_tenv(msig, ot.recs) in let db = n4_infer_dims(body, nm, tenv, ot) in let rds = n4_tdims(aget_sig_rty(msig)) in if len(db) == 2 and len(rds) == 2 then (if n4_dim_compat(n4_dim0(db), n4_dim0(rds)) == 0 or n4_dim_compat(n4_dim1(db), n4_dim1(rds)) == 0 then ctfail("lume: tensor shape error [T0300]: function '" + nm + "' returns tensor of shape [" + n4_dim0(db) + ", " + n4_dim1(db) + "] but signature declares [" + n4_dim0(rds) + ", " + n4_dim1(rds) + "] (fix-it: change return shape annotation or final projection layer)\n") else 1) else 1
+
+## ============================================================================================================
+## Phase 4 Track N2: Symbolic Reverse/Forward Autodiff (`grad`/`jvp`/`vjp`/`vmap`/`jit`) & `kernel fn` Check
+## ============================================================================================================
+fn n4_lookup_dvar(nm, dvars) = match dvars
+    Nil        => Num(0)
+    Cons(h, t) => if h.k == nm then h.dv else n4_lookup_dvar(nm, t)
+
+fn n4_diff_e(e, v, dvars) = match e
+    Num(n)          => Num(0)
+    Var(nm)         => if nm == v then Num(1) else n4_lookup_dvar(nm, dvars)
+    Bin(op, a, b)   => if op == "+" then Bin("+", n4_diff_e(a, v, dvars), n4_diff_e(b, v, dvars)) else if op == "-" then Bin("-", n4_diff_e(a, v, dvars), n4_diff_e(b, v, dvars)) else if op == "*" then Bin("+", Bin("*", n4_diff_e(a, v, dvars), b), Bin("*", a, n4_diff_e(b, v, dvars))) else Num(0)
+    If(c, t, e2)    => If(c, n4_diff_e(t, v, dvars), n4_diff_e(e2, v, dvars))
+    LetIn(nm, x, b) => let dx = n4_diff_e(x, v, dvars) in let dnm = "_ad_d_" + nm in LetIn(dnm, dx, LetIn(nm, x, n4_diff_e(b, v, Cons({k: nm, dv: Var(dnm)}, dvars))))
+    _               => Num(0)
+
+fn n4_collect_grads_e(e, acc) = match e
+    Call(nm, args)  => let acc2 = n4_collect_grads_args(args, acc) in if (nm == "grad" or nm == "jvp" or nm == "vjp") and isnil(args) == 0 then n4_add_grad_target(ohd_e(args), acc2) else acc2
+    Bin(op, l, r)   => n4_collect_grads_e(r, n4_collect_grads_e(l, acc))
+    If(c, t, e2)    => n4_collect_grads_e(e2, n4_collect_grads_e(t, n4_collect_grads_e(c, acc)))
+    LetIn(nm, v, b) => n4_collect_grads_e(b, n4_collect_grads_e(v, acc))
+    VarIn(nm, v, b) => n4_collect_grads_e(b, n4_collect_grads_e(v, acc))
+    _               => acc
+
+fn n4_collect_grads_args(xs, acc) = match xs
+    Nil        => acc
+    Cons(h, t) => n4_collect_grads_args(t, n4_collect_grads_e(h, acc))
+
+fn n4_add_grad_target(e, acc) = match e
+    Var(fnm) => if omem(fnm, acc) == 1 then acc else Cons(fnm, acc)
+    _        => acc
+
+fn n4_collect_grads_prog(prog, acc) = match prog
+    Nil        => acc
+    Cons(h, t) => n4_collect_grads_stmt(h, n4_collect_grads_prog(t, acc))
+
+fn n4_collect_grads_stmt(st, acc) = match st
+    Fn(nm, ps, body)                  => n4_collect_grads_e(body, acc)
+    VContractSig(nm, ps, reqs, enss)  => n4_collect_grads_args(reqs, n4_collect_grads_args(enss, acc))
+    VLawDecl(nm, ps, body)            => n4_collect_grads_e(body, acc)
+    Print(v)                          => n4_collect_grads_e(v, acc)
+    ExprS(v)                          => n4_collect_grads_e(v, acc)
+    _                                 => acc
+
+fn n4_synth_grad_fns(targets, raw_fns) = match targets
+    Nil          => Nil
+    Cons(fnm, r) => n4_synth_grad_one(fnm, vfnlookup(fnm, raw_fns), n4_synth_grad_fns(r, raw_fns))
+
+fn n4_synth_grad_one(fnm, mf, rest) = match mf
+    Nil        => rest
+    Cons(f, r) => Cons(Fn("__ad_grad_" + fnm, f.ps, n4_diff_e(f.body, phd(f.ps), Nil)), rest)
+
+fn n4_grad_fn_name(fnm, ufns) = if omem("grad_" + fnm, ufns) == 1 then "grad_" + fnm else if omem("mlp2_grad", ufns) == 1 and fnm == "mlp2_loss" then "mlp2_grad" else "__ad_grad_" + fnm
+
+fn n4_subst_call(e, vnm, gfn) = match e
+    Call(cnm, args) => Call(if cnm == vnm then gfn else cnm, n4_subst_call_args(args, vnm, gfn))
+    Bin(op, l, r)   => Bin(op, n4_subst_call(l, vnm, gfn), n4_subst_call(r, vnm, gfn))
+    If(c, t, e2)    => If(n4_subst_call(c, vnm, gfn), n4_subst_call(t, vnm, gfn), n4_subst_call(e2, vnm, gfn))
+    LetIn(nm, v, b) => LetIn(nm, n4_subst_call(v, vnm, gfn), if nm == vnm then b else n4_subst_call(b, vnm, gfn))
+    VarIn(nm, v, b) => VarIn(nm, n4_subst_call(v, vnm, gfn), if nm == vnm then b else n4_subst_call(b, vnm, gfn))
+    _               => e
+
+fn n4_subst_call_args(xs, vnm, gfn) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons(n4_subst_call(h, vnm, gfn), n4_subst_call_args(t, vnm, gfn))
+
+fn n4_is_grad_let(v) = match v
+    Call(cnm, args) => if cnm == "grad" and len(args) == 1 then n4_var_name(ohd_e(args)) else ""
+    _               => ""
+
+fn n4_var_name(e) = match e
+    Var(nm) => nm
+    _       => ""
+
+fn n4_chk_kernel_fn(nm, freef, body, ot) = if ois_kernel(freef) == 0 then 0 else let inf = kinfer_effs_e(body, ot.ksigs, ot.edecls, ot.fns, 4) in if omem("io", inf) == 1 or omem("fs", inf) == 1 or omem("net", inf) == 1 then ctfail("lume: effect error [E0200]: accelerator 'kernel fn " + nm + "' cannot perform host I/O effect '{" + keff_join(inf) + "}' (fix-it: keep 'kernel fn' pure/data-parallel and move host I/O outside the kernel)\n") else 0
+
 fn ochkfn(nm, ps, body, ot) = ochkfn2(nm, ps, body, osiglookup(nm, ot.osigs), tsiglookup(nm, ot.sigs), ot)
 
 fn ochkfn2(nm, ps, body, mosig, msig, ot) = match mosig
-    Nil          => let zv = vprove_fn_status(nm, ps, body, ot.vsigs, ot.fns) + (if isnil(ot.vsigs) == 1 and isnil(ot.invs) == 1 then 0 else vchk_expr_e(body, nm, ot)) in let zk = kchk_fn_effs(nm, 0, body, ot) in if oanye(body) == 0 and isnil(ot.osigs) == 1 and isnil(ot.otypes) == 1 and isnil(auinit_from_sig(msig)) == 1 then 1 else let rty = aget_sig_rty(msig) in let lenv = aget_fn_lenv(msig) in let zs = schk_conc_e(body, nm, 0, sinit_nonsend_sig(msig), Nil) in let zh = achk_holes_e(body, rty, lenv, {fnm: nm, pubf: 0, ps: ps, body: body, sigs: ot.sigs, vsigs: ot.vsigs, laws: ot.laws, fns: ot.fns}) in let zp = achk_prov_e(body, nm, auinit_from_sig(msig), ot) in let ctx = {fnm: nm, pubf: 0, freef: 0, halloc: 0, bparams: ps, mvars: Nil, pnames: ps, locals: Nil, origins: oinit_origins(ps), osigs: ot.osigs, otypes: ot.otypes} in let rb = ochke(body, ctx, Nil) in ochk_ret_origin(nm, 0, "", rty, ps, rb.origin)
-    Cons(sg, sr) => if sg.pubf == 1 and oisgctype(sg.rty, ot.otypes) == 1 then ctfail("lume: ownership error [O0030]: public function '" + nm + "' cannot expose '@gc' region type across a public module boundary\n") else let rty = aget_fn_rty(msig, mosig) in let lenv = aget_fn_lenv(msig) in let mvars = omvars_pl(sg.pl) in let zv = vprove_fn_status(nm, ps, body, ot.vsigs, ot.fns) + vchk_expr_e(body, nm, ot) in let zk = kchk_fn_effs(nm, sg.pubf, body, ot) in let zs = schk_conc_e(body, nm, 0, sinit_nonsend_sig(msig), mvars) in let zh = achk_holes_e(body, rty, lenv, {fnm: nm, pubf: sg.pubf, ps: ps, body: body, sigs: ot.sigs, vsigs: ot.vsigs, laws: ot.laws, fns: ot.fns}) in let zt = (if ois_total(sg.freef) == 1 then achk_total_e(body, {fnm: nm, ps: ps, fns: ot.fns, osigs: ot.osigs}, Nil, Nil) else 0) in let tret = achk_prov_e(body, nm, auinit_from_sig(msig), ot) in if sg.pubf == 1 and ois_llm(sg.freef) == 0 and ois_unverified_ty(rty) == 0 and tret == 1 then ctfail("lume: provenance error [A0003]: unverified AI/probabilistic value cannot be returned from trusted 'pub fn " + nm + "' without verification (fix-it: wrap the return value in 'verify(val, <contract>)' or validate with a contract guard before returning)\n") else let bparams = if isnil(sg.pl) == 1 then ps else obparams_pl(sg.pl) in let ctx = {fnm: nm, pubf: sg.pubf, freef: sg.freef, halloc: 0, bparams: bparams, mvars: mvars, pnames: ps, locals: Nil, origins: oinit_origins(ps), osigs: ot.osigs, otypes: ot.otypes} in let rb = ochke(body, ctx, Nil) in ochk_ret_origin(nm, sg.pubf, sg.fromp, rty, ps, rb.origin)
+    Nil          => let ztn = n4_chk_fn_tensors(nm, body, msig, ot) in let zv = vprove_fn_status(nm, ps, body, ot.vsigs, ot.fns) + (if isnil(ot.vsigs) == 1 and isnil(ot.invs) == 1 then 0 else vchk_expr_e(body, nm, ot)) in let zk = kchk_fn_effs(nm, 0, body, ot) in if oanye(body) == 0 and isnil(ot.osigs) == 1 and isnil(ot.otypes) == 1 and isnil(auinit_from_sig(msig)) == 1 then 1 else let rty = aget_sig_rty(msig) in let lenv = aget_fn_lenv(msig) in let zs = schk_conc_e(body, nm, 0, sinit_nonsend_sig(msig), Nil) in let zh = achk_holes_e(body, rty, lenv, {fnm: nm, pubf: 0, ps: ps, body: body, sigs: ot.sigs, vsigs: ot.vsigs, laws: ot.laws, fns: ot.fns}) in let zp = achk_prov_e(body, nm, auinit_from_sig(msig), ot) in let ctx = {fnm: nm, pubf: 0, freef: 0, halloc: 0, bparams: ps, mvars: Nil, pnames: ps, locals: Nil, origins: oinit_origins(ps), osigs: ot.osigs, otypes: ot.otypes} in let rb = ochke(body, ctx, Nil) in ochk_ret_origin(nm, 0, "", rty, ps, rb.origin)
+    Cons(sg, sr) => if sg.pubf == 1 and oisgctype(sg.rty, ot.otypes) == 1 then ctfail("lume: ownership error [O0030]: public function '" + nm + "' cannot expose '@gc' region type across a public module boundary\n") else let ztn = n4_chk_fn_tensors(nm, body, msig, ot) in let zkn = n4_chk_kernel_fn(nm, sg.freef, body, ot) in let rty = aget_fn_rty(msig, mosig) in let lenv = aget_fn_lenv(msig) in let mvars = omvars_pl(sg.pl) in let zv = vprove_fn_status(nm, ps, body, ot.vsigs, ot.fns) + vchk_expr_e(body, nm, ot) in let zk = kchk_fn_effs(nm, sg.pubf, body, ot) in let zs = schk_conc_e(body, nm, 0, sinit_nonsend_sig(msig), mvars) in let zh = achk_holes_e(body, rty, lenv, {fnm: nm, pubf: sg.pubf, ps: ps, body: body, sigs: ot.sigs, vsigs: ot.vsigs, laws: ot.laws, fns: ot.fns}) in let zt = (if ois_total(sg.freef) == 1 then achk_total_e(body, {fnm: nm, ps: ps, fns: ot.fns, osigs: ot.osigs}, Nil, Nil) else 0) in let tret = achk_prov_e(body, nm, auinit_from_sig(msig), ot) in if sg.pubf == 1 and ois_llm(sg.freef) == 0 and ois_unverified_ty(rty) == 0 and tret == 1 then ctfail("lume: provenance error [A0003]: unverified AI/probabilistic value cannot be returned from trusted 'pub fn " + nm + "' without verification (fix-it: wrap the return value in 'verify(val, <contract>)' or validate with a contract guard before returning)\n") else let bparams = if isnil(sg.pl) == 1 then ps else obparams_pl(sg.pl) in let ctx = {fnm: nm, pubf: sg.pubf, freef: sg.freef, halloc: 0, bparams: bparams, mvars: mvars, pnames: ps, locals: Nil, origins: oinit_origins(ps), osigs: ot.osigs, otypes: ot.otypes} in let rb = ochke(body, ctx, Nil) in ochk_ret_origin(nm, sg.pubf, sg.fromp, rty, ps, rb.origin)
 
 fn ochkstmts(prog, ot, moved) = match prog
     Nil        => 1
@@ -1435,7 +1621,7 @@ fn olowere(e, lctx, d) = match e
     WithHandlerE(en, hs, b) => olowere(b, {ufns: lctx.ufns, hops: app(hs, lctx.hops), ownps: lctx.ownps, fns: lctx.fns}, d + 1)
     ScopeE(snm, b)          => LetIn(snm, Num(1), olowere(b, lctx, d + 1))
     SpawnE(inner)           => olowere(inner, lctx, d + 1)
-    LetIn(nm, v, b)         => LetIn(nm, olowere(v, lctx, d + 1), olowere(b, {ufns: lctx.ufns, hops: lctx.hops, ownps: orem(nm, lctx.ownps), fns: lctx.fns}, d + 17))
+    LetIn(nm, v, b)         => let gfn = n4_is_grad_let(v) in if gfn != "" then olowere(n4_subst_call(b, nm, n4_grad_fn_name(gfn, lctx.ufns)), {ufns: lctx.ufns, hops: lctx.hops, ownps: orem(nm, lctx.ownps), fns: lctx.fns}, d + 17) else LetIn(nm, olowere(v, lctx, d + 1), olowere(b, {ufns: lctx.ufns, hops: lctx.hops, ownps: orem(nm, lctx.ownps), fns: lctx.fns}, d + 17))
     If(c, t, e2)            => If(olowere(c, lctx, d + 1), olowere(t, lctx, d + 17), olowere(e2, lctx, d + 33))
     Bin(op, l, r)           => olowerbin(op, l, r, lctx, d)
     Call(nm, args)          => olowercall(nm, args, khop_lookup(nm, lctx.hops), lctx, d)
@@ -1446,9 +1632,11 @@ fn olowere(e, lctx, d) = match e
     CT(inner)               => CT(olowere(inner, lctx, d))
     _                       => e
 
+fn n4_lower_ad_call(nm, args, lctx, d) = if nm == "grad" and len(args) >= 2 then Call(n4_grad_fn_name(n4_var_name(ohd_e(args)), lctx.ufns), olowerargs(ptl(args), lctx, d)) else if nm == "jvp" and len(args) == 3 then Bin("*", Call(n4_grad_fn_name(n4_var_name(ohd_e(args)), lctx.ufns), Cons(olowere(ohd_e(ptl(args)), lctx, d), Nil)), olowere(ohd_e(ptl(ptl(args))), lctx, d + 1)) else if nm == "vjp" and len(args) == 3 then Bin("*", olowere(ohd_e(ptl(ptl(args))), lctx, d + 1), Call(n4_grad_fn_name(n4_var_name(ohd_e(args)), lctx.ufns), Cons(olowere(ohd_e(ptl(args)), lctx, d), Nil))) else if nm == "jit" and len(args) >= 2 then Call(n4_var_name(ohd_e(args)), olowerargs(ptl(args), lctx, d)) else Call(nm, olowerargs(args, lctx, d))
+
 fn olowercall(nm, args, mhop, lctx, d) = match mhop
     Cons(hop, r) => kbind_hop_args(hop.ps, args, hop.body, "_khop_" + str(d) + "_" + hop.op + "_", lctx, d)
-    Nil          => if ois_intrinsic(nm, lctx.ufns) == 1 and len(args) == 1 then olowere(ohd_e(args), lctx, d) else if ois_verify_call(nm, lctx.ufns) == 1 then olower_verify(args, lctx, d) else if isnil(lctx.hops) == 0 and d < 200 then olowercall_fn(nm, args, vfnlookup(nm, lctx.fns), lctx, d) else Call(nm, olowerargs(args, lctx, d))
+    Nil          => if ois_intrinsic(nm, lctx.ufns) == 1 and len(args) == 1 then olowere(ohd_e(args), lctx, d) else if ois_verify_call(nm, lctx.ufns) == 1 then olower_verify(args, lctx, d) else if (nm == "grad" or nm == "jvp" or nm == "vjp" or nm == "jit") and omem(nm, lctx.ufns) == 0 then n4_lower_ad_call(nm, args, lctx, d) else if isnil(lctx.hops) == 0 and d < 200 then olowercall_fn(nm, args, vfnlookup(nm, lctx.fns), lctx, d) else Call(nm, olowerargs(args, lctx, d))
 
 fn olowercall_fn(nm, args, mf, lctx, d) = match mf
     Nil        => Call(nm, olowerargs(args, lctx, d))
@@ -1513,4 +1701,4 @@ fn olowerstmt(st, rest, ufns, osigs, vctx) = match st
     _                                     => Cons(st, rest)
 
 fn ocheck(prog) = if oany(prog) == 0 then prog else ocheckforce(prog)
-fn ocheckforce(prog) = let raw_osigs = ocollects(prog) in let raw_fns = ocollectf(prog) in let osigs = oinfer_priv_osigs(raw_fns, raw_osigs) in let otypes = ocollectt(prog) in let sigs = tcollects(prog) in let ksigs = kcollect_effsigs(prog) in let edecls = kcollect_effdecls(prog) in let caps = kcollect_caps(prog) in let vsigs = vcollect_vsigs(prog) in let invs = vcollect_invs(prog) in let laws = vcollect_laws(prog) in let prog2 = afill_prog_holes(prog, sigs, osigs, vsigs, laws, raw_fns) in let fns = ocollectf(prog2) in let ufns = ocollectfnms(prog2) in let z = ochkstmts(prog2, {osigs: osigs, otypes: otypes, sigs: sigs, fns: fns, ksigs: ksigs, edecls: edecls, caps: caps, vsigs: vsigs, invs: invs, laws: laws}, Nil) in olowerprog(prog2, ufns, osigs, {vsigs: vsigs, fns: fns})
+fn ocheckforce(prog) = let raw_osigs = ocollects(prog) in let raw_fns0 = ocollectf(prog) in let grad_fns = n4_synth_grad_fns(n4_collect_grads_prog(prog, Nil), raw_fns0) in let prog1 = app(grad_fns, prog) in let raw_fns = ocollectf(prog1) in let osigs = oinfer_priv_osigs(raw_fns, raw_osigs) in let otypes = ocollectt(prog1) in let recs = tcollectr(prog1) in let sigs = tcollects(prog1) in let ksigs = kcollect_effsigs(prog1) in let edecls = kcollect_effdecls(prog1) in let caps = kcollect_caps(prog1) in let vsigs = vcollect_vsigs(prog1) in let invs = vcollect_invs(prog1) in let laws = vcollect_laws(prog1) in let prog2 = afill_prog_holes(prog1, sigs, osigs, vsigs, laws, raw_fns) in let fns = ocollectf(prog2) in let ufns = ocollectfnms(prog2) in let z = ochkstmts(prog2, {osigs: osigs, otypes: otypes, recs: recs, sigs: sigs, fns: fns, ksigs: ksigs, edecls: edecls, caps: caps, vsigs: vsigs, invs: invs, laws: laws}, Nil) in olowerprog(prog2, ufns, osigs, {vsigs: vsigs, fns: fns})

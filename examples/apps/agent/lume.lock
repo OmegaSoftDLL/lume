@@ -1,0 +1,8 @@
+# lume.lock — deterministic content-addressed lockfile (P26, P32)
+version = 1
+manifest = {"name":"lume_agent_app","version":"0.4.0","edition":"2026","capabilities":"io"}
+manifest_sha256 = "4e6a3ade29f10125fd02debdff77ea63090ede85128bf9c8dd3fa062b97bf5ab"
+module "main.src" sha256 = "e1c8178fc01604f6a4d481a45b14c20eb8a6936dc28dbed2fda892355bfd23fe"
+module "planner.src" sha256 = "5e1cb81c4d019af850c1098952ba99a8d1cd69d57ce62ac32065fe60e350569b"
+module "rules.src" sha256 = "ceddeac8e2c69fda030f3f1c75043652acecab99fa814a298a986c616dd7f8a9"
+module "schema.src" sha256 = "2e19013f8d9404163fa9fcba96ce75d4add8efe886c0318eafbccb88423f07b5"

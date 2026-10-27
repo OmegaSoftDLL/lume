@@ -1,0 +1,12 @@
+## schema.src -- Stage 4 Capstone 2: Invoice & Policy Audit Schema (`examples/apps/agent/`)
+## Exercises schema-aligned LLM decoding + automatic `ensures` contract repair (`std.llm`).
+
+fn agent_extract_invoices() = let inv1 = llm_extract_invoice_repaired("INV-101", 250, 150, 100) in let inv2 = llm_extract_invoice_repaired("INV-102", 999, 180, 140) in Cons(inv1, Cons(inv2, Nil))
+
+fn agent_total_repaired(invs) = match invs
+    Nil        => 0
+    Cons(h, t) => h.repaired + agent_total_repaired(t)
+
+fn agent_total_amount(invs) = match invs
+    Nil        => 0
+    Cons(h, t) => h.total + agent_total_amount(t)
