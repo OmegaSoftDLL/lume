@@ -19,19 +19,19 @@ fn t_set_at(xs, idx, v) = match xs
 
 fn t_repeat(n, v) = if n <= 0 then Nil else Cons(v, t_repeat(n - 1, v))
 
-fn tensor_zeros(rows, cols) = requires
+fn tensor_zeros(rows, cols) = {rows: rows, cols: cols, data: t_repeat(rows * cols, 0)}
 
-fn tensor_ones(rows, cols) = requires
+fn tensor_ones(rows, cols) = {rows: rows, cols: cols, data: t_repeat(rows * cols, 1)}
 
-fn tensor_mat(rows, cols, data) = requires
+fn tensor_mat(rows, cols, data) = {rows: rows, cols: cols, data: data}
 
 fn tensor_vec(data) = {rows: 1, cols: t_len(data), data: data}
 
 fn tensor_shape_str(t) = "[" + str(t.rows) + ", " + str(t.cols) + "]"
 
-fn tensor_get(t, r, c) = requires
+fn tensor_get(t, r, c) = t_nth(t.data, r * t.cols + c)
 
-fn tensor_set(t, r, c, v) = requires
+fn tensor_set(t, r, c, v) = {rows: t.rows, cols: t.cols, data: t_set_at(t.data, r * t.cols + c, v)}
 
 fn t_add_list(xs, ys) = match xs
     Nil        => Nil
