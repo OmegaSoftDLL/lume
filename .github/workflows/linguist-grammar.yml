@@ -1,0 +1,53 @@
+name: Linguist grammar integration
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/linguist-grammar.yml"
+      - "contrib/linguist/**"
+      - "contrib/textmate/**"
+  push:
+    paths:
+      - ".github/workflows/linguist-grammar.yml"
+      - "contrib/linguist/**"
+      - "contrib/textmate/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  add-grammar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out this Lume revision
+        uses: actions/checkout@v7
+        with:
+          path: lume
+
+      - name: Check out Linguist
+        uses: actions/checkout@v7
+        with:
+          repository: github-linguist/linguist
+          path: linguist
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          working-directory: linguist
+          bundler-cache: true
+
+      - name: Validate with Linguist
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_repo="$RUNNER_TEMP/lume-grammar.git"
+          git clone --bare "$GITHUB_WORKSPACE/lume" "$source_repo"
+          git --git-dir="$source_repo" update-ref refs/heads/main "$GITHUB_SHA"
+          git --git-dir="$source_repo" symbolic-ref HEAD refs/heads/main
+          git -C linguist config \
+            url."file://$source_repo".insteadOf \
+            https://github.com/OmegaSoftDLL/lume
+          cd linguist
+          script/add-grammar https://github.com/OmegaSoftDLL/lume

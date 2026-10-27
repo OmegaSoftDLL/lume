@@ -269,6 +269,19 @@ Keep each brick a green, tested PR, and keep it **superior to the borrowed idea*
 
 ## 11. Publicizing the language (GitHub recognition)
 
+**Preparation status:** issue #217 stages a TextMate grammar, a draft languages.yml entry, and four
+non-trivial project samples under contrib/. The .lume extension has no current Linguist entry;
+.src is intentionally excluded because it is generic. The existing public
+lume-lang/tree-sitter-lume grammar uses syntax different from this project's specification, so it
+is not used as the grammar source.
+
+**Validation:** .github/workflows/linguist-grammar.yml runs Linguist's script/add-grammar against
+the current Lume revision in a temporary Linguist checkout. The workflow uses the public Lume
+repository as the grammar source and does not publish changes to github/linguist.
+
+**Submission gate:** adding the language definition and samples to github/linguist remains subject
+to the existing maturity gate below.
+
 GitHub's repository language bar is computed by **Linguist**, which only lists languages already
 in its catalogue; a brand-new language like Lume cannot appear there via `.gitattributes`
 (the `linguist-language=Lume` override is ignored for an unknown name). Today the C seed and
