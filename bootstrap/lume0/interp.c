@@ -1165,7 +1165,14 @@ static char *resolve_use(const Node *use, const char *dir) {
     static char path[1024];
     for (int k = m; k >= 1; k--) {
         int w = snprintf(path, sizeof path, "%s", dir);
-        for (int i = 0; i < k; i++) w += snprintf(path + w, sizeof path - (size_t)w, "/%.*s", segn[i]->text_len, segn[i]->text);
+        if (w < 0 || w >= (int)sizeof path) continue; /* dir alone overflows the buffer */
+        int fit = 1;
+        for (int i = 0; i < k; i++) {
+            int r = snprintf(path + w, sizeof path - (size_t)w, "/%.*s", segn[i]->text_len, segn[i]->text);
+            if (r < 0 || r >= (int)(sizeof path - (size_t)w)) { fit = 0; break; } /* truncated: would overflow (CodeQL #1) */
+            w += r;
+        }
+        if (!fit || (size_t)w + 5 >= sizeof path) continue; /* no room for the ".lume" suffix */
         snprintf(path + w, sizeof path - (size_t)w, ".lume");
         FILE *f = fopen(path, "rb"); if (f) { fclose(f); return path; }
     }
