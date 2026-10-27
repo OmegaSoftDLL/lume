@@ -22,6 +22,36 @@ is the short version.
 - Keep all 9 `examples/0*.lume` passing `lume0 check` cleanly (the semantic checker must stay
   zero-false-positive).
 
+## Delivery hardening — no theater (run this checklist on EVERY PR, before opening it)
+
+The repeated failure mode on this project is shipping impressive machinery whose **trust/soundness
+primitive is theater** (a prover that samples, a "signature" that is a hash of public data, a
+certificate that rubber-stamps, a one-shot JSON labelled a "server", a model labelled "done").
+Self-review every PR against this before opening it — the same scrutiny a reviewer applies. Full
+detail: `docs/28-delivery-rules.md`.
+
+1. **State the real level: shipped / model / planned.** Never label a stub, one-shot, in-language
+   model, or placeholder as working/done. The words must match what runs: don't write "serve",
+   "interactive", "ACID", "durable", "proven", "sound", or "✅ done" beyond what actually executes.
+   Update the docs **and** CLI help to the real level in the *same* PR.
+2. **"Done" means it does the real thing**, not that it emits the right shape/label. A target or
+   kernel brick is done only when a real program **runs on real hardware or QEMU**, guarantees intact.
+3. **Trust/soundness primitives must be genuine:** `proven` only from a sound decision procedure
+   (QF_LIA/Fourier–Motzkin), never sampling; never silently return a wrong result (diagnose, e.g.
+   `[N0400]`); signatures are **asymmetric** (public key in repo, private off-repo), never a hash over
+   public data, with no unsigned bypass; certificates/verifiers **re-derive independently**, never
+   rubber-stamp the compiler's own verdict; crypto/decision procedures are validated against the
+   **official test vectors** (e.g. RFC 8032 §7.1), not self-generated ones; an analysis that cannot be
+   sound is labelled honestly (e.g. `budget_checked`), never "proven".
+4. **Write tests that FAIL if the primitive is theater** — not just happy-path. Include the negative
+   case (forged signature rejected, false contract refuted *with the counterexample*, out-of-fragment
+   → `runtime_checked`), asm asserts ("no residual `call …`"), behaviour-identical-across-levels,
+   official vectors, and runs-on-QEMU. **A green CI does not prove soundness.**
+5. **GOLDEN RULE preserved:** `stage 2 == stage 3`, `make zero-c`, and the oracle byte-equivalence
+   stay green; new features/backends are in Lume, not new C in the frozen seed (`#205`); every fix
+   ships a regression test. If a shortcut is unavoidable, it ships labelled `model`/`planned` — never
+   as a guarantee. Zero theater inside Lume.
+
 ## Workflow
 
 - One change → one branch → one green PR → merge. Keep CI green (`gh`).
