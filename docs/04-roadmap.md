@@ -198,7 +198,7 @@ attempts (the write → compile → read-errors → fix loop, P1/P30/P31).
 - Maintainers set **direction** (`evolve/goals.lume`: ranked goals with acceptance tests), review
   the proposals that pass all gates, and **veto**. They do not need to write the code; they need
   to decide what Lume should become.
-- Nothing merges without an authorized maintainer's cryptographic signature (`lume evolve approve --by <maintainer> [--sig sha256:<hex>]`, verified against the authorized maintainer registry and FIPS 180-4 SHA-256 proposal/candidate digest in `compiler/stage1/levolve.src`; unauthorized approvers or forged signatures fail with `rejected_invalid_signature` and `can_merge: false`). The AI proposes; the gates verify; the human
+- The enforced merge gate is **GitHub branch protection** (only the account can merge to `main`; external contributors cannot push). On top of that, `lume evolve approve --by <maintainer>` records an authorized-maintainer approval and a SHA-256 digest over the proposal/candidate (`levolve.src`). **Note:** that digest is **not yet a real signature** — the key is derived from the public maintainer name, so it is forgeable, and the `approved:<name>` path needs no digest at all; real asymmetric (Ed25519) maintainer signatures are tracked in `#194`. The AI proposes; the gates verify; the human
   decides. This is deliberate: a language is a social contract with its users, not an optimisation
   target.
 
