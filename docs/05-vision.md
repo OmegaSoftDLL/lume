@@ -70,10 +70,10 @@ type Classifier = model
 - A `model` is a first-class type: it has typed parameters, a typed forward function, a schema, an
   ONNX/safetensors import/export, and a *version hash*. You pass it to functions, store it in a
   `table`, test it, ship it in a binary.
-- `grad`, `jvp`, `vjp`, `vmap`, `jit`, `shard` are **operators on functions**, implemented as IR
+- `grad`, `jvp`, `vjp`, `vmap`, `jit`, `shard` are **operators on functions** *(today `shard` is not implemented, `jit` is an identity wrapper, and `grad` covers only `+ - * if` — see below)*, implemented as IR
   transformations by the compiler (Jax's design, Enzyme/Zygote's implementation), not a library
-  with a tape. They work on *any pure Lume function with tensor types*, including loops and
-  branches.
+  with a tape. The design goal is that they work on *any pure Lume function with tensor types*, including loops and
+  branches; **today** symbolic autodiff differentiates only the `+ - * if` fragment, and other operators silently yield 0 (#184).
 - **Shapes are types.** `tensor[f32, n, 3, h, w]` with symbolic dimensions; mismatches are compile
   errors; `reshape`/`einsum` are typed; broadcasting rules are in the type checker (Dex). The #1
   bug class in ML code disappears.

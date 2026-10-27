@@ -95,14 +95,14 @@ started on).
    columnar tables, vectorised query plans, CSV/JSON/Parquet I/O, `persist` (an embedded ACID
    store with a write-ahead log), adapters (SQLite first, then PostgreSQL, DuckDB).
 3. `decimal`, `date/time/duration/money` literals and arithmetic (`std.decimal`, `std.time`).
-4. **`lume pkg`**: content-addressed store (`~/.lume/store/<hash>`), `lume.toml` written in the
+4. **`lume pkg`** *(built today: per-file SHA-256 lockfile + capability audit only; the content-addressed store, signed packages, registry protocol and AST-hash definitions below are **planned**, not built)*: content-addressed store (`~/.lume/store/<hash>`), `lume.toml` written in the
    restricted Lume config subset, lockfiles, enforced semantic versioning via API diff, capability
    grants per dependency (capabilities declared in package metadata and checked, scan: Austral),
    signed packages, a registry protocol (self-hostable). **Content-address definitions by AST hash**
    (scan: Unison) so tests and proofs are cached per definition and renames are non-breaking.
 5b. **`LAWS` (P34):** project-level invariants compiled to obligations checked on every build.
 5. `shape` structural types, multiple-dispatch trait parameters, properties, `report`.
-6. REPL with tables as first-class values (the dot prompt reborn), notebooks protocol (Jupyter kernel).
+6. *(planned, not built)* REPL with tables as first-class values (the dot prompt reborn), notebooks protocol (Jupyter kernel).
 7. **Exit criterion:** a complete business application (inventory + invoicing + reports) in
    `examples/apps/inventory/` under 1,500 lines, with tests, built only with `lume`.
 
@@ -156,7 +156,7 @@ started on).
    verified-safe Lume apps, a GPU-aware model service.
 5. `lume-core` mechanised in Lean (semantics + type soundness); the verified core becomes the
    trust anchor for `lume prove` and for self-evolution.
-6. **Exit criteria:** `lume-os` boots in QEMU, runs the Stage 4 agent example as a user app, and
+6. **Exit criteria (NOT met — planned):** the `lume-os` capstone is a deterministic user-space model of kernel services, with no boot, QEMU or hardware; the target is that `lume-os` boots in QEMU, runs the Stage 4 agent example as a user app, and
    the kernel's memory manager and scheduler have machine-checked proofs of their contracts.
 
 ---
@@ -179,11 +179,12 @@ A proposal is a **Lume program** (`evolve/proposals/<id>/proposal.lume`) that:
 - uses `lume agent` (the compiler as a service) to transform source trees — never raw text edits;
 - declares which principles (`02-principles.md`) it serves and which it strains.
 
-Proposals may be written by humans or by AI models running `lume evolve propose "<goal>"`, which
-gives the model the structured compiler API, the spec, the diagnostics and the test results of its
+Proposals may be written by humans or by AI models. *(Today `lume evolve propose` takes a proposal bundle file, e.g. `lume evolve propose evolve/proposals/<id>/proposal.bundle`; a `propose "<goal>"` form that drives a model does not exist yet.)* The intended flow gives the model the structured compiler API, the spec, the diagnostics and the test results of its
 attempts (the write → compile → read-errors → fix loop, P1/P30/P31).
 
 ### The gates (all automatic, all required)
+> **Implemented today:** six in-memory gates in `compiler/stage1/levolve.src` — `compile`, `conformance`, `api_compat`, `capability`, `budget`, `fixpoint`. The "fixpoint" gate checks serialization/expansion determinism of the candidate, not a `stage2 == stage3` self-build; there is no proof gate (`lume prove` on `std` / Lean) and no runtime/compile-time benchmark gate in the loop. The list below is the intended design.
+
 1. **Conformance**: every test in `tests/conformance/` passes for the edition.
 2. **Triple self-build**: `A → B → C`, `B == C` byte-identical, from `lume0` as the root.
 3. **Proofs**: `lume prove` on `std` contracts and the `lume-core` Lean development still check.
@@ -197,7 +198,7 @@ attempts (the write → compile → read-errors → fix loop, P1/P30/P31).
 - Maintainers set **direction** (`evolve/goals.lume`: ranked goals with acceptance tests), review
   the proposals that pass all gates, and **veto**. They do not need to write the code; they need
   to decide what Lume should become.
-- Nothing merges without a maintainer's signature. The AI proposes; the gates verify; the human
+- Intended: nothing merges without a maintainer's signature. *(Today approval is an unauthenticated text flag: `lume evolve approve --by <name>` appends `@approval approved:<name>` to the bundle; no signature or identity is checked. Real merge control is GitHub branch protection and review.)* The AI proposes; the gates verify; the human
   decides. This is deliberate: a language is a social contract with its users, not an optimisation
   target.
 

@@ -56,8 +56,8 @@ in Unison), this gives properties a text-first language cannot:
 
 The text syntax (`docs/03-specification.md`) remains the human-review projection and the on-ramp; it
 is not abandoned. But the roadmap treats the structured, content-addressed representation as the
-native substrate the AI author works in (Stage 2 introduces content-addressed definitions; the
-projectional editing surface follows).
+native substrate the AI author works in (*planned, not delivered:* content-addressed definitions and the
+projectional editing surface; today only a per-file SHA-256 lockfile exists).
 
 ## Humans are not removed — they are promoted
 
