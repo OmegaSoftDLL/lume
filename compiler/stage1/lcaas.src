@@ -972,7 +972,7 @@ fn cs_keff_diff(xs, ys) = match xs
     Nil        => Nil
     Cons(h, t) => if h == "pure" or cs_omem(h, ys) == 1 then cs_keff_diff(t, ys) else Cons(h, cs_keff_diff(t, ys))
 fn cs_kprim_eff(cnm) = if cnm == "io_write" or cnm == "io_read" or cnm == "println" or cnm == "read" or cnm == "readall" or cnm == "emit" or cnm == "flush" then "io" else if cnm == "fs_read" or cnm == "fs_write" or cnm == "fs_open" then "fs" else if cnm == "net_send" or cnm == "net_recv" or cnm == "net_connect" or cnm == "db_exec" then "net" else if cnm == "rc_new" or cnm == "arc_new" or cnm == "alloc_heap" or cnm == "table_new" or cnm == "box_new" then "alloc" else if cnm == "rand_int" or cnm == "prob_sample" or cnm == "llm_complete" then "rand" else if cnm == "sample_dist" or cnm == "observe_lik" then "prob" else if cnm == "llm_prompt" then "llm" else if cnm == "wasm_module_new" or cnm == "wasm_call_add" or cnm == "wasm_store32" or cnm == "wasm_load32" or cnm == "wasm_call_host_fs" then "wasm" else if cnm == "ffi_call" then "ffi" else if cnm == "time_now" or cnm == "clock_now" or cnm == "sleep_ms" then "time" else if cnm == "fail_err" or cnm == "raise_err" then "fail" else if cnm == "panic_msg" then "panic" else if cnm == "async_await" or cnm == "spawn_task" then "async" else ""
-fn cs_kinfer_call_effs(cnm, ksigs, edecls) = let pe = cs_kprim_eff(cnm) in let ue = cs_kop_effect(cnm, edecls) in let base = cs_keff_add(pe, cs_keff_add(ue, Nil)) in match cs_keffsig_lookup(cnm, ksigs)
+fn cs_kinfer_call_effs(cnm, ksigs, edecls) = let pe = cs_kprim_eff(cnm) in let ue = cs_kop_effect(cnm, edecls) in let base0 = cs_keff_add(pe, cs_keff_add(ue, Nil)) in let base = if cnm == "wasm_call_host_fs" then cs_keff_add("fs", base0) else if cnm == "wasm_call_host_net" then cs_keff_add("net", base0) else base0 in match cs_keffsig_lookup(cnm, ksigs)
     Cons(ks, r) => cs_keff_union(base, cs_keff_diff(ks.effs, Cons("pure", Nil)))
     Nil         => base
 fn cs_kinfer_effs_e(e, ksigs, edecls) = match e
@@ -1336,15 +1336,76 @@ fn cs_vgen_envs_hyps(ps, idx, total, chyps) = match ps
     Nil        => Cons(Nil, Nil)
     Cons(p, r) => cs_vcross_p(p, cs_vpts_from_hyps(p, chyps, cs_vpts_for(idx, total)), cs_vgen_envs_hyps(r, idx + 1, total, chyps))
 
+fn cs_cert_subst_res(e, leaf) = match e
+    Var(nm)         => if nm == "result" or nm == "ret" then leaf else e
+    Bin(op, a, b)   => Bin(op, cs_cert_subst_res(a, leaf), cs_cert_subst_res(b, leaf))
+    If(c, t, e2)    => If(cs_cert_subst_res(c, leaf), cs_cert_subst_res(t, leaf), cs_cert_subst_res(e2, leaf))
+    LetIn(nm, v, b) => LetIn(nm, cs_cert_subst_res(v, leaf), if nm == "result" or nm == "ret" then b else cs_cert_subst_res(b, leaf))
+    VarIn(nm, v, b) => VarIn(nm, cs_cert_subst_res(v, leaf), if nm == "result" or nm == "ret" then b else cs_cert_subst_res(b, leaf))
+    Call(cnm, args) => if (cnm == "verify" or cnm == "old" or cnm == "law_check" or cnm == "borrow" or cnm == "borrow_mut" or cnm == "move" or cnm == "clone") and cs_len(args) >= 1 then cs_cert_subst_res(cs_asthead(args), leaf) else if cnm == "dec_eq" and cs_len(args) == 2 then Bin("==", cs_cert_subst_res(cs_asthead(args), leaf), cs_cert_subst_res(cs_astsecond(args), leaf)) else if cnm == "dec_ge" and cs_len(args) == 2 then Bin(">=", cs_cert_subst_res(cs_asthead(args), leaf), cs_cert_subst_res(cs_astsecond(args), leaf)) else if cnm == "dec_gt" and cs_len(args) == 2 then Bin(">", cs_cert_subst_res(cs_asthead(args), leaf), cs_cert_subst_res(cs_astsecond(args), leaf)) else if cnm == "dec_le" and cs_len(args) == 2 then Bin("<=", cs_cert_subst_res(cs_asthead(args), leaf), cs_cert_subst_res(cs_astsecond(args), leaf)) else if cnm == "dec_lt" and cs_len(args) == 2 then Bin("<", cs_cert_subst_res(cs_asthead(args), leaf), cs_cert_subst_res(cs_astsecond(args), leaf)) else Call(cnm, cs_cert_subst_args(args, leaf))
+    _               => e
+fn cs_cert_subst_args(xs, leaf) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons(cs_cert_subst_res(h, leaf), cs_cert_subst_args(t, leaf))
+fn cs_cert_conj(es) = match es
+    Nil        => Num(1)
+    Cons(h, t) => if cs_isnil(t) == 1 then h else Bin("and", h, cs_cert_conj(t))
+fn cs_cert_bind_ps(ps, args) = match ps
+    Nil        => Nil
+    Cons(p, r) => cs_cert_bind_p1(p, r, args)
+fn cs_cert_bind_p1(p, r, args) = match args
+    Nil         => Nil
+    Cons(a, ar) => Cons({k: p, v: a}, cs_cert_bind_ps(r, ar))
+fn cs_cert_lookup_arg(nm, env) = match env
+    Nil        => Var(nm)
+    Cons(h, t) => if h.k == nm then h.v else cs_cert_lookup_arg(nm, t)
+fn cs_cert_subst_env(e, env) = match e
+    Var(nm)         => cs_cert_lookup_arg(nm, env)
+    Bin(op, a, b)   => Bin(op, cs_cert_subst_env(a, env), cs_cert_subst_env(b, env))
+    If(c, t, e2)    => If(cs_cert_subst_env(c, env), cs_cert_subst_env(t, env), cs_cert_subst_env(e2, env))
+    LetIn(nm, v, b) => LetIn(nm, cs_cert_subst_env(v, env), cs_cert_subst_env(b, Cons({k: nm, v: Var(nm)}, env)))
+    VarIn(nm, v, b) => LetIn(nm, cs_cert_subst_env(v, env), cs_cert_subst_env(b, Cons({k: nm, v: Var(nm)}, env)))
+    Call(cnm, args) => Call(cnm, cs_cert_subst_env_args(args, env))
+    _               => e
+fn cs_cert_subst_env_args(xs, env) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons(cs_cert_subst_env(h, env), cs_cert_subst_env_args(t, env))
+fn cs_cert_inline_ufn(cnm, cargs, mf, ft, d) = match mf
+    Nil          => Call(cnm, cargs)
+    Cons(fn0, r) => cs_cert_inline_ufn2(cnm, cargs, fn0, ft, d)
+fn cs_cert_inline_ufn2(cnm, cargs, fn0, ft, d) = match fn0
+    Fn(nm, ps, body) => cs_cert_clean_e(cs_cert_subst_env(body, cs_cert_bind_ps(ps, cargs)), ft, d + 1)
+    _                => Call(cnm, cargs)
+fn cs_cert_clean_args(xs, ft, d) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons(cs_cert_clean_e(h, ft, d), cs_cert_clean_args(t, ft, d))
+fn cs_cert_clean_e(e, ft, d) = if d > 4 then e else cs_cert_clean_e1(e, ft, d)
+fn cs_cert_clean_e1(e, ft, d) = match e
+    Call(cnm, args) => let cargs = cs_cert_clean_args(args, ft, d) in if (cnm == "verify" or cnm == "old" or cnm == "law_check" or cnm == "evolve_approve" or cnm == "borrow" or cnm == "borrow_mut" or cnm == "move" or cnm == "clone") and cs_len(cargs) >= 1 then cs_asthead(cargs) else if cnm == "grad" and cs_len(cargs) >= 2 then cs_cert_inline_ufn("__ad_grad_" + cs_n4_var_name(cs_asthead(args)), cs_cvtl(cargs), cs_fnlookup("__ad_grad_" + cs_n4_var_name(cs_asthead(args)), ft), ft, d) else if cnm == "jit" and cs_len(cargs) >= 2 then cs_cert_inline_ufn(cs_n4_var_name(cs_asthead(args)), cs_cvtl(cargs), cs_fnlookup(cs_n4_var_name(cs_asthead(args)), ft), ft, d) else if cnm == "dec_add" and cs_len(cargs) == 2 then Bin("+", cs_asthead(cargs), cs_astsecond(cargs)) else if cnm == "dec_sub" and cs_len(cargs) == 2 then Bin("-", cs_asthead(cargs), cs_astsecond(cargs)) else if cnm == "dec_eq" and cs_len(cargs) == 2 then Bin("==", cs_asthead(cargs), cs_astsecond(cargs)) else if cnm == "dec_ge" and cs_len(cargs) == 2 then Bin(">=", cs_asthead(cargs), cs_astsecond(cargs)) else if cnm == "dec_gt" and cs_len(cargs) == 2 then Bin(">", cs_asthead(cargs), cs_astsecond(cargs)) else if cnm == "dec_le" and cs_len(cargs) == 2 then Bin("<=", cs_asthead(cargs), cs_astsecond(cargs)) else if cnm == "dec_lt" and cs_len(cargs) == 2 then Bin("<", cs_asthead(cargs), cs_astsecond(cargs)) else cs_cert_inline_ufn(cnm, cargs, cs_fnlookup(cnm, ft), ft, d)
+    Bin(op, a, b)   => Bin(op, cs_cert_clean_e(a, ft, d), cs_cert_clean_e(b, ft, d))
+    If(c, t, e2)    => If(cs_cert_clean_e(c, ft, d), cs_cert_clean_e(t, ft, d), cs_cert_clean_e(e2, ft, d))
+    LetIn(nm, v, b) => let gfn = cs_n4_is_grad_let(v) in if gfn != "" then cs_cert_clean_e(cs_n4_subst_call(b, nm, "__ad_grad_" + gfn), ft, d) else LetIn(nm, cs_cert_clean_e(v, ft, d), cs_cert_clean_e(b, ft, d))
+    VarIn(nm, v, b) => LetIn(nm, cs_cert_clean_e(v, ft, d), cs_cert_clean_e(b, ft, d))
+    _               => e
+fn cs_cert_embed_body(body, enss, ft) = match body
+    LetIn(nm, v, b) => let gfn = cs_n4_is_grad_let(v) in if gfn != "" then cs_cert_embed_body(cs_n4_subst_call(b, nm, "__ad_grad_" + gfn), enss, ft) else LetIn(nm, cs_cert_clean_e(v, ft, 0), cs_cert_embed_body(b, enss, ft))
+    VarIn(nm, v, b) => LetIn(nm, cs_cert_clean_e(v, ft, 0), cs_cert_embed_body(b, enss, ft))
+    DeferE(c, b)    => cs_cert_embed_body(b, enss, ft)
+    ErrDeferE(c, b) => cs_cert_embed_body(b, enss, ft)
+    If(c, t, e2)    => If(cs_cert_clean_e(c, ft, 0), cs_cert_embed_body(t, enss, ft), cs_cert_embed_body(e2, enss, ft))
+    _               => cs_cert_clean_e(cs_cert_subst_res(cs_cert_conj(enss), body), ft, 0)
+fn cs_cert_reqs_sexpr(reqs, ft) = if cs_isnil(reqs) == 1 then "(and)" else "(and " + cs_exprs_sexpr(cs_cert_clean_args(reqs, ft, 0)) + ")"
+fn cs_cert_term_fn(reqs, enss, body, ft) = "(implies " + cs_cert_reqs_sexpr(reqs, ft) + " " + cs_expr_sexpr(cs_cert_embed_body(body, enss, ft)) + ")"
+
 fn cs_vprove_fn(nm, ps, body, mvs, ft) = match mvs
     Nil          => {proofs: Nil, diags: Nil}
-    Cons(vsg, r) => let lenv = cs_vlin_init_env(ps) in let raw_hyps = cs_vcollect_body_hyps(body, (cs_vprove_reqs_hyps(vsg.reqs, lenv, ft)).hyps, lenv, vsg.enss, ft, 0) in let chyps = cs_vfm_trace_hyps(raw_hyps, cs_vfm_vars(raw_hyps, Nil)) in let pr = cs_vprove_envs(cs_vgen_envs_hyps(ps, 0, cs_len(ps), chyps), vsg.reqs, vsg.enss, body, ft, 0) in let st = if pr.status == "refuted" then "refuted" else if cs_vqflia_prove_fn(ps, vsg.reqs, vsg.enss, body, ft) == 1 then "proven" else "runtime_checked" in let ob = cs_exprs_sexpr(vsg.reqs) + " => " + cs_exprs_sexpr(vsg.enss) in let pf = Cons({name: nm, kind: "contract", status: st, obligation: ob, counterexample: pr.cex}, Nil) in let dg = if st == "refuted" then Cons(cs_mkdiag("V0001", "contract", "contract error: cannot prove 'ensures' postcondition of '" + nm + "' — refuted with counterexample: " + pr.cex, "strengthen 'requires' precondition or fix implementation of '" + nm + "'"), Nil) else Nil in {proofs: pf, diags: dg}
+    Cons(vsg, r) => let lenv = cs_vlin_init_env(ps) in let raw_hyps = cs_vcollect_body_hyps(body, (cs_vprove_reqs_hyps(vsg.reqs, lenv, ft)).hyps, lenv, vsg.enss, ft, 0) in let chyps = cs_vfm_trace_hyps(raw_hyps, cs_vfm_vars(raw_hyps, Nil)) in let pr = cs_vprove_envs(cs_vgen_envs_hyps(ps, 0, cs_len(ps), chyps), vsg.reqs, vsg.enss, body, ft, 0) in let st = if pr.status == "refuted" then "refuted" else if cs_vqflia_prove_fn(ps, vsg.reqs, vsg.enss, body, ft) == 1 then "proven" else "runtime_checked" in let ob = cs_exprs_sexpr(vsg.reqs) + " => " + cs_exprs_sexpr(vsg.enss) in let tm = cs_cert_term_fn(vsg.reqs, vsg.enss, body, ft) in let pf = Cons({name: nm, kind: "contract", status: st, obligation: ob, term: tm, counterexample: pr.cex}, Nil) in let dg = if st == "refuted" then Cons(cs_mkdiag("V0001", "contract", "contract error: cannot prove 'ensures' postcondition of '" + nm + "' — refuted with counterexample: " + pr.cex, "strengthen 'requires' precondition or fix implementation of '" + nm + "'"), Nil) else Nil in {proofs: pf, diags: dg}
 fn cs_vchk_call_req(cnm, args, fnm, mvs, ft) = match mvs
     Nil          => {proofs: Nil, diags: Nil}
-    Cons(vsg, r) => if cs_isnil(vsg.reqs) == 1 then {proofs: Nil, diags: Nil} else let ra = cs_veval_args(args, Nil, Nil, ft, 0) in if ra.ok == 0 then {proofs: Nil, diags: Nil} else let env = cs_vbind_ps(vsg.ps, ra.vals) in let rq = cs_veval_all_true(vsg.reqs, env, env, ft) in if rq.ok == 1 and rq.hold == 0 then let cex = cs_vfmt_env(env) in {proofs: Cons({name: cnm, kind: "call_requires", status: "refuted", obligation: cs_exprs_sexpr(vsg.reqs), counterexample: cex}, Nil), diags: Cons(cs_mkdiag("V0001", "contract", "contract error: call to '" + cnm + "' in '" + fnm + "' violates 'requires' precondition with counterexample: " + cex, "ensure arguments passed to '" + cnm + "' satisfy its 'requires' contract"), Nil)} else {proofs: Nil, diags: Nil}
+    Cons(vsg, r) => if cs_isnil(vsg.reqs) == 1 then {proofs: Nil, diags: Nil} else let ra = cs_veval_args(args, Nil, Nil, ft, 0) in if ra.ok == 0 then {proofs: Nil, diags: Nil} else let env = cs_vbind_ps(vsg.ps, ra.vals) in let rq = cs_veval_all_true(vsg.reqs, env, env, ft) in if rq.ok == 1 and rq.hold == 0 then let cex = cs_vfmt_env(env) in {proofs: Cons({name: cnm, kind: "call_requires", status: "refuted", obligation: cs_exprs_sexpr(vsg.reqs), term: "(implies (and) " + cs_expr_sexpr(cs_cert_conj(vsg.reqs)) + ")", counterexample: cex}, Nil), diags: Cons(cs_mkdiag("V0001", "contract", "contract error: call to '" + cnm + "' in '" + fnm + "' violates 'requires' precondition with counterexample: " + cex, "ensure arguments passed to '" + cnm + "' satisfy its 'requires' contract"), Nil)} else {proofs: Nil, diags: Nil}
 fn cs_vchk_rect_inv(tn, items, fnm, miv, ft) = match miv
     Nil         => {proofs: Nil, diags: Nil}
-    Cons(iv, r) => let rr = cs_veval_rec(items, Nil, Nil, ft, 0) in if rr.ok == 0 then {proofs: Nil, diags: Nil} else let env = cs_vfields_env(rr.fields) in let ri = cs_veval(iv.inv, env, env, ft, 0) in if ri.ok == 1 and ri.i == 0 then let cex = cs_vfmt_env(env) in {proofs: Cons({name: tn, kind: "invariant", status: "refuted", obligation: cs_expr_sexpr(iv.inv), counterexample: cex}, Nil), diags: Cons(cs_mkdiag("V0001", "contract", "contract error: record construction of '" + tn + "' in '" + fnm + "' violates type 'invariant' with counterexample: " + cex, "satisfy the 'invariant' of '" + tn + "' before constructing the record"), Nil)} else {proofs: Nil, diags: Nil}
+    Cons(iv, r) => let rr = cs_veval_rec(items, Nil, Nil, ft, 0) in if rr.ok == 0 then {proofs: Nil, diags: Nil} else let env = cs_vfields_env(rr.fields) in let ri = cs_veval(iv.inv, env, env, ft, 0) in if ri.ok == 1 and ri.i == 0 then let cex = cs_vfmt_env(env) in {proofs: Cons({name: tn, kind: "invariant", status: "refuted", obligation: cs_expr_sexpr(iv.inv), term: "(implies (and) " + cs_expr_sexpr(iv.inv) + ")", counterexample: cex}, Nil), diags: Cons(cs_mkdiag("V0001", "contract", "contract error: record construction of '" + tn + "' in '" + fnm + "' violates type 'invariant' with counterexample: " + cex, "satisfy the 'invariant' of '" + tn + "' before constructing the record"), Nil)} else {proofs: Nil, diags: Nil}
 fn cs_vchk_expr_e(e, fnm, vsigs, invs, ft) = match e
     Call(cnm, args) => let r1 = cs_vchk_call_req(cnm, args, fnm, cs_vsiglookup(cnm, vsigs), ft) in let r2 = cs_vchk_args_e(args, fnm, vsigs, invs, ft) in {proofs: cs_app(r1.proofs, r2.proofs), diags: cs_app(r1.diags, r2.diags)}
     RecT(tn, items) => let r1 = cs_vchk_rect_inv(tn, items, fnm, cs_vinvlookup(tn, invs), ft) in let r2 = cs_vchk_rec_e(items, fnm, vsigs, invs, ft) in {proofs: cs_app(r1.proofs, r2.proofs), diags: cs_app(r1.diags, r2.diags)}
@@ -1392,13 +1453,13 @@ fn cs_vwcet_call(cnm, mf, ft, d) = match mf
 fn cs_vwcet_call2(cnm, fn0, ft, d) = match fn0
     Fn(nm, ps, body) => if cs_mentions_call(cnm, body) == 1 then 100000 else cs_vwcet_e(body, ft, d - 1)
     _                => 0
-fn cs_vwcet_prove_fn(nm, body, wcets, ft) = let bound = cs_vwcet_lookup(nm, wcets) in if bound <= 0 then {proofs: Nil, diags: Nil} else let est = (if cs_mentions_call(nm, body) == 1 then 100000 else cs_vwcet_e(body, ft, 4)) in let ok = if est <= bound then 1 else 0 in let pf = Cons({name: nm, kind: "wcet", status: if ok == 1 then "proven" else "refuted", obligation: "cycles(" + nm + ") <= " + str(bound), counterexample: if ok == 1 then "" else "estimated_cycles = " + str(est) + " > " + str(bound)}, Nil) in let dg = if ok == 1 then Nil else Cons(cs_mkdiag("V0002", "wcet", "wcet error: function '" + nm + "' has worst-case execution time of " + str(est) + " cycles, exceeding '@bound(cycles: " + str(bound) + ")'", "remove recursion/loops on the critical path or increase '@bound(cycles: " + str(est) + ")'"), Nil) in {proofs: pf, diags: dg}
+fn cs_vwcet_prove_fn(nm, body, wcets, ft) = let bound = cs_vwcet_lookup(nm, wcets) in if bound <= 0 then {proofs: Nil, diags: Nil} else let est = (if cs_mentions_call(nm, body) == 1 then 100000 else cs_vwcet_e(body, ft, 4)) in let ok = if est <= bound then 1 else 0 in let tm = "wcet_budget(" + str(est) + " <= " + str(bound) + ")" in let pf = Cons({name: nm, kind: "wcet", status: if ok == 1 then "budget_checked" else "refuted", obligation: "cycles(" + nm + ") <= " + str(bound), term: tm, counterexample: if ok == 1 then "" else "estimated_cycles = " + str(est) + " > " + str(bound)}, Nil) in let dg = if ok == 1 then Nil else Cons(cs_mkdiag("V0002", "wcet", "wcet budget error: function '" + nm + "' has structural cycle cost of " + str(est) + " cycles, exceeding '@bound(cycles: " + str(bound) + ")'", "remove recursion/loops on the critical path or increase '@bound(cycles: " + str(est) + ")'"), Nil) in {proofs: pf, diags: dg}
 fn cs_vprove_stmts(prog, vsigs, invs, wcets, ft) = match prog
     Nil        => {proofs: Nil, diags: Nil}
     Cons(h, t) => cs_vprove_stmt1(h, t, vsigs, invs, wcets, ft)
 fn cs_vprove_stmt1(st, rest, vsigs, invs, wcets, ft) = match st
-    VLawDecl(nm, ps, body)      => let lenv = cs_vlin_init_env(ps) in let chyps = cs_vcollect_body_hyps(body, Nil, lenv, Cons(body, Nil), ft, 0) in let pr = cs_vprove_law_envs(cs_vgen_envs_hyps(ps, 0, cs_len(ps), chyps), body, ft, 0) in let lst = if pr.status == "refuted" then "refuted" else if cs_vqflia_prove_law(ps, body, ft) == 1 then "proven" else "runtime_checked" in let pf = Cons({name: nm, kind: "law", status: lst, obligation: cs_expr_sexpr(body), counterexample: pr.cex}, Nil) in let dg = if lst == "refuted" then Cons(cs_mkdiag("V0001", "law", "contract error: law '" + nm + "' refuted with counterexample: " + pr.cex, "fix the implementation or refine law '" + nm + "'"), Nil) else Nil in let rr = cs_vprove_stmts(rest, vsigs, invs, wcets, ft) in {proofs: cs_app(pf, rr.proofs), diags: cs_app(dg, rr.diags)}
-    VTypeInvariant(nm, fs, inv) => let pf = Cons({name: nm, kind: "invariant", status: "runtime_checked", obligation: cs_expr_sexpr(inv), counterexample: ""}, Nil) in let rr = cs_vprove_stmts(rest, vsigs, invs, wcets, ft) in {proofs: cs_app(pf, rr.proofs), diags: rr.diags}
+    VLawDecl(nm, ps, body)      => let lenv = cs_vlin_init_env(ps) in let chyps = cs_vcollect_body_hyps(body, Nil, lenv, Cons(body, Nil), ft, 0) in let pr = cs_vprove_law_envs(cs_vgen_envs_hyps(ps, 0, cs_len(ps), chyps), body, ft, 0) in let lst = if pr.status == "refuted" then "refuted" else if cs_vqflia_prove_law(ps, body, ft) == 1 then "proven" else "runtime_checked" in let pf = Cons({name: nm, kind: "law", status: lst, obligation: cs_expr_sexpr(body), term: "(implies (and) " + cs_expr_sexpr(cs_cert_clean_e(body, ft, 0)) + ")", counterexample: pr.cex}, Nil) in let dg = if lst == "refuted" then Cons(cs_mkdiag("V0001", "law", "contract error: law '" + nm + "' refuted with counterexample: " + pr.cex, "fix the implementation or refine law '" + nm + "'"), Nil) else Nil in let rr = cs_vprove_stmts(rest, vsigs, invs, wcets, ft) in {proofs: cs_app(pf, rr.proofs), diags: cs_app(dg, rr.diags)}
+    VTypeInvariant(nm, fs, inv) => let pf = Cons({name: nm, kind: "invariant", status: "runtime_checked", obligation: cs_expr_sexpr(inv), term: "(implies (and) " + cs_expr_sexpr(cs_cert_clean_e(inv, ft, 0)) + ")", counterexample: ""}, Nil) in let rr = cs_vprove_stmts(rest, vsigs, invs, wcets, ft) in {proofs: cs_app(pf, rr.proofs), diags: rr.diags}
     Fn(nm, ps, body)            => let r1 = cs_vprove_fn(nm, ps, body, cs_vsiglookup(nm, vsigs), ft) in let rw = cs_vwcet_prove_fn(nm, body, wcets, ft) in let r2 = cs_vchk_expr_e(body, nm, vsigs, invs, ft) in let rr = cs_vprove_stmts(rest, vsigs, invs, wcets, ft) in {proofs: cs_app(r1.proofs, cs_app(rw.proofs, cs_app(r2.proofs, rr.proofs))), diags: cs_app(r1.diags, cs_app(rw.diags, cs_app(r2.diags, rr.diags)))}
     Print(v)                    => let r1 = cs_vchk_expr_e(v, "<main>", vsigs, invs, ft) in let rr = cs_vprove_stmts(rest, vsigs, invs, wcets, ft) in {proofs: cs_app(r1.proofs, rr.proofs), diags: cs_app(r1.diags, rr.diags)}
     ExprS(v)                    => let r1 = cs_vchk_expr_e(v, "<main>", vsigs, invs, ft) in let rr = cs_vprove_stmts(rest, vsigs, invs, wcets, ft) in {proofs: cs_app(r1.proofs, rr.proofs), diags: cs_app(r1.diags, rr.diags)}
@@ -1464,11 +1525,32 @@ fn cs_n4_diff_e(e, dv, dmap) = match e
     LetIn(nm, v, b) => let dv_e = cs_n4_diff_e(v, dv, dmap) in LetIn(nm, v, cs_n4_diff_e(b, dv, Cons({k: nm, de: dv_e}, dmap)))
     VarIn(nm, v, b) => let dv_e = cs_n4_diff_e(v, dv, dmap) in VarIn(nm, v, cs_n4_diff_e(b, dv, Cons({k: nm, de: dv_e}, dmap)))
     If(c, t, e2)    => If(c, cs_n4_diff_e(t, dv, dmap), cs_n4_diff_e(e2, dv, dmap))
-    Bin(op, l, r)   => let dl = cs_n4_diff_e(l, dv, dmap) in let dr = cs_n4_diff_e(r, dv, dmap) in if op == "+" then Bin("+", dl, dr) else if op == "-" then Bin("-", dl, dr) else if op == "*" then Bin("+", Bin("*", dl, r), Bin("*", l, dr)) else if op == "/" then Bin("/", dl, r) else Num(0)
+    Bin(op, l, r)   => let dl = cs_n4_diff_e(l, dv, dmap) in let dr = cs_n4_diff_e(r, dv, dmap) in if op == "+" then Bin("+", dl, dr) else if op == "-" then Bin("-", dl, dr) else if op == "*" then Bin("+", Bin("*", dl, r), Bin("*", l, dr)) else Num(0)
     Call(cnm, args) => if cnm == "relu" and cs_len(args) == 1 then (let x = cs_asthead(args) in If(Bin(">", x, Num(0)), cs_n4_diff_e(x, dv, dmap), Num(0))) else if cnm == "sq" and cs_len(args) == 1 then (let x = cs_asthead(args) in Bin("*", Bin("*", Num(2), x), cs_n4_diff_e(x, dv, dmap))) else Num(0)
     _               => Num(0)
+fn cs_n4_chk_diff_e(e, fnm) = match e
+    Num(n)          => Nil
+    Str(s)          => Nil
+    Var(nm)         => Nil
+    OwnE(inner)     => cs_n4_chk_diff_e(inner, fnm)
+    MutE(inner)     => cs_n4_chk_diff_e(inner, fnm)
+    LetIn(nm, v, b) => cs_app(cs_n4_chk_diff_e(v, fnm), cs_n4_chk_diff_e(b, fnm))
+    VarIn(nm, v, b) => cs_app(cs_n4_chk_diff_e(v, fnm), cs_n4_chk_diff_e(b, fnm))
+    If(c, t, e2)    => cs_app(cs_n4_chk_diff_e(t, fnm), cs_n4_chk_diff_e(e2, fnm))
+    Bin(op, l, r)   => let d_op = if op == "+" or op == "-" or op == "*" then Nil else Cons(cs_mkdiag("N0400", "autodiff", "autodiff error: operator '" + op + "' in '" + fnm + "' is outside the differentiable polynomial fragment (+, -, *, relu, sq)", "replace '" + op + "' with a polynomial operation (+, -, *) or use 'mlp2_grad' from 'std.nn'"), Nil) in cs_app(d_op, cs_app(cs_n4_chk_diff_e(l, fnm), cs_n4_chk_diff_e(r, fnm)))
+    Call(cnm, args) => if (cnm == "relu" or cnm == "sq") and cs_len(args) == 1 then cs_n4_chk_diff_e(cs_asthead(args), fnm) else Cons(cs_mkdiag("N0400", "autodiff", "autodiff error: call to '" + cnm + "' in '" + fnm + "' has no registered symbolic derivative rule", "inline '" + cnm + "' into polynomial ops (+, -, *, relu, sq) or use 'mlp2_grad' from 'std.nn'"), Nil)
+    _               => Cons(cs_mkdiag("N0400", "autodiff", "autodiff error: unsupported expression in differentiable function '" + fnm + "'", "use polynomial expressions (+, -, *, if, let, relu, sq)"), Nil)
+fn cs_n4_chk_grad_fns(gnms, ft) = match gnms
+    Nil          => Nil
+    Cons(fnm, r) => cs_app(cs_n4_chk_grad_fn1(fnm, cs_fnlookup(fnm, ft)), cs_n4_chk_grad_fns(r, ft))
+fn cs_n4_chk_grad_fn1(fnm, mf) = match mf
+    Nil          => Cons(cs_mkdiag("N0400", "autodiff", "autodiff error: target function '" + fnm + "' not found for symbolic differentiation", "define 'fn " + fnm + "(x: int) -> int = ...' before calling 'grad(" + fnm + ", ...)'"), Nil)
+    Cons(fn0, r) => cs_n4_chk_grad_fn2(fnm, fn0)
+fn cs_n4_chk_grad_fn2(fnm, fn0) = match fn0
+    Fn(nm, ps, body) => cs_n4_chk_diff_e(body, fnm)
+    _                => Nil
 fn cs_n4_collect_grads_e(e, acc) = match e
-    Call(cnm, args) => let acc1 = cs_n4_collect_grads_args(args, acc) in if (cnm == "grad" or cnm == "jvp" or cnm == "vjp") and cs_len(args) >= 1 then (let fnm = cs_n4_var_name(cs_asthead(args)) in if fnm != "" and cs_omem(fnm, acc1) == 0 then Cons(fnm, acc1) else acc1) else acc1
+    Call(cnm, args) => let acc1 = cs_n4_collect_grads_args(args, acc) in if (cnm == "grad" or cnm == "value_and_grad" or cnm == "jvp" or cnm == "vjp") and cs_len(args) >= 1 then (let fnm = cs_n4_var_name(cs_asthead(args)) in if fnm != "" and cs_omem(fnm, acc1) == 0 then Cons(fnm, acc1) else acc1) else acc1
     Bin(op, l, r)   => cs_n4_collect_grads_e(r, cs_n4_collect_grads_e(l, acc))
     If(c, t, e2)    => cs_n4_collect_grads_e(e2, cs_n4_collect_grads_e(t, cs_n4_collect_grads_e(c, acc)))
     LetIn(nm, v, b) => cs_n4_collect_grads_e(b, cs_n4_collect_grads_e(v, acc))
@@ -1517,7 +1599,7 @@ fn cs_diagnose_stmt(s0, tt) = match s0
     Print(v)         => cs_chk_expr(v, tt)
     ExprS(v)         => cs_chk_expr(v, tt)
     _                => Nil
-fn cs_diagnose(prog0) = let gfns = cs_n4_synth_grad_fns(cs_n4_collect_grads_prog(prog0, Nil), cs_buildft(prog0)) in let prog = cs_app(gfns, prog0) in let tt = cs_tcollect(prog) in let osigs = cs_ocollects(prog) in let vsigs = cs_vcollect_vsigs(prog) in let laws = cs_vcollect_laws(prog) in let kt = {ksigs: cs_kcollect_effsigs(prog), edecls: cs_kcollect_effdecls(prog), caps: cs_kcollect_caps(prog), recs: tt.recs, vsigs: vsigs, osigs: osigs} in let hr = cs_collect_holes_stmts(prog, tt.sigs, osigs, vsigs, laws, tt.ft) in let prog2 = cs_fill_prog_holes(prog, tt.sigs, osigs, vsigs, laws, tt.ft) in let vr = cs_vprove_all(prog2) in cs_app(cs_diagnose_stmts(prog2, tt), cs_app(hr.diags, cs_app(vr.diags, cs_odiagnose_stmts(prog2, osigs, tt.sigs, kt, Nil))))
+fn cs_diagnose(prog0) = let ft0 = cs_buildft(prog0) in let gnms = cs_n4_collect_grads_prog(prog0, Nil) in let d_ad = cs_n4_chk_grad_fns(gnms, ft0) in let gfns = cs_n4_synth_grad_fns(gnms, ft0) in let prog = cs_app(gfns, prog0) in let tt = cs_tcollect(prog) in let osigs = cs_ocollects(prog) in let vsigs = cs_vcollect_vsigs(prog) in let laws = cs_vcollect_laws(prog) in let kt = {ksigs: cs_kcollect_effsigs(prog), edecls: cs_kcollect_effdecls(prog), caps: cs_kcollect_caps(prog), recs: tt.recs, vsigs: vsigs, osigs: osigs} in let hr = cs_collect_holes_stmts(prog, tt.sigs, osigs, vsigs, laws, tt.ft) in let prog2 = cs_fill_prog_holes(prog, tt.sigs, osigs, vsigs, laws, tt.ft) in let vr = cs_vprove_all(prog2) in cs_app(d_ad, cs_app(cs_diagnose_stmts(prog2, tt), cs_app(hr.diags, cs_app(vr.diags, cs_odiagnose_stmts(prog2, osigs, tt.sigs, kt, Nil)))))
 
 ## --- C3 generic erasure & C1/C2/M1/M2 comptime + hygienic macro expansion ---
 fn cs_gcfs(pl) = match pl
@@ -1701,7 +1783,7 @@ fn cs_eval_prog(prog) = cs_joinsep(cs_eval_stmts(prog, cs_buildft(prog)), "\n")
 
 ## --- PUBLIC CALLABLE LIBRARY API (`use lcaas`) ---
 fn cs_collect_holes(prog) = let tt = cs_tcollect(prog) in let osigs = cs_ocollects(prog) in let vsigs = cs_vcollect_vsigs(prog) in let laws = cs_vcollect_laws(prog) in (cs_collect_holes_stmts(prog, tt.sigs, osigs, vsigs, laws, tt.ft)).holes
-fn caas_compile(src) = let ast0 = cs_parse(src) in let syms = cs_symbols(ast0) in let gfns = cs_n4_synth_grad_fns(cs_n4_collect_grads_prog(ast0, Nil), cs_buildft(ast0)) in let ast = cs_app(gfns, ast0) in let tt = cs_tcollect(ast) in let osigs = cs_ocollects(ast) in let vsigs = cs_vcollect_vsigs(ast) in let invs = cs_vcollect_invs(ast) in let laws = cs_vcollect_laws(ast) in let wcets = cs_vcollect_wcets(ast) in let kt = {ksigs: cs_kcollect_effsigs(ast), edecls: cs_kcollect_effdecls(ast), caps: cs_kcollect_caps(ast), recs: tt.recs, vsigs: vsigs, osigs: osigs} in let hr = cs_collect_holes_stmts(ast0, tt.sigs, osigs, vsigs, laws, tt.ft) in let ast_filled = cs_fill_prog_holes(ast, tt.sigs, osigs, vsigs, laws, tt.ft) in let vr = cs_vprove_stmts(ast_filled, vsigs, invs, wcets, cs_buildft(ast_filled)) in let diags = cs_app(cs_diagnose_stmts(ast_filled, tt), cs_app(hr.diags, cs_app(vr.diags, cs_odiagnose_stmts(ast_filled, osigs, tt.sigs, kt, Nil)))) in let raw_sexpr = cs_prog_sexpr(ast0) in if cs_isnil(diags) == 0 then {ok: 0, diagnostics: diags, holes: hr.holes, proofs: vr.proofs, symbols: syms, ast: ast0, ast_sexpr: raw_sexpr, expanded: Nil, expanded_sexpr: "", asm: "", result: ""} else let exp = cs_expand(ast_filled) in {ok: 1, diagnostics: Nil, holes: hr.holes, proofs: vr.proofs, symbols: syms, ast: ast0, ast_sexpr: raw_sexpr, expanded: exp, expanded_sexpr: cs_prog_sexpr(exp), asm: cs_asm_gen(exp), result: cs_eval_prog(exp)}
+fn caas_compile(src) = let ast0 = cs_parse(src) in let syms = cs_symbols(ast0) in let ft0 = cs_buildft(ast0) in let gnms = cs_n4_collect_grads_prog(ast0, Nil) in let d_ad = cs_n4_chk_grad_fns(gnms, ft0) in let gfns = cs_n4_synth_grad_fns(gnms, ft0) in let ast = cs_app(gfns, ast0) in let tt = cs_tcollect(ast) in let osigs = cs_ocollects(ast) in let vsigs = cs_vcollect_vsigs(ast) in let invs = cs_vcollect_invs(ast) in let laws = cs_vcollect_laws(ast) in let wcets = cs_vcollect_wcets(ast) in let kt = {ksigs: cs_kcollect_effsigs(ast), edecls: cs_kcollect_effdecls(ast), caps: cs_kcollect_caps(ast), recs: tt.recs, vsigs: vsigs, osigs: osigs} in let hr = cs_collect_holes_stmts(ast0, tt.sigs, osigs, vsigs, laws, tt.ft) in let ast_filled = cs_fill_prog_holes(ast, tt.sigs, osigs, vsigs, laws, tt.ft) in let vr = cs_vprove_stmts(ast_filled, vsigs, invs, wcets, cs_buildft(ast_filled)) in let diags = cs_app(d_ad, cs_app(cs_diagnose_stmts(ast_filled, tt), cs_app(hr.diags, cs_app(vr.diags, cs_odiagnose_stmts(ast_filled, osigs, tt.sigs, kt, Nil))))) in let raw_sexpr = cs_prog_sexpr(ast0) in if cs_isnil(diags) == 0 then {ok: 0, diagnostics: diags, holes: hr.holes, proofs: vr.proofs, symbols: syms, ast: ast0, ast_sexpr: raw_sexpr, expanded: Nil, expanded_sexpr: "", asm: "", result: ""} else let exp = cs_expand(ast_filled) in {ok: 1, diagnostics: Nil, holes: hr.holes, proofs: vr.proofs, symbols: syms, ast: ast0, ast_sexpr: raw_sexpr, expanded: exp, expanded_sexpr: cs_prog_sexpr(exp), asm: cs_asm_gen(exp), result: cs_eval_prog(exp)}
 
 fn caas_check(src) = caas_compile(src)
 fn caas_fill(src) = (caas_compile(src)).holes
@@ -1739,17 +1821,51 @@ fn cs_syms_json(ss) = match ss
 fn caas_json(r) = "{\"ok\":" + (if r.ok == 1 then "true" else "false") + ",\"diagnostics\":[" + cs_diags_json(r.diagnostics) + "],\"holes\":[" + cs_holes_json(r.holes) + "],\"proofs\":[" + cs_proofs_json(r.proofs) + "],\"symbols\":[" + cs_syms_json(r.symbols) + "],\"ast\":\"" + cs_jesc(r.ast_sexpr) + "\",\"expanded\":\"" + cs_jesc(r.expanded_sexpr) + "\",\"has_asm\":" + (if count(r.asm) > 0 then "true" else "false") + ",\"result\":\"" + cs_jesc(r.result) + "\"}"
 
 ## --- Stage 5: Proof Certificates (G3/H3), C-Header Bindings (I3), and MCP Server (G1) ---
-fn lc_hash_loop(s, i, n, acc) = if i >= n then acc else let c = at(s, i) in let v = if c == "a" then 97 else if c == "e" then 101 else if c == "i" then 105 else if c == "o" then 111 else if c == "u" then 117 else if c == "(" then 40 else if c == ")" then 41 else if c == "\n" then 10 else 65 + (i % 26) in let next = (acc * 131 + v + i) % 1000000007 in lc_hash_loop(s, i + 1, n, if next < 0 then 0 - next else next)
+fn sha_ord_lo(c) = if c < "0" then (if c < "(" then (if c == " " then 32 else if c == "!" then 33 else if c == "\"" then 34 else if c == "#" then 35 else if c == "$" then 36 else if c == "%" then 37 else if c == "&" then 38 else 39) else (if c == "(" then 40 else if c == ")" then 41 else if c == "*" then 42 else if c == "+" then 43 else if c == "," then 44 else if c == "-" then 45 else if c == "." then 46 else 47)) else (if c < ":" then 48 + toint(c) else (if c == ":" then 58 else if c == ";" then 59 else if c == "<" then 60 else if c == "=" then 61 else if c == ">" then 62 else if c == "?" then 63 else 64))
+fn sha_ord_up(c) = if c < "N" then (if c < "G" then (if c == "A" then 65 else if c == "B" then 66 else if c == "C" then 67 else if c == "D" then 68 else if c == "E" then 69 else 70) else (if c == "G" then 71 else if c == "H" then 72 else if c == "I" then 73 else if c == "J" then 74 else if c == "K" then 75 else if c == "L" then 76 else 77)) else (if c < "U" then (if c == "N" then 78 else if c == "O" then 79 else if c == "P" then 80 else if c == "Q" then 81 else if c == "R" then 82 else if c == "S" then 83 else 84) else (if c == "U" then 85 else if c == "V" then 86 else if c == "W" then 87 else if c == "X" then 88 else if c == "Y" then 89 else if c == "Z" then 90 else if c == "[" then 91 else if c == "\\" then 92 else if c == "]" then 93 else if c == "^" then 94 else if c == "_" then 95 else 96))
+fn sha_ord_az(c) = if c < "n" then (if c < "g" then (if c == "a" then 97 else if c == "b" then 98 else if c == "c" then 99 else if c == "d" then 100 else if c == "e" then 101 else 102) else (if c == "g" then 103 else if c == "h" then 104 else if c == "i" then 105 else if c == "j" then 106 else if c == "k" then 107 else if c == "l" then 108 else 109)) else (if c < "u" then (if c == "n" then 110 else if c == "o" then 111 else if c == "p" then 112 else if c == "q" then 113 else if c == "r" then 114 else if c == "s" then 115 else 116) else (if c == "u" then 117 else if c == "v" then 118 else if c == "w" then 119 else if c == "x" then 120 else if c == "y" then 121 else if c == "z" then 122 else if c == "|" then 124 else if c == "~" then 126 else if c > "z" and c < "|" then 123 else 125))
+fn sha_ord(c) = if c == "\n" then 10 else if c == "\r" then 13 else if c == "\t" then 9 else if c < "A" then sha_ord_lo(c) else if c < "a" then sha_ord_up(c) else sha_ord_az(c)
+fn sha_u32(x) = let r = x % 4294967296 in if r < 0 then r + 4294967296 else r
+fn sha_pow2(n) = if n <= 0 then 1 else if n >= 16 then 65536 * sha_pow2(n - 16) else if n >= 8 then 256 * sha_pow2(n - 8) else if n >= 4 then 16 * sha_pow2(n - 4) else if n == 3 then 8 else if n == 2 then 4 else 2
+fn sha_shr(x, n) = x / sha_pow2(n)
+fn sha_rotr(x, n) = let p = sha_pow2(n) in (x / p) + ((x % p) * sha_pow2(32 - n))
+fn sha_xor3_4(x, y, z) = let b0 = ((x % 2) + (y % 2) + (z % 2)) % 2 in let b1 = (((x / 2) % 2) + ((y / 2) % 2) + ((z / 2) % 2)) % 2 in let b2 = (((x / 4) % 2) + ((y / 4) % 2) + ((z / 4) % 2)) % 2 in let b3 = (((x / 8) % 2) + ((y / 8) % 2) + ((z / 8) % 2)) % 2 in b0 + 2 * b1 + 4 * b2 + 8 * b3
+fn sha_xor3_n(x, y, z, nibs) = if nibs <= 0 then 0 else sha_xor3_4(x % 16, y % 16, z % 16) + 16 * sha_xor3_n(x / 16, y / 16, z / 16, nibs - 1)
+fn sha_ch_4(e, f, g) = let b0 = (if (e % 2) == 1 then (f % 2) else (g % 2)) in let b1 = (if ((e / 2) % 2) == 1 then ((f / 2) % 2) else ((g / 2) % 2)) in let b2 = (if ((e / 4) % 2) == 1 then ((f / 4) % 2) else ((g / 4) % 2)) in let b3 = (if ((e / 8) % 2) == 1 then ((f / 8) % 2) else ((g / 8) % 2)) in b0 + 2 * b1 + 4 * b2 + 8 * b3
+fn sha_ch_n(e, f, g, nibs) = if nibs <= 0 then 0 else sha_ch_4(e % 16, f % 16, g % 16) + 16 * sha_ch_n(e / 16, f / 16, g / 16, nibs - 1)
+fn sha_maj_4(a, b, c) = let b0 = (if (a % 2) + (b % 2) + (c % 2) >= 2 then 1 else 0) in let b1 = (if ((a / 2) % 2) + ((b / 2) % 2) + ((c / 2) % 2) >= 2 then 1 else 0) in let b2 = (if ((a / 4) % 2) + ((b / 4) % 2) + ((c / 4) % 2) >= 2 then 1 else 0) in let b3 = (if ((a / 8) % 2) + ((b / 8) % 2) + ((c / 8) % 2) >= 2 then 1 else 0) in b0 + 2 * b1 + 4 * b2 + 8 * b3
+fn sha_maj_n(a, b, c, nibs) = if nibs <= 0 then 0 else sha_maj_4(a % 16, b % 16, c % 16) + 16 * sha_maj_n(a / 16, b / 16, c / 16, nibs - 1)
+fn sha_big_sig0(a) = sha_xor3_n(sha_rotr(a, 2), sha_rotr(a, 13), sha_rotr(a, 22), 8)
+fn sha_big_sig1(e) = sha_xor3_n(sha_rotr(e, 6), sha_rotr(e, 11), sha_rotr(e, 25), 8)
+fn sha_sml_sig0(x) = sha_xor3_n(sha_rotr(x, 7), sha_rotr(x, 18), sha_shr(x, 3), 8)
+fn sha_sml_sig1(x) = sha_xor3_n(sha_rotr(x, 17), sha_rotr(x, 19), sha_shr(x, 10), 8)
+fn sha_k(t) = if t < 16 then (if t == 0 then 1116352408 else if t == 1 then 1899447441 else if t == 2 then 3049323471 else if t == 3 then 3921009573 else if t == 4 then 961987163 else if t == 5 then 1508970993 else if t == 6 then 2453635748 else if t == 7 then 2870763221 else if t == 8 then 3624381080 else if t == 9 then 310598401 else if t == 10 then 607225278 else if t == 11 then 1426881987 else if t == 12 then 1925078388 else if t == 13 then 2162078206 else if t == 14 then 2614888103 else 3248222580) else if t < 32 then (if t == 16 then 3835390401 else if t == 17 then 4022224774 else if t == 18 then 264347078 else if t == 19 then 604807628 else if t == 20 then 770255983 else if t == 21 then 1249150122 else if t == 22 then 1555081692 else if t == 23 then 1996064986 else if t == 24 then 2554220882 else if t == 25 then 2821834349 else if t == 26 then 2952996808 else if t == 27 then 3210313671 else if t == 28 then 3336571891 else if t == 29 then 3584528711 else if t == 30 then 113926993 else 338241895) else if t < 48 then (if t == 32 then 666307205 else if t == 33 then 773529912 else if t == 34 then 1294757372 else if t == 35 then 1396182291 else if t == 36 then 1695183700 else if t == 37 then 1986661051 else if t == 38 then 2177026350 else if t == 39 then 2456956037 else if t == 40 then 2730485921 else if t == 41 then 2820302411 else if t == 42 then 3259730800 else if t == 43 then 3345764771 else if t == 44 then 3516065817 else if t == 45 then 3600352804 else if t == 46 then 4094571909 else 275423344) else (if t == 48 then 430227734 else if t == 49 then 506948616 else if t == 50 then 659060556 else if t == 51 then 883997877 else if t == 52 then 958139571 else if t == 53 then 1322822218 else if t == 54 then 1537002063 else if t == 55 then 1747873779 else if t == 56 then 1955562222 else if t == 57 then 2024104815 else if t == 58 then 2227730452 else if t == 59 then 2361852424 else if t == 60 then 2428436474 else if t == 61 then 2756734187 else if t == 62 then 3204031479 else 3329325298)
+fn sha_nth(xs, i) = match xs
+    Nil        => 0
+    Cons(h, t) => if i <= 0 then h else sha_nth(t, i - 1)
+fn sha_msg_byte(s, len, total, idx) = if idx < len then sha_ord(at(s, idx)) else if idx == len then 128 else if idx >= total - 8 then ((len * 8) / sha_pow2(8 * (total - 1 - idx))) % 256 else 0
+fn sha_msg_word(s, len, total, base) = sha_msg_byte(s, len, total, base) * 16777216 + sha_msg_byte(s, len, total, base + 1) * 65536 + sha_msg_byte(s, len, total, base + 2) * 256 + sha_msg_byte(s, len, total, base + 3)
+fn sha_w_build(s, len, total, blk_off, t, w_rev) = if t >= 64 then w_rev else let wt = (if t < 16 then sha_msg_word(s, len, total, blk_off + t * 4) else sha_u32(sha_nth(w_rev, 15) + sha_sml_sig0(sha_nth(w_rev, 14)) + sha_nth(w_rev, 6) + sha_sml_sig1(sha_nth(w_rev, 1)))) in sha_w_build(s, len, total, blk_off, t + 1, Cons(wt, w_rev))
+fn sha_round(st, wt, kt) = let t1 = sha_u32(st.h + sha_big_sig1(st.e) + sha_ch_n(st.e, st.f, st.g, 8) + kt + wt) in let t2 = sha_u32(sha_big_sig0(st.a) + sha_maj_n(st.a, st.b, st.c, 8)) in {a: sha_u32(t1 + t2), b: st.a, c: st.b, d: st.c, e: sha_u32(st.d + t1), f: st.e, g: st.f, h: st.g}
+fn sha_rounds(st, w_rev, t) = if t >= 64 then st else sha_rounds(sha_round(st, sha_nth(w_rev, 63 - t), sha_k(t)), w_rev, t + 1)
+fn sha_blocks(s, len, total, blk_off, st) = if blk_off >= total then st else let w_rev = sha_w_build(s, len, total, blk_off, 0, Nil) in let r = sha_rounds(st, w_rev, 0) in sha_blocks(s, len, total, blk_off + 64, {a: sha_u32(st.a + r.a), b: sha_u32(st.b + r.b), c: sha_u32(st.c + r.c), d: sha_u32(st.d + r.d), e: sha_u32(st.e + r.e), f: sha_u32(st.f + r.f), g: sha_u32(st.g + r.g), h: sha_u32(st.h + r.h)})
+fn sha_hex1(n) = at("0123456789abcdef", n % 16)
+fn sha_hex32(w) = sha_hex1(w / 268435456) + sha_hex1(w / 16777216) + sha_hex1(w / 1048576) + sha_hex1(w / 65536) + sha_hex1(w / 4096) + sha_hex1(w / 256) + sha_hex1(w / 16) + sha_hex1(w)
+fn sha256_hex(s) = let len = count(s) in let total = ((len + 9 + 63) / 64) * 64 in let init = {a: 1779033703, b: 3144134277, c: 1013904242, d: 2773480762, e: 1359893119, f: 2600822924, g: 528734635, h: 1541459225} in let fin = sha_blocks(s, len, total, 0, init) in sha_hex32(fin.a) + sha_hex32(fin.b) + sha_hex32(fin.c) + sha_hex32(fin.d) + sha_hex32(fin.e) + sha_hex32(fin.f) + sha_hex32(fin.g) + sha_hex32(fin.h)
 
-fn lc_sha256(s) = "sha256:" + str(lc_hash_loop(s, 0, count(s), 5381))
+fn lc_fold1(s, i, n, acc) = if i >= n then acc else let next = (acc * 131 + sha_ord(at(s, i)) + i + 17) % 1000000007 in lc_fold1(s, i + 1, n, if next < 0 then 0 - next else next)
+fn lc_fold2(s, i, n, acc) = if i >= n then acc else let next = (acc * 257 + sha_ord(at(s, i)) * 7 + i + 31) % 1000000009 in lc_fold2(s, i + 1, n, if next < 0 then 0 - next else next)
+fn lc_canon55(s) = let n = count(s) in if n <= 55 then s else slice(s, 0, 16) + ":" + str(n) + ":" + str(lc_fold1(s, 0, n, 5381)) + ":" + str(lc_fold2(s, 0, n, 7919))
+fn lc_sha256(s) = "sha256:" + sha256_hex(lc_canon55(s))
 
 fn lc_count_proven(ps) = match ps
     Nil        => 0
     Cons(h, t) => (if h.status == "proven" then 1 else 0) + lc_count_proven(t)
+fn lc_count_budget(ps) = match ps
+    Nil        => 0
+    Cons(h, t) => (if h.status == "budget_checked" then 1 else 0) + lc_count_budget(t)
 
-fn lc_kernel_term(p) = if p.status == "proven" then (if p.kind == "wcet" then "wcet_le_bound(" + p.name + ", " + p.obligation + ")" else "qf_lia_fm_unsat(not(" + p.obligation + "))") else "unproven(" + p.obligation + ")"
-
-fn lc_kernel_check_one(p) = if p.status == "proven" and count(p.obligation) > 0 and count(p.counterexample) == 0 then 1 else 0
+fn lc_kernel_check_one(p) = if p.kind == "wcet" then (if p.status == "budget_checked" and count(p.term) > 12 and count(p.counterexample) == 0 then 1 else 0) else (if p.status == "proven" and count(p.term) > 10 and count(p.counterexample) == 0 then 1 else 0)
 
 fn lc_kernel_check_all(ps) = match ps
     Nil        => 1
@@ -1757,9 +1873,11 @@ fn lc_kernel_check_all(ps) = match ps
 
 fn lc_terms_json(ps) = match ps
     Nil        => ""
-    Cons(h, t) => let item = "{\"name\":\"" + cs_jesc(h.name) + "\",\"kind\":\"" + cs_jesc(h.kind) + "\",\"term\":\"" + cs_jesc(lc_kernel_term(h)) + "\",\"checked\":" + (if lc_kernel_check_one(h) == 1 then "true" else "false") + "}" in if cs_isnil(t) == 1 then item else item + "," + lc_terms_json(t)
+    Cons(h, t) => let item = "{\"name\":\"" + cs_jesc(h.name) + "\",\"kind\":\"" + cs_jesc(h.kind) + "\",\"term\":\"" + cs_jesc(h.term) + "\",\"checked\":" + (if lc_kernel_check_one(h) == 1 then "true" else "false") + "}" in if cs_isnil(t) == 1 then item else item + "," + lc_terms_json(t)
 
-fn lcert_certify(src) = let r = caas_compile(src) in let total = cs_len(r.proofs) in let proven = lc_count_proven(r.proofs) in let k_ok = if r.ok == 1 and total > 0 and proven == total and lc_kernel_check_all(r.proofs) == 1 then 1 else 0 in let src_hash = lc_sha256(src) in let cert_hash = lc_sha256(src_hash + ":" + str(proven) + "/" + str(total) + ":" + cs_proofs_json(r.proofs)) in let badge = if k_ok == 1 then "Lume Verified ✓" else "unverified" in "{\"ok\":" + (if k_ok == 1 then "true" else "false") + ",\"badge\":\"" + cs_jesc(badge) + "\",\"kernel_verified\":" + (if k_ok == 1 then "true" else "false") + ",\"kernel_id\":\"lume-minimal-kernel-v1\",\"bootstrap_attestation\":\"stage2==stage3\",\"zero_c\":true,\"source_hash\":\"" + cs_jesc(src_hash) + "\",\"certificate_hash\":\"" + cs_jesc(cert_hash) + "\",\"proven_count\":" + str(proven) + ",\"total_obligations\":" + str(total) + ",\"proof_terms\":[" + lc_terms_json(r.proofs) + "],\"obligations\":[" + cs_proofs_json(r.proofs) + "]}"
+fn lc_extract_sha_hdr(s) = if cs_startswith(s, "@sha256 ") == 1 then let le = cs_lineend(s, 0, count(s)) in {has: 1, sha: "sha256:" + cs_chomp(slice(s, 8, le)), rest: slice(s, le, count(s))} else {has: 0, sha: "", rest: s}
+
+fn lcert_certify(raw_src) = let sh = lc_extract_sha_hdr(raw_src) in let src = sh.rest in let r = caas_compile(src) in let total = cs_len(r.proofs) in let proven = lc_count_proven(r.proofs) in let budgeted = lc_count_budget(r.proofs) in let k_ok = if r.ok == 1 and total > 0 and proven + budgeted == total and lc_kernel_check_all(r.proofs) == 1 then 1 else 0 in let src_hash = if sh.has == 1 and count(sh.sha) == 71 then sh.sha else lc_sha256(src) in let terms_str = lc_terms_json(r.proofs) in let obls_str = cs_proofs_json(r.proofs) in let cert_hash = lc_sha256(src_hash + "|" + terms_str + "|" + obls_str) in let badge = if k_ok == 1 then "Lume Verified ✓" else "unverified" in "{\"ok\":" + (if k_ok == 1 then "true" else "false") + ",\"badge\":\"" + cs_jesc(badge) + "\",\"kernel_verified\":" + (if k_ok == 1 then "true" else "false") + ",\"kernel_id\":\"lume-minimal-kernel-v1\",\"bootstrap_attestation\":\"stage2==stage3\",\"zero_c\":true,\"source_hash\":\"" + cs_jesc(src_hash) + "\",\"certificate_hash\":\"" + cs_jesc(cert_hash) + "\",\"proven_count\":" + str(proven) + ",\"budget_checked_count\":" + str(budgeted) + ",\"total_obligations\":" + str(total) + ",\"proof_terms\":[" + terms_str + "],\"obligations\":[" + obls_str + "]}"
 
 fn lc_find_ch(s, i, n, ch) = if i >= n then n else if at(s, i) == ch then i else lc_find_ch(s, i + 1, n, ch)
 
@@ -1781,7 +1899,7 @@ fn lc_split_lines(s, i, n) = if i >= n then Nil else let le = cs_lineend(s, i, n
 
 fn lcert_bind(hdr_text) = let r = lc_bind_lines(lc_split_lines(hdr_text, 0, count(hdr_text))) in let gen = cs_joinsep(cs_app(r.exts, r.wraps), "\n") in "{\"ok\":true,\"mode\":\"bind\",\"bridge\":\"c_abi\",\"provenance_guard\":\"A0003\",\"effect\":\"ffi\",\"extern_decls\":[" + cs_strlist_json(r.exts) + "],\"safe_wrappers\":[" + cs_strlist_json(r.wraps) + "],\"generated_lume\":\"" + cs_jesc(gen) + "\"}"
 
-fn lcert_mcp(src) = let r = caas_compile(src) in let cert = lcert_certify(src) in "{\"jsonrpc\":\"2.0\",\"protocol\":\"mcp/1.0\",\"server\":\"lume-oracle-mcp\",\"tools\":[\"lume_check\",\"lume_prove\",\"lume_fill\",\"lume_bind\",\"lume_certify\"],\"result\":{\"ok\":" + (if r.ok == 1 then "true" else "false") + ",\"diagnostics\":[" + cs_diags_json(r.diagnostics) + "],\"holes\":[" + cs_holes_json(r.holes) + "],\"proofs\":[" + cs_proofs_json(r.proofs) + "],\"certificate\":" + cert + "}}"
+fn lcert_mcp(raw_src) = let sh = lc_extract_sha_hdr(raw_src) in let src = sh.rest in let r = caas_compile(src) in let cert = lcert_certify(raw_src) in "{\"jsonrpc\":\"2.0\",\"protocol\":\"mcp/1.0\",\"server\":\"lume-oracle-mcp\",\"tools\":[\"lume_check\",\"lume_prove\",\"lume_fill\",\"lume_bind\",\"lume_certify\"],\"result\":{\"ok\":" + (if r.ok == 1 then "true" else "false") + ",\"diagnostics\":[" + cs_diags_json(r.diagnostics) + "],\"holes\":[" + cs_holes_json(r.holes) + "],\"proofs\":[" + cs_proofs_json(r.proofs) + "],\"certificate\":" + cert + "}}"
 
 fn caas_entry_dispatch(input) = if cs_startswith(input, "@mode certify\n") == 1 then lcert_certify(slice(input, 14, count(input))) else if cs_startswith(input, "@mode bind\n") == 1 then lcert_bind(slice(input, 11, count(input))) else if cs_startswith(input, "@mode mcp\n") == 1 then lcert_mcp(slice(input, 10, count(input))) else caas_json(caas_compile(input))
 

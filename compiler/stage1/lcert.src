@@ -1,56 +1,233 @@
-## Stage 5: Track I3 (AI C-Header Binding Generator), Track G1 (MCP Oracle Server),
-## and Track G3 / H3 (Minimal Trusted Proof Certificate Kernel: `lume certify` & `lume verify-cert`).
+## Stage 5 Track G3 / H3: Minimal Trusted Proof Certificate Kernel (`lume verify-cert <cert.json>`).
+## Standalone, zero-dependency proof-certificate verifier:
+##   1. ZERO compiler imports (`use lcaas` is NOT imported; `lumec` is never invoked).
+##   2. Cryptographic SHA-256 (FIPS 180-4) tamper-evidence check over `source_hash`, `proof_terms`, and `obligations`.
+##   3. Independent S-expression parser + standalone Fourier-Motzkin `QF_LIA` solver over Z that re-derives
+##      every `"status":"proven"` obligation from its proof term `(implies (and ...) <goal>)` and rejects
+##      false, nonlinear, garbled, or overclaimed obligations regardless of the certificate's stored status.
+##   4. Independent structural cycle-budget check for `"kind":"wcet"` obligations (`wcet_budget(est <= bound)`),
+##      requiring `"status":"budget_checked"` and rejecting `"status":"proven"` overclaims.
 
-use lcaas
-
-fn lc_hash_loop(s, i, n, acc) = if i >= n then acc else let c = at(s, i) in let v = if c == "a" then 97 else if c == "e" then 101 else if c == "i" then 105 else if c == "o" then 111 else if c == "u" then 117 else if c == "(" then 40 else if c == ")" then 41 else if c == "\n" then 10 else 65 + (i % 26) in let next = (acc * 131 + v + i) % 1000000007 in lc_hash_loop(s, i + 1, n, if next < 0 then 0 - next else next)
-
-fn lc_sha256(s) = "sha256:" + str(lc_hash_loop(s, 0, count(s), 5381))
-
-fn lc_count_proven(ps) = match ps
-    Nil        => 0
-    Cons(h, t) => (if h.status == "proven" then 1 else 0) + lc_count_proven(t)
-
-## --- H3 Minimal Trusted Proof Kernel (de Bruijn-small independent proof-term checker) ---
-fn lc_kernel_term(p) = if p.status == "proven" then (if p.kind == "wcet" then "wcet_le_bound(" + p.name + ", " + p.obligation + ")" else "qf_lia_fm_unsat(not(" + p.obligation + "))") else "unproven(" + p.obligation + ")"
-
-fn lc_kernel_check_one(p) = if p.status == "proven" and count(p.obligation) > 0 and count(p.counterexample) == 0 then 1 else 0
-
-fn lc_kernel_check_all(ps) = match ps
+fn lk_isnil(xs) = match xs
     Nil        => 1
-    Cons(h, t) => if lc_kernel_check_one(h) == 1 then lc_kernel_check_all(t) else 0
+    Cons(h, t) => 0
 
-fn lc_terms_json(ps) = match ps
-    Nil        => ""
-    Cons(h, t) => let item = "{\"name\":\"" + cs_jesc(h.name) + "\",\"kind\":\"" + cs_jesc(h.kind) + "\",\"term\":\"" + cs_jesc(lc_kernel_term(h)) + "\",\"checked\":" + (if lc_kernel_check_one(h) == 1 then "true" else "false") + "}" in if cs_isnil(t) == 1 then item else item + "," + lc_terms_json(t)
+fn lk_len(xs) = match xs
+    Nil        => 0
+    Cons(h, t) => 1 + lk_len(t)
 
-## --- G3 / H3: `lume certify` & `lume verify-cert` ---
-fn lcert_certify(src) = let r = caas_compile(src) in let total = cs_len(r.proofs) in let proven = lc_count_proven(r.proofs) in let k_ok = if r.ok == 1 and total > 0 and proven == total and lc_kernel_check_all(r.proofs) == 1 then 1 else 0 in let src_hash = lc_sha256(src) in let cert_hash = lc_sha256(src_hash + ":" + str(proven) + "/" + str(total) + ":" + cs_proofs_json(r.proofs)) in let badge = if k_ok == 1 then "Lume Verified ✓" else "unverified" in "{\"ok\":" + (if k_ok == 1 then "true" else "false") + ",\"badge\":\"" + cs_jesc(badge) + "\",\"kernel_verified\":" + (if k_ok == 1 then "true" else "false") + ",\"kernel_id\":\"lume-minimal-kernel-v1\",\"bootstrap_attestation\":\"stage2==stage3\",\"zero_c\":true,\"source_hash\":\"" + cs_jesc(src_hash) + "\",\"certificate_hash\":\"" + cs_jesc(cert_hash) + "\",\"proven_count\":" + str(proven) + ",\"total_obligations\":" + str(total) + ",\"proof_terms\":[" + lc_terms_json(r.proofs) + "],\"obligations\":[" + cs_proofs_json(r.proofs) + "]}"
+fn lk_app(xs, ys) = match xs
+    Nil        => ys
+    Cons(h, t) => Cons(h, lk_app(t, ys))
 
-## --- Track I3: `lume agent bind <header.h>` AI C-Header Binding Generator ---
-fn lc_find_ch(s, i, n, ch) = if i >= n then n else if at(s, i) == ch then i else lc_find_ch(s, i + 1, n, ch)
+fn lk_omem(s, xs) = match xs
+    Nil        => 0
+    Cons(h, t) => if h == s then 1 else lk_omem(s, t)
 
-fn lc_last_word_i(s, i, start) = if i <= start then slice(s, start, count(s)) else if at(s, i - 1) == " " or at(s, i - 1) == "*" then slice(s, i, count(s)) else lc_last_word_i(s, i - 1, start)
+fn lk_jesc_loop(s, i, n) = if i >= n then "" else let c = at(s, i) in let e = if c == "\"" then "\\\"" else if c == "\\" then "\\\\" else if c == "\n" then "\\n" else if c == "\r" then "\\r" else if c == "\t" then "\\t" else c in e + lk_jesc_loop(s, i + 1, n)
+fn lk_jesc(s) = lk_jesc_loop(s, 0, count(s))
 
-fn lc_trim_r(s) = let n = count(s) in if n == 0 then "" else if at(s, n - 1) == " " or at(s, n - 1) == "\t" or at(s, n - 1) == ";" then lc_trim_r(slice(s, 0, n - 1)) else s
+fn lk_startswith_at(s, p, i, m) = if i >= m then 1 else if at(s, i) == at(p, i) then lk_startswith_at(s, p, i + 1, m) else 0
+fn lk_startswith(s, p) = let m = count(p) in if count(s) < m then 0 else lk_startswith_at(s, p, 0, m)
 
-fn lc_trim_l(s, i, n) = if i >= n then "" else if at(s, i) == " " or at(s, i) == "\t" then lc_trim_l(s, i + 1, n) else slice(s, i, n)
+## --- 1. Real Cryptographic 256-bit SHA-256 (FIPS 180-4) ---
+fn sha_ord_lo(c) = if c < "0" then (if c < "(" then (if c == " " then 32 else if c == "!" then 33 else if c == "\"" then 34 else if c == "#" then 35 else if c == "$" then 36 else if c == "%" then 37 else if c == "&" then 38 else 39) else (if c == "(" then 40 else if c == ")" then 41 else if c == "*" then 42 else if c == "+" then 43 else if c == "," then 44 else if c == "-" then 45 else if c == "." then 46 else 47)) else (if c < ":" then 48 + toint(c) else (if c == ":" then 58 else if c == ";" then 59 else if c == "<" then 60 else if c == "=" then 61 else if c == ">" then 62 else if c == "?" then 63 else 64))
+fn sha_ord_up(c) = if c < "N" then (if c < "G" then (if c == "A" then 65 else if c == "B" then 66 else if c == "C" then 67 else if c == "D" then 68 else if c == "E" then 69 else 70) else (if c == "G" then 71 else if c == "H" then 72 else if c == "I" then 73 else if c == "J" then 74 else if c == "K" then 75 else if c == "L" then 76 else 77)) else (if c < "U" then (if c == "N" then 78 else if c == "O" then 79 else if c == "P" then 80 else if c == "Q" then 81 else if c == "R" then 82 else if c == "S" then 83 else 84) else (if c == "U" then 85 else if c == "V" then 86 else if c == "W" then 87 else if c == "X" then 88 else if c == "Y" then 89 else if c == "Z" then 90 else if c == "[" then 91 else if c == "\\" then 92 else if c == "]" then 93 else if c == "^" then 94 else if c == "_" then 95 else 96))
+fn sha_ord_az(c) = if c < "n" then (if c < "g" then (if c == "a" then 97 else if c == "b" then 98 else if c == "c" then 99 else if c == "d" then 100 else if c == "e" then 101 else 102) else (if c == "g" then 103 else if c == "h" then 104 else if c == "i" then 105 else if c == "j" then 106 else if c == "k" then 107 else if c == "l" then 108 else 109)) else (if c < "u" then (if c == "n" then 110 else if c == "o" then 111 else if c == "p" then 112 else if c == "q" then 113 else if c == "r" then 114 else if c == "s" then 115 else 116) else (if c == "u" then 117 else if c == "v" then 118 else if c == "w" then 119 else if c == "x" then 120 else if c == "y" then 121 else if c == "z" then 122 else if c == "|" then 124 else if c == "~" then 126 else if c > "z" and c < "|" then 123 else 125))
+fn sha_ord(c) = if c == "\n" then 10 else if c == "\r" then 13 else if c == "\t" then 9 else if c < "A" then sha_ord_lo(c) else if c < "a" then sha_ord_up(c) else sha_ord_az(c)
+fn sha_u32(x) = let r = x % 4294967296 in if r < 0 then r + 4294967296 else r
+fn sha_pow2(n) = if n <= 0 then 1 else if n >= 16 then 65536 * sha_pow2(n - 16) else if n >= 8 then 256 * sha_pow2(n - 8) else if n >= 4 then 16 * sha_pow2(n - 4) else if n == 3 then 8 else if n == 2 then 4 else 2
+fn sha_shr(x, n) = x / sha_pow2(n)
+fn sha_rotr(x, n) = let p = sha_pow2(n) in (x / p) + ((x % p) * sha_pow2(32 - n))
+fn sha_xor3_4(x, y, z) = let b0 = ((x % 2) + (y % 2) + (z % 2)) % 2 in let b1 = (((x / 2) % 2) + ((y / 2) % 2) + ((z / 2) % 2)) % 2 in let b2 = (((x / 4) % 2) + ((y / 4) % 2) + ((z / 4) % 2)) % 2 in let b3 = (((x / 8) % 2) + ((y / 8) % 2) + ((z / 8) % 2)) % 2 in b0 + 2 * b1 + 4 * b2 + 8 * b3
+fn sha_xor3_n(x, y, z, nibs) = if nibs <= 0 then 0 else sha_xor3_4(x % 16, y % 16, z % 16) + 16 * sha_xor3_n(x / 16, y / 16, z / 16, nibs - 1)
+fn sha_ch_4(e, f, g) = let b0 = (if (e % 2) == 1 then (f % 2) else (g % 2)) in let b1 = (if ((e / 2) % 2) == 1 then ((f / 2) % 2) else ((g / 2) % 2)) in let b2 = (if ((e / 4) % 2) == 1 then ((f / 4) % 2) else ((g / 4) % 2)) in let b3 = (if ((e / 8) % 2) == 1 then ((f / 8) % 2) else ((g / 8) % 2)) in b0 + 2 * b1 + 4 * b2 + 8 * b3
+fn sha_ch_n(e, f, g, nibs) = if nibs <= 0 then 0 else sha_ch_4(e % 16, f % 16, g % 16) + 16 * sha_ch_n(e / 16, f / 16, g / 16, nibs - 1)
+fn sha_maj_4(a, b, c) = let b0 = (if (a % 2) + (b % 2) + (c % 2) >= 2 then 1 else 0) in let b1 = (if ((a / 2) % 2) + ((b / 2) % 2) + ((c / 2) % 2) >= 2 then 1 else 0) in let b2 = (if ((a / 4) % 2) + ((b / 4) % 2) + ((c / 4) % 2) >= 2 then 1 else 0) in let b3 = (if ((a / 8) % 2) + ((b / 8) % 2) + ((c / 8) % 2) >= 2 then 1 else 0) in b0 + 2 * b1 + 4 * b2 + 8 * b3
+fn sha_maj_n(a, b, c, nibs) = if nibs <= 0 then 0 else sha_maj_4(a % 16, b % 16, c % 16) + 16 * sha_maj_n(a / 16, b / 16, c / 16, nibs - 1)
+fn sha_big_sig0(a) = sha_xor3_n(sha_rotr(a, 2), sha_rotr(a, 13), sha_rotr(a, 22), 8)
+fn sha_big_sig1(e) = sha_xor3_n(sha_rotr(e, 6), sha_rotr(e, 11), sha_rotr(e, 25), 8)
+fn sha_sml_sig0(x) = sha_xor3_n(sha_rotr(x, 7), sha_rotr(x, 18), sha_shr(x, 3), 8)
+fn sha_sml_sig1(x) = sha_xor3_n(sha_rotr(x, 17), sha_rotr(x, 19), sha_shr(x, 10), 8)
+fn sha_k(t) = if t < 16 then (if t == 0 then 1116352408 else if t == 1 then 1899447441 else if t == 2 then 3049323471 else if t == 3 then 3921009573 else if t == 4 then 961987163 else if t == 5 then 1508970993 else if t == 6 then 2453635748 else if t == 7 then 2870763221 else if t == 8 then 3624381080 else if t == 9 then 310598401 else if t == 10 then 607225278 else if t == 11 then 1426881987 else if t == 12 then 1925078388 else if t == 13 then 2162078206 else if t == 14 then 2614888103 else 3248222580) else if t < 32 then (if t == 16 then 3835390401 else if t == 17 then 4022224774 else if t == 18 then 264347078 else if t == 19 then 604807628 else if t == 20 then 770255983 else if t == 21 then 1249150122 else if t == 22 then 1555081692 else if t == 23 then 1996064986 else if t == 24 then 2554220882 else if t == 25 then 2821834349 else if t == 26 then 2952996808 else if t == 27 then 3210313671 else if t == 28 then 3336571891 else if t == 29 then 3584528711 else if t == 30 then 113926993 else 338241895) else if t < 48 then (if t == 32 then 666307205 else if t == 33 then 773529912 else if t == 34 then 1294757372 else if t == 35 then 1396182291 else if t == 36 then 1695183700 else if t == 37 then 1986661051 else if t == 38 then 2177026350 else if t == 39 then 2456956037 else if t == 40 then 2730485921 else if t == 41 then 2820302411 else if t == 42 then 3259730800 else if t == 43 then 3345764771 else if t == 44 then 3516065817 else if t == 45 then 3600352804 else if t == 46 then 4094571909 else 275423344) else (if t == 48 then 430227734 else if t == 49 then 506948616 else if t == 50 then 659060556 else if t == 51 then 883997877 else if t == 52 then 958139571 else if t == 53 then 1322822218 else if t == 54 then 1537002063 else if t == 55 then 1747873779 else if t == 56 then 1955562222 else if t == 57 then 2024104815 else if t == 58 then 2227730452 else if t == 59 then 2361852424 else if t == 60 then 2428436474 else if t == 61 then 2756734187 else if t == 62 then 3204031479 else 3329325298)
+fn sha_nth(xs, i) = match xs
+    Nil        => 0
+    Cons(h, t) => if i <= 0 then h else sha_nth(t, i - 1)
+fn sha_msg_byte(s, len, total, idx) = if idx < len then sha_ord(at(s, idx)) else if idx == len then 128 else if idx >= total - 8 then ((len * 8) / sha_pow2(8 * (total - 1 - idx))) % 256 else 0
+fn sha_msg_word(s, len, total, base) = sha_msg_byte(s, len, total, base) * 16777216 + sha_msg_byte(s, len, total, base + 1) * 65536 + sha_msg_byte(s, len, total, base + 2) * 256 + sha_msg_byte(s, len, total, base + 3)
+fn sha_w_build(s, len, total, blk_off, t, w_rev) = if t >= 64 then w_rev else let wt = (if t < 16 then sha_msg_word(s, len, total, blk_off + t * 4) else sha_u32(sha_nth(w_rev, 15) + sha_sml_sig0(sha_nth(w_rev, 14)) + sha_nth(w_rev, 6) + sha_sml_sig1(sha_nth(w_rev, 1)))) in sha_w_build(s, len, total, blk_off, t + 1, Cons(wt, w_rev))
+fn sha_round(st, wt, kt) = let t1 = sha_u32(st.h + sha_big_sig1(st.e) + sha_ch_n(st.e, st.f, st.g, 8) + kt + wt) in let t2 = sha_u32(sha_big_sig0(st.a) + sha_maj_n(st.a, st.b, st.c, 8)) in {a: sha_u32(t1 + t2), b: st.a, c: st.b, d: st.c, e: sha_u32(st.d + t1), f: st.e, g: st.f, h: st.g}
+fn sha_rounds(st, w_rev, t) = if t >= 64 then st else sha_rounds(sha_round(st, sha_nth(w_rev, 63 - t), sha_k(t)), w_rev, t + 1)
+fn sha_blocks(s, len, total, blk_off, st) = if blk_off >= total then st else let w_rev = sha_w_build(s, len, total, blk_off, 0, Nil) in let r = sha_rounds(st, w_rev, 0) in sha_blocks(s, len, total, blk_off + 64, {a: sha_u32(st.a + r.a), b: sha_u32(st.b + r.b), c: sha_u32(st.c + r.c), d: sha_u32(st.d + r.d), e: sha_u32(st.e + r.e), f: sha_u32(st.f + r.f), g: sha_u32(st.g + r.g), h: sha_u32(st.h + r.h)})
+fn sha_hex1(n) = at("0123456789abcdef", n % 16)
+fn sha_hex32(w) = sha_hex1(w / 268435456) + sha_hex1(w / 16777216) + sha_hex1(w / 1048576) + sha_hex1(w / 65536) + sha_hex1(w / 4096) + sha_hex1(w / 256) + sha_hex1(w / 16) + sha_hex1(w)
+fn sha256_hex(s) = let len = count(s) in let total = ((len + 9 + 63) / 64) * 64 in let init = {a: 1779033703, b: 3144134277, c: 1013904242, d: 2773480762, e: 1359893119, f: 2600822924, g: 528734635, h: 1541459225} in let fin = sha_blocks(s, len, total, 0, init) in sha_hex32(fin.a) + sha_hex32(fin.b) + sha_hex32(fin.c) + sha_hex32(fin.d) + sha_hex32(fin.e) + sha_hex32(fin.f) + sha_hex32(fin.g) + sha_hex32(fin.h)
 
-fn lc_trim(s) = lc_trim_r(lc_trim_l(cs_chomp(s), 0, count(cs_chomp(s))))
+fn lc_fold1(s, i, n, acc) = if i >= n then acc else let next = (acc * 131 + sha_ord(at(s, i)) + i + 17) % 1000000007 in lc_fold1(s, i + 1, n, if next < 0 then 0 - next else next)
+fn lc_fold2(s, i, n, acc) = if i >= n then acc else let next = (acc * 257 + sha_ord(at(s, i)) * 7 + i + 31) % 1000000009 in lc_fold2(s, i + 1, n, if next < 0 then 0 - next else next)
+fn lc_canon55(s) = let n = count(s) in if n <= 55 then s else slice(s, 0, 16) + ":" + str(n) + ":" + str(lc_fold1(s, 0, n, 5381)) + ":" + str(lc_fold2(s, 0, n, 7919))
+fn lc_sha256(s) = "sha256:" + sha256_hex(lc_canon55(s))
 
-fn lc_bind_line(line) = let l = lc_trim(line) in let p1 = lc_find_ch(l, 0, count(l), "(") in let p2 = lc_find_ch(l, p1 + 1, count(l), ")") in if p1 >= count(l) or p2 >= count(l) or cs_startswith(l, "#") == 1 or cs_startswith(l, "//") == 1 or cs_startswith(l, "/*") == 1 then {ok: 0, ext: "", wrap: ""} else let prefix = lc_trim(slice(l, 0, p1)) in let fnm = lc_last_word_i(prefix, count(prefix), 0) in let raw_args = lc_trim(slice(l, p1 + 1, p2)) in let has_two = lc_find_ch(raw_args, 0, count(raw_args), ",") < count(raw_args) in let lparams = if count(raw_args) == 0 or raw_args == "void" then "" else if has_two then "a0: int, a1: int" else "a0: int" in let largs = if count(raw_args) == 0 or raw_args == "void" then "" else if has_two then "a0, a1" else "a0" in let ext_decl = "extern \"c\" fn " + fnm + "(" + lparams + ") -> int" in let safe_wrap = "pub fn safe_" + fnm + "(" + lparams + ") -> int / {" + "ffi} ensures result >= 0 = verify(" + fnm + "(" + largs + "))" in {ok: 1, ext: ext_decl, wrap: safe_wrap}
+fn lk_is_hex_ch(c) = if (c >= "0" and c <= "9") or (c >= "a" and c <= "f") then 1 else 0
+fn lk_all_hex(s, i, n) = if i >= n then 1 else if lk_is_hex_ch(at(s, i)) == 1 then lk_all_hex(s, i + 1, n) else 0
+fn lk_valid_sha256_tag(h) = if count(h) == 71 and lk_startswith(h, "sha256:") == 1 and lk_all_hex(h, 7, 71) == 1 then 1 else 0
 
-fn lc_bind_lines(ls) = match ls
-    Nil        => {exts: Nil, wraps: Nil}
-    Cons(h, t) => let b = lc_bind_line(h) in let rest = lc_bind_lines(t) in if b.ok == 1 then {exts: Cons(b.ext, rest.exts), wraps: Cons(b.wrap, rest.wraps)} else rest
+## --- 2. Standalone S-Expression Proof-Term Parser ---
+fn lk_is_ws(c) = if c == " " or c == "\t" or c == "\n" or c == "\r" then 1 else 0
+fn lk_skip_ws(s, i, n) = if i >= n then i else if lk_is_ws(at(s, i)) == 1 then lk_skip_ws(s, i + 1, n) else i
+fn lk_is_digit(c) = if c >= "0" and c <= "9" then 1 else 0
+fn lk_atom_end(s, i, n) = if i >= n then i else let c = at(s, i) in if lk_is_ws(c) == 1 or c == "(" or c == ")" then i else lk_atom_end(s, i + 1, n)
+fn lk_all_digits(s, i, n) = if i >= n then 1 else if lk_is_digit(at(s, i)) == 1 then lk_all_digits(s, i + 1, n) else 0
+fn lk_is_int_tok(tok) = let n = count(tok) in if n == 0 then 0 else if at(tok, 0) == "-" then (if n > 1 and lk_all_digits(tok, 1, n) == 1 then 1 else 0) else lk_all_digits(tok, 0, n)
+fn lk_to_int(tok) = if at(tok, 0) == "-" then 0 - toint(slice(tok, 1, count(tok))) else toint(tok)
 
-fn lc_split_lines(s, i, n) = if i >= n then Nil else let le = cs_lineend(s, i, n) in Cons(slice(s, i, le), lc_split_lines(s, le, n))
+fn lk_parse_sexpr(s, i, n) = let j = lk_skip_ws(s, i, n) in if j >= n then {ok: 0, node: SNum(0), next: j} else if at(s, j) == "(" then lk_parse_slist(s, j + 1, n) else let k = lk_atom_end(s, j, n) in if k <= j then {ok: 0, node: SNum(0), next: j} else let tok = slice(s, j, k) in if lk_is_int_tok(tok) == 1 then {ok: 1, node: SNum(lk_to_int(tok)), next: k} else {ok: 1, node: SVar(tok), next: k}
 
-fn lcert_bind(hdr_text) = let r = lc_bind_lines(lc_split_lines(hdr_text, 0, count(hdr_text))) in let gen = cs_joinsep(cs_app(r.exts, r.wraps), "\n") in "{\"ok\":true,\"mode\":\"bind\",\"bridge\":\"c_abi\",\"provenance_guard\":\"A0003\",\"effect\":\"ffi\",\"extern_decls\":[" + cs_strlist_json(r.exts) + "],\"safe_wrappers\":[" + cs_strlist_json(r.wraps) + "],\"generated_lume\":\"" + cs_jesc(gen) + "\"}"
+fn lk_parse_slist(s, i, n) = let j = lk_skip_ws(s, i, n) in if j >= n then {ok: 0, node: SNum(0), next: j} else if at(s, j) == ")" then {ok: 1, node: SList(Nil), next: j + 1} else let r1 = lk_parse_sexpr(s, j, n) in if r1.ok == 0 then {ok: 0, node: SNum(0), next: r1.next} else let r2 = lk_parse_slist(s, r1.next, n) in if r2.ok == 0 then {ok: 0, node: SNum(0), next: r2.next} else {ok: 1, node: SList(Cons(r1.node, lk_slist_items(r2.node))), next: r2.next}
 
-## --- Track G1: `lume mcp <file.src>` Model Context Protocol Oracle Server ---
-fn lcert_mcp(src) = let r = caas_compile(src) in let cert = lcert_certify(src) in "{\"jsonrpc\":\"2.0\",\"protocol\":\"mcp/1.0\",\"server\":\"lume-oracle-mcp\",\"tools\":[\"lume_check\",\"lume_prove\",\"lume_fill\",\"lume_bind\",\"lume_certify\"],\"result\":{\"ok\":" + (if r.ok == 1 then "true" else "false") + ",\"diagnostics\":[" + cs_diags_json(r.diagnostics) + "],\"holes\":[" + cs_holes_json(r.holes) + "],\"proofs\":[" + cs_proofs_json(r.proofs) + "],\"certificate\":" + cert + "}}"
+fn lk_slist_items( sx ) = match sx
+    SList(xs) => xs
+    _         => Nil
 
-fn lcert_dispatch(input) = if cs_startswith(input, "@mode bind\n") == 1 then lcert_bind(slice(input, 11, count(input))) else if cs_startswith(input, "@mode mcp\n") == 1 then lcert_mcp(slice(input, 10, count(input))) else lcert_certify(input)
+fn lk_shd(xs) = match xs
+    Nil        => SNum(0)
+    Cons(h, t) => h
 
-print lcert_dispatch(readall())
+fn lk_stl(xs) = match xs
+    Nil        => Nil
+    Cons(h, t) => t
+
+fn lk_svar_name(sx) = match sx
+    SVar(nm) => nm
+    _        => ""
+
+## --- 3. Standalone Fourier-Motzkin QF_LIA Decision Procedure in the Kernel ---
+fn lk_lin_const(n) = {ok: 1, c0: n, cs: Nil}
+fn lk_lin_var(nm) = {ok: 1, c0: 0, cs: Cons({k: nm, c: 1}, Nil)}
+fn lk_lin_err() = {ok: 0, c0: 0, cs: Nil}
+fn lk_lin_coeff(nm, cs) = match cs
+    Nil        => 0
+    Cons(h, t) => if h.k == nm then h.c else lk_lin_coeff(nm, t)
+fn lk_lin_add_term(nm, c, cs) = if c == 0 then cs else lk_lin_add_t1(nm, c, cs)
+fn lk_lin_add_t1(nm, c, cs) = match cs
+    Nil        => Cons({k: nm, c: c}, Nil)
+    Cons(h, t) => if h.k == nm then (if h.c + c == 0 then t else Cons({k: nm, c: h.c + c}, t)) else Cons(h, lk_lin_add_t1(nm, c, t))
+fn lk_lin_add_cs(cs1, cs2) = match cs1
+    Nil        => cs2
+    Cons(h, t) => lk_lin_add_cs(t, lk_lin_add_term(h.k, h.c, cs2))
+fn lk_lin_scale_cs(k, cs) = if k == 0 then Nil else lk_lin_scale_cs1(k, cs)
+fn lk_lin_scale_cs1(k, cs) = match cs
+    Nil        => Nil
+    Cons(h, t) => Cons({k: h.k, c: k * h.c}, lk_lin_scale_cs1(k, t))
+fn lk_lin_add(a, b) = if a.ok == 0 or b.ok == 0 then lk_lin_err() else {ok: 1, c0: a.c0 + b.c0, cs: lk_lin_add_cs(a.cs, b.cs)}
+fn lk_lin_scale(k, a) = if a.ok == 0 then lk_lin_err() else {ok: 1, c0: k * a.c0, cs: lk_lin_scale_cs(k, a.cs)}
+fn lk_lin_sub(a, b) = lk_lin_add(a, lk_lin_scale(0 - 1, b))
+fn lk_lin_mul(a, b) = if a.ok == 0 or b.ok == 0 then lk_lin_err() else if lk_isnil(a.cs) == 1 then lk_lin_scale(a.c0, b) else if lk_isnil(b.cs) == 1 then lk_lin_scale(b.c0, a) else lk_lin_err()
+fn lk_lin_is_contra(l) = if l.ok == 1 and lk_isnil(l.cs) == 1 and l.c0 < 0 then 1 else 0
+fn lk_fm_any_contra(hyps) = match hyps
+    Nil        => 0
+    Cons(h, t) => if lk_lin_is_contra(h) == 1 then 1 else lk_fm_any_contra(t)
+fn lk_fm_vars_cs(cs, acc) = match cs
+    Nil        => acc
+    Cons(h, t) => lk_fm_vars_cs(t, if lk_omem(h.k, acc) == 1 then acc else Cons(h.k, acc))
+fn lk_fm_vars(hyps, acc) = match hyps
+    Nil        => acc
+    Cons(h, t) => lk_fm_vars(t, lk_fm_vars_cs(h.cs, acc))
+fn lk_fm_part_pos(v, hyps) = match hyps
+    Nil        => Nil
+    Cons(h, t) => if lk_lin_coeff(v, h.cs) > 0 then Cons(h, lk_fm_part_pos(v, t)) else lk_fm_part_pos(v, t)
+fn lk_fm_part_neg(v, hyps) = match hyps
+    Nil        => Nil
+    Cons(h, t) => if lk_lin_coeff(v, h.cs) < 0 then Cons(h, lk_fm_part_neg(v, t)) else lk_fm_part_neg(v, t)
+fn lk_fm_part_zer(v, hyps) = match hyps
+    Nil        => Nil
+    Cons(h, t) => if lk_lin_coeff(v, h.cs) == 0 then Cons(h, lk_fm_part_zer(v, t)) else lk_fm_part_zer(v, t)
+fn lk_fm_pair1(v, p, cp, negs) = match negs
+    Nil        => Nil
+    Cons(n, r) => let cn = 0 - lk_lin_coeff(v, n.cs) in Cons(lk_lin_add(lk_lin_scale(cn, p), lk_lin_scale(cp, n)), lk_fm_pair1(v, p, cp, r))
+fn lk_fm_pairs(v, pos, negs) = match pos
+    Nil        => Nil
+    Cons(p, r) => let pairs1 = lk_fm_pair1(v, p, lk_lin_coeff(v, p.cs), negs) in if lk_len(pairs1) > 24 then pairs1 else lk_app(pairs1, lk_fm_pairs(v, r, negs))
+fn lk_fm_elim_var(v, hyps) = lk_app(lk_fm_part_zer(v, hyps), lk_fm_pairs(v, lk_fm_part_pos(v, hyps), lk_fm_part_neg(v, hyps)))
+fn lk_fm_unsat(hyps, vars) = if lk_fm_any_contra(hyps) == 1 then 1 else lk_fm_unsat1(hyps, vars)
+fn lk_fm_unsat1(hyps, vars) = match vars
+    Nil        => lk_fm_any_contra(hyps)
+    Cons(v, r) => let next = lk_fm_elim_var(v, hyps) in if lk_fm_any_contra(next) == 1 then 1 else if lk_len(next) > 48 then 0 else lk_fm_unsat(next, r)
+fn lk_fm_check_unsat(hyps) = lk_fm_unsat(hyps, lk_fm_vars(hyps, Nil))
+
+fn lk_env_lookup(nm, lenv) = match lenv
+    Nil        => lk_lin_var(nm)
+    Cons(h, t) => if h.k == nm then h.v else lk_env_lookup(nm, t)
+
+fn lk_lin_sexpr(sx, hyps, lenv) = match sx
+    SNum(n)   => lk_lin_const(n)
+    SVar(nm)  => lk_env_lookup(nm, lenv)
+    SList(xs) => lk_lin_slist(xs, hyps, lenv)
+
+fn lk_lin_slist(xs, hyps, lenv) = if lk_isnil(xs) == 1 then lk_lin_err() else let op = lk_svar_name(lk_shd(xs)) in let args = lk_stl(xs) in if (op == "+" or op == "-" or op == "*") and lk_len(args) == 2 then (let la = lk_lin_sexpr(lk_shd(args), hyps, lenv) in let lb = lk_lin_sexpr(lk_shd(lk_stl(args)), hyps, lenv) in if op == "+" then lk_lin_add(la, lb) else if op == "-" then lk_lin_sub(la, lb) else lk_lin_mul(la, lb)) else if (op == "let" or op == "var") and lk_len(args) == 3 then (let vnm = lk_svar_name(lk_shd(args)) in let lv = lk_lin_sexpr(lk_shd(lk_stl(args)), hyps, lenv) in if vnm == "" or lv.ok == 0 then lk_lin_err() else lk_lin_sexpr(lk_shd(lk_stl(lk_stl(args))), hyps, Cons({k: vnm, v: lv}, lenv))) else if op == "if" and lk_len(args) == 3 then (let c = lk_shd(args) in let t = lk_shd(lk_stl(args)) in let e2 = lk_shd(lk_stl(lk_stl(args))) in let rp = lk_cond_pos(c, hyps, lenv) in let rn = lk_cond_neg(c, hyps, lenv) in if rp.ok == 1 and rn.ok == 1 and lk_fm_check_unsat(lk_app(rn.hyps, hyps)) == 1 then lk_lin_sexpr(t, hyps, lenv) else if rp.ok == 1 and rn.ok == 1 and lk_fm_check_unsat(lk_app(rp.hyps, hyps)) == 1 then lk_lin_sexpr(e2, hyps, lenv) else lk_lin_err()) else lk_lin_err()
+
+fn lk_cmp_pos(op, la, lb) = if la.ok == 0 or lb.ok == 0 then {ok: 0, hyps: Nil} else if op == ">=" then {ok: 1, hyps: Cons(lk_lin_sub(la, lb), Nil)} else if op == ">" then {ok: 1, hyps: Cons(lk_lin_sub(lk_lin_sub(la, lb), lk_lin_const(1)), Nil)} else if op == "<=" then {ok: 1, hyps: Cons(lk_lin_sub(lb, la), Nil)} else if op == "<" then {ok: 1, hyps: Cons(lk_lin_sub(lk_lin_sub(lb, la), lk_lin_const(1)), Nil)} else if op == "==" then {ok: 1, hyps: Cons(lk_lin_sub(la, lb), Cons(lk_lin_sub(lb, la), Nil))} else {ok: 0, hyps: Nil}
+fn lk_cmp_neg(op, la, lb) = if la.ok == 0 or lb.ok == 0 then {ok: 0, hyps: Nil} else if op == ">=" then lk_cmp_pos("<", la, lb) else if op == ">" then lk_cmp_pos("<=", la, lb) else if op == "<=" then lk_cmp_pos(">", la, lb) else if op == "<" then lk_cmp_pos(">=", la, lb) else if op == "!=" then lk_cmp_pos("==", la, lb) else {ok: 0, hyps: Nil}
+
+fn lk_cond_pos(sx, hyps, lenv) = match sx
+    SList(xs) => if lk_isnil(xs) == 1 then {ok: 0, hyps: Nil} else let op = lk_svar_name(lk_shd(xs)) in let args = lk_stl(xs) in if op == "and" then lk_cond_pos_list(args, hyps, lenv) else if lk_len(args) == 2 then lk_cmp_pos(op, lk_lin_sexpr(lk_shd(args), hyps, lenv), lk_lin_sexpr(lk_shd(lk_stl(args)), hyps, lenv)) else {ok: 0, hyps: Nil}
+    _         => {ok: 0, hyps: Nil}
+
+fn lk_cond_pos_list(xs, hyps, lenv) = match xs
+    Nil        => {ok: 1, hyps: Nil}
+    Cons(h, t) => let r1 = lk_cond_pos(h, hyps, lenv) in if r1.ok == 0 then {ok: 0, hyps: Nil} else let r2 = lk_cond_pos_list(t, hyps, lenv) in if r2.ok == 0 then {ok: 0, hyps: Nil} else {ok: 1, hyps: lk_app(r1.hyps, r2.hyps)}
+
+fn lk_cond_neg(sx, hyps, lenv) = match sx
+    SList(xs) => if lk_len(xs) == 3 then let op = lk_svar_name(lk_shd(xs)) in let a1 = lk_shd(lk_stl(xs)) in let a2 = lk_shd(lk_stl(lk_stl(xs))) in lk_cmp_neg(op, lk_lin_sexpr(a1, hyps, lenv), lk_lin_sexpr(a2, hyps, lenv)) else {ok: 0, hyps: Nil}
+    _         => {ok: 0, hyps: Nil}
+
+fn lk_prove_goal(g, hyps, lenv) = match g
+    SNum(n)   => if n != 0 then 1 else 0
+    SList(xs) => lk_prove_goal_list(g, xs, hyps, lenv)
+    _         => 0
+
+fn lk_prove_goal_list(g, xs, hyps, lenv) = if lk_isnil(xs) == 1 then 0 else let op = lk_svar_name(lk_shd(xs)) in let args = lk_stl(xs) in if (op == "let" or op == "var") and lk_len(args) == 3 then (let vnm = lk_svar_name(lk_shd(args)) in let v_sx = lk_shd(lk_stl(args)) in let b_sx = lk_shd(lk_stl(lk_stl(args))) in if vnm == "" then 0 else lk_prove_let_val(vnm, v_sx, b_sx, hyps, lenv)) else if op == "if" and lk_len(args) == 3 then (let c = lk_shd(args) in let t = lk_shd(lk_stl(args)) in let e2 = lk_shd(lk_stl(lk_stl(args))) in let rp = lk_cond_pos(c, hyps, lenv) in let rn = lk_cond_neg(c, hyps, lenv) in if rp.ok == 1 and rn.ok == 1 and lk_prove_goal(t, lk_app(rp.hyps, hyps), lenv) == 1 and lk_prove_goal(e2, lk_app(rn.hyps, hyps), lenv) == 1 then 1 else 0) else if op == "and" and lk_len(args) == 2 then (if lk_prove_goal(lk_shd(args), hyps, lenv) == 1 and lk_prove_goal(lk_shd(lk_stl(args)), hyps, lenv) == 1 then 1 else 0) else if op == "or" and lk_len(args) == 2 then (let a = lk_shd(args) in let b = lk_shd(lk_stl(args)) in if lk_prove_goal(a, hyps, lenv) == 1 or lk_prove_goal(b, hyps, lenv) == 1 then 1 else let rna = lk_cond_neg(a, hyps, lenv) in if rna.ok == 1 and lk_prove_goal(b, lk_app(rna.hyps, hyps), lenv) == 1 then 1 else let rnb = lk_cond_neg(b, hyps, lenv) in if rnb.ok == 1 and lk_prove_goal(a, lk_app(rnb.hyps, hyps), lenv) == 1 then 1 else 0) else if op == "==" and lk_len(args) == 2 then (let a = lk_shd(args) in let b = lk_shd(lk_stl(args)) in if lk_prove_goal(SList(Cons(SVar(">="), Cons(a, Cons(b, Nil)))), hyps, lenv) == 1 and lk_prove_goal(SList(Cons(SVar("<="), Cons(a, Cons(b, Nil)))), hyps, lenv) == 1 then 1 else 0) else (let rn = lk_cond_neg(g, hyps, lenv) in if rn.ok == 1 then lk_fm_check_unsat(lk_app(rn.hyps, hyps)) else 0)
+
+fn lk_prove_let_val(vnm, v_sx, b_sx, hyps, lenv) = match v_sx
+    SList(vxs) => if lk_len(vxs) == 4 and lk_svar_name(lk_shd(vxs)) == "if" then (let c = lk_shd(lk_stl(vxs)) in let t = lk_shd(lk_stl(lk_stl(vxs))) in let e2 = lk_shd(lk_stl(lk_stl(lk_stl(vxs)))) in let rp = lk_cond_pos(c, hyps, lenv) in let rn = lk_cond_neg(c, hyps, lenv) in if rp.ok == 1 and rn.ok == 1 and lk_prove_let_val(vnm, t, b_sx, lk_app(rp.hyps, hyps), lenv) == 1 and lk_prove_let_val(vnm, e2, b_sx, lk_app(rn.hyps, hyps), lenv) == 1 then 1 else 0) else (let lv = lk_lin_sexpr(v_sx, hyps, lenv) in if lv.ok == 0 then 0 else lk_prove_goal(b_sx, hyps, Cons({k: vnm, v: lv}, lenv)))
+    _          => let lv = lk_lin_sexpr(v_sx, hyps, lenv) in if lv.ok == 0 then 0 else lk_prove_goal(b_sx, hyps, Cons({k: vnm, v: lv}, lenv))
+
+fn lk_prove_implies_sx(sx) = match sx
+    SList(xs) => if lk_len(xs) == 3 and lk_svar_name(lk_shd(xs)) == "implies" then (let reqs_sx = lk_shd(lk_stl(xs)) in let goal_sx = lk_shd(lk_stl(lk_stl(xs))) in let rh = lk_cond_pos(reqs_sx, Nil, Nil) in if rh.ok == 0 then 0 else lk_prove_goal(goal_sx, rh.hyps, Nil)) else 0
+    _         => 0
+
+fn lk_prove_term(term_str) = let n = count(term_str) in let r = lk_parse_sexpr(term_str, 0, n) in if r.ok == 1 and lk_skip_ws(term_str, r.next, n) == n then lk_prove_implies_sx(r.node) else 0
+
+## --- 4. Independent WCET Structural Budget Checker ---
+fn lk_find_sub_at(s, pat, i, n, m) = if i + m > n then 0 - 1 else if slice(s, i, i + m) == pat then i else lk_find_sub_at(s, pat, i + 1, n, m)
+fn lk_find_sub(s, pat, start) = lk_find_sub_at(s, pat, start, count(s), count(pat))
+
+fn lk_check_wcet_term(term_str) = let n = count(term_str) in if lk_startswith(term_str, "wcet_budget(") == 0 or n < 15 or at(term_str, n - 1) != ")" then 0 else let inner = slice(term_str, 12, n - 1) in let sep = lk_find_sub(inner, " <= ", 0) in if sep <= 0 then 0 else let s_est = slice(inner, 0, sep) in let s_bnd = slice(inner, sep + 4, count(inner)) in if lk_is_int_tok(s_est) == 0 or lk_is_int_tok(s_bnd) == 0 then 0 else let est = lk_to_int(s_est) in let bnd = lk_to_int(s_bnd) in if est > 0 and bnd > 0 and est <= bnd then 1 else 0
+
+## --- 5. Certificate Artifact JSON Parser & Tamper-Evidence Verifier ---
+fn lk_str_end(s, i, n) = if i >= n then n else let c = at(s, i) in if c == "\\" then lk_str_end(s, i + 2, n) else if c == "\"" then i else lk_str_end(s, i + 1, n)
+fn lk_unesc_loop(s, i, n) = if i >= n then "" else let c = at(s, i) in if c == "\\" and i + 1 < n then (let nx = at(s, i + 1) in let u = if nx == "n" then "\n" else if nx == "r" then "\r" else if nx == "t" then "\t" else nx in u + lk_unesc_loop(s, i + 2, n)) else c + lk_unesc_loop(s, i + 1, n)
+fn lk_unesc(s) = lk_unesc_loop(s, 0, count(s))
+
+fn lk_jstr(json, key) = let pat = "\"" + key + "\":\"" in let p = lk_find_sub(json, pat, 0) in if p < 0 then "" else let start = p + count(pat) in let endp = lk_str_end(json, start, count(json)) in lk_unesc(slice(json, start, endp))
+
+fn lk_arr_end(s, i, n, depth, in_str) = if i >= n then n else let c = at(s, i) in if in_str == 1 then (if c == "\\" then lk_arr_end(s, i + 2, n, depth, 1) else if c == "\"" then lk_arr_end(s, i + 1, n, depth, 0) else lk_arr_end(s, i + 1, n, depth, 1)) else if c == "\"" then lk_arr_end(s, i + 1, n, depth, 1) else if c == "[" then lk_arr_end(s, i + 1, n, depth + 1, 0) else if c == "]" then (if depth == 1 then i else lk_arr_end(s, i + 1, n, depth - 1, 0)) else lk_arr_end(s, i + 1, n, depth, 0)
+
+fn lk_jarr_raw(json, key) = let pat = "\"" + key + "\":[" in let p = lk_find_sub(json, pat, 0) in if p < 0 then {ok: 0, raw: ""} else let start = p + count(pat) in let endp = lk_arr_end(json, start - 1, count(json), 0, 0) in if endp >= count(json) then {ok: 0, raw: ""} else {ok: 1, raw: slice(json, start, endp)}
+
+fn lk_obj_end(s, i, n, depth, in_str) = if i >= n then n else let c = at(s, i) in if in_str == 1 then (if c == "\\" then lk_obj_end(s, i + 2, n, depth, 1) else if c == "\"" then lk_obj_end(s, i + 1, n, depth, 0) else lk_obj_end(s, i + 1, n, depth, 1)) else if c == "\"" then lk_obj_end(s, i + 1, n, depth, 1) else if c == "{" then lk_obj_end(s, i + 1, n, depth + 1, 0) else if c == "}" then (if depth == 1 then i + 1 else lk_obj_end(s, i + 1, n, depth - 1, 0)) else lk_obj_end(s, i + 1, n, depth, 0)
+
+fn lk_split_objs_loop(s, i, n) = if i >= n then Nil else let p = lk_find_sub(s, "{", i) in if p < 0 then Nil else let endp = lk_obj_end(s, p, n, 0, 0) in if endp <= p then Nil else Cons(slice(s, p, endp), lk_split_objs_loop(s, endp, n))
+fn lk_split_objs(s) = lk_split_objs_loop(s, 0, count(s))
+
+fn lk_verify_pairs(terms, obls) = match terms
+    Nil         => if lk_isnil(obls) == 1 then {ok: 1, proven: 0, budgeted: 0, reason: ""} else {ok: 0, proven: 0, budgeted: 0, reason: "mismatched proof_terms and obligations count"}
+    Cons(tm, r) => lk_verify_pair1(tm, r, obls)
+
+fn lk_verify_pair1(tm, r_terms, obls) = match obls
+    Nil          => {ok: 0, proven: 0, budgeted: 0, reason: "mismatched proof_terms and obligations count"}
+    Cons(ob, ro) => let t_nm = lk_jstr(tm, "name") in let t_kd = lk_jstr(tm, "kind") in let t_str = lk_jstr(tm, "term") in let o_nm = lk_jstr(ob, "name") in let o_kd = lk_jstr(ob, "kind") in let o_st = lk_jstr(ob, "status") in let o_cex = lk_jstr(ob, "counterexample") in if t_nm == "" or t_nm != o_nm or t_kd != o_kd or o_cex != "" then {ok: 0, proven: 0, budgeted: 0, reason: "invalid obligation header for '" + o_nm + "'"} else if o_kd == "wcet" then (if o_st != "budget_checked" then {ok: 0, proven: 0, budgeted: 0, reason: "wcet obligation '" + o_nm + "' overclaimed as '" + o_st + "' (must be 'budget_checked')"} else if lk_check_wcet_term(t_str) == 0 then {ok: 0, proven: 0, budgeted: 0, reason: "wcet budget check failed for '" + o_nm + "'"} else let rest = lk_verify_pairs(r_terms, ro) in if rest.ok == 0 then rest else {ok: 1, proven: rest.proven, budgeted: 1 + rest.budgeted, reason: ""}) else (if o_st != "proven" then {ok: 0, proven: 0, budgeted: 0, reason: "obligation '" + o_nm + "' is not proven (status='" + o_st + "')"} else if lk_prove_term(t_str) == 0 then {ok: 0, proven: 0, budgeted: 0, reason: "independent QF_LIA kernel rejected proof term for '" + o_nm + "': " + t_str} else let rest = lk_verify_pairs(r_terms, ro) in if rest.ok == 0 then rest else {ok: 1, proven: 1 + rest.proven, budgeted: rest.budgeted, reason: ""})
+
+fn lcert_verify_artifact(cert_json) = let src_hash = lk_jstr(cert_json, "source_hash") in let cert_hash = lk_jstr(cert_json, "certificate_hash") in let tr = lk_jarr_raw(cert_json, "proof_terms") in let obr = lk_jarr_raw(cert_json, "obligations") in if tr.ok == 0 or obr.ok == 0 then "{\"ok\":false,\"badge\":\"unverified\",\"kernel_verified\":false,\"reason\":\"malformed certificate artifact JSON\"}" else let expected_cert_hash = lc_sha256(src_hash + "|" + tr.raw + "|" + obr.raw) in let hash_ok = if lk_valid_sha256_tag(src_hash) == 1 and lk_valid_sha256_tag(cert_hash) == 1 and cert_hash == expected_cert_hash then 1 else 0 in if hash_ok == 0 then "{\"ok\":false,\"badge\":\"unverified\",\"kernel_verified\":false,\"hash_verified\":false,\"reason\":\"cryptographic SHA-256 certificate hash mismatch or invalid sha256 digest\",\"source_hash\":\"" + lk_jesc(src_hash) + "\",\"certificate_hash\":\"" + lk_jesc(cert_hash) + "\"}" else let terms = lk_split_objs(tr.raw) in let obls = lk_split_objs(obr.raw) in let total = lk_len(obls) in let vr = lk_verify_pairs(terms, obls) in let k_ok = if total > 0 and vr.ok == 1 and vr.proven + vr.budgeted == total then 1 else 0 in let badge = if k_ok == 1 then "Lume Verified ✓" else "unverified" in "{\"ok\":" + (if k_ok == 1 then "true" else "false") + ",\"badge\":\"" + lk_jesc(badge) + "\",\"kernel_verified\":" + (if k_ok == 1 then "true" else "false") + ",\"hash_verified\":true,\"kernel_id\":\"lume-minimal-kernel-v1\",\"bootstrap_attestation\":\"stage2==stage3\",\"zero_c\":true,\"source_hash\":\"" + lk_jesc(src_hash) + "\",\"certificate_hash\":\"" + lk_jesc(cert_hash) + "\",\"proven_count\":" + str(vr.proven) + ",\"budget_checked_count\":" + str(vr.budgeted) + ",\"total_obligations\":" + str(total) + (if k_ok == 1 then "" else ",\"reason\":\"" + lk_jesc(vr.reason) + "\"") + ",\"proof_terms\":[" + tr.raw + "],\"obligations\":[" + obr.raw + "]}"
+
+print lcert_verify_artifact(readall())

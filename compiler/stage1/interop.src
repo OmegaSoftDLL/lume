@@ -1,7 +1,8 @@
-## Stage 5: Track I (I1-I5 Interop: C ABI, Wasm Sandbox, Reverse Export) & Track K5 (std.os.cap Linear Hardware Capabilities)
+## Stage 5: Track I (I1-I5 Interop: C ABI, Wasm Reference Sandbox Model, Reverse Export) & Track K5 (std.os.cap Linear Hardware Capabilities)
 ## Provides deterministic, zero-C implementations of:
 ## - C ABI layout & struct packing (@repr(c), @packed, @bits, @mmio)
-## - Capability-scoped WebAssembly sandbox host (std.wasm) with deterministic fuel & bounds checking
+## - Deterministic reference semantics & capability-sandbox model for WebAssembly host interactions (std.wasm)
+##   paired with compile-time effect/capability enforcement (`{wasm}`, `{fs}`, `{net}` -> `[E0200]` in `06b_phase3.src` / `lcaas.src`)
 ## - Reverse C header & WAT export (Track I5: ffi_export_c_header, wasm_export_wat)
 ## - Linear hardware capabilities (std.os.cap: cap[Page], cap[Port], cap[Irq])
 
@@ -69,7 +70,10 @@ fn ffi_export_c_header(fn_name, arity) = let params = if arity == 0 then "void" 
 
 fn wasm_export_wat(fn_name) = "(module (func $" + fn_name + " (export \"" + fn_name + "\") (param i64 i64) (result i64) local.get 0 local.get 1 i64.add))"
 
-## --- 3. Track I4: Capability-Scoped WebAssembly Sandbox Host (std.wasm) ---
+## --- 3. Track I4: WebAssembly Reference Sandbox Model (std.wasm) ---
+## Note: `std.wasm` models linear-memory bounds (4 slots), instruction fuel accounting, and host capability
+## flags (`cap_fs`, `cap_net`) as a pure Lume reference model; compile-time capability isolation is enforced by
+## `06b_phase3.src` / `lcaas.src` (`wasm_call_host_fs` requires both `"wasm"` and `"fs"` capabilities `[E0200]`).
 
 fn wasm_module_new(mem_pages, fuel_limit) = {mem: Cons(0, Cons(0, Cons(0, Cons(0, Nil)))), pages: mem_pages, fuel: fuel_limit, cap_fs: 0, cap_net: 0, trapped: 0, last_result: 0}
 

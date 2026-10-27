@@ -186,7 +186,7 @@ fn keff_join(xs) = match xs
 
 fn kprim_eff(cnm) = if cnm == "io_write" or cnm == "io_read" or cnm == "println" or cnm == "read" or cnm == "readall" or cnm == "emit" or cnm == "flush" then "io" else if cnm == "fs_read" or cnm == "fs_write" or cnm == "fs_open" then "fs" else if cnm == "net_send" or cnm == "net_recv" or cnm == "net_connect" or cnm == "db_exec" then "net" else if cnm == "rc_new" or cnm == "arc_new" or cnm == "alloc_heap" or cnm == "table_new" or cnm == "box_new" then "alloc" else if cnm == "rand_int" or cnm == "prob_sample" or cnm == "llm_complete" then "rand" else if cnm == "sample_dist" or cnm == "observe_lik" then "prob" else if cnm == "llm_prompt" then "llm" else if cnm == "wasm_module_new" or cnm == "wasm_call_add" or cnm == "wasm_store32" or cnm == "wasm_load32" or cnm == "wasm_call_host_fs" then "wasm" else if cnm == "ffi_call" then "ffi" else if cnm == "time_now" or cnm == "clock_now" or cnm == "sleep_ms" then "time" else if cnm == "fail_err" or cnm == "raise_err" then "fail" else if cnm == "panic_msg" then "panic" else if cnm == "async_await" or cnm == "spawn_task" then "async" else ""
 
-fn kinfer_call_effs(cnm, ksigs, edecls, fns, d) = let pe = kprim_eff(cnm) in let ue = kop_effect(cnm, edecls) in let base = keff_add(pe, keff_add(ue, Nil)) in let mks = keffsig_lookup(cnm, ksigs) in match mks
+fn kinfer_call_effs(cnm, ksigs, edecls, fns, d) = let pe = kprim_eff(cnm) in let ue = kop_effect(cnm, edecls) in let host_e = if cnm == "wasm_call_host_fs" then "fs" else if cnm == "wasm_call_host_net" then "net" else "" in let base = keff_add(host_e, keff_add(pe, keff_add(ue, Nil))) in let mks = keffsig_lookup(cnm, ksigs) in match mks
     Cons(ks, r) => keff_union(base, keff_diff(ks.effs, Cons("pure", Nil)))
     Nil         => if d <= 0 then base else keff_union(base, kinfer_fn_lookup(cnm, fns, ksigs, edecls, d - 1))
 
@@ -1422,16 +1422,20 @@ fn n4_lookup_dvar(nm, dvars) = match dvars
     Nil        => Num(0)
     Cons(h, t) => if h.k == nm then h.dv else n4_lookup_dvar(nm, t)
 
-fn n4_diff_e(e, v, dvars) = match e
+fn n4_diff_e(e, v, dvars, fnm) = match e
     Num(n)          => Num(0)
     Var(nm)         => if nm == v then Num(1) else n4_lookup_dvar(nm, dvars)
-    Bin(op, a, b)   => if op == "+" then Bin("+", n4_diff_e(a, v, dvars), n4_diff_e(b, v, dvars)) else if op == "-" then Bin("-", n4_diff_e(a, v, dvars), n4_diff_e(b, v, dvars)) else if op == "*" then Bin("+", Bin("*", n4_diff_e(a, v, dvars), b), Bin("*", a, n4_diff_e(b, v, dvars))) else Num(0)
-    If(c, t, e2)    => If(c, n4_diff_e(t, v, dvars), n4_diff_e(e2, v, dvars))
-    LetIn(nm, x, b) => let dx = n4_diff_e(x, v, dvars) in let dnm = "_ad_d_" + nm in LetIn(dnm, dx, LetIn(nm, x, n4_diff_e(b, v, Cons({k: nm, dv: Var(dnm)}, dvars))))
-    _               => Num(0)
+    OwnE(inner)     => n4_diff_e(inner, v, dvars, fnm)
+    MutE(inner)     => n4_diff_e(inner, v, dvars, fnm)
+    Bin(op, a, b)   => if op == "+" then Bin("+", n4_diff_e(a, v, dvars, fnm), n4_diff_e(b, v, dvars, fnm)) else if op == "-" then Bin("-", n4_diff_e(a, v, dvars, fnm), n4_diff_e(b, v, dvars, fnm)) else if op == "*" then Bin("+", Bin("*", n4_diff_e(a, v, dvars, fnm), b), Bin("*", a, n4_diff_e(b, v, dvars, fnm))) else ctfail("lume: autodiff error [N0400]: cannot differentiate non-polynomial operator '" + op + "' in '" + fnm + "' (supported exact differentiable fragment: +, -, *, if, let)\n")
+    If(c, t, e2)    => If(c, n4_diff_e(t, v, dvars, fnm), n4_diff_e(e2, v, dvars, fnm))
+    LetIn(nm, x, b) => let dx = n4_diff_e(x, v, dvars, fnm) in let dnm = "_ad_d_" + nm in LetIn(dnm, dx, LetIn(nm, x, n4_diff_e(b, v, Cons({k: nm, dv: Var(dnm)}, dvars), fnm)))
+    VarIn(nm, x, b) => let dx = n4_diff_e(x, v, dvars, fnm) in let dnm = "_ad_d_" + nm in LetIn(dnm, dx, LetIn(nm, x, n4_diff_e(b, v, Cons({k: nm, dv: Var(dnm)}, dvars), fnm)))
+    Call(cnm, args) => ctfail("lume: autodiff error [N0400]: cannot differentiate unhandled call '" + cnm + "' in '" + fnm + "' (inline the function or restrict 'grad' to the polynomial fragment +, -, *, if, let)\n")
+    _               => ctfail("lume: autodiff error [N0400]: cannot differentiate non-polynomial expression in '" + fnm + "' (supported exact differentiable fragment: +, -, *, if, let)\n")
 
 fn n4_collect_grads_e(e, acc) = match e
-    Call(nm, args)  => let acc2 = n4_collect_grads_args(args, acc) in if (nm == "grad" or nm == "jvp" or nm == "vjp") and isnil(args) == 0 then n4_add_grad_target(ohd_e(args), acc2) else acc2
+    Call(nm, args)  => let acc2 = n4_collect_grads_args(args, acc) in if (nm == "grad" or nm == "value_and_grad" or nm == "jvp" or nm == "vjp") and isnil(args) == 0 then n4_add_grad_target(ohd_e(args), acc2) else acc2
     Bin(op, l, r)   => n4_collect_grads_e(r, n4_collect_grads_e(l, acc))
     If(c, t, e2)    => n4_collect_grads_e(e2, n4_collect_grads_e(t, n4_collect_grads_e(c, acc)))
     LetIn(nm, v, b) => n4_collect_grads_e(b, n4_collect_grads_e(v, acc))
@@ -1464,7 +1468,7 @@ fn n4_synth_grad_fns(targets, raw_fns) = match targets
 
 fn n4_synth_grad_one(fnm, mf, rest) = match mf
     Nil        => rest
-    Cons(f, r) => Cons(Fn("__ad_grad_" + fnm, f.ps, n4_diff_e(f.body, phd(f.ps), Nil)), rest)
+    Cons(f, r) => Cons(Fn("__ad_grad_" + fnm, f.ps, n4_diff_e(f.body, phd(f.ps), Nil, fnm)), rest)
 
 fn n4_grad_fn_name(fnm, ufns) = if omem("grad_" + fnm, ufns) == 1 then "grad_" + fnm else if omem("mlp2_grad", ufns) == 1 and fnm == "mlp2_loss" then "mlp2_grad" else "__ad_grad_" + fnm
 
@@ -1526,7 +1530,7 @@ fn vwcet_call(cnm, mf, fns, d) = match mf
     Nil        => 0
     Cons(f, r) => if afn_calls_self(cnm, f.body) == 1 then 100000 else vwcet_e(f.body, fns, d - 1)
 
-fn vwcet_chk_fn(nm, body, wcets, fns) = let bound = vwcet_lookup(nm, wcets) in if bound <= 0 then 0 else let est = (if afn_calls_self(nm, body) == 1 then 100000 else vwcet_e(body, fns, 4)) in if est > bound then ctfail("lume: wcet error [V0002]: function '" + nm + "' has worst-case execution time of " + str(est) + " cycles, exceeding '@bound(cycles: " + str(bound) + ")' (fix-it: remove recursion/loops on the critical path or increase '@bound(cycles: " + str(est) + ")')\n") else 1
+fn vwcet_chk_fn(nm, body, wcets, fns) = let bound = vwcet_lookup(nm, wcets) in if bound <= 0 then 0 else let est = (if afn_calls_self(nm, body) == 1 then 100000 else vwcet_e(body, fns, 4)) in if est > bound then ctfail("lume: wcet budget error [V0002]: function '" + nm + "' has structural cycle cost of " + str(est) + " cycles, exceeding '@bound(cycles: " + str(bound) + ")' (fix-it: remove recursion/loops on the critical path or increase '@bound(cycles: " + str(est) + ")')\n") else 1
 
 fn ochkfn(nm, ps, body, ot) = ochkfn2(nm, ps, body, osiglookup(nm, ot.osigs), tsiglookup(nm, ot.sigs), ot)
 

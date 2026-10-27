@@ -733,8 +733,9 @@ cmd_certify() {
         rm -f "$_cbun"
         exit 1
     fi
+    _src_sha=$(sha256_file "$_cbun")
     _ctmp=$(mktemp)
-    printf '@mode certify\n' > "$_ctmp"
+    printf '@mode certify\n@sha256 %s\n' "$_src_sha" > "$_ctmp"
     cat "$_cbun" >> "$_ctmp"
     _cjson=$(run_core_tool lcaas "$_ctmp")
     rm -f "$_cbun" "$_ctmp"
@@ -760,18 +761,19 @@ cmd_verify_cert() {
         echo "lume verify-cert: cannot read $_cfile" >&2
         exit 66
     fi
-    _cbun=$(mktemp)
-    if ! bundle_src_if_needed "$_cfile" "$_cbun"; then
-        rm -f "$_cbun"
-        exit 1
-    fi
-    _ctmp=$(mktemp)
-    printf '@mode certify\n' > "$_ctmp"
-    cat "$_cbun" >> "$_ctmp"
-    _cjson=$(run_core_tool lcaas "$_ctmp")
-    rm -f "$_cbun" "$_ctmp"
-    printf '%s\n' "$_cjson"
-    case "$_cjson" in
+    case "$_cfile" in
+        *.src)
+            _vcert=$(mktemp)
+            cmd_certify "$_cfile" > "$_vcert" || true
+            _vjson=$(run_core_tool lcert "$_vcert")
+            rm -f "$_vcert"
+            ;;
+        *)
+            _vjson=$(run_core_tool lcert "$_cfile")
+            ;;
+    esac
+    printf '%s\n' "$_vjson"
+    case "$_vjson" in
         *'"kernel_verified":true'*) return 0 ;;
         *) return 1 ;;
     esac
@@ -797,8 +799,9 @@ cmd_mcp() {
         rm -f "$_mbun"
         exit 1
     fi
+    _src_sha=$(sha256_file "$_mbun")
     _mtmp=$(mktemp)
-    printf '@mode mcp\n' > "$_mtmp"
+    printf '@mode mcp\n@sha256 %s\n' "$_src_sha" > "$_mtmp"
     cat "$_mbun" >> "$_mtmp"
     run_core_tool lcaas "$_mtmp"
     rm -f "$_mbun" "$_mtmp"
