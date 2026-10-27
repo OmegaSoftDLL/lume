@@ -73,8 +73,9 @@ binaries.
 8b. **Tooling for the AI-author loop and the C ecosystem (ship with the first compiler):** `lume lsp`
     (language server) and `lume dap` (debug adapter) so agents get interactive diagnostics; `import c
     "header.h"` and `@export("C")` for FFI and incremental migration. (Scan: NanoLang, Carbon, Zig, Mojo.)
-8c. **P35 — mandatory tests:** the compiler reports a `pub` function with no test/example (warning in
-    debug, error under `--strict`).
+8c. **P35 — public test coverage diagnostics:** the compiler reports `[P35]` when a `pub fn` has
+    no matching `fn test_<name>()`; the warning is advisory and currently does not fail compilation.
+    Example-based coverage and strict-mode enforcement are future work.
 9. Diagnostics style guide (`docs/diagnostics.md`) and the first 100 diagnostics written to it.
 
 **Exit criterion (the triple build):** `lume0` runs `lumec` to compile `lumec` → binary **A**;

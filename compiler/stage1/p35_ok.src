@@ -1,0 +1,12 @@
+## P35 conformance tests: public APIs warn without a paired `test_<name>` function.
+use lcaas
+
+fn test_p35_warns_for_public_function_without_matching_test() =
+    let r = caas_compile("pub fn exposed() -> int = 1\n") in
+    match r.diagnostics
+        Cons(d, Nil) => r.ok == 1 and d.code == "P35" and d.severity == "warning" and d.phase == "test_coverage"
+        _             => 0
+
+fn test_p35_accepts_public_function_with_matching_test() =
+    let r = caas_compile("pub fn exposed() -> int = 1\nfn test_exposed() = exposed()\n") in
+    r.ok == 1 and cs_isnil(r.diagnostics) == 1

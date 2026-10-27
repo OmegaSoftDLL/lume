@@ -136,6 +136,8 @@ must name the principle it breaks.
   turns into a proof/test obligation on *every* build, so an edit (human or AI) cannot silently break
   a cross-cutting rule. Per-function contracts (P15) guard a function; laws guard the whole program.
   (Modelled on Bend 2.)
-- **P35 — No untested public surface.** *(design rule, not yet enforced — the compiler does not emit a missing-test diagnostic)* Every `pub` function carries at least one test or example
-  the test runner executes; the compiler's JSON diagnostics report a missing one. AI-written code is
-  never merged as untested code. (Modelled on NanoLang's mandatory `shadow` block.)
+- **P35 — No untested public surface.** The compiler's structured diagnostics emit warning `[P35]`
+  for each `pub fn` without a matching `fn test_<name>()`; for example, `pub fn parse(...)` is
+  covered by `fn test_parse()`. The warning appears in `lume agent check` JSON and does not fail
+  compilation. Example-based coverage and strict-mode enforcement remain future work. (Modelled on
+  NanoLang's mandatory `shadow` block.)
