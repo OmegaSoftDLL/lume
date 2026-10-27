@@ -212,11 +212,13 @@ the same scheme as the Rust project (Go uses BSD-3-Clause; both are permissive).
 The license covers the Lume toolchain, standard library and docs; it does not restrict what you do
 with programs you write in Lume or the binaries it produces for you.
 
-## Software protection (anti-reverse-engineering)
+## Software protection (anti-reverse-engineering) — planned, not yet implemented
 
-Protecting the programs you ship is a first-class toolchain goal (`docs/06-software-protection.md`,
-principle P33): per-profile symbol stripping, constant/string encryption, control-flow obfuscation,
-selective bytecode virtualisation and tamper seals — opt-in, composable, and applied only to your
-own artifact without changing its behaviour or weakening compile-time safety. Models and LLM
-prompts embedded in a program are protected the same way. Lume ships no tooling for attacking,
-deobfuscating or evading anyone else's software.
+Protecting the programs you ship is a **design-stage** toolchain goal (`docs/06-software-protection.md`,
+principle P33) — **not yet implemented**. The plan: per-profile symbol stripping, constant/string
+encryption, control-flow obfuscation, selective bytecode virtualisation and tamper seals — opt-in,
+composable, and applied only to your own artifact without changing its behaviour or weakening
+compile-time safety, with embedded models and LLM prompts protected the same way. **No `lume`
+command, compiler pass, or `std.protect` module ships today**; `docs/06` holds the staged roadmap.
+When it does ship, Lume will ship no tooling for attacking, deobfuscating or evading anyone else's
+software.
