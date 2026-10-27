@@ -1,0 +1,61 @@
+name: Linguist grammar integration
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/linguist-grammar.yml"
+      - "contrib/linguist/**"
+      - "contrib/textmate/**"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/linguist-grammar.yml"
+      - "contrib/linguist/**"
+      - "contrib/textmate/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  add-grammar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out this Lume revision
+        uses: actions/checkout@v7
+        with:
+          path: lume
+
+      - name: Check out Linguist
+        uses: actions/checkout@v7
+        with:
+          repository: github-linguist/linguist
+          path: linguist
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          working-directory: linguist
+          bundler-cache: true
+
+      - name: Validate with Linguist
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_repo="$RUNNER_TEMP/lume-grammar.git"
+          git clone --bare "$GITHUB_WORKSPACE/lume" "$source_repo"
+          git --git-dir="$source_repo" update-ref refs/heads/main "$GITHUB_SHA"
+          git --git-dir="$source_repo" symbolic-ref HEAD refs/heads/main
+          git --git-dir="$source_repo" cat-file -e \
+            refs/heads/main:contrib/textmate/syntaxes/Lume.tmLanguage.json
+          git config --global \
+            url."file://$source_repo".insteadOf \
+            https://github.com/OmegaSoftDLL/lume.git
+          git config --global protocol.file.allow always
+          expected_sha="$(git --git-dir="$source_repo" rev-parse refs/heads/main)"
+          resolved="$(git ls-remote https://github.com/OmegaSoftDLL/lume.git HEAD)"
+          [[ "$resolved" == "$expected_sha"$'\t'* ]]
+          cd linguist
+          script/add-grammar https://github.com/OmegaSoftDLL/lume
