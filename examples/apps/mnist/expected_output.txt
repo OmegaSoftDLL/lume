@@ -1,1 +1,1 @@
-mnist_loss_init=120 mnist_loss_final=0 accuracy=100% hash=sha256:278884942
+mnist_loss_init=120 mnist_loss_final=0 accuracy=100% hash=sha256:dbc8d2a98cff4885ef7cd729e258846a5afd7e00e5059566c4da00b8f5b536a4

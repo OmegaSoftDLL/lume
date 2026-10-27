@@ -28,8 +28,8 @@ Phase 4 (Stage 4 of `docs/04-roadmap.md` and `docs/03-specification.md` §14) br
 ### 2.1 `model` Declarations & Autodiff Transform
 - **`type Name = model { ... }` (`04_parser_decls.src`, `06b_phase3.src`):**
   - Declares a differentiable parameter record (`OType(Name, "model")`) whose tensor fields form a parameter tree.
-- **Compiler Autodiff (`grad`, `vjp`, `jvp`, `vmap`, `jit` in `06b_phase3.src` & `lcaas.src`):**
-  - `grad(f)` synthesizes a symbolic derivative function `__ad_grad_<f>` by differentiating pure scalar/piecewise expressions (`Num`, `Var`, `+`, `-`, `*`, and `If(c, t, e)` piecewise branches such as `relu`) with respect to the first parameter, or dispatches to analytical `grad_<f>` for tensor models.
+- **Compiler Autodiff (`grad`, `value_and_grad`, `vjp`, `jvp`, `vmap`, `jit` in `06b_phase3.src` & `lcaas.src`):**
+  - `grad(f)` synthesizes a symbolic derivative function `__ad_grad_<f>` by differentiating functions in the supported polynomial/piecewise fragment (`Num`, `Var`, `+`, `-`, `*`, `let`, `if`, `relu`, and `sq`) with respect to the first parameter. Any non-polynomial operator (`/`, `%`, comparisons) or unhandled function call inside a differentiated function is rejected at compile time with `[N0400]` (exit 3 in `lumec`, `"code":"N0400"` in `lcaas`), never silently returning `0`. For 2D tensor models, `mlp2_grad` in `std.nn` provides reverse-mode backpropagation.
   - `jvp(f, x, dx)` computes forward-mode directional derivative `grad(f)(x) * dx`; `vjp(f, x, dy)` computes reverse-mode pullback `dy * grad(f)(x)`; `vmap(f, xs)` maps `f` across a batch list.
 - **Accelerator Kernels (`kernel fn`, `@schedule`, `@autotune`):**
   - `kernel fn` declarations are statically checked for accelerator purity (rejecting `io`, `fs`, `net` side effects inside a kernel with `[E0200]`) and can be lowered to PTX (`kernel_emit_ptx`) and SPIR-V assembly (`kernel_emit_spirv`).

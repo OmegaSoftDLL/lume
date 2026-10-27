@@ -47,11 +47,58 @@ fn nn_acc_rows(logits, targets, r, rmax) = if r >= rmax then 0 else let pred = t
 ## Returns accuracy percentage (`0..100`)
 fn mlp2_accuracy(m, x, targets) = let logits = mlp2_forward(m, x) in if logits.rows <= 0 then 0 else nn_acc_rows(logits, targets, 0, logits.rows) * 100 / logits.rows
 
+fn sha_ord_lo(c) = if c < "0" then (if c < "(" then (if c == " " then 32 else if c == "!" then 33 else if c == "\"" then 34 else if c == "#" then 35 else if c == "$" then 36 else if c == "%" then 37 else if c == "&" then 38 else 39) else (if c == "(" then 40 else if c == ")" then 41 else if c == "*" then 42 else if c == "+" then 43 else if c == "," then 44 else if c == "-" then 45 else if c == "." then 46 else 47)) else (if c < ":" then 48 + toint(c) else (if c == ":" then 58 else if c == ";" then 59 else if c == "<" then 60 else if c == "=" then 61 else if c == ">" then 62 else if c == "?" then 63 else 64))
+fn sha_ord_up(c) = if c < "N" then (if c < "G" then (if c == "A" then 65 else if c == "B" then 66 else if c == "C" then 67 else if c == "D" then 68 else if c == "E" then 69 else 70) else (if c == "G" then 71 else if c == "H" then 72 else if c == "I" then 73 else if c == "J" then 74 else if c == "K" then 75 else if c == "L" then 76 else 77)) else (if c < "U" then (if c == "N" then 78 else if c == "O" then 79 else if c == "P" then 80 else if c == "Q" then 81 else if c == "R" then 82 else if c == "S" then 83 else 84) else (if c == "U" then 85 else if c == "V" then 86 else if c == "W" then 87 else if c == "X" then 88 else if c == "Y" then 89 else if c == "Z" then 90 else if c == "[" then 91 else if c == "\\" then 92 else if c == "]" then 93 else if c == "^" then 94 else if c == "_" then 95 else 96))
+fn sha_ord_az(c) = if c < "n" then (if c < "g" then (if c == "a" then 97 else if c == "b" then 98 else if c == "c" then 99 else if c == "d" then 100 else if c == "e" then 101 else 102) else (if c == "g" then 103 else if c == "h" then 104 else if c == "i" then 105 else if c == "j" then 106 else if c == "k" then 107 else if c == "l" then 108 else 109)) else (if c < "u" then (if c == "n" then 110 else if c == "o" then 111 else if c == "p" then 112 else if c == "q" then 113 else if c == "r" then 114 else if c == "s" then 115 else 116) else (if c == "u" then 117 else if c == "v" then 118 else if c == "w" then 119 else if c == "x" then 120 else if c == "y" then 121 else if c == "z" then 122 else if c == "|" then 124 else if c == "~" then 126 else if c > "z" and c < "|" then 123 else 125))
+fn sha_ord(c) = if c == "\n" then 10 else if c == "\r" then 13 else if c == "\t" then 9 else if c < "A" then sha_ord_lo(c) else if c < "a" then sha_ord_up(c) else sha_ord_az(c)
+
+fn sha_u32(x) = let r = x % 4294967296 in if r < 0 then r + 4294967296 else r
+fn sha_pow2(n) = if n <= 0 then 1 else if n >= 16 then 65536 * sha_pow2(n - 16) else if n >= 8 then 256 * sha_pow2(n - 8) else if n >= 4 then 16 * sha_pow2(n - 4) else if n == 3 then 8 else if n == 2 then 4 else 2
+fn sha_shr(x, n) = x / sha_pow2(n)
+fn sha_rotr(x, n) = let p = sha_pow2(n) in (x / p) + ((x % p) * sha_pow2(32 - n))
+
+fn sha_xor3_4(x, y, z) = let b0 = ((x % 2) + (y % 2) + (z % 2)) % 2 in let b1 = (((x / 2) % 2) + ((y / 2) % 2) + ((z / 2) % 2)) % 2 in let b2 = (((x / 4) % 2) + ((y / 4) % 2) + ((z / 4) % 2)) % 2 in let b3 = (((x / 8) % 2) + ((y / 8) % 2) + ((z / 8) % 2)) % 2 in b0 + 2 * b1 + 4 * b2 + 8 * b3
+fn sha_xor3_n(x, y, z, nibs) = if nibs <= 0 then 0 else sha_xor3_4(x % 16, y % 16, z % 16) + 16 * sha_xor3_n(x / 16, y / 16, z / 16, nibs - 1)
+
+fn sha_ch_4(e, f, g) = let b0 = (if (e % 2) == 1 then (f % 2) else (g % 2)) in let b1 = (if ((e / 2) % 2) == 1 then ((f / 2) % 2) else ((g / 2) % 2)) in let b2 = (if ((e / 4) % 2) == 1 then ((f / 4) % 2) else ((g / 4) % 2)) in let b3 = (if ((e / 8) % 2) == 1 then ((f / 8) % 2) else ((g / 8) % 2)) in b0 + 2 * b1 + 4 * b2 + 8 * b3
+fn sha_ch_n(e, f, g, nibs) = if nibs <= 0 then 0 else sha_ch_4(e % 16, f % 16, g % 16) + 16 * sha_ch_n(e / 16, f / 16, g / 16, nibs - 1)
+
+fn sha_maj_4(a, b, c) = let b0 = (if (a % 2) + (b % 2) + (c % 2) >= 2 then 1 else 0) in let b1 = (if ((a / 2) % 2) + ((b / 2) % 2) + ((c / 2) % 2) >= 2 then 1 else 0) in let b2 = (if ((a / 4) % 2) + ((b / 4) % 2) + ((c / 4) % 2) >= 2 then 1 else 0) in let b3 = (if ((a / 8) % 2) + ((b / 8) % 2) + ((c / 8) % 2) >= 2 then 1 else 0) in b0 + 2 * b1 + 4 * b2 + 8 * b3
+fn sha_maj_n(a, b, c, nibs) = if nibs <= 0 then 0 else sha_maj_4(a % 16, b % 16, c % 16) + 16 * sha_maj_n(a / 16, b / 16, c / 16, nibs - 1)
+
+fn sha_big_sig0(a) = sha_xor3_n(sha_rotr(a, 2), sha_rotr(a, 13), sha_rotr(a, 22), 8)
+fn sha_big_sig1(e) = sha_xor3_n(sha_rotr(e, 6), sha_rotr(e, 11), sha_rotr(e, 25), 8)
+fn sha_sml_sig0(x) = sha_xor3_n(sha_rotr(x, 7), sha_rotr(x, 18), sha_shr(x, 3), 8)
+fn sha_sml_sig1(x) = sha_xor3_n(sha_rotr(x, 17), sha_rotr(x, 19), sha_shr(x, 10), 8)
+
+fn sha_k(t) = if t < 16 then (if t == 0 then 1116352408 else if t == 1 then 1899447441 else if t == 2 then 3049323471 else if t == 3 then 3921009573 else if t == 4 then 961987163 else if t == 5 then 1508970993 else if t == 6 then 2453635748 else if t == 7 then 2870763221 else if t == 8 then 3624381080 else if t == 9 then 310598401 else if t == 10 then 607225278 else if t == 11 then 1426881987 else if t == 12 then 1925078388 else if t == 13 then 2162078206 else if t == 14 then 2614888103 else 3248222580) else if t < 32 then (if t == 16 then 3835390401 else if t == 17 then 4022224774 else if t == 18 then 264347078 else if t == 19 then 604807628 else if t == 20 then 770255983 else if t == 21 then 1249150122 else if t == 22 then 1555081692 else if t == 23 then 1996064986 else if t == 24 then 2554220882 else if t == 25 then 2821834349 else if t == 26 then 2952996808 else if t == 27 then 3210313671 else if t == 28 then 3336571891 else if t == 29 then 3584528711 else if t == 30 then 113926993 else 338241895) else if t < 48 then (if t == 32 then 666307205 else if t == 33 then 773529912 else if t == 34 then 1294757372 else if t == 35 then 1396182291 else if t == 36 then 1695183700 else if t == 37 then 1986661051 else if t == 38 then 2177026350 else if t == 39 then 2456956037 else if t == 40 then 2730485921 else if t == 41 then 2820302411 else if t == 42 then 3259730800 else if t == 43 then 3345764771 else if t == 44 then 3516065817 else if t == 45 then 3600352804 else if t == 46 then 4094571909 else 275423344) else (if t == 48 then 430227734 else if t == 49 then 506948616 else if t == 50 then 659060556 else if t == 51 then 883997877 else if t == 52 then 958139571 else if t == 53 then 1322822218 else if t == 54 then 1537002063 else if t == 55 then 1747873779 else if t == 56 then 1955562222 else if t == 57 then 2024104815 else if t == 58 then 2227730452 else if t == 59 then 2361852424 else if t == 60 then 2428436474 else if t == 61 then 2756734187 else if t == 62 then 3204031479 else 3329325298)
+
+fn sha_nth(xs, i) = match xs
+    Nil        => 0
+    Cons(h, t) => if i <= 0 then h else sha_nth(t, i - 1)
+
+fn sha_msg_byte(s, len, total, idx) = if idx < len then sha_ord(at(s, idx)) else if idx == len then 128 else if idx >= total - 8 then ((len * 8) / sha_pow2(8 * (total - 1 - idx))) % 256 else 0
+fn sha_msg_word(s, len, total, base) = sha_msg_byte(s, len, total, base) * 16777216 + sha_msg_byte(s, len, total, base + 1) * 65536 + sha_msg_byte(s, len, total, base + 2) * 256 + sha_msg_byte(s, len, total, base + 3)
+
+fn sha_w_build(s, len, total, blk_off, t, w_rev) = if t >= 64 then w_rev else let wt = (if t < 16 then sha_msg_word(s, len, total, blk_off + t * 4) else sha_u32(sha_nth(w_rev, 15) + sha_sml_sig0(sha_nth(w_rev, 14)) + sha_nth(w_rev, 6) + sha_sml_sig1(sha_nth(w_rev, 1)))) in sha_w_build(s, len, total, blk_off, t + 1, Cons(wt, w_rev))
+
+fn sha_round(st, wt, kt) = let t1 = sha_u32(st.h + sha_big_sig1(st.e) + sha_ch_n(st.e, st.f, st.g, 8) + kt + wt) in let t2 = sha_u32(sha_big_sig0(st.a) + sha_maj_n(st.a, st.b, st.c, 8)) in {a: sha_u32(t1 + t2), b: st.a, c: st.b, d: st.c, e: sha_u32(st.d + t1), f: st.e, g: st.f, h: st.g}
+
+fn sha_rounds(st, w_rev, t) = if t >= 64 then st else sha_rounds(sha_round(st, sha_nth(w_rev, 63 - t), sha_k(t)), w_rev, t + 1)
+
+fn sha_blocks(s, len, total, blk_off, st) = if blk_off >= total then st else let w_rev = sha_w_build(s, len, total, blk_off, 0, Nil) in let r = sha_rounds(st, w_rev, 0) in sha_blocks(s, len, total, blk_off + 64, {a: sha_u32(st.a + r.a), b: sha_u32(st.b + r.b), c: sha_u32(st.c + r.c), d: sha_u32(st.d + r.d), e: sha_u32(st.e + r.e), f: sha_u32(st.f + r.f), g: sha_u32(st.g + r.g), h: sha_u32(st.h + r.h)})
+
+fn sha_hex1(n) = at("0123456789abcdef", n % 16)
+fn sha_hex32(w) = sha_hex1(w / 268435456) + sha_hex1(w / 16777216) + sha_hex1(w / 1048576) + sha_hex1(w / 65536) + sha_hex1(w / 4096) + sha_hex1(w / 256) + sha_hex1(w / 16) + sha_hex1(w)
+
+## Real cryptographic 256-bit SHA-256 (FIPS 180-4) returning 64 hex characters
+fn sha256_hex(s) = let len = count(s) in let total = ((len + 9 + 63) / 64) * 64 in let init = {a: 1779033703, b: 3144134277, c: 1013904242, d: 2773480762, e: 1359893119, f: 2600822924, g: 528734635, h: 1541459225} in let fin = sha_blocks(s, len, total, 0, init) in sha_hex32(fin.a) + sha_hex32(fin.b) + sha_hex32(fin.c) + sha_hex32(fin.d) + sha_hex32(fin.e) + sha_hex32(fin.f) + sha_hex32(fin.g) + sha_hex32(fin.h)
+
 fn nn_hash_list(xs, acc) = match xs
     Nil        => acc
     Cons(x, r) => nn_hash_list(r, (acc * 131 + x + 97) % 1000000007)
 
-fn model_content_hash(m) = let h1 = nn_hash_list(m.w1.data, 17) in let h2 = nn_hash_list(m.b1.data, h1) in let h3 = nn_hash_list(m.w2.data, h2) in let h4 = nn_hash_list(m.b2.data, h3) in "sha256:" + str(if h4 < 0 then 0 - h4 else h4)
+fn model_content_hash(m) = let h1 = nn_hash_list(m.w1.data, 17) in let h2 = nn_hash_list(m.b1.data, h1) in let h3 = nn_hash_list(m.w2.data, h2) in let h4 = nn_hash_list(m.b2.data, h3) in "sha256:" + sha256_hex(str(h1) + ":" + str(h2) + ":" + str(h3) + ":" + str(h4))
 
 fn model_save_safetensors(m) = "{\"format\":\"safetensors\",\"version\":\"" + model_content_hash(m) + "\",\"tensors\":{\"w1\":" + tensor_shape_str(m.w1) + ",\"b1\":" + tensor_shape_str(m.b1) + ",\"w2\":" + tensor_shape_str(m.w2) + ",\"b2\":" + tensor_shape_str(m.b2) + "}}"
 
@@ -69,6 +116,6 @@ fn test_nn_mlp2_grad_and_sgd_step() = let w1 = {rows: 2, cols: 2, data: Cons(1, 
 
 fn test_nn_adam_step() = let w1 = {rows: 2, cols: 2, data: Cons(1, Cons(0, Cons(0, Cons(1, Nil))))} in let b1 = {rows: 1, cols: 2, data: Cons(0, Cons(0, Nil))} in let m0 = mlp2_new(w1, b1, w1, b1) in let st0 = adam_init_mlp2(m0) in let x = {rows: 2, cols: 2, data: Cons(3, Cons(0, Cons(0, Cons(3, Nil))))} in let y = Cons(0, Cons(1, Nil)) in let g = mlp2_grad(m0, x, y) in let r = adam_step_mlp2(m0, st0, g, 1) in if r.state.step == 1 then 1 else 0
 
-fn test_nn_safetensors_and_onnx_export() = let w1 = {rows: 2, cols: 2, data: Cons(1, Cons(2, Cons(3, Cons(4, Nil))))} in let b1 = {rows: 1, cols: 2, data: Cons(0, Cons(0, Nil))} in let m = mlp2_new(w1, b1, w1, b1) in let st = model_save_safetensors(m) in let ox = model_export_onnx(m, "mlp2") in if st != "" and ox != "" then 1 else 0
+fn test_nn_safetensors_and_onnx_export() = let w1 = {rows: 2, cols: 2, data: Cons(1, Cons(2, Cons(3, Cons(4, Nil))))} in let b1 = {rows: 1, cols: 2, data: Cons(0, Cons(0, Nil))} in let m = mlp2_new(w1, b1, w1, b1) in let h = model_content_hash(m) in let st = model_save_safetensors(m) in let ox = model_export_onnx(m, "mlp2") in if count(h) == 71 and sha256_hex("abc") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" and st != "" and ox != "" then 1 else 0
 
 fn test_nn_ptx_and_spirv_codegen() = let ptx = kernel_emit_ptx("fused_affine_relu", 16) in let spv = kernel_emit_spirv("fused_affine_relu", 16) in if ptx != "" and spv != "" then 1 else 0
