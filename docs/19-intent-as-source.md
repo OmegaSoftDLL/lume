@@ -64,6 +64,7 @@ guarantees the code matches** — correctness by construction instead of by test
 existing language offers, and it is the reason Lume is worth building AI-first from the ground up
 rather than retrofitting AI onto a human-first language.
 
-**Status:** north star. The concrete first steps are in the Phase 3 plan (`docs/16`) as **Track A**
-(A1 holes, A2 `total`, A3 provenance) and **Track V** (V2 `lume prove`, V3 `LAWS`); this document is
-the direction those bricks are climbing toward.
+**Status:** Implemented (`compiler/stage1/lume/06b_phase3.src`, `compiler/stage1/lcaas.src`,
+`compiler/stage1/levolve.src`, `compiler/stage1/intent_oracle_ok.src`, and
+`evolve/proposals/0002_intent_oracle/proposal.bundle`):
+- **Hole-Guided `QF_LIA` & Law Synthesis (`abest_hole_expr` / `cs_best_hole_expr`):** Typed holes (`_`, `_hole*`) generate linear arithmetic (`v + 1`, `v - 1`, `v + w`, `v - w`, `w - v`) and branching (`if v >= w then v else w`, `if v <= w then v else w`) AST candidates alongside variables and helper calls, score each candidate against `requires`/`ensures` contracts and `law` (`P34`) declarations using the Fourier–Motzkin `QF_LIA` decision procedure (`vqflia_prove_fn`/`vqflia_prove_law`) and counterexample search, prune refuted candidates, emit `proven_candidates` in `lume agent fill`, automatically fill private draft holes (`afill_prog_holes`/`cs_fill_prog_holes`) with zero runtime guards when proven, and repair `pub fn` `A0001` holes inside the 6-gate `lume evolve` loop.
