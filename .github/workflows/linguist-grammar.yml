@@ -48,8 +48,8 @@ jobs:
           git clone --bare "$GITHUB_WORKSPACE/lume" "$source_repo"
           git --git-dir="$source_repo" update-ref refs/heads/main "$GITHUB_SHA"
           git --git-dir="$source_repo" symbolic-ref HEAD refs/heads/main
-          git --git-dir="$source_repo" ls-tree -r --name-only main \
-            | grep -Fqx contrib/textmate/syntaxes/Lume.tmLanguage.json
+          git --git-dir="$source_repo" cat-file -e \
+            refs/heads/main:contrib/textmate/syntaxes/Lume.tmLanguage.json
           git config --global \
             url."file://$source_repo".insteadOf \
             https://github.com/OmegaSoftDLL/lume.git
