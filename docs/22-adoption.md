@@ -7,7 +7,7 @@ changes nature: from building a compiler to building **distribution**. This docu
 to execute once Phases 1–5 and the correctness protection (provenance A3 + contracts V + sound
 `QF_LIA` proof) have landed.
 
-> **Status note.** Only a minimal slice has landed. **G1 (MCP)**: `lume mcp` exposes `lume_check`, `lume_prove`, `lume_fill`, `lume_bind`, `lume_certify` — there are no `witness`/`repair`/`impact` queries. **G3 (certificate)**: `lume certify`/`verify-cert` now verify certificates **independently** (a standalone Fourier–Motzkin `QF_LIA` kernel re-derives each proof term + FIPS-180-4 SHA-256 hashing, #183 fixed); certificates are **not yet cryptographically signed** (a hash is not a signature). Everything else below is plan.
+> **Status note.** **G1 (MCP)**: `lume mcp` exposes `lume_check`, `lume_prove`, `lume_fill`, `lume_witness`, `lume_repair`, `lume_impact`, `lume_bind`, and `lume_certify` (`lume agent witness|repair|impact`, #195 fixed). **G3 (certificate)**: `lume certify`/`verify-cert` verify certificates **independently** (a standalone Fourier–Motzkin `QF_LIA` kernel re-derives each proof term + FIPS-180-4 SHA-256 hashing, #183 fixed). **G8 (`lume evolve`)**: `lume evolve` enforces 6 gates (including `proofs_ok`, `benchmark_ok`, and `stage2 == stage3` fixpoint) plus cryptographic SHA-256 maintainer signature verification (#194 fixed). Remaining distribution tracks (G0/G2/G4/G5/G6/G7) are tracked under #196.
 
 It deliberately does **not** replay the human-first playbook (installer → LSP → registry → book).
 Lume's user is not primarily a human typing; it is an **AI generating**. That single fact lets us

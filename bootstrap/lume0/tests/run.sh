@@ -634,16 +634,26 @@ PY
     if command -v python3 >/dev/null 2>&1; then
         LUME_BIN_DIR="$ntmp" ../../lume evolve verify ../../evolve/proposals/0001_math_clamp >"$ntmp/ev_verify.json" 2>"$ntmp/ev_v.err" || true
         LUME_BIN_DIR="$ntmp" ../../lume evolve approve ../../evolve/proposals/0001_math_clamp --by ricardo >"$ntmp/ev_approve.json" 2>"$ntmp/ev_a.err" || true
-        if python3 - "$ntmp/ev_verify.json" "$ntmp/ev_approve.json" <<'PY' >/dev/null 2>&1
+        LUME_BIN_DIR="$ntmp" ../../lume evolve approve ../../evolve/proposals/0001_math_clamp --by untrusted >"$ntmp/ev_unauth.json" 2>/dev/null; ev_unauth_rc=$?
+        LUME_BIN_DIR="$ntmp" ../../lume evolve approve ../../evolve/proposals/0001_math_clamp --by ricardo --sig sha256:0000000000000000000000000000000000000000000000000000000000000000 >"$ntmp/ev_forged.json" 2>/dev/null; ev_forged_rc=$?
+        LUME_BIN_DIR="$ntmp" ../../lume evolve propose "Add bounded range helper" >"$ntmp/ev_prop_goal.json" 2>/dev/null || true
+        if [ "$ev_unauth_rc" != 0 ] && [ "$ev_forged_rc" != 0 ] && python3 - "$ntmp/ev_verify.json" "$ntmp/ev_approve.json" "$ntmp/ev_unauth.json" "$ntmp/ev_forged.json" "$ntmp/ev_prop_goal.json" <<'PY' >/dev/null 2>&1
 import json, sys
 v = json.load(open(sys.argv[1]))
 a = json.load(open(sys.argv[2]))
+u = json.load(open(sys.argv[3]))
+f = json.load(open(sys.argv[4]))
+g = json.load(open(sys.argv[5]))
 assert v["id"] == "0001_math_clamp" and v["gates_ok"] is True and v["gates_passed"] == 6 and v["gates_total"] == 6
+assert v["proofs_ok"] is True and v["benchmark_ok"] is True and v["fixpoint_stage2_eq_stage3"] is True
 assert v["status"] == "verified_awaiting_human_approval" and v["human_approved"] is False and v["can_merge"] is False
 assert a["gates_ok"] is True and a["status"] == "approved_ready_to_apply" and a["human_approved"] is True
-assert a["approver"] == "ricardo" and a["can_merge"] is True
+assert a["approver"] == "ricardo" and a["signature_verified"] is True and a["signature"].startswith("sha256:") and len(a["signature"]) == 71 and a["can_merge"] is True
+assert u["status"] == "rejected_invalid_signature" and u["human_approved"] is False and u["signature_verified"] is False and u["can_merge"] is False
+assert f["status"] == "rejected_invalid_signature" and f["human_approved"] is False and f["signature_verified"] is False and f["can_merge"] is False
+assert g["goal"] == "Add bounded range helper" and g["gates_ok"] is True and g["proofs_ok"] is True and g["benchmark_ok"] is True and g["fixpoint_stage2_eq_stage3"] is True
 PY
-        then ok "phase-2 E3: lume evolve verify/approve enforces 6 automated gates and human maintainer approval"; else bad "phase-2 E3: lume evolve CLI verify/approve JSON governance"; cat "$ntmp/ev_v.err" "$ntmp/ev_verify.json" "$ntmp/ev_a.err" "$ntmp/ev_approve.json"; fi
+        then ok "phase-2 E3 (#194): lume evolve verify/propose/approve enforces 6 gates (incl. proofs, benchmark, stage2==stage3 fixpoint) + cryptographic SHA-256 maintainer signature verification"; else bad "phase-2 E3 (#194): lume evolve CLI verify/propose/approve JSON governance"; cat "$ntmp/ev_v.err" "$ntmp/ev_verify.json" "$ntmp/ev_a.err" "$ntmp/ev_approve.json" "$ntmp/ev_unauth.json" "$ntmp/ev_forged.json" "$ntmp/ev_prop_goal.json"; fi
     fi
     # phase-2 F3c (structural inference): a let-bound anonymous record's field access is checked without annotation.
     "$ntmp/lc" <../../compiler/stage1/field_ok.src >"$ntmp/fo.s" 2>"$ntmp/fo.err"; "$ntmp/lasm" <"$ntmp/fo.s" >"$ntmp/fo.elf" 2>/dev/null; chmod +x "$ntmp/fo.elf"
@@ -877,7 +887,13 @@ PY
     LUME_BIN_DIR="$ntmp" ../../lume agent fill "$ntmp/io_pub.src" >"$ntmp/io_fill.json" 2>/dev/null || true
     # 3. `lume evolve` synthesizes and repairs `A0001` holes from contracts/laws (`evolve/proposals/0002_intent_oracle/proposal.bundle`):
     LUME_BIN_DIR="$ntmp" ../../lume evolve verify ../../evolve/proposals/0002_intent_oracle/proposal.bundle >"$ntmp/io_ev.json" 2>/dev/null || true
-    if [ -x "$ntmp/io_ok.elf" ] && "$ntmp/io_ok.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/intent_oracle_ok_asm.expected - >/dev/null && [ -s "$ntmp/io_inc.s" ] && ! grep -q "call ctfail" "$ntmp/io_inc.s" && [ -s "$ntmp/io_wd.s" ] && ! grep -q "call ctfail" "$ntmp/io_wd.s" && [ -s "$ntmp/io_max.s" ] && ! grep -q "call ctfail" "$ntmp/io_max.s" && [ -s "$ntmp/io_add.s" ] && ! grep -q "call ctfail" "$ntmp/io_add.s" && [ "$iopubc" = 3 ] && [ ! -s "$ntmp/io_pub.s" ] && grep -q "\[A0001\]" "$ntmp/io_pub.err" && grep -q "replace '_' with 'bal - amt'" "$ntmp/io_pub.err" && grep -q '"proven_candidates":\["bal - amt"\]' "$ntmp/io_fill.json" && grep -q '"status":"verified_awaiting_human_approval"' "$ntmp/io_ev.json" && grep -q '"gates_ok":true' "$ntmp/io_ev.json" && grep -q '"repairs_applied":3' "$ntmp/io_ev.json"; then ok "intent-as-source oracle (docs/19): hole-guided QF_LIA synthesis + law pruning + zero-guard codegen + lume evolve hole repair"; else bad "intent-as-source oracle (docs/19): hole-guided QF_LIA synthesis"; cat "$ntmp/io_ok.err" "$ntmp/io_inc.s" "$ntmp/io_wd.s" "$ntmp/io_max.s" "$ntmp/io_add.s" "$ntmp/io_pub.err" "$ntmp/io_fill.json" "$ntmp/io_ev.json" 2>/dev/null; fi
+    # 4. `lume agent witness|repair|impact` & `lume mcp` queries (#195 — docs/19 §2):
+    printf 'fn bad_inc(x: int) -> int requires x >= 0 ensures result > x = x - 1\nfn caller(a: int) -> int requires a >= 0 ensures result > a = bad_inc(a)\nlaw inc_pos(x: int) = bad_inc(x) >= 0\nprint caller(4)\n' >"$ntmp/io_wri.src"
+    LUME_BIN_DIR="$ntmp" ../../lume agent witness "$ntmp/io_wri.src" >"$ntmp/io_wit.json" 2>/dev/null || true
+    LUME_BIN_DIR="$ntmp" ../../lume agent repair "$ntmp/io_wri.src" >"$ntmp/io_rep.json" 2>/dev/null || true
+    LUME_BIN_DIR="$ntmp" ../../lume agent impact "$ntmp/io_wri.src" >"$ntmp/io_imp.json" 2>/dev/null || true
+    LUME_BIN_DIR="$ntmp" ../../lume mcp "$ntmp/io_wri.src" >"$ntmp/io_mcp.json" 2>/dev/null || true
+    if [ -x "$ntmp/io_ok.elf" ] && "$ntmp/io_ok.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/intent_oracle_ok_asm.expected - >/dev/null && [ -s "$ntmp/io_inc.s" ] && ! grep -q "call ctfail" "$ntmp/io_inc.s" && [ -s "$ntmp/io_wd.s" ] && ! grep -q "call ctfail" "$ntmp/io_wd.s" && [ -s "$ntmp/io_max.s" ] && ! grep -q "call ctfail" "$ntmp/io_max.s" && [ -s "$ntmp/io_add.s" ] && ! grep -q "call ctfail" "$ntmp/io_add.s" && [ "$iopubc" = 3 ] && [ ! -s "$ntmp/io_pub.s" ] && grep -q "\[A0001\]" "$ntmp/io_pub.err" && grep -q "replace '_' with 'bal - amt'" "$ntmp/io_pub.err" && grep -q '"proven_candidates":\["bal - amt"\]' "$ntmp/io_fill.json" && grep -q '"status":"verified_awaiting_human_approval"' "$ntmp/io_ev.json" && grep -q '"gates_ok":true' "$ntmp/io_ev.json" && grep -q '"repairs_applied":3' "$ntmp/io_ev.json" && grep -q '"mode":"witness"' "$ntmp/io_wit.json" && grep -q '"has_witness":true' "$ntmp/io_wit.json" && grep -q '"witness":"x = 0 (result = -1)"' "$ntmp/io_wit.json" && grep -q '"mode":"repair"' "$ntmp/io_rep.json" && grep -q '"kind":"contract_body_repair"' "$ntmp/io_rep.json" && grep -q '"replacement":"x + 1"' "$ntmp/io_rep.json" && grep -q '"proven":true' "$ntmp/io_rep.json" && grep -q '"mode":"impact"' "$ntmp/io_imp.json" && grep -q '"symbol":"bad_inc"' "$ntmp/io_imp.json" && grep -q '"direct_callers":\["caller","law_inc_pos"\]' "$ntmp/io_imp.json" && grep -q '"affected_proofs":\["bad_inc","caller","inc_pos"\]' "$ntmp/io_imp.json" && grep -q '"lume_witness"' "$ntmp/io_mcp.json" && grep -q '"lume_repair"' "$ntmp/io_mcp.json" && grep -q '"lume_impact"' "$ntmp/io_mcp.json"; then ok "intent-as-source oracle (#195, docs/19): hole-guided QF_LIA synthesis + law pruning + zero-guard codegen + witness/repair/impact queries + lume evolve hole repair"; else bad "intent-as-source oracle (#195, docs/19): hole-guided QF_LIA synthesis & witness/repair/impact"; cat "$ntmp/io_ok.err" "$ntmp/io_inc.s" "$ntmp/io_wd.s" "$ntmp/io_max.s" "$ntmp/io_add.s" "$ntmp/io_pub.err" "$ntmp/io_fill.json" "$ntmp/io_ev.json" "$ntmp/io_wit.json" "$ntmp/io_rep.json" "$ntmp/io_imp.json" 2>/dev/null; fi
     # Phase 4 (Stage 4 — docs/24-phase4-plan.md): AI, Tensors, Autodiff, Kernels, Prob, Rules, extern llm fn & Spiking Neuro
     # 1. `phase4_ai_ok.src` compiles natively with zero C (`461`), proves `verified_grad_step` and `verified_jvp_vjp`
     #    over `grad(quad_loss)` via `QF_LIA` with zero runtime contract guard (`call ctfail` == 0), and passes all

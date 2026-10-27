@@ -1912,8 +1912,59 @@ fn lc_split_lines(s, i, n) = if i >= n then Nil else let le = cs_lineend(s, i, n
 
 fn lcert_bind(hdr_text) = let r = lc_bind_lines(lc_split_lines(hdr_text, 0, count(hdr_text))) in let gen = cs_joinsep(cs_app(r.exts, r.wraps), "\n") in "{\"ok\":true,\"mode\":\"bind\",\"bridge\":\"c_abi\",\"provenance_guard\":\"A0003\",\"effect\":\"ffi\",\"extern_decls\":[" + cs_strlist_json(r.exts) + "],\"safe_wrappers\":[" + cs_strlist_json(r.wraps) + "],\"generated_lume\":\"" + cs_jesc(gen) + "\"}"
 
-fn lcert_mcp(raw_src) = let sh = lc_extract_sha_hdr(raw_src) in let src = sh.rest in let r = caas_compile(src) in let cert = lcert_certify(raw_src) in "{\"jsonrpc\":\"2.0\",\"protocol\":\"mcp/1.0\",\"server\":\"lume-oracle-mcp\",\"tools\":[\"lume_check\",\"lume_prove\",\"lume_fill\",\"lume_bind\",\"lume_certify\"],\"result\":{\"ok\":" + (if r.ok == 1 then "true" else "false") + ",\"diagnostics\":[" + cs_diags_json(r.diagnostics) + "],\"holes\":[" + cs_holes_json(r.holes) + "],\"proofs\":[" + cs_proofs_json(r.proofs) + "],\"certificate\":" + cert + "}}"
+## --- Oracle Queries (`docs/19-intent-as-source.md` §2, #195): `witness`, `repair`, `impact` ---
+fn cs_witness_items(ps) = match ps
+    Nil        => Nil
+    Cons(p, r) => if p.status == "refuted" or count(p.counterexample) > 0 then Cons("{\"name\":\"" + cs_jesc(p.name) + "\",\"kind\":\"" + cs_jesc(p.kind) + "\",\"obligation\":\"" + cs_jesc(p.obligation) + "\",\"witness\":\"" + cs_jesc(p.counterexample) + "\"}", cs_witness_items(r)) else cs_witness_items(r)
 
-fn caas_entry_dispatch(input) = if cs_startswith(input, "@mode certify\n") == 1 then lcert_certify(slice(input, 14, count(input))) else if cs_startswith(input, "@mode bind\n") == 1 then lcert_bind(slice(input, 11, count(input))) else if cs_startswith(input, "@mode mcp\n") == 1 then lcert_mcp(slice(input, 10, count(input))) else caas_json(caas_compile(input))
+fn caas_witness_json(src) = let r = caas_compile(src) in let ws = cs_witness_items(r.proofs) in let cnt = cs_len(ws) in "{\"ok\":true,\"mode\":\"witness\",\"has_witness\":" + (if cnt > 0 then "true" else "false") + ",\"witness_count\":" + str(cnt) + ",\"witnesses\":[" + cs_joinsep(ws, ",") + "]}"
+
+fn cs_is_refuted_fn(fnm, ps) = match ps
+    Nil        => 0
+    Cons(p, r) => if p.name == fnm and p.status == "refuted" then 1 else cs_is_refuted_fn(fnm, r)
+
+fn cs_diag_repairs(ds) = match ds
+    Nil        => Nil
+    Cons(d, r) => if count(d.fixit) > 0 and d.code != "V0001" then Cons("{\"target\":\"" + cs_jesc(d.phase) + "\",\"code\":\"" + cs_jesc(d.code) + "\",\"kind\":\"diagnostic_fixit\",\"patch\":\"" + cs_jesc(d.fixit) + "\",\"proven\":" + (if d.code == "A0001" then "true" else "false") + "}", cs_diag_repairs(r)) else cs_diag_repairs(r)
+
+fn cs_contract_repairs_stmt(st, rest, rctx) = match st
+    Fn(nm, ps, body) => let r_rest = cs_contract_repairs_stmts(rest, rctx) in if cs_is_refuted_fn(nm, rctx.proofs) == 0 then r_rest else (let msig = cs_siglookup(nm, rctx.sigs) in let mosig = cs_osiglookup(nm, rctx.osigs) in let ety = cs_fn_rty(msig, mosig) in let lenv = cs_fn_lenv(msig) in let hctx = {fnm: nm, pubf: 1, ps: ps, body: Var("_"), sigs: rctx.sigs, vsigs: rctx.vsigs, laws: rctx.laws, ft: rctx.ft} in let raw_es = cs_synth_cand_es(ety, lenv, rctx.sigs, nm) in let prv_es = cs_filter_proven_es(raw_es, "_", hctx) in let prv_strs = cs_exprs_surface_list(prv_es) in let best = cs_hd_str(prv_strs, "") in if best != "" then Cons("{\"target\":\"" + cs_jesc(nm) + "\",\"code\":\"V0001\",\"kind\":\"contract_body_repair\",\"patch\":\"replace body of '" + cs_jesc(nm) + "' with '" + cs_jesc(best) + "'\",\"replacement\":\"" + cs_jesc(best) + "\",\"proven\":true}", r_rest) else r_rest)
+    _                => cs_contract_repairs_stmts(rest, rctx)
+
+fn cs_contract_repairs_stmts(prog, rctx) = match prog
+    Nil        => Nil
+    Cons(h, t) => cs_contract_repairs_stmt(h, t, rctx)
+
+fn cs_collect_repairs(src, r) = let ast0 = r.ast in let tt = cs_tcollect(ast0) in let osigs = cs_ocollects(ast0) in let vsigs = cs_vcollect_vsigs(ast0) in let laws = cs_vcollect_laws(ast0) in let rctx = {sigs: tt.sigs, osigs: osigs, vsigs: vsigs, laws: laws, ft: tt.ft, proofs: r.proofs} in cs_app(cs_diag_repairs(r.diagnostics), cs_contract_repairs_stmts(ast0, rctx))
+
+fn caas_repair_json(src) = let r = caas_compile(src) in let reps = cs_collect_repairs(src, r) in let cnt = cs_len(reps) in "{\"ok\":true,\"mode\":\"repair\",\"repair_count\":" + str(cnt) + ",\"repairs\":[" + cs_joinsep(reps, ",") + "]}"
+
+fn cs_callers_of_stmt(st, rest, sym) = match st
+    Fn(fnm, ps, body) => let r_rest = cs_callers_of_stmts(rest, sym) in if fnm != sym and cs_mentions_call(sym, body) == 1 then Cons(fnm, r_rest) else r_rest
+    _                 => cs_callers_of_stmts(rest, sym)
+
+fn cs_callers_of_stmts(prog, sym) = match prog
+    Nil        => Nil
+    Cons(h, t) => cs_callers_of_stmt(h, t, sym)
+
+fn cs_law_names(laws) = match laws
+    Nil        => Nil
+    Cons(l, r) => Cons(l.nm, cs_law_names(r))
+
+fn cs_affected_proofs_for(sym, callers, vsigs, laws) = let own_pf = if cs_isnil(cs_vsiglookup(sym, vsigs)) == 0 then Cons(sym, Nil) else Nil in let caller_pfs = cs_filter_has_vsig(callers, vsigs) in let law_pfs = cs_law_names(cs_laws_mention_fn(sym, laws)) in cs_app(own_pf, cs_app(caller_pfs, law_pfs))
+
+fn cs_filter_has_vsig(fnms, vsigs) = match fnms
+    Nil          => Nil
+    Cons(fnm, r) => if cs_isnil(cs_vsiglookup(fnm, vsigs)) == 0 then Cons(fnm, cs_filter_has_vsig(r, vsigs)) else cs_filter_has_vsig(r, vsigs)
+
+fn cs_impact_items(syms, ast0, vsigs, laws) = match syms
+    Nil        => Nil
+    Cons(s, r) => let callers = cs_callers_of_stmts(ast0, s.name) in let pfs = cs_affected_proofs_for(s.name, callers, vsigs, laws) in Cons("{\"symbol\":\"" + cs_jesc(s.name) + "\",\"kind\":\"" + cs_jesc(s.kind) + "\",\"signature\":\"" + cs_jesc(s.sig) + "\",\"direct_callers\":[" + cs_strlist_json(callers) + "],\"affected_proofs\":[" + cs_strlist_json(pfs) + "]}", cs_impact_items(r, ast0, vsigs, laws))
+
+fn caas_impact_json(src) = let ast0 = cs_parse(src) in let syms = cs_symbols(ast0) in let vsigs = cs_vcollect_vsigs(ast0) in let laws = cs_vcollect_laws(ast0) in let items = cs_impact_items(syms, ast0, vsigs, laws) in "{\"ok\":true,\"mode\":\"impact\",\"impacts\":[" + cs_joinsep(items, ",") + "]}"
+
+fn lcert_mcp(raw_src) = let sh = lc_extract_sha_hdr(raw_src) in let src = sh.rest in let r = caas_compile(src) in let cert = lcert_certify(raw_src) in let ws = cs_witness_items(r.proofs) in let reps = cs_collect_repairs(src, r) in let imps = cs_impact_items(r.symbols, r.ast, cs_vcollect_vsigs(r.ast), cs_vcollect_laws(r.ast)) in "{\"jsonrpc\":\"2.0\",\"protocol\":\"mcp/1.0\",\"server\":\"lume-oracle-mcp\",\"tools\":[\"lume_check\",\"lume_prove\",\"lume_fill\",\"lume_witness\",\"lume_repair\",\"lume_impact\",\"lume_bind\",\"lume_certify\"],\"result\":{\"ok\":" + (if r.ok == 1 then "true" else "false") + ",\"diagnostics\":[" + cs_diags_json(r.diagnostics) + "],\"holes\":[" + cs_holes_json(r.holes) + "],\"proofs\":[" + cs_proofs_json(r.proofs) + "],\"witnesses\":[" + cs_joinsep(ws, ",") + "],\"repairs\":[" + cs_joinsep(reps, ",") + "],\"impacts\":[" + cs_joinsep(imps, ",") + "],\"certificate\":" + cert + "}}"
+
+fn caas_entry_dispatch(input) = if cs_startswith(input, "@mode certify\n") == 1 then lcert_certify(slice(input, 14, count(input))) else if cs_startswith(input, "@mode bind\n") == 1 then lcert_bind(slice(input, 11, count(input))) else if cs_startswith(input, "@mode witness\n") == 1 then caas_witness_json(slice(input, 14, count(input))) else if cs_startswith(input, "@mode repair\n") == 1 then caas_repair_json(slice(input, 13, count(input))) else if cs_startswith(input, "@mode impact\n") == 1 then caas_impact_json(slice(input, 13, count(input))) else if cs_startswith(input, "@mode mcp\n") == 1 then lcert_mcp(slice(input, 10, count(input))) else caas_json(caas_compile(input))
 
 print caas_entry_dispatch(readall())
