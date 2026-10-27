@@ -1,0 +1,85 @@
+# 27 — Systems & kernels: everything Lume needs to build real bare-metal software
+
+**Goal.** Make Lume able to build the full stack down to the metal — firmware, bootloaders, a real
+bootable **microkernel**, and the systems that run on it — **for real, with no hacks, carrying
+Lume's proofs to the hardware**, and surpass what C/Rust-on-LLVM offer. This document is the plan;
+the worklist is the companion tracking issue. It composes with `docs/26` (universal targets) and the
+`docs/23` H5 horizon.
+
+## Two very different bars — be honest about which
+
+- **(A) A minimal, real, bootable microkernel** — boots on QEMU/hardware, sets up interrupts,
+  manages physical memory, schedules tasks, talks to a device or two, **with Lume's contracts/WCET/
+  ownership proven**. Ambitious but **tractable** (years, not decades). This is what this plan targets
+  and where Lume is unique.
+- **(B) "A complete OS like Linux"** — thousands of drivers, filesystems, a network stack, SMP,
+  POSIX, ~30M lines, 30 years. That is **not a language gap** — it is a decades + ecosystem + large-
+  team effort. No language hands you "a Linux." Lume's job is to be the language you **write and
+  prove** such a system in; the OS itself is a separate, enormous project built on top of (A).
+
+The no-theater rule applies throughout: a systems brick is **not "done" until it runs on real
+hardware or a faithful emulator (QEMU)** — not when it emits plausible bytes or a model.
+
+## Today (verified)
+Lume emits a **Linux user-space x86-64 ELF** (`PT_LOAD` at `0x400000`, `exit` via syscall); its
+runtime allocates via `brk` and does I/O through Linux syscalls; `lasm` emits a user-space
+instruction subset; `@freestanding`/`@interrupt`/`std.os.cap` and `lume-os` exist only as **checks
+and in-language models**, not real hardware codegen. So none of (A) is possible yet. The bricks below
+close that.
+
+## The bricks (K0–K9) — each a real PR, running on QEMU
+
+- **K0 — Freestanding/no-OS codegen.** A real `@freestanding` lowering: no libc, no syscalls, a
+  custom entry point, code that runs with no OS underneath. Promotes O4's *check* into actual
+  bare-metal output.
+- **K1 — Syscall-free runtime.** A Lume runtime that owns memory itself (a physical frame allocator,
+  not `brk`) and does **no** Linux syscalls; I/O only via the hardware primitives (K3). The current
+  `brk`/syscall runtime is reimplemented for bare metal.
+- **K2 — Privileged/system instruction emission.** `lasm` gains the system ISA: `cli/sti`, `hlt`,
+  `lgdt/lidt`, `cr0–cr4`/`cr8`, `rdmsr/wrmsr`, `in/out`, `iret`, `invlpg`, etc., plus an `asm { … }`
+  intrinsic for what the compiler cannot express — per target ISA.
+- **K3 — Volatile MMIO + typed hardware registers.** Real memory-mapped I/O with volatile semantics
+  (no reordering/elision), replacing the `std.os.cap`/`@mmio` model with actual loads/stores.
+- **K4 — Real interrupts.** IDT setup, ISR entry/exit with full register save/restore, and the
+  `@interrupt` attribute **lowered to a real ISR** (not just the effect check) — with the WCET bound
+  (`@bound`) proven for the handler.
+- **K5 — Bootable image.** A kernel-image mode in `lasm` (physical/virtual load addresses, a layout/
+  linker-script equivalent) and a boot entry (multiboot2 and/or UEFI) producing an image that a boot
+  loader hands control to — not a user-space ELF.
+- **K6 — Memory management.** x86-64 4-level page tables, a physical frame allocator, virtual-memory
+  mapping, and `cap[Page]` made **real** (linear, with the no-double-map invariant **proven**).
+- **K7 — Real SMP & concurrency.** Atomics, spinlocks, per-core state, secondary-core bring-up, and a
+  real scheduler running on real cores — making `spawn`/`scope`/channels actually parallel (closes
+  the sequential-simulation gap, ties `#193`), with data-race-freedom still statically enforced.
+- **K8 — Drivers.** A driver model + the first real drivers: serial/UART (kernel output), the timer/
+  local APIC, and the interrupt controller — volatile-safe, capability-scoped.
+- **K9 — Capstone: `lume-os` that actually boots.** Turn the `lume-os` model into a kernel that
+  **boots on QEMU**: serial "hello", IDT + a timer ISR (WCET-proven), physical-memory management
+  (allocator invariant proven), and a scheduler running 2+ tasks (no data race proven). This is the
+  living proof that Lume writes a real, proven kernel.
+
+**Per-ISA:** K2/K3/K4 are written once per instruction set; x86-64 first, then AArch64/RISC-V (from
+`docs/26`) for embedded/firmware. **Cross-cutting:** every brick is Lume (`.src`), not new C in the
+frozen seed (`#205`); keeps `stage2 == stage3`, `zero-c`, and the suite green; and carries the
+ownership/effect/contract/proof guarantees to the metal (H5).
+
+## Beyond the kernel (the long tail toward a full OS)
+Once (A) stands, a general-purpose OS adds, each a large track of its own: a filesystem (and a VFS),
+a block/storage stack, a network stack, a process/userspace model + syscall interface, a shell and
+userland, and a device-driver ecosystem. These are **not** near-term; they are the decades-scale
+build that (A) enables. We track them only as direction until the kernel is real.
+
+## The differentiator
+C/Rust-on-LLVM can target bare metal, but the correctness proof **stops at the source**. Lume's edge
+is a **proof-carrying kernel**: the frame allocator's invariant, the ISR's worst-case cycle bound,
+and the scheduler's data-race-freedom are **proven**, in-language, down to the emitted machine code.
+seL4 proved a kernel but in a separate Isabelle development over years; Lume carries the proof in the
+same language that emits the code. *The first OS you can write and prove in one language* — the pitch
+no one else can make, and the one that matters most where a bug is catastrophic (firmware, medical,
+avionics, a bank's core).
+
+## Acceptance (the whole track)
+Each Kn ships as a green PR whose test **runs on QEMU** (or real hardware) and demonstrates the real
+behaviour with its guarantees intact; `stage2 == stage3`, `zero-c`, and the full suite stay green; no
+brick is a model presented as hardware. K9 boots. Then (A) is real, and Lume has earned the right to
+climb toward (B).
