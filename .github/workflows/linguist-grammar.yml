@@ -48,8 +48,13 @@ jobs:
           git clone --bare "$GITHUB_WORKSPACE/lume" "$source_repo"
           git --git-dir="$source_repo" update-ref refs/heads/main "$GITHUB_SHA"
           git --git-dir="$source_repo" symbolic-ref HEAD refs/heads/main
-          git -C linguist config \
+          git --git-dir="$source_repo" ls-tree -r --name-only main \
+            | grep -Fqx contrib/textmate/syntaxes/Lume.tmLanguage.json
+          git config --global \
             url."file://$source_repo".insteadOf \
             https://github.com/OmegaSoftDLL/lume
+          expected_sha="$(git --git-dir="$source_repo" rev-parse refs/heads/main)"
+          resolved_sha="$(git ls-remote https://github.com/OmegaSoftDLL/lume HEAD | cut -f1)"
+          test "$resolved_sha" = "$expected_sha"
           cd linguist
           script/add-grammar https://github.com/OmegaSoftDLL/lume
