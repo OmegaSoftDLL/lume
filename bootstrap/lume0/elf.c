@@ -6,11 +6,15 @@
  *
  * It implements the AT&T-syntax instruction forms the backend emits. Any form
  * it does not understand is a hard error, never a silent miscompile. */
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L  /* expose POSIX fileno()/fchmod() under -std=c11 */
+#endif
 #include "lume0.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <sys/stat.h>
 
 #define ELF_VBASE 0x400000ULL
 #define ELF_HDRS  120          /* ELF header (64) + one program header (56) */
@@ -377,8 +381,9 @@ int elf_assemble(const char *src, const char *outpath) {
         for(size_t i=0;i<payload.n;i++)buf_put(&f,payload.d[i]);
 
         FILE *o=fopen(outpath,"wb"); if(!o){snprintf(err,sizeof(err),"cannot write %s",outpath);free(code.d);free(payload.d);free(f.d);goto fail;}
-        fwrite(f.d,1,f.n,o); fclose(o);
-        { char cmd[512]; snprintf(cmd,sizeof(cmd),"chmod +x '%s'",outpath); int rc=system(cmd);(void)rc; }
+        fwrite(f.d,1,f.n,o);
+        fchmod(fileno(o), 0755); /* on the open fd, before close: no shell (CodeQL #2) and no path TOCTOU race */
+        fclose(o);
         free(code.d); free(payload.d); free(f.d);
     }
 
