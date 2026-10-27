@@ -976,6 +976,12 @@ fi
 if ../../lume --version | grep -q "^lume " && ../../lume check ../../examples/01_hello.lume >/dev/null 2>&1 && ../../lume test ../../examples/01_hello.lume | grep -q "1 passed, 0 failed"; then ok "phase-2 T1: lume CLI (--version, check, test on surface .lume)"; else bad "phase-2 T1: lume CLI (--version, check, test on surface .lume)"; fi
 
 if [ -z "${LUME0_ASAN:-}" ]; then
+    _p35_tmp=$(mktemp)
+    printf 'pub fn exposed() -> int = 1\n' >"$_p35_tmp"
+    _p35_json=$(../../lume agent check "$_p35_tmp" 2>/dev/null || true)
+    if ../../lume test ../../compiler/stage1/p35_ok.src 2>/dev/null | grep -q "2 passed, 0 failed" && printf '%s' "$_p35_json" | grep -q '"ok":true' && printf '%s' "$_p35_json" | grep -q '"code":"P35","severity":"warning"'; then ok "P35 (#208): public API without matching test emits a non-blocking structured warning"; else bad "P35 (#208): missing public API test diagnostic"; printf '%s\n' "$_p35_json"; fi
+    rm -f "$_p35_tmp"
+
     _k2x_tmp=$(mktemp)
     printf 'effect Clock { fn now_tick() -> int }\npub fn step(c: int) -> int / {Clock} = now_tick() + c\npub fn run(c: int) -> int / pure = with handler Clock { fn now_tick() -> int = 100 } in step(c) + step(c)\nprint run(5)\n' >"$_k2x_tmp"
     if ../../lume agent eval "$_k2x_tmp" 2>/dev/null | grep -q '"result":"210"'; then ok "phase-3 K2 (#167): cross-platform inter-procedural effect handler dispatch (step(c) + step(c) == 210)"; else bad "phase-3 K2 (#167): cross-platform inter-procedural effect handler dispatch"; fi

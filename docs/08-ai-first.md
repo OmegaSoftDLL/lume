@@ -77,7 +77,8 @@ fast, but fallible author is doing the typing.
   structured data with a stable code, spans, expected/actual and a suggested fix, so the model's
   repair loop is mechanical.
 - **P35 (no untested public surface)** and **P34 (project-level laws)** exist because the author is a
-  model: untested or law-breaking code must be impossible to merge, not merely discouraged.
+  model. P35 currently warns when a public function lacks its paired test; strict merge enforcement
+  and example-based coverage are future work.
 
 Everything else in the project serves this: the unambiguous grammar, the effect system, the contracts,
 the `lume agent` compiler-as-a-service, the self-description, and the self-evolution loop in which AI

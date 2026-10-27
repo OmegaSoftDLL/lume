@@ -346,7 +346,11 @@ fn cs_ctorty(m) = match m
     Nil        => ""
     Cons(h, t) => h.en
 
-fn cs_mkdiag(code, phase, msg, fix) = {code: code, phase: phase, message: msg, fixit: fix}
+fn cs_mkdiag(code, phase, msg, fix) = {code: code, severity: "error", phase: phase, message: msg, fixit: fix}
+fn cs_mkwarn(code, phase, msg, fix) = {code: code, severity: "warning", phase: phase, message: msg, fixit: fix}
+fn cs_has_error_diags(ds) = match ds
+    Nil        => 0
+    Cons(h, t) => if h.severity == "error" then 1 else cs_has_error_diags(t)
 
 fn cs_chk_ctor(tag, ar, tt) = if tt.decl == 0 then Nil else cs_chk_ctor2(tag, ar, cs_clookup(tag, tt.ctors), tt)
 fn cs_chk_ctor2(tag, ar, m, tt) = match m
@@ -596,6 +600,15 @@ fn cs_ocollects(prog) = match prog
 fn cs_ocollects1(st, rest) = match st
     OSig(nm, pubf, freef, pl, rty, fromp) => Cons({nm: nm, pubf: pubf, freef: freef, pl: pl, rty: rty, fromp: fromp}, rest)
     _                                     => rest
+fn cs_p35_has_test(nm, prog) = match prog
+    Nil        => 0
+    Cons(h, t) => if cs_p35_has_test_stmt(h, nm) == 1 then 1 else cs_p35_has_test(nm, t)
+fn cs_p35_has_test_stmt(st, nm) = match st
+    Fn(test_nm, ps, body) => if test_nm == "test_" + nm then 1 else 0
+    _                     => 0
+fn cs_p35_diags(osigs, prog) = match osigs
+    Nil        => Nil
+    Cons(h, t) => if h.pubf == 1 and cs_p35_has_test(h.nm, prog) == 0 then Cons(cs_mkwarn("P35", "test_coverage", "public function '" + h.nm + "' has no associated test; add 'fn test_" + h.nm + "()'", "add a 'test_" + h.nm + "' function that exercises the public API"), cs_p35_diags(t, prog)) else cs_p35_diags(t, prog)
 fn cs_osiglookup(nm, osigs) = match osigs
     Nil        => Nil
     Cons(h, t) => if h.nm == nm then Cons(h, Nil) else cs_osiglookup(nm, t)
@@ -1612,7 +1625,7 @@ fn cs_diagnose_stmt(s0, tt) = match s0
     Print(v)         => cs_chk_expr(v, tt)
     ExprS(v)         => cs_chk_expr(v, tt)
     _                => Nil
-fn cs_diagnose(prog0) = let ft0 = cs_buildft(prog0) in let gnms = cs_n4_collect_grads_prog(prog0, Nil) in let d_ad = cs_n4_chk_grad_fns(gnms, ft0) in let gfns = cs_n4_synth_grad_fns(gnms, ft0) in let prog = cs_app(gfns, prog0) in let tt = cs_tcollect(prog) in let osigs = cs_ocollects(prog) in let vsigs = cs_vcollect_vsigs(prog) in let laws = cs_vcollect_laws(prog) in let kt = {ksigs: cs_kcollect_effsigs(prog), edecls: cs_kcollect_effdecls(prog), caps: cs_kcollect_caps(prog), recs: tt.recs, vsigs: vsigs, osigs: osigs} in let hr = cs_collect_holes_stmts(prog, tt.sigs, osigs, vsigs, laws, tt.ft) in let prog2 = cs_fill_prog_holes(prog, tt.sigs, osigs, vsigs, laws, tt.ft) in let vr = cs_vprove_all(prog2) in cs_app(d_ad, cs_app(cs_diagnose_stmts(prog2, tt), cs_app(hr.diags, cs_app(vr.diags, cs_odiagnose_stmts(prog2, osigs, tt.sigs, kt, Nil)))))
+fn cs_diagnose(prog0) = let ft0 = cs_buildft(prog0) in let gnms = cs_n4_collect_grads_prog(prog0, Nil) in let d_ad = cs_n4_chk_grad_fns(gnms, ft0) in let gfns = cs_n4_synth_grad_fns(gnms, ft0) in let prog = cs_app(gfns, prog0) in let tt = cs_tcollect(prog) in let osigs = cs_ocollects(prog) in let vsigs = cs_vcollect_vsigs(prog) in let laws = cs_vcollect_laws(prog) in let kt = {ksigs: cs_kcollect_effsigs(prog), edecls: cs_kcollect_effdecls(prog), caps: cs_kcollect_caps(prog), recs: tt.recs, vsigs: vsigs, osigs: osigs} in let hr = cs_collect_holes_stmts(prog, tt.sigs, osigs, vsigs, laws, tt.ft) in let prog2 = cs_fill_prog_holes(prog, tt.sigs, osigs, vsigs, laws, tt.ft) in let vr = cs_vprove_all(prog2) in cs_app(cs_p35_diags(osigs, prog0), cs_app(d_ad, cs_app(cs_diagnose_stmts(prog2, tt), cs_app(hr.diags, cs_app(vr.diags, cs_odiagnose_stmts(prog2, osigs, tt.sigs, kt, Nil))))))
 
 ## --- C3 generic erasure & C1/C2/M1/M2 comptime + hygienic macro expansion ---
 fn cs_gcfs(pl) = match pl
@@ -1796,7 +1809,7 @@ fn cs_eval_prog(prog) = cs_joinsep(cs_eval_stmts(prog, cs_buildft(prog)), "\n")
 
 ## --- PUBLIC CALLABLE LIBRARY API (`use lcaas`) ---
 fn cs_collect_holes(prog) = let tt = cs_tcollect(prog) in let osigs = cs_ocollects(prog) in let vsigs = cs_vcollect_vsigs(prog) in let laws = cs_vcollect_laws(prog) in (cs_collect_holes_stmts(prog, tt.sigs, osigs, vsigs, laws, tt.ft)).holes
-fn caas_compile(src) = let ast0 = cs_parse(src) in let syms = cs_symbols(ast0) in let ft0 = cs_buildft(ast0) in let gnms = cs_n4_collect_grads_prog(ast0, Nil) in let d_ad = cs_n4_chk_grad_fns(gnms, ft0) in let gfns = cs_n4_synth_grad_fns(gnms, ft0) in let ast = cs_app(gfns, ast0) in let tt = cs_tcollect(ast) in let osigs = cs_ocollects(ast) in let vsigs = cs_vcollect_vsigs(ast) in let invs = cs_vcollect_invs(ast) in let laws = cs_vcollect_laws(ast) in let wcets = cs_vcollect_wcets(ast) in let kt = {ksigs: cs_kcollect_effsigs(ast), edecls: cs_kcollect_effdecls(ast), caps: cs_kcollect_caps(ast), recs: tt.recs, vsigs: vsigs, osigs: osigs} in let hr = cs_collect_holes_stmts(ast0, tt.sigs, osigs, vsigs, laws, tt.ft) in let ast_filled = cs_fill_prog_holes(ast, tt.sigs, osigs, vsigs, laws, tt.ft) in let vr = cs_vprove_stmts(ast_filled, vsigs, invs, wcets, cs_buildft(ast_filled)) in let diags = cs_app(d_ad, cs_app(cs_diagnose_stmts(ast_filled, tt), cs_app(hr.diags, cs_app(vr.diags, cs_odiagnose_stmts(ast_filled, osigs, tt.sigs, kt, Nil))))) in let raw_sexpr = cs_prog_sexpr(ast0) in if cs_isnil(diags) == 0 then {ok: 0, diagnostics: diags, holes: hr.holes, proofs: vr.proofs, symbols: syms, ast: ast0, ast_sexpr: raw_sexpr, expanded: Nil, expanded_sexpr: "", asm: "", result: ""} else let exp = cs_expand(ast_filled) in {ok: 1, diagnostics: Nil, holes: hr.holes, proofs: vr.proofs, symbols: syms, ast: ast0, ast_sexpr: raw_sexpr, expanded: exp, expanded_sexpr: cs_prog_sexpr(exp), asm: cs_asm_gen(exp), result: cs_eval_prog(exp)}
+fn caas_compile(src) = let ast0 = cs_parse(src) in let syms = cs_symbols(ast0) in let ft0 = cs_buildft(ast0) in let gnms = cs_n4_collect_grads_prog(ast0, Nil) in let d_ad = cs_n4_chk_grad_fns(gnms, ft0) in let gfns = cs_n4_synth_grad_fns(gnms, ft0) in let ast = cs_app(gfns, ast0) in let tt = cs_tcollect(ast) in let osigs = cs_ocollects(ast) in let vsigs = cs_vcollect_vsigs(ast) in let invs = cs_vcollect_invs(ast) in let laws = cs_vcollect_laws(ast) in let wcets = cs_vcollect_wcets(ast) in let kt = {ksigs: cs_kcollect_effsigs(ast), edecls: cs_kcollect_effdecls(ast), caps: cs_kcollect_caps(ast), recs: tt.recs, vsigs: vsigs, osigs: osigs} in let hr = cs_collect_holes_stmts(ast0, tt.sigs, osigs, vsigs, laws, tt.ft) in let ast_filled = cs_fill_prog_holes(ast, tt.sigs, osigs, vsigs, laws, tt.ft) in let vr = cs_vprove_stmts(ast_filled, vsigs, invs, wcets, cs_buildft(ast_filled)) in let diags = cs_app(cs_p35_diags(osigs, ast0), cs_app(d_ad, cs_app(cs_diagnose_stmts(ast_filled, tt), cs_app(hr.diags, cs_app(vr.diags, cs_odiagnose_stmts(ast_filled, osigs, tt.sigs, kt, Nil)))))) in let raw_sexpr = cs_prog_sexpr(ast0) in if cs_has_error_diags(diags) == 1 then {ok: 0, diagnostics: diags, holes: hr.holes, proofs: vr.proofs, symbols: syms, ast: ast0, ast_sexpr: raw_sexpr, expanded: Nil, expanded_sexpr: "", asm: "", result: ""} else let exp = cs_expand(ast_filled) in {ok: 1, diagnostics: diags, holes: hr.holes, proofs: vr.proofs, symbols: syms, ast: ast0, ast_sexpr: raw_sexpr, expanded: exp, expanded_sexpr: cs_prog_sexpr(exp), asm: cs_asm_gen(exp), result: cs_eval_prog(exp)}
 
 fn caas_check(src) = caas_compile(src)
 fn caas_fill(src) = (caas_compile(src)).holes
@@ -1823,7 +1836,7 @@ fn cs_proof_json(p) = "{\"name\":\"" + cs_jesc(p.name) + "\",\"kind\":\"" + cs_j
 fn cs_proofs_json(ps) = match ps
     Nil        => ""
     Cons(h, t) => cs_proof_json(h) + (if cs_isnil(t) == 1 then "" else "," + cs_proofs_json(t))
-fn cs_diag_json(d) = "{\"code\":\"" + cs_jesc(d.code) + "\",\"phase\":\"" + cs_jesc(d.phase) + "\",\"message\":\"" + cs_jesc(d.message) + "\",\"fixit\":\"" + cs_jesc(d.fixit) + "\"}"
+fn cs_diag_json(d) = "{\"code\":\"" + cs_jesc(d.code) + "\",\"severity\":\"" + cs_jesc(d.severity) + "\",\"phase\":\"" + cs_jesc(d.phase) + "\",\"message\":\"" + cs_jesc(d.message) + "\",\"fixit\":\"" + cs_jesc(d.fixit) + "\"}"
 fn cs_diags_json(ds) = match ds
     Nil        => ""
     Cons(h, t) => if cs_isnil(t) == 1 then cs_diag_json(h) else cs_diag_json(h) + "," + cs_diags_json(t)
