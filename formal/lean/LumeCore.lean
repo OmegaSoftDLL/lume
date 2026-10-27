@@ -3,7 +3,8 @@
   Mechanised Operational Semantics & Type/Ownership/Effect/Contract Soundness
   for Lume-Core (Stage 5 Trust Anchor — Issue #213, docs/04 §5, docs/05 §2.10).
 
-  This file is a self-contained Lean 4 formalisation with ZERO `sorry` axioms.
+  This file is a self-contained Lean 4 formalisation: every theorem is fully proved,
+  with no proof holes and no extra postulates (the CI gate greps this file to enforce it).
   It mechanises:
     1. Core types (`Ty`), ownership tiers (`OwnTier`), and effect rows (`EffRow`).
     2. Lume-Core AST (`Expr`) and canonical runtime values (`Val`).
