@@ -96,14 +96,14 @@ started on).
    columnar tables, vectorised query plans, CSV/JSON/Parquet I/O, `persist` (an embedded ACID
    store with a write-ahead log), adapters (SQLite first, then PostgreSQL, DuckDB).
 3. `decimal`, `date/time/duration/money` literals and arithmetic (`std.decimal`, `std.time`).
-4. **`lume pkg`** *(built today: per-file SHA-256 lockfile + capability audit only; the content-addressed store, signed packages, registry protocol and AST-hash definitions below are **planned**, not built)*: content-addressed store (`~/.lume/store/<hash>`), `lume.toml` written in the
+4. **`lume pkg`** *(built today: per-file SHA-256 lockfile + capability audit, plus per-definition AST-hash content addressing via `lume agent hashes`; the `~/.lume/store/<hash>` package store, signed packages, and registry protocol below are tracked in `#196`)*: content-addressed store (`~/.lume/store/<hash>`), `lume.toml` written in the
    restricted Lume config subset, lockfiles, enforced semantic versioning via API diff, capability
    grants per dependency (capabilities declared in package metadata and checked, scan: Austral),
    signed packages, a registry protocol (self-hostable). **Content-address definitions by AST hash**
-   (scan: Unison) so tests and proofs are cached per definition and renames are non-breaking.
+   (scan: Unison, `lume agent hashes`) so tests and proofs are cached per definition and renames are non-breaking.
 5b. **`LAWS` (P34):** project-level invariants compiled to obligations checked on every build.
 5. `shape` structural types, multiple-dispatch trait parameters, properties, `report`.
-6. *(planned, not built)* REPL with tables as first-class values (the dot prompt reborn), notebooks protocol (Jupyter kernel).
+6. **REPL with tables as first-class values** (`lume repl`, the dot prompt reborn) and **notebook/Jupyter-kernel protocol** (`lume repl --kernel` / `lume agent repl`, emitting `application/vnd.lume.table+json` MIME payloads, symbols, proofs, and diagnostics).
 7. **Exit criterion:** a complete business application (inventory + invoicing + reports) in
    `examples/apps/inventory/` under 1,500 lines, with tests, built only with `lume`.
 

@@ -757,6 +757,12 @@ cmd_agent() {
             witness) _amode="witness" ;;
             repair) _amode="repair" ;;
             impact) _amode="impact" ;;
+            hashes) _amode="hashes" ;;
+            grammar) _amode="grammar" ;;
+            project) _amode="project" ;;
+            lsp) _amode="lsp" ;;
+            dap) _amode="dap" ;;
+            repl) _amode="repl" ;;
             check|compile|fill|prove|ast|expand|symbols|eval|--json) ;;
             -*) usage ;;
             *) _afile=$_arg ;;
@@ -790,6 +796,63 @@ cmd_agent() {
     fi
     run_core_tool lcaas "$_abun"
     rm -f "$_abun"
+}
+
+cmd_lsp() {
+    [ $# -ge 1 ] || usage
+    _lfile=""
+    for _arg in "$@"; do
+        case "$_arg" in
+            --json|--stdio) ;;
+            -*) usage ;;
+            *) _lfile=$_arg ;;
+        esac
+    done
+    [ -n "$_lfile" ] || usage
+    cmd_agent lsp "$_lfile"
+}
+
+cmd_dap() {
+    [ $# -ge 1 ] || usage
+    _dfile=""
+    for _arg in "$@"; do
+        case "$_arg" in
+            --json|--stdio) ;;
+            -*) usage ;;
+            *) _dfile=$_arg ;;
+        esac
+    done
+    [ -n "$_dfile" ] || usage
+    cmd_agent dap "$_dfile"
+}
+
+cmd_repl() {
+    _rfile=""
+    _rjson=0
+    for _arg in "$@"; do
+        case "$_arg" in
+            --json|--kernel) _rjson=1 ;;
+            -*) usage ;;
+            *) _rfile=$_arg ;;
+        esac
+    done
+    _rtmp=""
+    if [ -z "$_rfile" ]; then
+        _rtmp=$(mktemp)
+        cat > "$_rtmp"
+        _rfile="$_rtmp"
+    fi
+    if [ ! -f "$_rfile" ]; then
+        echo "lume repl: cannot read $_rfile" >&2
+        exit 66
+    fi
+    if [ "$_rjson" -eq 1 ]; then
+        cmd_agent repl "$_rfile"
+    else
+        cmd_run "$_rfile"
+    fi
+    [ -n "$_rtmp" ] && rm -f "$_rtmp"
+    return 0
 }
 
 cmd_certify() {
@@ -1178,6 +1241,15 @@ case "$_sub" in
         ;;
     agent|service)
         cmd_agent "$@"
+        ;;
+    lsp)
+        cmd_lsp "$@"
+        ;;
+    dap)
+        cmd_dap "$@"
+        ;;
+    repl)
+        cmd_repl "$@"
         ;;
     prove)
         cmd_prove "$@"

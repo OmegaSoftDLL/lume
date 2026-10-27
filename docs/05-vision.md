@@ -176,7 +176,7 @@ kernel with a bump allocator and in a server with a general-purpose one.
 
 - `lume build --target x86_64-freestanding` → a kernel. `--target riscv32-none` → a microcontroller
   firmware. `--target wasm32` → a browser or edge function. `--target cuda` → a kernel for the GPU.
-  `--target lumb` → portable bytecode for plugins/REPL. Cross-compiling from any host (Zig).
+  `lume0 emit <file.lume> <file.lbe>` → dense binary AST serialization (LBE, `docs/09-lbe.md`; see `#206` for the target-triple matrix). Cross-compiling from any host (Zig).
 - **`lume-os`** as the long-term proof and testbed: a capability-based microkernel written in Lume
   where drivers are Lume `platform`s, user programs are Lume `app`s parametrised by the capabilities
   they receive (Roc's split), processes are software-isolated because the compiler proved them safe

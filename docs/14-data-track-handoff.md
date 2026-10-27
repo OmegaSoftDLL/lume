@@ -60,6 +60,28 @@ merged. Work after D3 has not been defined; follow Ricardo's direction on what c
   (stage2 == stage3), Stage 0 Ubuntu, and Stage 0 macOS. Do not confuse this passing bootstrap
   gate with the project milestone “triple self-build”; the latter is still not complete.
 
+## D4 — Persistent WAL tables, versioned time-travel, unit-typed `money[CCY]`, and `@soa` columnar layout (#214)
+
+- Implemented in `compiler/stage1/table.src`, `compiler/stage1/lume/04_parser_decls.src`,
+  `compiler/stage1/lume/06_typecheck.src`, `compiler/stage1/lcaas.src`, and
+  `compiler/stage1/data_d4_ok.src`.
+- **CSV serialization (`write_csv`) & row append (`table_insert_row`)**: deterministic round-trip
+  CSV writer that quotes delimiters, newlines, and embedded quotes and pairs cleanly with `read_csv`.
+- **Crash-safe WAL persistence (`persist_open`, `persist_commit`, `persist_recover`)**: each
+  committed table revision records a deterministic checksum over `<path>|<version>|<csv>` and a
+  `committed: 1` flag. Torn or corrupted uncommitted writes (`persist_append_torn`) are rejected
+  on recovery, rolling back to the last valid committed snapshot.
+- **Versioned tables & time-travel (`versioned_new`, `versioned_commit`, `versioned_at`)**:
+  append-only snapshot log allowing historical point-in-time queries (`versioned_at(store, ver)`).
+- **Unit-typed currency (`money[CCY]`)**: `money_parse(ccy, text)` / `money_make(ccy, dec)` pair
+  an exact `decimal(14, 2)` amount with an ISO-4217 currency tag (`BRL`, `USD`, `EUR`). Both the
+  compile-time typechecker (`06_typecheck.src` / `lcaas.src`) and the runtime (`money_add`,
+  `money_sub`, `money_cmp`) reject cross-currency operations unless explicitly converted via
+  `money_convert_fx(m, target_ccy, rate_num, rate_den)`.
+- **Columnar `@soa` layout (`@soa type R = record ...`, `table_to_soa`, `soa_sum_int`,
+  `soa_sum_decimal`, `soa_filter_count_int`)**: transposes row-major relations into contiguous
+  typed column vectors for vectorised column aggregations and filtering.
+
 ## Continuation rules
 
 - D1–D3 are complete. Future data-track scope is open and must follow Ricardo's direction.
