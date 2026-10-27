@@ -1,6 +1,8 @@
 ## Phase 4 (Stage 4): AI, Tensors, Autodiff, Kernels, Prob, Rules, LLM & Spiking Neuro
 ## Conformance suite exercising Tracks N1 (P11), N2 (P12, P13, P29), and N3 (P14, P15, P16, P21).
 
+type List = enum Nil | Cons(int, List)
+
 fn t_len(xs) = match xs
     Nil        => 0
     Cons(h, t) => 1 + t_len(t)

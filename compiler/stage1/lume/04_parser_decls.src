@@ -72,7 +72,8 @@ fn parseeffect(t) = let enm = headtext(t) in let ops = parseeffops(dropkw(dropon
 fn parsecapat(t) = let t1 = droponce(t) in let er = if headtext(t1) == "{" then parseeffitems(droponce(t1)) else if headtext(t1) == "(" then let nm = headtext(droponce(t1)) in {items: Cons(nm, Nil), rest: skiprp(droponce(droponce(t1)))} else {items: Cons(headtext(t1), Nil), rest: droponce(t1)} in Cons(KCapGrant(er.items), parseprog(er.rest))
 fn parserule(t) = let nm = headtext(t) in let ps = parseparams(dropkw(droponce(t), "(")) in let rt = parseret(ps.rest) in let b = if headtext(rt.rest) == "when" then expr(droponce(rt.rest)) else if headtext(rt.rest) == ":" and headtext(droponce(rt.rest)) == "-" then expr(droponce(droponce(rt.rest))) else expr(dropkw(rt.rest, "=")) in {sg: mksig(nm, ps, TyName("int")), fnnode: Fn(nm, ps.items, b.node), rest: b.rest}
 fn progrule(r) = progsig(r.sg, Cons(r.fnnode, parseprog(r.rest)))
-fn skipatparen(ts) = if headtext(ts) == "(" then (findclose(droponce(ts), 1, "(", ")")).rest else ts
+fn skipatparen1(ts, d) = if d <= 0 then ts else if isnil(ts) == 1 then Nil else if headtext(ts) == "(" then skipatparen1(droponce(ts), d + 1) else if headtext(ts) == ")" then skipatparen1(droponce(ts), d - 1) else skipatparen1(droponce(ts), d)
+fn skipatparen(ts) = if headtext(ts) == "(" then skipatparen1(droponce(ts), 1) else ts
 fn progfree(ts) = if headtext(ts) == "pub" then progfn(parsefnp(droponce(droponce(ts)), 1, 1)) else progfn(parsefnp(droponce(ts), 0, 1))
 fn progat(t) = if headtext(t) == "freestanding" then progfree(droponce(t)) else if headtext(t) == "gc" then progtyped("gc", parsetype(droponce(droponce(t)))) else if headtext(t) == "capability" or headtext(t) == "grant" then parsecapat(t) else parseprog(skipatparen(droponce(t)))
 fn progextern(t, pubf) = if headtext(t) == "llm" and headtext(droponce(t)) == "fn" then progfn(parsefnp(droponce(droponce(t)), pubf, 4)) else progfn(parsefnp(droponce(t), pubf, 4))
