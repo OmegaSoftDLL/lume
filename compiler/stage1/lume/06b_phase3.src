@@ -1310,7 +1310,7 @@ fn n4_tdims(ty) = match ty
 fn n4_dim0(ds) = phd(ds)
 fn n4_dim1(ds) = phd(ptl(ds))
 
-fn n4_dim_compat(d1, d2) = if d1 == "" or d2 == "" or d1 == d2 then 1 else if n4_is_digits(d1) == 1 and n4_is_digits(d2) == 1 then 0 else 1
+fn n4_dim_compat(d1, d2) = if d1 == "" or d2 == "" or d1 == d2 or d1 == "_" or d2 == "_" then 1 else 0
 
 fn n4_lookup_tenv(k, tenv) = match tenv
     Nil        => Nil
