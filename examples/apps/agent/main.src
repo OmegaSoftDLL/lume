@@ -1,0 +1,20 @@
+## main.src -- Stage 4 Capstone 2: Neuro-Symbolic Agent Pipeline (`examples/apps/agent/`)
+## Combines:
+## 1. Typed `extern llm fn` + BAML-style `ensures` contract repair (`std.llm`)
+## 2. Semi-naive Datalog policy reachability (`std.rules`)
+## 3. Bayesian Beta-Bernoulli vendor reliability posterior (`std.prob`)
+## 4. Spiking LIF anomaly watchdog on logical ticks (`std.neuro`)
+use ai_runtime
+use schema
+use rules
+use planner
+
+fn test_agent_llm_extraction_and_contract_repair() = let invs = agent_extract_invoices() in if agent_total_amount(invs) == 570 and agent_total_repaired(invs) == 1 then 1 else 0
+
+fn test_agent_datalog_policy_reachability() = if agent_reachable_approvers("analyst") == 3 and agent_reachable_approvers("manager") == 2 then 1 else 0
+
+fn test_agent_prob_and_spiking_watchdog() = let rel = agent_vendor_reliability_milli() in let spk = agent_spiking_watchdog_spikes() in if rel == 666 and spk == 2 then 1 else 0
+
+fn run_agent_app() = let invs = agent_extract_invoices() in let tot = agent_total_amount(invs) in let rep = agent_total_repaired(invs) in let reach = agent_reachable_approvers("analyst") in let rel = agent_vendor_reliability_milli() in let spk = agent_spiking_watchdog_spikes() in "invoices_total=" + str(tot) + " repaired=" + str(rep) + " approvers=" + str(reach) + " reliability_milli=" + str(rel) + " spikes=" + str(spk)
+
+print run_agent_app()

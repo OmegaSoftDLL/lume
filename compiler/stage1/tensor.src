@@ -1,0 +1,132 @@
+## tensor.src -- Stage 4 Track N1: `std.tensor` 1D/2D Tensor Kernels, Broadcasting, MatMul (`@`), Activations & `einsum`
+## All functions obey the 6-arg limit and top-level `match` invariant for `lumec` native x86-64 compilation.
+
+fn t_len(xs) = match xs
+    Nil        => 0
+    Cons(h, t) => 1 + t_len(t)
+
+fn t_app(xs, ys) = match xs
+    Nil        => ys
+    Cons(h, t) => Cons(h, t_app(t, ys))
+
+fn t_nth(xs, idx) = match xs
+    Nil        => 0
+    Cons(h, t) => if idx <= 0 then h else t_nth(t, idx - 1)
+
+fn t_set_at(xs, idx, v) = match xs
+    Nil        => Nil
+    Cons(h, t) => if idx <= 0 then Cons(v, t) else Cons(h, t_set_at(t, idx - 1, v))
+
+fn t_repeat(n, v) = if n <= 0 then Nil else Cons(v, t_repeat(n - 1, v))
+
+fn tensor_zeros(rows, cols) = {rows: rows, cols: cols, data: t_repeat(rows * cols, 0)}
+
+fn tensor_ones(rows, cols) = {rows: rows, cols: cols, data: t_repeat(rows * cols, 1)}
+
+fn tensor_mat(rows, cols, data) = {rows: rows, cols: cols, data: data}
+
+fn tensor_vec(data) = {rows: 1, cols: t_len(data), data: data}
+
+fn tensor_shape_str(t) = "[" + str(t.rows) + ", " + str(t.cols) + "]"
+
+fn tensor_get(t, r, c) = t_nth(t.data, r * t.cols + c)
+
+fn tensor_set(t, r, c, v) = {rows: t.rows, cols: t.cols, data: t_set_at(t.data, r * t.cols + c, v)}
+
+fn t_add_list(xs, ys) = match xs
+    Nil        => Nil
+    Cons(x, r) => Cons(x + t_nth(ys, 0), t_add_list(r, t_tail(ys)))
+
+fn t_sub_list(xs, ys) = match xs
+    Nil        => Nil
+    Cons(x, r) => Cons(x - t_nth(ys, 0), t_sub_list(r, t_tail(ys)))
+
+fn t_mul_list(xs, ys) = match xs
+    Nil        => Nil
+    Cons(x, r) => Cons(x * t_nth(ys, 0), t_mul_list(r, t_tail(ys)))
+
+fn t_tail(xs) = match xs
+    Nil        => Nil
+    Cons(h, t) => t
+
+fn tensor_add(a, b) = {rows: a.rows, cols: a.cols, data: t_add_list(a.data, b.data)}
+
+fn tensor_sub(a, b) = {rows: a.rows, cols: a.cols, data: t_sub_list(a.data, b.data)}
+
+fn tensor_mul(a, b) = {rows: a.rows, cols: a.cols, data: t_mul_list(a.data, b.data)}
+
+fn t_scale_list(xs, k) = match xs
+    Nil        => Nil
+    Cons(x, r) => Cons(x * k, t_scale_list(r, k))
+
+fn tensor_scale(t, k) = {rows: t.rows, cols: t.cols, data: t_scale_list(t.data, k)}
+
+fn t_bias_idx(xs, bdata, cols, idx) = match xs
+    Nil        => Nil
+    Cons(x, r) => Cons(x + t_nth(bdata, idx % cols), t_bias_idx(r, bdata, cols, idx + 1))
+
+## Broadcast row bias `[1, cols]` across `[rows, cols]` (`x .+ b`)
+fn tensor_add_bias(a, b) = {rows: a.rows, cols: a.cols, data: t_bias_idx(a.data, b.data, a.cols, 0)}
+
+fn t_relu_list(xs) = match xs
+    Nil        => Nil
+    Cons(x, r) => Cons(if x > 0 then x else 0, t_relu_list(r))
+
+fn tensor_relu(t) = {rows: t.rows, cols: t.cols, data: t_relu_list(t.data)}
+
+fn t_relu_grad_list(xs, gs) = match xs
+    Nil        => Nil
+    Cons(x, r) => Cons(if x > 0 then t_nth(gs, 0) else 0, t_relu_grad_list(r, t_tail(gs)))
+
+fn tensor_relu_backward(x, grad_out) = {rows: x.rows, cols: x.cols, data: t_relu_grad_list(x.data, grad_out.data)}
+
+fn t_sum_list(xs) = match xs
+    Nil        => 0
+    Cons(x, r) => x + t_sum_list(r)
+
+fn tensor_sum(t) = t_sum_list(t.data)
+
+fn tensor_mean(t) = let n = t.rows * t.cols in if n <= 0 then 0 else tensor_sum(t) / n
+
+fn t_dot_step(a, b, r, c, k, kmax) = if k >= kmax then 0 else tensor_get(a, r, k) * tensor_get(b, k, c) + t_dot_step(a, b, r, c, k + 1, kmax)
+
+fn t_mm_cols(a, b, r, c, cmax) = if c >= cmax then Nil else Cons(t_dot_step(a, b, r, c, 0, a.cols), t_mm_cols(a, b, r, c + 1, cmax))
+
+fn t_mm_rows(a, b, r, rmax) = if r >= rmax then Nil else t_app(t_mm_cols(a, b, r, 0, b.cols), t_mm_rows(a, b, r + 1, rmax))
+
+## 2D matrix multiplication `a @ b` (`[m, k] @ [k, n] -> [m, n]`)
+fn matmul(a, b) = {rows: a.rows, cols: b.cols, data: t_mm_rows(a, b, 0, a.rows)}
+
+fn tensor_matmul(a, b) = matmul(a, b)
+
+fn t_tr_cols(t, r, c, rmax) = if r >= rmax then Nil else Cons(tensor_get(t, r, c), t_tr_cols(t, r + 1, c, rmax))
+
+fn t_tr_rows(t, c, cmax) = if c >= cmax then Nil else t_app(t_tr_cols(t, 0, c, t.rows), t_tr_rows(t, c + 1, cmax))
+
+fn tensor_transpose(t) = {rows: t.cols, cols: t.rows, data: t_tr_rows(t, 0, t.cols)}
+
+fn t_argmax_scan(t, r, c, best_c, best_v) = if c >= t.cols then best_c else let v = tensor_get(t, r, c) in if v > best_v then t_argmax_scan(t, r, c + 1, c, v) else t_argmax_scan(t, r, c + 1, best_c, best_v)
+
+fn tensor_argmax_row(t, r) = t_argmax_scan(t, r, 1, 0, tensor_get(t, r, 0))
+
+fn t_trace_step(t, i, n) = if i >= n then 0 else tensor_get(t, i, i) + t_trace_step(t, i + 1, n)
+
+## Typed `einsum` contractions ("ij,jk->ik", "ii->", "bi,bi->b")
+fn einsum_ij_jk(a, b) = matmul(a, b)
+
+fn einsum_trace(t) = let n = if t.rows < t.cols then t.rows else t.cols in t_trace_step(t, 0, n)
+
+fn t_bdot_rows(a, b, r, rmax) = if r >= rmax then Nil else Cons(t_dot_step(a, tensor_transpose(b), r, r, 0, a.cols), t_bdot_rows(a, b, r + 1, rmax))
+
+fn einsum_batch_dot(a, b) = {rows: a.rows, cols: 1, data: t_bdot_rows(a, b, 0, a.rows)}
+
+## --- unit tests (`lume test compiler/stage1/tensor.src`) ---
+fn test_tensor_matmul_and_shapes() = let a = tensor_mat(2, 3, Cons(1, Cons(2, Cons(3, Cons(4, Cons(5, Cons(6, Nil))))))) in let b = tensor_mat(3, 2, Cons(1, Cons(2, Cons(3, Cons(4, Cons(5, Cons(6, Nil))))))) in let c = matmul(a, b) in c.rows == 2 and c.cols == 2 and tensor_get(c, 0, 0) == 22 and tensor_get(c, 1, 1) == 64
+
+fn test_tensor_broadcast_bias_and_relu() = let x = tensor_mat(2, 2, Cons(0 - 5, Cons(3, Cons(2, Cons(0 - 4, Nil))))) in let b = tensor_vec(Cons(2, Cons(1, Nil))) in let y = tensor_relu(tensor_add_bias(x, b)) in tensor_get(y, 0, 0) == 0 and tensor_get(y, 0, 1) == 4 and tensor_get(y, 1, 0) == 4 and tensor_get(y, 1, 1) == 0
+
+fn test_tensor_transpose_and_argmax() = let m = tensor_mat(2, 3, Cons(10, Cons(50, Cons(20, Cons(90, Cons(30, Cons(40, Nil))))))) in let tr = tensor_transpose(m) in tr.rows == 3 and tr.cols == 2 and tensor_argmax_row(m, 0) == 1 and tensor_argmax_row(m, 1) == 0
+
+fn test_tensor_einsum_contractions() = let m = tensor_mat(2, 2, Cons(3, Cons(1, Cons(2, Cons(4, Nil))))) in let bd = einsum_batch_dot(m, m) in einsum_trace(m) == 7 and tensor_get(bd, 0, 0) == 10 and tensor_get(bd, 1, 0) == 20
+
+fn test_tensor_elementwise_arithmetic() = let a = tensor_ones(2, 2) in let b = tensor_scale(a, 5) in let c = tensor_add(a, b) in tensor_sum(c) == 24 and tensor_mean(c) == 6

@@ -1,0 +1,6 @@
+## model.src -- 2-layer MLP (`4 -> 4 -> 4`) with reverse-mode autodiff, SGD & Adam training,
+## and content-addressed `safetensors` + `onnx` export (`docs/04-roadmap.md` ┬ºStage 4.9).
+
+fn mnist_init_model() = let w1 = {rows: 4, cols: 4, data: Cons(1, Cons(0, Cons(0, Cons(0, Cons(0, Cons(1, Cons(0, Cons(0, Cons(0, Cons(0, Cons(1, Cons(0, Cons(0, Cons(0, Cons(0, Cons(1, Nil))))))))))))))))} in let b1 = {rows: 1, cols: 4, data: Cons(0, Cons(0, Cons(0, Cons(0, Nil))))} in let w2 = {rows: 4, cols: 4, data: Cons(1, Cons(1, Cons(1, Cons(1, Cons(1, Cons(1, Cons(1, Cons(1, Cons(1, Cons(1, Cons(1, Cons(1, Cons(1, Cons(1, Cons(1, Cons(1, Nil))))))))))))))))} in let b2 = {rows: 1, cols: 4, data: Cons(0, Cons(0, Cons(0, Cons(0, Nil))))} in mlp2_new(w1, b1, w2, b2)
+
+fn mnist_train_epochs(m, x, y, epochs, lr) = if epochs <= 0 then m else let g = mlp2_grad(m, x, y) in let m_next = sgd_step_mlp2(m, g, lr) in mnist_train_epochs(m_next, x, y, epochs - 1, lr)

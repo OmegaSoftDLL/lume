@@ -1,0 +1,6 @@
+## dataset.src -- Synthetic 4x4 MNIST-style digit patterns (`0`, `1`, `2`, `3`)
+## Each row in `mnist_train_x()` represents a 4-feature quadrant intensity summary `[q0, q1, q2, q3]`.
+
+fn mnist_train_x() = {rows: 4, cols: 4, data: Cons(4, Cons(0, Cons(0, Cons(0, Cons(0, Cons(4, Cons(0, Cons(0, Cons(0, Cons(0, Cons(4, Cons(0, Cons(0, Cons(0, Cons(0, Cons(4, Nil))))))))))))))))}
+
+fn mnist_train_y() = Cons(0, Cons(1, Cons(2, Cons(3, Nil))))

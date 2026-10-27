@@ -489,10 +489,14 @@ fn tisinferable(a) = match a
     Field(o, nm)    => 1
     _               => 0
 fn tchkinfercmp(nm, i, pn, ty, k) = if tisname(ty) == 1 and tisname(k) == 1 and tcompat(ty, k) == 0 then ctfail("lume: type error: argument " + str(i) + " of '" + nm + "' has type " + tystr(k) + " but parameter '" + pn + "' expects " + tystr(ty) + "\n") else 0
+fn tdims_str(ds) = match ds
+    Nil        => ""
+    Cons(d, r) => ", " + d + tdims_str(r)
 fn tystr(t) = match t
     TyName(n) => n
     TyList(e) => "[" + tystr(e) + "]"
     TyApply(n, e) => n + "[" + tystr(e) + "]"
+    TyTensor(e, ds) => "tensor[" + tystr(e) + tdims_str(ds) + "]"
     TyDecimal(p, s) => "decimal(" + str(p) + ", " + str(s) + ")"
     TyDecimalLiteral(c, s) => "decimal literal"
     _         => "?"
@@ -502,7 +506,12 @@ fn tcompat(ex, k) = match ex
     TyName(n) => tcompatn(n, k)
     TyList(e) => tcompatl(e, k)
     TyApply(n, e) => tcompatapply(n, e, k)
+    TyTensor(e, ds) => tcompattensor(e, ds, k)
     TyDecimal(p, s) => tcompatdecimal(p, s, k)
+fn tcompattensor(e, ds, k) = match k
+    TyAny => 1
+    TyTensor(e2, ds2) => 1
+    _ => 0
 fn tcompatn(n, k) = match k
     TyAny     => 1
     TyName(m) => if n == m then 1 else 0

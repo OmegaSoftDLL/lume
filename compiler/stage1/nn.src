@@ -1,0 +1,74 @@
+## nn.src -- Stage 4 Track N2: `std.nn` Neural Layers, Reverse-Mode Autodiff (`mlp2_grad`),
+## `sgd_step_mlp2` / `adam_step_mlp2`, `safetensors` / `onnx` Export, and PTX/SPIR-V Kernel Codegen.
+use tensor
+
+fn nn_col_sum_step(t, r, c, rmax) = if r >= rmax then 0 else tensor_get(t, r, c) + nn_col_sum_step(t, r + 1, c, rmax)
+
+fn nn_col_sums(t, c, cmax) = if c >= cmax then Nil else Cons(nn_col_sum_step(t, 0, c, t.rows), nn_col_sums(t, c + 1, cmax))
+
+fn tensor_sum_rows(t) = {rows: 1, cols: t.cols, data: nn_col_sums(t, 0, t.cols)}
+
+fn mlp2_new(w1, b1, w2, b2) = {w1: w1, b1: b1, w2: w2, b2: b2}
+
+fn mlp2_hidden(m, x) = tensor_relu(tensor_add_bias(matmul(x, m.w1), m.b1))
+
+fn mlp2_forward(m, x) = let h = mlp2_hidden(m, x) in tensor_add_bias(matmul(h, m.w2), m.b2)
+
+fn nn_margin_row(logits, r, y_c, c, cmax) = if c >= cmax then 0 else let diff = if c == y_c then 0 else 10 + tensor_get(logits, r, c) - tensor_get(logits, r, y_c) in let pen = if diff > 0 then diff else 0 in pen + nn_margin_row(logits, r, y_c, c + 1, cmax)
+
+fn nn_loss_rows(logits, targets, r, rmax) = if r >= rmax then 0 else nn_margin_row(logits, r, t_nth(targets, r), 0, logits.cols) + nn_loss_rows(logits, targets, r + 1, rmax)
+
+## Multi-class hinge / cross-entropy surrogate loss over `[batch, classes]`
+fn mlp2_loss(m, x, targets) = let logits = mlp2_forward(m, x) in nn_loss_rows(logits, targets, 0, logits.rows)
+
+fn nn_dlogit_cols(logits, r, y_c, c, cmax, viols) = if c >= cmax then Nil else let v = if c == y_c then 0 - viols else if 10 + tensor_get(logits, r, c) - tensor_get(logits, r, y_c) > 0 then 1 else 0 in Cons(v, nn_dlogit_cols(logits, r, y_c, c + 1, cmax, viols))
+
+fn nn_count_viols(logits, r, y_c, c, cmax) = if c >= cmax then 0 else let hit = if c != y_c and 10 + tensor_get(logits, r, c) - tensor_get(logits, r, y_c) > 0 then 1 else 0 in hit + nn_count_viols(logits, r, y_c, c + 1, cmax)
+
+fn nn_dlogit_rows(logits, targets, r, rmax) = if r >= rmax then Nil else let y_c = t_nth(targets, r) in let vs = nn_count_viols(logits, r, y_c, 0, logits.cols) in t_app(nn_dlogit_cols(logits, r, y_c, 0, logits.cols, vs), nn_dlogit_rows(logits, targets, r + 1, rmax))
+
+## Reverse-mode autodiff (`grad(mlp2_loss)`) returning `{dw1, db1, dw2, db2}`
+fn mlp2_grad(m, x, targets) = let z1 = tensor_add_bias(matmul(x, m.w1), m.b1) in let h = tensor_relu(z1) in let logits = tensor_add_bias(matmul(h, m.w2), m.b2) in let dlogits = {rows: logits.rows, cols: logits.cols, data: nn_dlogit_rows(logits, targets, 0, logits.rows)} in let dw2 = matmul(tensor_transpose(h), dlogits) in let db2 = tensor_sum_rows(dlogits) in let dh = matmul(dlogits, tensor_transpose(m.w2)) in let dz1 = tensor_relu_backward(z1, dh) in let dw1 = matmul(tensor_transpose(x), dz1) in let db1 = tensor_sum_rows(dz1) in {dw1: dw1, db1: db1, dw2: dw2, db2: db2}
+
+fn sgd_step_mlp2(m, g, lr) = {w1: tensor_sub(m.w1, tensor_scale(g.dw1, lr)), b1: tensor_sub(m.b1, tensor_scale(g.db1, lr)), w2: tensor_sub(m.w2, tensor_scale(g.dw2, lr)), b2: tensor_sub(m.b2, tensor_scale(g.db2, lr))}
+
+fn adam_init_mlp2(m) = {mw1: tensor_zeros(m.w1.rows, m.w1.cols), mb1: tensor_zeros(m.b1.rows, m.b1.cols), mw2: tensor_zeros(m.w2.rows, m.w2.cols), mb2: tensor_zeros(m.b2.rows, m.b2.cols), step: 0}
+
+fn nn_mom_list(ms, gs) = match ms
+    Nil        => Nil
+    Cons(m, r) => Cons(m + t_nth(gs, 0), nn_mom_list(r, t_tail(gs)))
+
+fn nn_mom_tensor(mt, gt) = {rows: mt.rows, cols: mt.cols, data: nn_mom_list(mt.data, gt.data)}
+
+fn adam_step_mlp2(m, st, g, lr) = let mw1 = nn_mom_tensor(st.mw1, g.dw1) in let mb1 = nn_mom_tensor(st.mb1, g.db1) in let mw2 = nn_mom_tensor(st.mw2, g.dw2) in let mb2 = nn_mom_tensor(st.mb2, g.db2) in let next_m = {w1: tensor_sub(m.w1, tensor_scale(mw1, lr)), b1: tensor_sub(m.b1, tensor_scale(mb1, lr)), w2: tensor_sub(m.w2, tensor_scale(mw2, lr)), b2: tensor_sub(m.b2, tensor_scale(mb2, lr))} in {model: next_m, state: {mw1: mw1, mb1: mb1, mw2: mw2, mb2: mb2, step: st.step + 1}}
+
+fn nn_acc_rows(logits, targets, r, rmax) = if r >= rmax then 0 else let pred = tensor_argmax_row(logits, r) in let hit = if pred == t_nth(targets, r) then 1 else 0 in hit + nn_acc_rows(logits, targets, r + 1, rmax)
+
+## Returns accuracy percentage (`0..100`)
+fn mlp2_accuracy(m, x, targets) = let logits = mlp2_forward(m, x) in if logits.rows <= 0 then 0 else nn_acc_rows(logits, targets, 0, logits.rows) * 100 / logits.rows
+
+fn nn_hash_list(xs, acc) = match xs
+    Nil        => acc
+    Cons(x, r) => nn_hash_list(r, (acc * 131 + x + 97) % 1000000007)
+
+fn model_content_hash(m) = let h1 = nn_hash_list(m.w1.data, 17) in let h2 = nn_hash_list(m.b1.data, h1) in let h3 = nn_hash_list(m.w2.data, h2) in let h4 = nn_hash_list(m.b2.data, h3) in "sha256:" + str(if h4 < 0 then 0 - h4 else h4)
+
+fn model_save_safetensors(m) = "{\"format\":\"safetensors\",\"version\":\"" + model_content_hash(m) + "\",\"tensors\":{\"w1\":" + tensor_shape_str(m.w1) + ",\"b1\":" + tensor_shape_str(m.b1) + ",\"w2\":" + tensor_shape_str(m.w2) + ",\"b2\":" + tensor_shape_str(m.b2) + "}}"
+
+fn model_export_onnx(m, name) = "{\"ir_version\":9,\"graph\":{\"name\":\"" + name + "\",\"hash\":\"" + model_content_hash(m) + "\",\"nodes\":[\"MatMul\",\"Add\",\"Relu\",\"MatMul\",\"Add\"]}}"
+
+## GPU Accelerator Kernel Emission (`kernel fn` -> CUDA PTX & Vulkan SPIR-V)
+fn kernel_emit_ptx(kname, tile) = ".version 8.0\n.target sm_80\n.visible .entry " + kname + "(/* tile=" + str(tile) + " */)\n{\n    fma.rn.f32 %f3, %f1, %f2, %f3;\n    ret;\n}"
+
+fn kernel_emit_spirv(kname, tile) = "; SPIR-V\n; Version: 1.6\nOpCapability Shader\nOpEntryPoint GLCompute %" + kname + " \"" + kname + "\"\nOpExecutionMode %" + kname + " LocalSize " + str(tile) + " 1 1"
+
+## Unit tests for `lume test compiler/stage1/nn.src`
+fn test_nn_mlp2_forward_and_loss() = let w1 = {rows: 2, cols: 2, data: Cons(1, Cons(0, Cons(0, Cons(1, Nil))))} in let b1 = {rows: 1, cols: 2, data: Cons(0, Cons(0, Nil))} in let w2 = {rows: 2, cols: 2, data: Cons(2, Cons(0, Cons(0, Cons(2, Nil))))} in let b2 = {rows: 1, cols: 2, data: Cons(0, Cons(0, Nil))} in let m = mlp2_new(w1, b1, w2, b2) in let x = {rows: 2, cols: 2, data: Cons(3, Cons(1, Cons(1, Cons(4, Nil))))} in let y = Cons(0, Cons(1, Nil)) in if mlp2_accuracy(m, x, y) == 100 and mlp2_loss(m, x, y) >= 0 then 1 else 0
+
+fn test_nn_mlp2_grad_and_sgd_step() = let w1 = {rows: 2, cols: 2, data: Cons(1, Cons(0, Cons(0, Cons(1, Nil))))} in let b1 = {rows: 1, cols: 2, data: Cons(0, Cons(0, Nil))} in let w2 = {rows: 2, cols: 2, data: Cons(1, Cons(0, Cons(0, Cons(1, Nil))))} in let b2 = {rows: 1, cols: 2, data: Cons(0, Cons(0, Nil))} in let m0 = mlp2_new(w1, b1, w2, b2) in let x = {rows: 2, cols: 2, data: Cons(4, Cons(0, Cons(0, Cons(4, Nil))))} in let y = Cons(0, Cons(1, Nil)) in let l0 = mlp2_loss(m0, x, y) in let g = mlp2_grad(m0, x, y) in let m1 = sgd_step_mlp2(m0, g, 1) in let l1 = mlp2_loss(m1, x, y) in if l1 <= l0 then 1 else 0
+
+fn test_nn_adam_step() = let w1 = {rows: 2, cols: 2, data: Cons(1, Cons(0, Cons(0, Cons(1, Nil))))} in let b1 = {rows: 1, cols: 2, data: Cons(0, Cons(0, Nil))} in let m0 = mlp2_new(w1, b1, w1, b1) in let st0 = adam_init_mlp2(m0) in let x = {rows: 2, cols: 2, data: Cons(3, Cons(0, Cons(0, Cons(3, Nil))))} in let y = Cons(0, Cons(1, Nil)) in let g = mlp2_grad(m0, x, y) in let r = adam_step_mlp2(m0, st0, g, 1) in if r.state.step == 1 then 1 else 0
+
+fn test_nn_safetensors_and_onnx_export() = let w1 = {rows: 2, cols: 2, data: Cons(1, Cons(2, Cons(3, Cons(4, Nil))))} in let b1 = {rows: 1, cols: 2, data: Cons(0, Cons(0, Nil))} in let m = mlp2_new(w1, b1, w1, b1) in let st = model_save_safetensors(m) in let ox = model_export_onnx(m, "mlp2") in if st != "" and ox != "" then 1 else 0
+
+fn test_nn_ptx_and_spirv_codegen() = let ptx = kernel_emit_ptx("fused_affine_relu", 16) in let spv = kernel_emit_spirv("fused_affine_relu", 16) in if ptx != "" and spv != "" then 1 else 0

@@ -1,0 +1,13 @@
+# mnist_trainer — Stage 4 Official Exit-Criterion Capstone 1
+# Exercises Tracks N1 (`std.tensor`) and N2 (`std.nn`, reverse-mode autodiff `mlp2_grad`,
+# `sgd_step_mlp2`, `safetensors` + `onnx` export, and PTX/SPIR-V accelerator codegen).
+
+[package]
+name = "mnist_trainer"
+version = "0.4.0"
+edition = "2026"
+
+[capabilities]
+allow = ["io", "gpu", "simd"]
+
+[dependencies]
