@@ -118,11 +118,14 @@ theorem envTyped_extend {ρ : ValEnv} {Γ : TyEnv} {x : VarId} {v : Val} {τ : T
   intro y τ' hy
   unfold extendTy at hy
   unfold extendVal
-  split at hy
-  · injection hy with hEq
+  by_cases h : y = x
+  · rw [if_pos h] at hy
+    injection hy with hEq
     subst hEq
-    exact ⟨v, rfl, hVal⟩
-  · exact hEnv y τ' hy
+    exact ⟨v, if_pos h, hVal⟩
+  · rw [if_neg h] at hy
+    obtain ⟨v', hv', hvt⟩ := hEnv y τ' hy
+    exact ⟨v', by rw [if_neg h]; exact hv', hvt⟩
 
 /-- Combined Type, Linear Ownership (`[O0001]`), Effect (`[E0200]`), and Provenance (`[A0003]`) judgment. -/
 inductive HasType : TyEnv → OwnEnv → EffRow → Expr → Ty → OwnEnv → Prop where

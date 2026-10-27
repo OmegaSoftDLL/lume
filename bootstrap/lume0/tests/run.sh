@@ -973,7 +973,7 @@ PY
     printf 'int sqlite3_open(const char *filename, int flags);\nvoid hw_ack_irq(int irq);\n' >"$ntmp/p5_hdr.h"
     LUME_BIN_DIR="$ntmp" ../../lume agent bind "$ntmp/p5_hdr.h" >"$ntmp/p5_bind.json" 2>/dev/null || true
     LUME_BIN_DIR="$ntmp" ../../lume agent c-export ../../compiler/stage1/phase5_sys_ok.src >"$ntmp/p5_cexp.json" 2>/dev/null || true
-    printf '## @manifest\n[package]\nname = "ffi_app"\nversion = "0.1.0"\n[ffi]\nlibs = ["c", "m"]\n' | "$ntmp/lmod" >"$ntmp/p5_ffiman.json" 2>/dev/null || true
+    printf '@manifest\n[package]\nname = "ffi_app"\nversion = "0.1.0"\n[ffi]\nlibs = ["c","m"]\n' | "$ntmp/lmod" >"$ntmp/p5_ffiman.json" 2>/dev/null || true
     # Phase 5 negative checks: [V0002] WCET bound exceeded, [E0200] ISR heap/blocking, [A0003] unverified FFI, [O0001] double cap_page_map,
     # and [E0200] (#186) calling `wasm_call_host_fs` in a module whose `@capability` grants `"wasm"` but not `"fs"`:
     printf '@bound(cycles: 5)\nfn bad_wcet(x: int) -> int = (x * x) + (x * x) + (x * x)\nprint bad_wcet(2)\n' >"$ntmp/p5_bad_wcet.src"
