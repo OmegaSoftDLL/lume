@@ -174,7 +174,7 @@ fn eval(e) = match e
     Add(a, b) => eval(a) + eval(b)
 ```
 
-**One tool:** `lume build|run|fmt|test|doc|check|pkg` — the native tools are written in Lume, but the `lume` driver itself is a POSIX `sh` script that still invokes the C seed (`lume0`) for some commands (`check`, `describe`, running `.lume` files) and on hosts other than Linux x86-64. Commands: a canonical formatter (`lume fmt`), zero-config test discovery (`lume test` finds `fn test_*()`), doc/contract extraction (`lume doc`), and a module system + package manager with **capability-audited dependencies and content-addressed lockfiles** (superior to cargo/go mod). Plus **exact `decimal` arithmetic** for money/data.
+**One tool:** `lume build|run|fmt|test|doc|check|pkg` — the native tools are written in Lume, but the `lume` driver itself is a POSIX `sh` script that still invokes the C seed (`lume0`) for some commands (`check`, `describe`, running `.lume` files) and on hosts other than Linux x86-64. It includes a canonical formatter (`lume fmt`), zero-config test discovery (`lume test` finds `fn test_*()`), doc/contract extraction (`lume doc`), and a module system + package manager with **capability-audited dependencies and content-addressed lockfiles** (superior to cargo/go mod). Plus **exact `decimal` arithmetic** for money/data.
 
 ## Quickstart
 

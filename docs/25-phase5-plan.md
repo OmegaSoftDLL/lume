@@ -1,6 +1,6 @@
 # Phase 5 Plan — Machine Level, Interop (Track I), Realtime/WCET, `lume-os` Microkernel & Proof Certificates
 
-**Status:** Implemented & Active (Stage 5 of `docs/04-roadmap.md`, `docs/20-interop.md`, `docs/22-adoption.md` G1/G3, `docs/23-horizon.md` H1–H5)
+**Status:** Implemented & Active, with the honest limits flagged inline below (interop is parse+check only; `std.wasm` and `lume-os` are models; WCET is heuristic; certificates are unsigned and not independently re-derived) (Stage 5 of `docs/04-roadmap.md`, `docs/20-interop.md`, `docs/22-adoption.md` G1/G3, `docs/23-horizon.md` H1–H5)
 **Prerequisite:** Phase 4 (Tensors, Autodiff, GPU Kernels, Probabilistic/Rules/LLM/Neuro, PR #181)
 
 ---
@@ -12,20 +12,20 @@ Phase 5 completes the Lume language roadmap (`docs/04-roadmap.md` §Stage 5), th
 1. **Track M5 / Interop (`I1–I5`, `P16`, `P26`, `A3`):**
    - Low-level attributes & blocks: `@repr(c)`, `@packed`, `@bits(N)`, `@mmio(addr)`, `@export("C")`, `unsafe`, inline `asm(...)`, `import c "header.h"`, `extern "c" fn`, and `pub extern "c" fn`.
    - **I1 (`extern "c"` + System V AMD64 ABI):** `extern "c" fn` calls infer the `"ffi"` effect (`[E0200]` if unhandled) and mark returned values with **`foreign` / `unverified` provenance (`[A0003]`)** until discharged via `verify(...)` or a proven `ensures` contract.
-   - **I2 (Linking metadata):** `[ffi]` link declarations in `lume.toml` and ELF dynamic/static symbol descriptors in `std.ffi` (`compiler/stage1/interop.src`).
+   - **I2 (Linking metadata):** *planned.* `[ffi]` link declarations and dynamic ELF linking are not implemented (no `DT_NEEDED`/PLT/GOT/`[ffi]` handling in `lasm.src`, `lmod.src` or `./lume`); `extern "c"` is parsed and effect/provenance-checked only, there is no native linking (#11).
    - **I3 (`lume agent bind <header.h>`):** AI-first C header binding generator (`compiler/stage1/lcert.src`) emitting structured JSON with `extern "c" fn` declarations and provenance-verified Lume wrappers.
-   - **I4 (`std.wasm` Sandbox Host):** Deterministic, capability-scoped WebAssembly sandbox (`wasm_module_new`, `wasm_grant_cap`, `wasm_call_add`, `wasm_call_mem`, `wasm_fuel_left`) gated by the `"wasm"` effect.
-   - **I5 (Reverse C-ABI & WASM Export):** `pub extern "c" fn` / `@export("C")` and `ffi_export_c_header` / `wasm_export_wat` so Python, Node, Rust, and Go can call proven Lume cores (`docs/22-adoption.md` Pillar A / G2).
+   - **I4 (`std.wasm` Sandbox Host):** An in-language *model* of a capability-scoped WebAssembly sandbox (`wasm_module_new`, `wasm_grant_cap`, `wasm_call_add`, `wasm_store32`, `wasm_load32`, `wasm_call_host_fs`) gated by the `"wasm"` effect. It does not load or isolate real WASM modules (#186).
+   - **I5 (Reverse C-ABI & WASM Export):** `pub extern "c" fn` / `@export("C")` and `ffi_export_c_header` / `wasm_export_wat` so Python, Node, Rust, and Go can call proven Lume cores (`docs/22-adoption.md` Pillar A / G2). *Not yet real:* `ffi_export_c_header` / `wasm_export_wat` return text from a fixed template; no real C-ABI or WASM export is produced (#11).
 2. **Track K5 — Realtime, Interrupts, Static WCET & Linear Hardware Capabilities (`std.os.cap`):**
    - `@interrupt(irq: N)` and `interrupt` / `realtime` effects: compile-time enforcement in `06b_phase3.src` and `lcaas.src` rejecting `alloc`, `io`, `net`, `fs`, and `async` inside interrupt service routines (`[E0200]`).
-   - `@bound(cycles: N)`: static Worst-Case Execution Time (WCET) analyzer integrated into `lume prove` (`06b_phase3.src` + `lcaas.src`), emitting `"kind":"wcet"` proof obligations (`"status":"proven"` when `est_cycles <= bound`, or `[V0002]` `"status":"refuted"` when exceeded or recursive).
+   - `@bound(cycles: N)`: a *heuristic* per-AST-node cycle estimate (not a sound, cycle-accurate WCET analysis, #185) integrated into `lume prove` (`06b_phase3.src` + `lcaas.src`), emitting `"kind":"wcet"` proof obligations (`"status":"proven"` when `est_cycles <= bound`, or `[V0002]` `"status":"refuted"` when exceeded or recursive).
    - Linear hardware capabilities `cap[Page]`, `cap[Port]`, `cap[Irq]` tracked by the Phase 3 ownership checker (`[O0001]` on double consumption) and `platform` / `app` top-level items.
 3. **Track O5 — `lume-os` Microkernel (`examples/apps/lume_os/`) & Proof Certificates / MCP (`G1`, `G3`, `H3`):**
    - **`compiler/stage1/lcert.src`:**
-     - `lume certify <file.src>` and `lume verify-cert <file.src>`: emits and independently verifies a self-contained proof certificate JSON (`"badge":"Lume Verified ✓"`, `QF_LIA` + `WCET` obligations, source hash, and `stage2==stage3` attestation) via a minimal de Bruijn-style proof kernel.
+     - `lume certify <file.src>` and `lume verify-cert <file.src>`: emits and re-checks a proof certificate JSON (`"badge":"Lume Verified ✓"`, `QF_LIA` + `WCET` obligations, source hash, and `stage2==stage3` attestation). **Honest limits (#183):** the "kernel" re-reports the compiler's own `proven` status and does not independently re-derive proofs (no de Bruijn-style proof checking yet); the hashes are a non-cryptographic placeholder labelled `sha256:`; `verify-cert` re-runs `certify` on the source; certificates carry no signature.
      - `lume mcp <file.src>`: JSON-RPC 2.0 MCP server exposing `lume_check`, `lume_prove`, `lume_fill`, `lume_bind`, and `lume_certify`.
    - **Stage 5 Exit-Criterion Capstone (`examples/apps/lume_os/`):**
-     - Capability-based microkernel (`caps.src`, `scheduler.src`, `ipc.src`, `main.src`) with `QF_LIA`-proven page-table and IPC capability invariants (0 runtime `ctfail` guards), a `@bound(cycles: 64)` WCET-proven scheduler, a `@interrupt(irq: 32)` timer ISR, and isolated user-space execution of the Stage 4 neuro-symbolic agent.
+     - A deterministic user-space *model* of capability-based microkernel services (`caps.src`, `scheduler.src`, `ipc.src`, `main.src`) — no boot, QEMU, hardware or real isolation (#12) — with `QF_LIA`-proven page-table and IPC capability invariants (0 runtime `ctfail` guards), a `@bound(cycles: 64)` WCET-proven scheduler, a `@interrupt(irq: 32)` timer ISR, and a simulated user-space run of the Stage 4 neuro-symbolic agent.
 
 ---
 

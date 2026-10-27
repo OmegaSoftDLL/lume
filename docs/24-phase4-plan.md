@@ -29,30 +29,30 @@ Phase 4 (Stage 4 of `docs/04-roadmap.md` and `docs/03-specification.md` §14) br
 - **`type Name = model { ... }` (`04_parser_decls.src`, `06b_phase3.src`):**
   - Declares a differentiable parameter record (`OType(Name, "model")`) whose tensor fields form a parameter tree.
 - **Compiler Autodiff (`grad`, `vjp`, `jvp`, `vmap`, `jit` in `06b_phase3.src` & `lcaas.src`):**
-  - `grad(f)` synthesizes a symbolic derivative function `__ad_grad_<f>` by differentiating pure scalar/piecewise expressions (`Num`, `Var`, `+`, `-`, `*`, and `If(c, t, e)` piecewise branches such as `relu`) with respect to the first parameter, or dispatches to analytical `grad_<f>` for tensor models.
+  - `grad(f)` synthesizes a symbolic derivative function `__ad_grad_<f>` by differentiating pure scalar/piecewise expressions (`Num`, `Var`, `+`, `-`, `*`, and `If(c, t, e)` piecewise branches such as `relu`) with respect to the first parameter, or dispatches to analytical `grad_<f>` for tensor models. **Honest limits:** only `+ - * if` are differentiated; other operators silently produce 0 (#184). `jit(f, ...)` currently lowers to a plain call of `f` (an identity wrapper, no compilation, #10; see `n4_lower_ad_call` in `06b_phase3.src`).
   - `jvp(f, x, dx)` computes forward-mode directional derivative `grad(f)(x) * dx`; `vjp(f, x, dy)` computes reverse-mode pullback `dy * grad(f)(x)`; `vmap(f, xs)` maps `f` across a batch list.
 - **Accelerator Kernels (`kernel fn`, `@schedule`, `@autotune`):**
-  - `kernel fn` declarations are statically checked for accelerator purity (rejecting `io`, `fs`, `net` side effects inside a kernel with `[E0200]`) and can be lowered to PTX (`kernel_emit_ptx`) and SPIR-V assembly (`kernel_emit_spirv`).
+  - `kernel fn` declarations are statically checked for accelerator purity (rejecting `io`, `fs`, `net` side effects inside a kernel with `[E0200]`) and have `kernel_emit_ptx` / `kernel_emit_spirv` helpers, but these emit **placeholder** PTX/SPIR-V text (a fixed fma/ret stub tagged with the tile size): no kernel body lowering and no GPU execution (#8).
 
 ### 2.2 `compiler/stage1/nn.src` (`use nn`)
-- 2-layer MLP (`mlp2_new`, `mlp2_forward`, `mlp2_loss`, `mlp2_grad`, `mlp2_accuracy`), optimisers (`sgd_step_mlp2`, `adam_init_mlp2`, `adam_step_mlp2`), and content-addressed serialisation (`model_content_hash`, `model_save_safetensors`, `model_load_safetensors`, `model_export_onnx`).
+- 2-layer MLP (`mlp2_new`, `mlp2_forward`, `mlp2_loss`, `mlp2_grad`, `mlp2_accuracy`), optimisers (`sgd_step_mlp2`, `adam_init_mlp2`, `adam_step_mlp2`), and content-addressed serialisation (`model_content_hash`, `model_save_safetensors`, `model_load_safetensors`, `model_export_onnx`). **Honest limit:** `model_save_safetensors` / `model_export_onnx` return descriptor strings (JSON-like shape metadata), not valid safetensors/ONNX files (#9).
 
 ---
 
 ## 3. Track N3 — `prob` Effect, Datalog `rule`, `extern llm fn` & `std.neuro`
 
 ### 3.1 Probabilistic Programming (`prob` Effect)
-- Builtin `prob` effect (`sample_dist`, `observe_lik`) discharged by inference handlers (`infer_mcmc`, `infer_svi`, `infer_smc`) over `Beta`, `Bernoulli`, and `Normal` distributions.
+- Builtin `prob` effect (`sample_dist`, `observe_lik`) discharged by inference handlers (`infer_mcmc`, `infer_svi`, `infer_smc`) over `Beta`, `Bernoulli`, and `Normal` distributions. **Honest limit:** inference is a closed-form Beta-Bernoulli posterior mean; `infer_svi` and `infer_smc` are aliases of `infer_mcmc`, and no sampling is performed (#6).
 
 ### 3.2 Datalog `rule` Declarations (`std.rules`)
-- Top-level `rule name(params) = expr` (and `rule name(params) when cond = expr`) compiles to `NRuleDecl` + callable `rule_<name>` predicates and semi-naive relational fixpoint evaluation (`datalog_fixpoint`) over tables/relations.
+- Top-level `rule name(params) = expr` (and `rule name(params) when cond = expr`) compiles to `NRuleDecl` + callable `rule_<name>` predicates; the runtime helper is `datalog_closure` (`ai_runtime.src`), a naive transitive-closure iteration over edge relations (not semi-naive, and there is no `datalog_fixpoint`).
 
 ### 3.3 Schema-Constrained `extern llm fn` & Deterministic Replay (`std.llm`)
 - `extern llm fn name(params) -> Ret / {llm} requires ... ensures ...` declares an AI-backed function whose signature defines its decoding schema and whose `ensures` clause validates output before discharging `unverified[Ret]` provenance (`[A0003]`).
-- Includes BAML-style schema-aligned fallback + contract repair loop (`llm_call_with_repair`), budget enforcement (`llm_local_handler`, `llm_budget_charge`), and deterministic record/replay evaluation (`llm_eval_suite`).
+- Runtime helpers in `ai_runtime.src`: budget enforcement (`llm_local_handler`, `llm_charge`, `llm_within_budget`) and deterministic record/replay evaluation (`llm_replay_case`, `llm_eval_suite`). The contract-repair step is a hard-coded invoice example (`llm_extract_invoice_repaired`), not a general repair loop; `llm_call_with_repair` and `llm_budget_charge` do not exist.
 
 ### 3.4 Spiking Neural Networks (`std.neuro`)
-- Leaky Integrate-and-Fire (`lif_neuron_new`, `lif_step`, `spiking_network_run`) operating over deterministic logical time (`std.time.logical`).
+- Leaky Integrate-and-Fire (`lif_neuron_new`, `lif_step`, `lif_run_Currents`; there is no `spiking_network_run`) operating over deterministic logical time (`std.time.logical`).
 
 ---
 

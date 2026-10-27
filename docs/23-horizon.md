@@ -81,7 +81,7 @@ thousand-line kernel. That is not a better language; it is a new kind of artifac
 Soundness is sacred. A single false "proven" — shipped as a certificate, relied on by a downstream
 proof, trusted by a human who stopped reading — would do more damage than every bug Lume ever
 prevented. So, forever: `proven` means *sound*, never sampling; every proof is **independently
-checkable** by the minimal kernel; `stage 2 == stage 3`, `zero-c`, and byte-equivalence stay green.
+checkable** by the minimal kernel *(not yet true — see #183: today the kernel re-reports the compiler's verdict)*; `stage 2 == stage 3`, `zero-c`, and byte-equivalence stay green.
 The GOLDEN RULE scales from the compiler to the ecosystem to the horizon.
 
 ## Relationship to the plan
