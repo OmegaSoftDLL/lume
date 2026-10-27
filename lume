@@ -30,27 +30,10 @@ fi
 BIN_DIR="${LUME_BIN_DIR:-$ROOT/build/bin}"
 
 usage() {
-    cat >&2 <<'EOF'
-lume 0.2.0 — the AI-first programming language (edition 2026)
-
-usage:
-  lume build <file.src> [-o <out>]          compile to a standalone native ELF executable (no C, no as/ld)
-  lume run   <file.src|file.lume> [args...] run a Lume program (native ELF for .src, interpreter for .lume/.lbe)
-  lume test  <file.src|file.lume>...        discover and run unit tests (`fn test_*()` and runtime contracts)
-  lume doc   [--json] <file.src|file.lume>  render module & item documentation + contracts (Markdown or JSON)
-  lume fmt   [--check] <file>               format a Lume source file in place (or verify with --check)
-  lume pkg   <init|check|lock|verify|tree>  manage lume.toml manifest, capabilities & SHA-256 lume.lock
-  lume agent [check|compile|ast|...] <file> query in-process compiler-as-a-service JSON protocol
-  lume prove [--json] <file.src>            verify requires/ensures/invariant/law/wcet contracts statically
-  lume certify [--json] <file.src>          emit machine-checkable proof certificate & Lume Verified badge
-  lume verify-cert [--json] <file.src>      independently verify proof certificate via minimal proof kernel
-  lume mcp   [--json] <file.src>            serve Model Context Protocol (MCP) tools & diagnostics for AI agents
-  lume evolve <verify|approve|goals|...>    run self-evolution gates and human governance loop
-  lume check [--json] <file.lume|file.src>  run static semantic checks
-  lume compile [--json] [--run] <file.src>  compile-as-a-service: structured {ok, diagnostics, asm, stdout}
-  lume describe [--json]                    emit machine-readable language self-description for AI agents
-  lume --version                            print version
-EOF
+    _u_in=$(mktemp)
+    printf '@cmd help\n' > "$_u_in"
+    run_core_tool lcli "$_u_in" >&2
+    rm -f "$_u_in"
     exit 64
 }
 
@@ -98,9 +81,15 @@ ensure_native_toolchain() {
     fi
 }
 
-# Build a Lume-Core tool (e.g. ldoc, ltest, lfmt, levolve) to a native ELF using lumec + lasm.
+# Build a Lume-Core tool (e.g. lcli, ldoc, ltest, lfmt, levolve) to a native ELF using lumec + lasm.
 ensure_core_tool() {
     if [ -x "$BIN_DIR/$1" ]; then
+        return 0
+    fi
+    mkdir -p "$BIN_DIR"
+    if [ "$1" = "lcli" ] && [ -x "$ROOT/build/bootstrap/lcli3" ]; then
+        cp "$ROOT/build/bootstrap/lcli3" "$BIN_DIR/lcli"
+        chmod +x "$BIN_DIR/lcli"
         return 0
     fi
     ensure_native_toolchain
@@ -394,11 +383,6 @@ cmd_run() {
     esac
 }
 
-# JSON-escape the contents of a file to a single string body (no surrounding quotes).
-json_escape() {
-    awk 'BEGIN { ORS = "" } { gsub(/\\/, "\\\\"); gsub(/"/, "\\\""); gsub(/\t/, "\\t"); gsub(/\r/, "\\r"); if (NR > 1) printf "\\n"; printf "%s", $0 }' "$1"
-}
-
 # E1 — compiler-as-a-service: compile a .src and report a machine-readable result
 # (ok, exit, asm line count, diagnostics, and with --run the native stdout). This is
 # the programmatic surface the self-evolution loop (E3) and AI agents consume; the
@@ -456,19 +440,14 @@ cmd_compile() {
         "$_bin" > "$_runout" 2>/dev/null || _ranexit=$?
     fi
     if [ "$_json" -eq 1 ]; then
-        printf '{'
-        if [ "$_exit" -eq 0 ]; then printf '"ok":true'; else printf '"ok":false'; fi
-        printf ',"exit":%s,"asm_lines":%s,"diagnostics":"' "$_exit" "$_asmlines"
-        json_escape "$_diag"
-        printf '"'
-        if [ "$_didrun" -eq 1 ]; then
-            printf ',"ran":true,"run_exit":%s,"stdout":"' "$_ranexit"
-            json_escape "$_runout"
-            printf '"'
-        else
-            printf ',"ran":false'
-        fi
-        printf '}\n'
+        _cjin=$(mktemp)
+        printf '@cmd compile-json\n@exit %s\n@asm_lines %s\n@ran %s\n@run_exit %s\n@diag\n' "$_exit" "$_asmlines" "$_didrun" "$_ranexit" > "$_cjin"
+        cat "$_diag" >> "$_cjin"
+        printf '\n@end\n@stdout\n' >> "$_cjin"
+        cat "$_runout" >> "$_cjin"
+        printf '\n@end\n' >> "$_cjin"
+        run_core_tool lcli "$_cjin"
+        rm -f "$_cjin"
     elif [ "$_exit" -eq 0 ]; then
         echo "lume compile: $_file OK ($_asmlines asm lines)" >&2
         cat "$_asm"
@@ -529,13 +508,14 @@ cmd_test() {
                 rm -f "$_bundled" "$_tmpsrc"
                 ;;
             *)
-                ensure_seed
-                if "$L0" check "$_file" >/dev/null 2>&1 && "$L0" run "$_file" >/dev/null 2>&1; then
-                    printf '  ok   %s\n1 passed, 0 failed\n' "$_file"
-                else
-                    printf '  FAIL %s\n0 passed, 1 failed\n' "$_file"
+                _ts_in=$(mktemp)
+                printf '@cmd test-surface\n@pkg %s\n@src\n' "$_file" > "$_ts_in"
+                cat "$_file" >> "$_ts_in"
+                printf '\n@end\n' >> "$_ts_in"
+                if ! run_core_tool lcli "$_ts_in"; then
                     _overall=1
                 fi
+                rm -f "$_ts_in"
                 ;;
         esac
     done
@@ -631,11 +611,17 @@ cmd_check() {
             fi
             ;;
         *)
-            ensure_seed
-            if [ -n "$_json" ]; then
-                "$L0" check "$_file" --json
-            else
-                "$L0" check "$_file"
+            _ck_in=$(mktemp)
+            printf '@cmd check-surface\n@pkg %s\n@src\n' "$_file" > "$_ck_in"
+            cat "$_file" >> "$_ck_in"
+            printf '\n@end\n' >> "$_ck_in"
+            if ! run_core_tool lcli "$_ck_in" >/dev/null; then
+                rm -f "$_ck_in"
+                exit 1
+            fi
+            rm -f "$_ck_in"
+            if [ -z "$_json" ]; then
+                echo "$_file: OK (Lume surface checked)" >&2
             fi
             ;;
     esac
@@ -644,14 +630,14 @@ cmd_check() {
 gen_lockfile() {
     _pdir=$1
     _mjson=$2
-    printf '# lume.lock — deterministic content-addressed lockfile (P26, P32)\n'
-    printf 'version = 1\n'
-    printf 'manifest = %s\n' "$_mjson"
-    printf 'manifest_sha256 = "%s"\n' "$(sha256_file "$_pdir/lume.toml")"
+    _lkin=$(mktemp)
+    printf '@cmd pkg-lock\n@manifest %s\n@manifest_sha256 %s\n' "$_mjson" "$(sha256_file "$_pdir/lume.toml")" > "$_lkin"
     for _sf in $(find "$_pdir" -maxdepth 2 \( -name '*.src' -o -name '*.lume' \) | LC_ALL=C sort); do
         _rel=${_sf#"$_pdir/"}
-        printf 'module "%s" sha256 = "%s"\n' "$_rel" "$(sha256_file "$_sf")"
+        printf '@module %s %s\n' "$_rel" "$(sha256_file "$_sf")" >> "$_lkin"
     done
+    run_core_tool lcli "$_lkin"
+    rm -f "$_lkin"
 }
 
 cmd_pkg() {
@@ -664,20 +650,16 @@ cmd_pkg() {
             mkdir -p "$_pdir"
             _pkgname=$(basename -- "$(cd "$_pdir" && pwd)")
             if [ ! -f "$_pdir/lume.toml" ]; then
-                cat > "$_pdir/lume.toml" <<EOF
-[package]
-name = "$_pkgname"
-version = "0.1.0"
-edition = "2026"
-
-[capabilities]
-allow = ["io"]
-
-[dependencies]
-EOF
+                _pi_in=$(mktemp)
+                printf '@cmd pkg-init\n@pkg %s\n@part toml\n' "$_pkgname" > "$_pi_in"
+                run_core_tool lcli "$_pi_in" > "$_pdir/lume.toml"
+                rm -f "$_pi_in"
             fi
             if [ ! -f "$_pdir/main.src" ]; then
-                printf '## %s — entry module\nfn main_val() -> int = 42\nprint main_val()\n' "$_pkgname" > "$_pdir/main.src"
+                _pi_in=$(mktemp)
+                printf '@cmd pkg-init\n@pkg %s\n@part main\n' "$_pkgname" > "$_pi_in"
+                run_core_tool lcli "$_pi_in" > "$_pdir/main.src"
+                rm -f "$_pi_in"
             fi
             echo "lume pkg: initialized $_pkgname in $_pdir/lume.toml"
             ;;
@@ -748,16 +730,16 @@ EOF
                 exit 1
             fi
             rm -f "$_mtmp"
-            echo "$_mjson"
+            _trin=$(mktemp)
+            printf '@cmd pkg-tree\n@manifest %s\n' "$_mjson" > "$_trin"
             for _sf in $(find "$_pdir" -maxdepth 2 -name '*.src' | LC_ALL=C sort); do
                 _rel=${_sf#"$_pdir/"}
-                _uses=$(awk '/^[ \t]*use[ \t]+/{sub(/^[ \t]*use[ \t]+/,""); sub(/[ \t\r]+$/,""); printf "%s ", $1}' "$_sf")
-                if [ -n "$_uses" ]; then
-                    printf '  |-- %s -> %s\n' "$_rel" "$_uses"
-                else
-                    printf '  |-- %s\n' "$_rel"
-                fi
+                printf '@modsrc %s\n' "$_rel" >> "$_trin"
+                cat "$_sf" >> "$_trin"
+                printf '\n@end\n' >> "$_trin"
             done
+            run_core_tool lcli "$_trin"
+            rm -f "$_trin"
             ;;
         *)
             usage
@@ -933,6 +915,14 @@ cmd_prove() {
     esac
 }
 
+prepend_evolve_pubkeys() {
+    _pk_out=$1
+    : > "$_pk_out"
+    if [ -f "$ROOT/evolve/maintainers.pub" ]; then
+        awk '!/^[ \t]*#/ && NF>=2 {print "@pubkey " $1 " " $2}' "$ROOT/evolve/maintainers.pub" >> "$_pk_out"
+    fi
+}
+
 cmd_evolve() {
     [ $# -ge 1 ] || usage
     _eact=$1
@@ -962,34 +952,10 @@ cmd_evolve() {
             _etmp_goal=""
             if [ ! -f "$_efile" ] && [ "$_eact" = "propose" ]; then
                 _etmp_goal=$(mktemp)
-                cat > "$_etmp_goal" <<EOF
-@proposal 0003_goal_proposal
-@goal $_efile
-@principles P1,P7,P30,P31
-@capability pure
-@max_asm_lines 160
-@approval none
-@baseline
-fn add(a: int, b: int) -> int = a + b
-fn scale(x: int, k: int) -> int = x * k
-@end
-@candidate
-fn add(a: int, b: int) -> int = a + b
-fn scale(x: int, k: int) -> int = x * k
-@bound(cycles: 32)
-fn clamp(x: int, lo: int, hi: int) -> int requires lo <= hi ensures result >= lo and result <= hi = if x < lo then lo else if x > hi then hi else x
-@end
-@tests
-print clamp(3, 10, 20)
-print clamp(25, 10, 20)
-print clamp(15, 10, 20)
-@end
-@expected
-10
-20
-15
-@end
-EOF
+                _epin=$(mktemp)
+                printf '@cmd evolve-propose\n@goal %s\n' "$_efile" > "$_epin"
+                run_core_tool lcli "$_epin" > "$_etmp_goal"
+                rm -f "$_epin"
                 _efile="$_etmp_goal"
             fi
             if [ ! -f "$_efile" ]; then
@@ -1003,7 +969,11 @@ EOF
                     exit 1
                 fi
             fi
-            _ejson=$(run_core_tool levolve "$_efile")
+            _evin=$(mktemp)
+            prepend_evolve_pubkeys "$_evin"
+            cat "$_efile" >> "$_evin"
+            _ejson=$(run_core_tool levolve "$_evin")
+            rm -f "$_evin"
             [ -n "$_etmp_goal" ] && rm -f "$_etmp_goal"
             printf '%s\n' "$_ejson"
             case "$_ejson" in
@@ -1054,7 +1024,8 @@ EOF
                 fi
             fi
             _etmp=$(mktemp)
-            cat "$_efile" > "$_etmp"
+            prepend_evolve_pubkeys "$_etmp"
+            cat "$_efile" >> "$_etmp"
             if [ -n "$_sig" ]; then
                 printf '\n@approval signed:%s:%s\n' "$_by" "$_sig" >> "$_etmp"
             else
@@ -1068,6 +1039,105 @@ EOF
                 *) return 1 ;;
             esac
             ;;
+        apply)
+            _efile=""
+            _by=""
+            _sig=""
+            _etarget=""
+            while [ $# -gt 0 ]; do
+                case "$1" in
+                    --by)
+                        [ $# -ge 2 ] || usage
+                        _by=$2
+                        shift 2
+                        ;;
+                    --sig)
+                        [ $# -ge 2 ] || usage
+                        _sig=$2
+                        shift 2
+                        ;;
+                    --target)
+                        [ $# -ge 2 ] || usage
+                        _etarget=$2
+                        shift 2
+                        ;;
+                    --json)
+                        shift
+                        ;;
+                    -*)
+                        usage
+                        ;;
+                    *)
+                        _efile=$1
+                        shift
+                        ;;
+                esac
+            done
+            [ -n "$_efile" ] || _efile="$ROOT/evolve/proposals/0003_decimal_clamp/proposal.bundle"
+            if [ -d "$_efile" ] && [ -f "$_efile/proposal.bundle" ]; then
+                _efile="$_efile/proposal.bundle"
+            fi
+            if [ ! -f "$_efile" ]; then
+                echo "lume evolve: cannot read $_efile" >&2
+                exit 66
+            fi
+            if [ -f "$ROOT/build/bootstrap/lumec2" ] && [ -f "$ROOT/build/bootstrap/lumec3" ]; then
+                if ! cmp -s "$ROOT/build/bootstrap/lumec2" "$ROOT/build/bootstrap/lumec3"; then
+                    echo "lume evolve: stage2 != stage3 binary fixpoint failure" >&2
+                    exit 1
+                fi
+            fi
+            _etmp=$(mktemp)
+            prepend_evolve_pubkeys "$_etmp"
+            cat "$_efile" >> "$_etmp"
+            if [ -n "$_sig" ]; then
+                printf '\n@approval signed:%s:%s\n' "${_by:-ricardo}" "$_sig" >> "$_etmp"
+            elif [ -n "$_by" ]; then
+                printf '\n@approval approved:%s\n' "$_by" >> "$_etmp"
+            fi
+            _ejson=$(run_core_tool levolve "$_etmp")
+            case "$_ejson" in
+                *'"can_merge":true'*'"signature_verified":true'*|*'"signature_verified":true'*'"can_merge":true'*) ;;
+                *)
+                    rm -f "$_etmp"
+                    printf '%s\n' "$_ejson"
+                    return 1
+                    ;;
+            esac
+            if [ -z "$_etarget" ]; then
+                _rel_t=$(awk '/^@target[ \t]+/{sub(/^@target[ \t]+/,""); sub(/[ \t\r]+$/,""); print; exit}' "$_efile")
+                if [ -n "$_rel_t" ]; then
+                    case "$_rel_t" in
+                        /*) _etarget="$_rel_t" ;;
+                        *)  _etarget="$ROOT/$_rel_t" ;;
+                    esac
+                fi
+            fi
+            if [ -z "$_etarget" ]; then
+                rm -f "$_etmp"
+                echo "lume evolve apply: proposal has no @target and --target was not specified" >&2
+                return 1
+            fi
+            _etmp_app=$(mktemp)
+            printf '@mode apply\n' > "$_etmp_app"
+            cat "$_etmp" >> "$_etmp_app"
+            _etmp_out=$(mktemp)
+            if ! run_core_tool levolve "$_etmp_app" | tr -d '\r' > "$_etmp_out"; then
+                rm -f "$_etmp" "$_etmp_app" "$_etmp_out"
+                printf '%s\n' "$_ejson"
+                return 1
+            fi
+            mv "$_etmp_out" "$_etarget"
+            rm -f "$_etmp" "$_etmp_app"
+            if grep -Eq '^fn[ \t]+test_' "$_etarget"; then
+                if ! cmd_test "$_etarget" >/dev/null 2>&1; then
+                    echo "lume evolve apply: target test suite failed after apply on $_etarget" >&2
+                    return 1
+                fi
+            fi
+            printf '%s\n' "$_ejson"
+            return 0
+            ;;
         *)
             usage
             ;;
@@ -1080,7 +1150,10 @@ shift
 
 case "$_sub" in
     --version|version)
-        echo "lume 0.2.0 (edition 2026)"
+        _v_in=$(mktemp)
+        printf '@cmd version\n' > "$_v_in"
+        run_core_tool lcli "$_v_in"
+        rm -f "$_v_in"
         ;;
     --help|-h|help)
         usage
@@ -1128,8 +1201,10 @@ case "$_sub" in
         cmd_compile "$@"
         ;;
     describe)
-        ensure_seed
-        "$L0" describe "$@"
+        _d_in=$(mktemp)
+        printf '@cmd describe\n' > "$_d_in"
+        run_core_tool lcli "$_d_in"
+        rm -f "$_d_in"
         ;;
     *)
         usage

@@ -1,0 +1,204 @@
+@proposal 0003_decimal_clamp
+@target compiler/stage1/decimal.src
+@goal Add exact decimal_clamp(value, lo, hi) and unit test to compiler/stage1/decimal.src
+@principles P1,P7,P24,P30,P31
+@capability pure
+@max_asm_lines 2500
+@approval signed:ricardo:ed25519:213eeaec6fac6d5ff5ab457a2d57d00c16e9ba82baf6444b2c477363d68934ab700b44cc2938f7abbc20456a32fb0f299dd9a304047c9756780f3147ade34d0c
+@baseline
+## decimal.src — exact base-10 arithmetic over signed integer coefficients.
+## A value {coefficient: c, scale: s, precision: p} represents c * 10^-s.
+## Precision 0 means an unannotated literal; decimal(p,s,value) produces a
+## precision-carrying value. Arithmetic checks result precision and scale.
+
+fn decimal_power10(n) = if n <= 0 then 1 else 10 * decimal_power10(n - 1)
+
+fn decimal_abs(value) = if value < 0 then 0 - value else value
+
+fn decimal_shift(value, places) = if value == 0 then 0 else if count(str(decimal_abs(value))) + places > 18 then ctfail("lume: decimal arithmetic exceeds the 18 digit coefficient limit\n") else value * decimal_power10(places)
+
+fn decimal_make(coefficient, scale) = if scale < 0 or scale > 18 then ctfail("lume: decimal scale must be between 0 and 18\n") else if count(str(decimal_abs(coefficient))) > 18 then ctfail("lume: decimal coefficient exceeds the 18 digit limit\n") else {coefficient: coefficient, scale: scale, precision: 0}
+
+fn decimal_max(left, right) = if left >= right then left else right
+
+fn decimal_effective_precision(value) = if value.precision > 0 then value.precision else decimal_max(count(str(decimal_abs(value.coefficient))), value.scale)
+
+fn decimal_add_precision(left, right, scale) = decimal_max(decimal_effective_precision(left) - left.scale, decimal_effective_precision(right) - right.scale) + scale
+
+fn decimal_mul_precision(left, right) = decimal_effective_precision(left) + decimal_effective_precision(right)
+
+fn decimal_is_digit(c) = c >= "0" and c <= "9"
+
+fn decimal_valid(text, index, point_seen, digit_seen) = if index >= count(text) then digit_seen else let c = at(text, index) in if decimal_is_digit(c) then decimal_valid(text, index + 1, point_seen, 1) else if c == "." and point_seen == 0 then decimal_valid(text, index + 1, 1, digit_seen) else if (c == "-" or c == "+") and index == 0 then decimal_valid(text, index + 1, point_seen, digit_seen) else 0
+
+fn decimal_parse_loop(text, index, coefficient, scale, past_point, significant_digits) = if index >= count(text) then {coefficient: coefficient, scale: scale} else if at(text, index) == "." then decimal_parse_loop(text, index + 1, coefficient, scale, 1, significant_digits) else let digit = toint(at(text, index)) in if past_point == 1 and scale >= 18 then ctfail("lume: decimal scale exceeds the 18 digit limit\n") else if coefficient == 0 and digit == 0 then decimal_parse_loop(text, index + 1, 0, scale + past_point, past_point, significant_digits) else if significant_digits >= 18 then ctfail("lume: decimal coefficient exceeds the 18 digit limit\n") else decimal_parse_loop(text, index + 1, coefficient * 10 + digit, scale + past_point, past_point, significant_digits + 1)
+
+fn decimal_parse(text) = if decimal_valid(text, 0, 0, 0) == 0 then ctfail("lume: invalid decimal literal\n") else let negative = count(text) > 0 and at(text, 0) == "-" in let parsed = decimal_parse_loop(text, if negative or (count(text) > 0 and at(text, 0) == "+") then 1 else 0, 0, 0, 0, 0) in decimal_make(if negative then 0 - parsed.coefficient else parsed.coefficient, parsed.scale)
+
+fn decimal_zeroes(n) = if n <= 0 then "" else "0" + decimal_zeroes(n - 1)
+
+fn decimal_format(value) = let negative = value.coefficient < 0 in let sign = if negative then "-" else "" in let digits = str(if negative then 0 - value.coefficient else value.coefficient) in if value.scale <= 0 then sign + digits else let padded = decimal_zeroes(value.scale + 1 - count(digits)) + digits in let point = count(padded) - value.scale in sign + slice(padded, 0, point) + "." + slice(padded, point, count(padded))
+
+fn decimal_at_scale(value, target) = if value.scale >= target then value.coefficient else decimal_shift(value.coefficient, target - value.scale)
+
+fn decimal_add(left, right) = let scale = if left.scale >= right.scale then left.scale else right.scale in decimal_cast(decimal_make(decimal_at_scale(left, scale) + decimal_at_scale(right, scale), scale), decimal_add_precision(left, right, scale), scale)
+
+fn decimal_sub(left, right) = let scale = if left.scale >= right.scale then left.scale else right.scale in decimal_cast(decimal_make(decimal_at_scale(left, scale) - decimal_at_scale(right, scale), scale), decimal_add_precision(left, right, scale), scale)
+
+fn decimal_mul(left, right) = if left.scale + right.scale > 18 then ctfail("lume: decimal multiplication scale exceeds the 18 digit limit\n") else if right.coefficient == 0 then decimal_cast(decimal_make(0, left.scale + right.scale), decimal_mul_precision(left, right), left.scale + right.scale) else if decimal_abs(left.coefficient) > 999999999999999999 / decimal_abs(right.coefficient) then ctfail("lume: decimal multiplication exceeds the 18 digit coefficient limit\n") else decimal_cast(decimal_make(left.coefficient * right.coefficient, left.scale + right.scale), decimal_mul_precision(left, right), left.scale + right.scale)
+
+fn decimal_compare(left, right) = if left.coefficient < 0 and right.coefficient >= 0 then 0 - 1 else if left.coefficient >= 0 and right.coefficient < 0 then 1 else let ld = str(decimal_abs(left.coefficient)) in let rd = str(decimal_abs(right.coefficient)) in let lm = count(ld) - left.scale in let rm = count(rd) - right.scale in let result = if lm < rm then 0 - 1 else if lm > rm then 1 else let scale = if left.scale >= right.scale then left.scale else right.scale in let la = ld + decimal_zeroes(scale - left.scale) in let ra = rd + decimal_zeroes(scale - right.scale) in if la < ra then 0 - 1 else if la > ra then 1 else 0 in if left.coefficient < 0 then 0 - result else result
+
+fn decimal_rescale(value, target) = if value.scale <= target then decimal_make(decimal_shift(value.coefficient, target - value.scale), target) else let divisor = decimal_power10(value.scale - target) in if value.coefficient % divisor == 0 then decimal_make(value.coefficient / divisor, target) else ctfail("lume: decimal rescale would discard nonzero digits\n")
+
+fn decimal_cast(value, precision, scale) = if precision < 1 or precision > 18 or scale < 0 or scale > precision then ctfail("lume: decimal precision/scale must satisfy 1 <= p <= 18 and 0 <= s <= p\n") else let scaled = decimal_rescale(value, scale) in let magnitude = if scaled.coefficient < 0 then 0 - scaled.coefficient else scaled.coefficient in if count(str(magnitude)) > precision then ctfail("lume: decimal precision overflow\n") else {coefficient: scaled.coefficient, scale: scaled.scale, precision: precision}
+
+fn decimal(precision, scale, value) = decimal_cast(value, precision, scale)
+
+fn decimal_div_exact(left, right, target_scale) = if right.coefficient == 0 then ctfail("lume: decimal division by zero\n") else let numerator = decimal_shift(left.coefficient, right.scale + target_scale) in let denominator = decimal_shift(right.coefficient, left.scale) in if numerator % denominator != 0 then ctfail("lume: decimal division is inexact at requested scale\n") else decimal_cast(decimal_make(numerator / denominator, target_scale), decimal_max(target_scale, decimal_effective_precision(left) - left.scale + right.scale + target_scale), target_scale)
+
+fn decimal_trim(value) = if value.scale > 0 and value.coefficient % 10 == 0 then decimal_trim(decimal_make(value.coefficient / 10, value.scale - 1)) else value
+
+fn decimal_div(left, right) = if right.coefficient == 0 then ctfail("lume: decimal division by zero\n") else decimal_div_typed(left, right, decimal_div_search(left, right, 0))
+
+fn decimal_div_typed(left, right, value) = decimal_cast(value, decimal_max(value.scale, decimal_effective_precision(left) - left.scale + right.scale + value.scale), value.scale)
+
+fn decimal_div_search(left, right, target_scale) = if target_scale > 18 then ctfail("lume: decimal division has no exact result within scale 18\n") else decimal_div_try(left, right, target_scale, decimal_shift(left.coefficient, right.scale + target_scale), decimal_shift(right.coefficient, left.scale))
+
+fn decimal_div_try(left, right, target_scale, numerator, denominator) = if numerator % denominator == 0 then decimal_trim(decimal_make(numerator / denominator, target_scale)) else decimal_div_search(left, right, target_scale + 1)
+
+fn test_decimal_add_aligns_scales() = let result = decimal_add(decimal_make(123, 2), decimal_make(7, 1)) in result.coefficient == 193 and result.scale == 2
+
+fn test_decimal_sub_aligns_scales() = let result = decimal_sub(decimal_make(7, 1), decimal_make(123, 2)) in result.coefficient + 53 == 0 and result.scale == 2
+
+fn test_decimal_mul_preserves_product_scale() = let result = decimal_mul(decimal_make(125, 2), decimal_make(4, 1)) in result.coefficient == 500 and result.scale == 3
+
+fn test_decimal_compare_ignores_representation_scale() = decimal_compare(decimal_make(120, 2), decimal_make(12, 1)) == 0 and decimal_compare(decimal_make(119, 2), decimal_make(12, 1)) < 0
+
+fn test_decimal_parse_preserves_trailing_zero_scale() = let result = decimal_parse("-12.340") in result.coefficient + 12340 == 0 and result.scale == 3
+
+fn test_decimal_format_preserves_scale_and_sign() = decimal_format(decimal_make(5, 3)) == "0.005" and decimal_format(decimal_parse("-12.340")) == "-12.340"
+
+fn test_decimal_cast_rescales_without_rounding() = let result = decimal_cast(decimal_parse("1.2"), 4, 2) in result.coefficient == 120 and result.scale == 2
+
+fn test_decimal_division_is_exact_at_requested_scale() = let result = decimal_div_exact(decimal_parse("0.50"), decimal_parse("0.2"), 2) in result.coefficient == 250 and result.scale == 2
+
+fn test_decimal_parse_accepts_precision18_scale18() = let result = decimal_parse("0.000000000000000001") in result.coefficient == 1 and result.scale == 18
+
+fn test_decimal_compare_handles_extreme_scale_gap() = decimal_compare(decimal_make(999999999999999999, 0), decimal_make(1, 18)) == 1
+
+fn test_decimal_constructor_applies_precision_and_scale() = let result = decimal(4, 2, decimal_parse("1.2")) in result.coefficient == 120 and result.scale == 2
+
+fn test_decimal_division_uses_shortest_exact_scale() = let result = decimal_div(decimal_parse("0.50"), decimal_parse("0.2")) in result.coefficient == 25 and result.scale == 1
+
+fn test_decimal_constructor_carries_precision() = let result = decimal(4, 2, decimal_parse("1.2")) in result.coefficient == 120 and result.scale == 2 and result.precision == 4
+
+fn test_decimal_add_preserves_fixed_precision() = let result = decimal_add(decimal(4, 2, decimal_parse("1.2")), decimal(4, 2, decimal_parse("2.3"))) in result.coefficient == 350 and result.scale == 2 and result.precision == 4
+
+fn test_decimal_multiply_derives_precision() = let result = decimal_mul(decimal(3, 2, decimal_parse("1.25")), decimal(2, 1, decimal_parse("0.4"))) in result.coefficient == 500 and result.scale == 3 and result.precision == 5
+@end
+@candidate
+## decimal.src — exact base-10 arithmetic over signed integer coefficients.
+## A value {coefficient: c, scale: s, precision: p} represents c * 10^-s.
+## Precision 0 means an unannotated literal; decimal(p,s,value) produces a
+## precision-carrying value. Arithmetic checks result precision and scale.
+
+fn decimal_power10(n) = if n <= 0 then 1 else 10 * decimal_power10(n - 1)
+
+fn decimal_abs(value) = if value < 0 then 0 - value else value
+
+fn decimal_shift(value, places) = if value == 0 then 0 else if count(str(decimal_abs(value))) + places > 18 then ctfail("lume: decimal arithmetic exceeds the 18 digit coefficient limit\n") else value * decimal_power10(places)
+
+fn decimal_make(coefficient, scale) = if scale < 0 or scale > 18 then ctfail("lume: decimal scale must be between 0 and 18\n") else if count(str(decimal_abs(coefficient))) > 18 then ctfail("lume: decimal coefficient exceeds the 18 digit limit\n") else {coefficient: coefficient, scale: scale, precision: 0}
+
+fn decimal_max(left, right) = if left >= right then left else right
+
+fn decimal_effective_precision(value) = if value.precision > 0 then value.precision else decimal_max(count(str(decimal_abs(value.coefficient))), value.scale)
+
+fn decimal_add_precision(left, right, scale) = decimal_max(decimal_effective_precision(left) - left.scale, decimal_effective_precision(right) - right.scale) + scale
+
+fn decimal_mul_precision(left, right) = decimal_effective_precision(left) + decimal_effective_precision(right)
+
+fn decimal_is_digit(c) = c >= "0" and c <= "9"
+
+fn decimal_valid(text, index, point_seen, digit_seen) = if index >= count(text) then digit_seen else let c = at(text, index) in if decimal_is_digit(c) then decimal_valid(text, index + 1, point_seen, 1) else if c == "." and point_seen == 0 then decimal_valid(text, index + 1, 1, digit_seen) else if (c == "-" or c == "+") and index == 0 then decimal_valid(text, index + 1, point_seen, digit_seen) else 0
+
+fn decimal_parse_loop(text, index, coefficient, scale, past_point, significant_digits) = if index >= count(text) then {coefficient: coefficient, scale: scale} else if at(text, index) == "." then decimal_parse_loop(text, index + 1, coefficient, scale, 1, significant_digits) else let digit = toint(at(text, index)) in if past_point == 1 and scale >= 18 then ctfail("lume: decimal scale exceeds the 18 digit limit\n") else if coefficient == 0 and digit == 0 then decimal_parse_loop(text, index + 1, 0, scale + past_point, past_point, significant_digits) else if significant_digits >= 18 then ctfail("lume: decimal coefficient exceeds the 18 digit limit\n") else decimal_parse_loop(text, index + 1, coefficient * 10 + digit, scale + past_point, past_point, significant_digits + 1)
+
+fn decimal_parse(text) = if decimal_valid(text, 0, 0, 0) == 0 then ctfail("lume: invalid decimal literal\n") else let negative = count(text) > 0 and at(text, 0) == "-" in let parsed = decimal_parse_loop(text, if negative or (count(text) > 0 and at(text, 0) == "+") then 1 else 0, 0, 0, 0, 0) in decimal_make(if negative then 0 - parsed.coefficient else parsed.coefficient, parsed.scale)
+
+fn decimal_zeroes(n) = if n <= 0 then "" else "0" + decimal_zeroes(n - 1)
+
+fn decimal_format(value) = let negative = value.coefficient < 0 in let sign = if negative then "-" else "" in let digits = str(if negative then 0 - value.coefficient else value.coefficient) in if value.scale <= 0 then sign + digits else let padded = decimal_zeroes(value.scale + 1 - count(digits)) + digits in let point = count(padded) - value.scale in sign + slice(padded, 0, point) + "." + slice(padded, point, count(padded))
+
+fn decimal_at_scale(value, target) = if value.scale >= target then value.coefficient else decimal_shift(value.coefficient, target - value.scale)
+
+fn decimal_add(left, right) = let scale = if left.scale >= right.scale then left.scale else right.scale in decimal_cast(decimal_make(decimal_at_scale(left, scale) + decimal_at_scale(right, scale), scale), decimal_add_precision(left, right, scale), scale)
+
+fn decimal_sub(left, right) = let scale = if left.scale >= right.scale then left.scale else right.scale in decimal_cast(decimal_make(decimal_at_scale(left, scale) - decimal_at_scale(right, scale), scale), decimal_add_precision(left, right, scale), scale)
+
+fn decimal_mul(left, right) = if left.scale + right.scale > 18 then ctfail("lume: decimal multiplication scale exceeds the 18 digit limit\n") else if right.coefficient == 0 then decimal_cast(decimal_make(0, left.scale + right.scale), decimal_mul_precision(left, right), left.scale + right.scale) else if decimal_abs(left.coefficient) > 999999999999999999 / decimal_abs(right.coefficient) then ctfail("lume: decimal multiplication exceeds the 18 digit coefficient limit\n") else decimal_cast(decimal_make(left.coefficient * right.coefficient, left.scale + right.scale), decimal_mul_precision(left, right), left.scale + right.scale)
+
+fn decimal_compare(left, right) = if left.coefficient < 0 and right.coefficient >= 0 then 0 - 1 else if left.coefficient >= 0 and right.coefficient < 0 then 1 else let ld = str(decimal_abs(left.coefficient)) in let rd = str(decimal_abs(right.coefficient)) in let lm = count(ld) - left.scale in let rm = count(rd) - right.scale in let result = if lm < rm then 0 - 1 else if lm > rm then 1 else let scale = if left.scale >= right.scale then left.scale else right.scale in let la = ld + decimal_zeroes(scale - left.scale) in let ra = rd + decimal_zeroes(scale - right.scale) in if la < ra then 0 - 1 else if la > ra then 1 else 0 in if left.coefficient < 0 then 0 - result else result
+
+fn decimal_rescale(value, target) = if value.scale <= target then decimal_make(decimal_shift(value.coefficient, target - value.scale), target) else let divisor = decimal_power10(value.scale - target) in if value.coefficient % divisor == 0 then decimal_make(value.coefficient / divisor, target) else ctfail("lume: decimal rescale would discard nonzero digits\n")
+
+fn decimal_cast(value, precision, scale) = if precision < 1 or precision > 18 or scale < 0 or scale > precision then ctfail("lume: decimal precision/scale must satisfy 1 <= p <= 18 and 0 <= s <= p\n") else let scaled = decimal_rescale(value, scale) in let magnitude = if scaled.coefficient < 0 then 0 - scaled.coefficient else scaled.coefficient in if count(str(magnitude)) > precision then ctfail("lume: decimal precision overflow\n") else {coefficient: scaled.coefficient, scale: scaled.scale, precision: precision}
+
+fn decimal(precision, scale, value) = decimal_cast(value, precision, scale)
+
+fn decimal_div_exact(left, right, target_scale) = if right.coefficient == 0 then ctfail("lume: decimal division by zero\n") else let numerator = decimal_shift(left.coefficient, right.scale + target_scale) in let denominator = decimal_shift(right.coefficient, left.scale) in if numerator % denominator != 0 then ctfail("lume: decimal division is inexact at requested scale\n") else decimal_cast(decimal_make(numerator / denominator, target_scale), decimal_max(target_scale, decimal_effective_precision(left) - left.scale + right.scale + target_scale), target_scale)
+
+fn decimal_trim(value) = if value.scale > 0 and value.coefficient % 10 == 0 then decimal_trim(decimal_make(value.coefficient / 10, value.scale - 1)) else value
+
+fn decimal_div(left, right) = if right.coefficient == 0 then ctfail("lume: decimal division by zero\n") else decimal_div_typed(left, right, decimal_div_search(left, right, 0))
+
+fn decimal_div_typed(left, right, value) = decimal_cast(value, decimal_max(value.scale, decimal_effective_precision(left) - left.scale + right.scale + value.scale), value.scale)
+
+fn decimal_div_search(left, right, target_scale) = if target_scale > 18 then ctfail("lume: decimal division has no exact result within scale 18\n") else decimal_div_try(left, right, target_scale, decimal_shift(left.coefficient, right.scale + target_scale), decimal_shift(right.coefficient, left.scale))
+
+fn decimal_div_try(left, right, target_scale, numerator, denominator) = if numerator % denominator == 0 then decimal_trim(decimal_make(numerator / denominator, target_scale)) else decimal_div_search(left, right, target_scale + 1)
+
+fn test_decimal_add_aligns_scales() = let result = decimal_add(decimal_make(123, 2), decimal_make(7, 1)) in result.coefficient == 193 and result.scale == 2
+
+fn test_decimal_sub_aligns_scales() = let result = decimal_sub(decimal_make(7, 1), decimal_make(123, 2)) in result.coefficient + 53 == 0 and result.scale == 2
+
+fn test_decimal_mul_preserves_product_scale() = let result = decimal_mul(decimal_make(125, 2), decimal_make(4, 1)) in result.coefficient == 500 and result.scale == 3
+
+fn test_decimal_compare_ignores_representation_scale() = decimal_compare(decimal_make(120, 2), decimal_make(12, 1)) == 0 and decimal_compare(decimal_make(119, 2), decimal_make(12, 1)) < 0
+
+fn test_decimal_parse_preserves_trailing_zero_scale() = let result = decimal_parse("-12.340") in result.coefficient + 12340 == 0 and result.scale == 3
+
+fn test_decimal_format_preserves_scale_and_sign() = decimal_format(decimal_make(5, 3)) == "0.005" and decimal_format(decimal_parse("-12.340")) == "-12.340"
+
+fn test_decimal_cast_rescales_without_rounding() = let result = decimal_cast(decimal_parse("1.2"), 4, 2) in result.coefficient == 120 and result.scale == 2
+
+fn test_decimal_division_is_exact_at_requested_scale() = let result = decimal_div_exact(decimal_parse("0.50"), decimal_parse("0.2"), 2) in result.coefficient == 250 and result.scale == 2
+
+fn test_decimal_parse_accepts_precision18_scale18() = let result = decimal_parse("0.000000000000000001") in result.coefficient == 1 and result.scale == 18
+
+fn test_decimal_compare_handles_extreme_scale_gap() = decimal_compare(decimal_make(999999999999999999, 0), decimal_make(1, 18)) == 1
+
+fn test_decimal_constructor_applies_precision_and_scale() = let result = decimal(4, 2, decimal_parse("1.2")) in result.coefficient == 120 and result.scale == 2
+
+fn test_decimal_division_uses_shortest_exact_scale() = let result = decimal_div(decimal_parse("0.50"), decimal_parse("0.2")) in result.coefficient == 25 and result.scale == 1
+
+fn test_decimal_constructor_carries_precision() = let result = decimal(4, 2, decimal_parse("1.2")) in result.coefficient == 120 and result.scale == 2 and result.precision == 4
+
+fn test_decimal_add_preserves_fixed_precision() = let result = decimal_add(decimal(4, 2, decimal_parse("1.2")), decimal(4, 2, decimal_parse("2.3"))) in result.coefficient == 350 and result.scale == 2 and result.precision == 4
+
+fn test_decimal_multiply_derives_precision() = let result = decimal_mul(decimal(3, 2, decimal_parse("1.25")), decimal(2, 1, decimal_parse("0.4"))) in result.coefficient == 500 and result.scale == 3 and result.precision == 5
+
+fn decimal_clamp(value, lo, hi) = if decimal_compare(value, lo) < 0 then lo else if decimal_compare(value, hi) > 0 then hi else value
+
+fn test_decimal_clamp_bounds_value() = let lo = decimal_parse("1.50") in let hi = decimal_parse("9.75") in decimal_compare(decimal_clamp(decimal_parse("0.25"), lo, hi), lo) == 0 and decimal_compare(decimal_clamp(decimal_parse("5.00"), lo, hi), decimal_parse("5.00")) == 0 and decimal_compare(decimal_clamp(decimal_parse("12.00"), lo, hi), hi) == 0
+@end
+@tests
+fn verify_coeff_clamp(v: int, lo: int, hi: int) -> int requires lo <= hi ensures result >= lo and result <= hi = if v < lo then lo else if v > hi then hi else v
+print verify_coeff_clamp(3, 10, 20)
+print test_decimal_clamp_bounds_value()
+@end
+@expected
+10
+1
+@end

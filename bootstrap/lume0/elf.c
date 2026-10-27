@@ -317,19 +317,6 @@ int elf_assemble(const char *src, const char *outpath) {
                 if(z){buf_put(&rodata,0);}
                 continue;
             }
-            if (!strncmp(s,".byte",5)) {
-                char *p=s+5;
-                while(*p){
-                    while(*p==' '||*p=='\t'||*p==',')p++;
-                    if(!*p)break;
-                    char *end=NULL;
-                    long v=strtol(p,&end,0);
-                    if(end==p)break;
-                    buf_put(&rodata,(uint8_t)(v&0xff));
-                    p=end;
-                }
-                continue;
-            }
             continue;
         }
         char *sp=strchr(s,' ');

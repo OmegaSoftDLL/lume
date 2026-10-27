@@ -1,0 +1,4 @@
+## Lume Evolution Governance — Authorized Maintainer Ed25519 Public Keys (RFC 8032)
+## Format: <maintainer_id> ed25519:<64-hex-public-key>
+## Private keys are kept strictly off-repo by maintainers; nothing merges or applies without a valid Ed25519 signature.
+ricardo ed25519:81aef71822bb3a4527e38a37b218fac8858467eaec5535dbcb8763f60c12dd0c

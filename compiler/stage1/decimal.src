@@ -88,3 +88,7 @@ fn test_decimal_constructor_carries_precision() = let result = decimal(4, 2, dec
 fn test_decimal_add_preserves_fixed_precision() = let result = decimal_add(decimal(4, 2, decimal_parse("1.2")), decimal(4, 2, decimal_parse("2.3"))) in result.coefficient == 350 and result.scale == 2 and result.precision == 4
 
 fn test_decimal_multiply_derives_precision() = let result = decimal_mul(decimal(3, 2, decimal_parse("1.25")), decimal(2, 1, decimal_parse("0.4"))) in result.coefficient == 500 and result.scale == 3 and result.precision == 5
+
+fn decimal_clamp(value, lo, hi) = if decimal_compare(value, lo) < 0 then lo else if decimal_compare(value, hi) > 0 then hi else value
+
+fn test_decimal_clamp_bounds_value() = let lo = decimal_parse("1.50") in let hi = decimal_parse("9.75") in decimal_compare(decimal_clamp(decimal_parse("0.25"), lo, hi), lo) == 0 and decimal_compare(decimal_clamp(decimal_parse("5.00"), lo, hi), decimal_parse("5.00")) == 0 and decimal_compare(decimal_clamp(decimal_parse("12.00"), lo, hi), hi) == 0
