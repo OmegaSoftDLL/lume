@@ -963,18 +963,32 @@ cmd_evolve() {
             if [ ! -f "$_efile" ] && [ "$_eact" = "propose" ]; then
                 _etmp_goal=$(mktemp)
                 cat > "$_etmp_goal" <<EOF
-@id 0003_goal_proposal
+@proposal 0003_goal_proposal
 @goal $_efile
-@approval pending
+@principles P1,P7,P30,P31
+@capability pure
+@max_asm_lines 160
+@approval none
 @baseline
-fn clamp(x: int, lo: int, hi: int) -> int requires lo <= hi ensures result >= lo and result <= hi = if x < lo then lo else if x > hi then hi else x
-print(clamp(15, 0, 10))
+fn add(a: int, b: int) -> int = a + b
+fn scale(x: int, k: int) -> int = x * k
+@end
 @candidate
+fn add(a: int, b: int) -> int = a + b
+fn scale(x: int, k: int) -> int = x * k
 @bound(cycles: 32)
 fn clamp(x: int, lo: int, hi: int) -> int requires lo <= hi ensures result >= lo and result <= hi = if x < lo then lo else if x > hi then hi else x
-@bound(cycles: 16)
-fn in_range(x: int, lo: int, hi: int) -> int requires lo <= hi ensures result >= 0 and result <= 1 = if clamp(x, lo, hi) == x then 1 else 0
-print(clamp(15, 0, 10) + in_range(5, 0, 10))
+@end
+@tests
+print clamp(3, 10, 20)
+print clamp(25, 10, 20)
+print clamp(15, 10, 20)
+@end
+@expected
+10
+20
+15
+@end
 EOF
                 _efile="$_etmp_goal"
             fi
