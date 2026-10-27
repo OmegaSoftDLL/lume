@@ -100,14 +100,42 @@ fn nn_hash_list(xs, acc) = match xs
 
 fn model_content_hash(m) = let h1 = nn_hash_list(m.w1.data, 17) in let h2 = nn_hash_list(m.b1.data, h1) in let h3 = nn_hash_list(m.w2.data, h2) in let h4 = nn_hash_list(m.b2.data, h3) in "sha256:" + sha256_hex(str(h1) + ":" + str(h2) + ":" + str(h3) + ":" + str(h4))
 
-fn model_save_safetensors(m) = "{\"format\":\"safetensors\",\"version\":\"" + model_content_hash(m) + "\",\"tensors\":{\"w1\":" + tensor_shape_str(m.w1) + ",\"b1\":" + tensor_shape_str(m.b1) + ",\"w2\":" + tensor_shape_str(m.w2) + ",\"b2\":" + tensor_shape_str(m.b2) + "}}"
+fn nn_data_csv(xs) = match xs
+    Nil        => ""
+    Cons(x, r) => nn_data_csv1(x, r)
 
-fn model_export_onnx(m, name) = "{\"ir_version\":9,\"graph\":{\"name\":\"" + name + "\",\"hash\":\"" + model_content_hash(m) + "\",\"nodes\":[\"MatMul\",\"Add\",\"Relu\",\"MatMul\",\"Add\"]}}"
+fn nn_data_csv1(x, r) = match r
+    Nil         => str(x)
+    Cons(x2, t) => str(x) + "," + nn_data_csv(r)
 
-## GPU Accelerator Kernel Emission (`kernel fn` -> CUDA PTX & Vulkan SPIR-V)
-fn kernel_emit_ptx(kname, tile) = ".version 8.0\n.target sm_80\n.visible .entry " + kname + "(/* tile=" + str(tile) + " */)\n{\n    fma.rn.f32 %f3, %f1, %f2, %f3;\n    ret;\n}"
+fn nn_data_bytes(t) = (t.rows * t.cols) * 8
 
-fn kernel_emit_spirv(kname, tile) = "; SPIR-V\n; Version: 1.6\nOpCapability Shader\nOpEntryPoint GLCompute %" + kname + " \"" + kname + "\"\nOpExecutionMode %" + kname + " LocalSize " + str(tile) + " 1 1"
+fn nn_st_entry(t, off) = let end_off = off + nn_data_bytes(t) in "{\"dtype\":\"I64\",\"shape\":[" + str(t.rows) + "," + str(t.cols) + "],\"data_offsets\":[" + str(off) + "," + str(end_off) + "],\"data\":[" + nn_data_csv(t.data) + "]}"
+
+fn model_save_safetensors(m) = let o1 = nn_data_bytes(m.w1) in let o2 = o1 + nn_data_bytes(m.b1) in let o3 = o2 + nn_data_bytes(m.w2) in "{\"__metadata__\":{\"format\":\"safetensors\",\"version\":\"" + model_content_hash(m) + "\"},\"w1\":" + nn_st_entry(m.w1, 0) + ",\"b1\":" + nn_st_entry(m.b1, o1) + ",\"w2\":" + nn_st_entry(m.w2, o2) + ",\"b2\":" + nn_st_entry(m.b2, o3) + "}"
+
+fn model_export_onnx(m, name) = "{\"ir_version\":9,\"graph\":{\"name\":\"" + name + "\",\"hash\":\"" + model_content_hash(m) + "\",\"initializers\":{\"w1\":[" + nn_data_csv(m.w1.data) + "],\"b1\":[" + nn_data_csv(m.b1.data) + "],\"w2\":[" + nn_data_csv(m.w2.data) + "],\"b2\":[" + nn_data_csv(m.b2.data) + "]},\"nodes\":[\"MatMul\",\"Add\",\"Relu\",\"MatMul\",\"Add\"]}}"
+
+## GPU Accelerator Kernel Emission (`kernel fn` body lowering -> CUDA PTX & Vulkan SPIR-V)
+fn kernel_ptx_op(op, i) = let r_in = "%r" + str(i) in let r_out = "%r" + str(i + 1) in if op == "mul" then "    mul.lo.s32 " + r_out + ", " + r_in + ", %r_w;\n" else if op == "add" then "    add.s32 " + r_out + ", " + r_in + ", %r_b;\n" else if op == "sub" then "    sub.s32 " + r_out + ", " + r_in + ", %r_b;\n" else if op == "relu" then "    max.s32 " + r_out + ", " + r_in + ", 0;\n" else "    mov.s32 " + r_out + ", " + r_in + ";\n"
+
+fn kernel_ptx_ops(ops, i) = match ops
+    Nil         => "    st.global.s32 [%rd_out], %r" + str(i) + ";\n    ret;\n"
+    Cons(op, r) => kernel_ptx_op(op, i) + kernel_ptx_ops(r, i + 1)
+
+fn kernel_lower_ptx(kname, tile, ops) = ".version 8.0\n.target sm_80\n.visible .entry " + kname + "(.param .u64 p_in, .param .s32 p_w, .param .s32 p_b, .param .u64 p_out)\n.maxntid " + str(tile) + ", 1, 1\n{\n    .reg .s32 %r<8>, %r_w, %r_b;\n    .reg .u64 %rd_in, %rd_out;\n    ld.param.u64 %rd_in, [p_in];\n    ld.param.s32 %r_w, [p_w];\n    ld.param.s32 %r_b, [p_b];\n    ld.param.u64 %rd_out, [p_out];\n    ld.global.s32 %r0, [%rd_in];\n" + kernel_ptx_ops(ops, 0) + "}"
+
+fn kernel_emit_ptx(kname, tile) = kernel_lower_ptx(kname, tile, Cons("mul", Cons("add", Cons("relu", Nil))))
+
+fn kernel_spirv_op(op, i) = let r_in = "%v" + str(i) in let r_out = "%v" + str(i + 1) in if op == "mul" then "    " + r_out + " = OpIMul %int " + r_in + " %w\n" else if op == "add" then "    " + r_out + " = OpIAdd %int " + r_in + " %b\n" else if op == "sub" then "    " + r_out + " = OpISub %int " + r_in + " %b\n" else if op == "relu" then "    " + r_out + " = OpExtInst %int %glsl SMax " + r_in + " %zero\n" else "    " + r_out + " = OpCopyObject %int " + r_in + "\n"
+
+fn kernel_spirv_ops(ops, i) = match ops
+    Nil         => "    OpStore %out_ptr %v" + str(i) + "\n    OpReturn\n"
+    Cons(op, r) => kernel_spirv_op(op, i) + kernel_spirv_ops(r, i + 1)
+
+fn kernel_lower_spirv(kname, tile, ops) = "; SPIR-V\n; Version: 1.6\nOpCapability Shader\n%glsl = OpExtInstImport \"GLSL.std.450\"\nOpMemoryModel Logical GLSL450\nOpEntryPoint GLCompute %" + kname + " \"" + kname + "\"\nOpExecutionMode %" + kname + " LocalSize " + str(tile) + " 1 1\n%int = OpTypeInt 32 1\n%zero = OpConstant %int 0\n%" + kname + " = OpFunction %void None %fn_ty\n%entry = OpLabel\n" + kernel_spirv_ops(ops, 0) + "OpFunctionEnd"
+
+fn kernel_emit_spirv(kname, tile) = kernel_lower_spirv(kname, tile, Cons("mul", Cons("add", Cons("relu", Nil))))
 
 ## Unit tests for `lume test compiler/stage1/nn.src`
 fn test_nn_mlp2_forward_and_loss() = let w1 = {rows: 2, cols: 2, data: Cons(1, Cons(0, Cons(0, Cons(1, Nil))))} in let b1 = {rows: 1, cols: 2, data: Cons(0, Cons(0, Nil))} in let w2 = {rows: 2, cols: 2, data: Cons(2, Cons(0, Cons(0, Cons(2, Nil))))} in let b2 = {rows: 1, cols: 2, data: Cons(0, Cons(0, Nil))} in let m = mlp2_new(w1, b1, w2, b2) in let x = {rows: 2, cols: 2, data: Cons(3, Cons(1, Cons(1, Cons(4, Nil))))} in let y = Cons(0, Cons(1, Nil)) in if mlp2_accuracy(m, x, y) == 100 and mlp2_loss(m, x, y) >= 0 then 1 else 0
@@ -116,6 +144,6 @@ fn test_nn_mlp2_grad_and_sgd_step() = let w1 = {rows: 2, cols: 2, data: Cons(1, 
 
 fn test_nn_adam_step() = let w1 = {rows: 2, cols: 2, data: Cons(1, Cons(0, Cons(0, Cons(1, Nil))))} in let b1 = {rows: 1, cols: 2, data: Cons(0, Cons(0, Nil))} in let m0 = mlp2_new(w1, b1, w1, b1) in let st0 = adam_init_mlp2(m0) in let x = {rows: 2, cols: 2, data: Cons(3, Cons(0, Cons(0, Cons(3, Nil))))} in let y = Cons(0, Cons(1, Nil)) in let g = mlp2_grad(m0, x, y) in let r = adam_step_mlp2(m0, st0, g, 1) in if r.state.step == 1 then 1 else 0
 
-fn test_nn_safetensors_and_onnx_export() = let w1 = {rows: 2, cols: 2, data: Cons(1, Cons(2, Cons(3, Cons(4, Nil))))} in let b1 = {rows: 1, cols: 2, data: Cons(0, Cons(0, Nil))} in let m = mlp2_new(w1, b1, w1, b1) in let h = model_content_hash(m) in let st = model_save_safetensors(m) in let ox = model_export_onnx(m, "mlp2") in if count(h) == 71 and sha256_hex("abc") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" and st != "" and ox != "" then 1 else 0
+fn test_nn_safetensors_and_onnx_export() = let w1 = {rows: 2, cols: 2, data: Cons(1, Cons(2, Cons(3, Cons(4, Nil))))} in let b1 = {rows: 1, cols: 2, data: Cons(5, Cons(6, Nil))} in let m = mlp2_new(w1, b1, w1, b1) in let h = model_content_hash(m) in let st = model_save_safetensors(m) in let ox = model_export_onnx(m, "mlp2") in if count(h) == 71 and sha256_hex("abc") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" and count(st) > 150 and count(ox) > 120 then 1 else 0
 
-fn test_nn_ptx_and_spirv_codegen() = let ptx = kernel_emit_ptx("fused_affine_relu", 16) in let spv = kernel_emit_spirv("fused_affine_relu", 16) in if ptx != "" and spv != "" then 1 else 0
+fn test_nn_ptx_and_spirv_codegen() = let ptx = kernel_emit_ptx("fused_affine_relu", 16) in let spv = kernel_emit_spirv("fused_affine_relu", 16) in if count(ptx) > 150 and count(spv) > 150 then 1 else 0

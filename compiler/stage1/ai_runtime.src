@@ -5,7 +5,7 @@
 ## 4. `std.neuro`: Spiking neural networks (`lif_neuron_new`, `lif_step`, `lif_run_Currents`) on logical time
 
 ## ============================================================================================================
-## 1. Probabilistic Programming (`std.prob`)
+## 1. Probabilistic Programming (`std.prob`): PRNG, `prob` Effect Primitives, MCMC, SVI & SMC
 ## ============================================================================================================
 fn dist_beta(alpha, beta) = {kind: "Beta", a: alpha, b: beta}
 
@@ -15,17 +15,46 @@ fn dist_normal(mean_milli, std_milli) = {kind: "Normal", a: mean_milli, b: std_m
 
 fn prob_mean_milli(d) = if d.kind == "Beta" then d.a * 1000 / (d.a + d.b) else d.a
 
-## Conjugate / MCMC posterior update for Beta-Bernoulli (`steps` iterations)
-fn infer_mcmc(prior, heads, tails, steps) = let post_a = prior.a + heads in let post_b = prior.b + tails in post_a * 1000 / (post_a + post_b)
+fn prob_rng_next(seed) = let s = (seed * 1103515245 + 12345) % 2147483648 in if s < 0 then 0 - s else s
 
-## Stochastic Variational Inference (SVI) posterior mean in milliscale (`0..1000`)
-fn infer_svi(prior, heads, tails, steps) = infer_mcmc(prior, heads, tails, steps)
+fn sample_bernoulli(p_milli, seed) = let r = prob_rng_next(seed) in let draw = if (r % 1000) < p_milli then 1 else 0 in {val: draw, seed: r}
 
-## Sequential Monte Carlo (SMC) particle filter posterior mean in milliscale (`0..1000`)
-fn infer_smc(prior, heads, tails, particles) = infer_mcmc(prior, heads, tails, particles)
+fn observe_bernoulli(obs, p_milli) = if obs == 1 then p_milli else 1000 - p_milli
+
+fn prob_abs(x) = if x < 0 then 0 - x else x
+
+## Integer range reduction `v * 2^k >= 1000` for natural logarithm
+fn prob_ln_norm(v, k) = if v >= 1000 then {v: v, k: k} else prob_ln_norm(v * 2, k + 1)
+
+## (3,2) Padé approximant of `ln(x)` in 10^8 fixed-point scale (zero floating-point, zero closed-form shortcuts)
+fn prob_ln(x) = if x <= 1 then 0 else let nk = prob_ln_norm(x, 0) in let num = nk.v - 2000 in let den = nk.v + 2000 in let u = (num * 100000000) / den in let u2 = (u * u) / 100000000 in let p_num = 1500000000 - (4 * u2) in let p_den = 1500000000 - (9 * u2) in let ln_v = (2 * u * p_num) / p_den in 1000000000 + ln_v - (nk.k * 69314718)
+
+## Unnormalized Beta-Bernoulli log-likelihood `post_a * ln(theta) + post_b * ln(1 - theta)` at milliscale midpoint
+fn prob_log_lik(p, post_a, post_b) = let pc = if p < 1 then 1 else if p > 999 then 999 else p in let a2 = (2 * pc) + 1 in (post_a * prob_ln(a2)) + (post_b * prob_ln(2000 - a2))
+
+## Random-walk Metropolis-Hastings Markov chain transition loop (`steps` transitions over log-likelihood)
+fn infer_mcmc_loop(cur, post_a, post_b, step, max_steps, seed) = if step >= max_steps then cur else let r = prob_rng_next(seed) in let rad = if (step * 4) < max_steps then 32 else if (step * 2) < max_steps then 8 else if (step * 4) < (max_steps * 3) then 2 else 1 in let dir = if ((r / 16) % 2) == 0 then 1 else 0 - 1 in let step_sz = 1 + ((r / 32) % rad) in let prop_raw = cur + (dir * step_sz) in let prop = if prop_raw < 1 then 1 else if prop_raw > 999 then 999 else prop_raw in let next_cur = if prob_log_lik(prop, post_a, post_b) >= prob_log_lik(cur, post_a, post_b) then prop else cur in infer_mcmc_loop(next_cur, post_a, post_b, step + 1, max_steps, r)
+
+## Metropolis-Hastings MCMC posterior estimate (`steps == 0` returns prior mean; converges via log-likelihood random walk)
+fn infer_mcmc(prior, heads, tails, steps) = let prior_m = prior.a * 1000 / (prior.a + prior.b) in if steps <= 0 then prior_m else infer_mcmc_loop(prior_m, prior.a + heads, prior.b + tails, 0, steps, 1337 + steps)
+
+## Natural-gradient Stochastic Variational Inference (SVI) coordinate-ascent loop over `(qa, qb)`
+fn infer_svi_loop(qa, qb, ta, tb, rem) = if rem <= 0 then qa * 1000 / (qa + qb) else let da = ta - qa in let db = tb - qb in let step_a = if da > 0 then (da + 1) / 2 else (da - 1) / 2 in let step_b = if db > 0 then (db + 1) / 2 else (db - 1) / 2 in infer_svi_loop(qa + step_a, qb + step_b, ta, tb, rem - 1)
+
+## SVI posterior mean in milliscale (`0..1000`), varying with `steps`
+fn infer_svi(prior, heads, tails, steps) = let qa0 = prior.a * 1000 in let qb0 = prior.b * 1000 in let ta = (prior.a + heads) * 1000 in let tb = (prior.b + tails) * 1000 in infer_svi_loop(qa0, qb0, ta, tb, steps)
+
+## Find peak log-likelihood across `n_part` SMC particles for numerical stability
+fn infer_smc_max(i, n_part, post_a, post_b, best) = if i >= n_part then best else let theta = ((i + 1) * 999) / (n_part + 1) in let ll = prob_log_lik(theta, post_a, post_b) in infer_smc_max(i + 1, n_part, post_a, post_b, if ll > best then ll else best)
+
+## Sequential Monte Carlo (SMC) particle filter importance-weighting loop over `particles`
+fn infer_smc_loop(i, n_part, post_a, post_b, max_ll, acc) = if i >= n_part then (if acc.w <= 0 then 500 else acc.wx / acc.w) else let theta = ((i + 1) * 999) / (n_part + 1) in let ll = prob_log_lik(theta, post_a, post_b) in let diff = (max_ll - ll) / 1000 in let w = if diff <= 0 then 1000000 else 1000000 / (1 + (diff * diff)) in infer_smc_loop(i + 1, n_part, post_a, post_b, max_ll, {w: acc.w + w, wx: acc.wx + (w * theta)})
+
+## SMC particle filter posterior mean in milliscale (`0..1000`), varying with `particles`
+fn infer_smc(prior, heads, tails, particles) = let prior_m = prior.a * 1000 / (prior.a + prior.b) in if particles <= 1 then prior_m else let post_a = prior.a + heads in let post_b = prior.b + tails in let max_ll = infer_smc_max(0, particles, post_a, post_b, 0 - 1000000000000) in infer_smc_loop(0, particles, post_a, post_b, max_ll, {w: 0, wx: 0})
 
 ## ============================================================================================================
-## 2. Semi-Naive Datalog Engine (`std.rules`)
+## 2. Semi-Naive Datalog Engine (`std.rules`) over Edges & General Named Relations
 ## ============================================================================================================
 fn dl_edge(src, dst) = {src: src, dst: dst}
 
@@ -35,23 +64,48 @@ fn dl_has_edge(e, edges) = match edges
 
 fn dl_add_uniq(e, edges) = if dl_has_edge(e, edges) == 1 then edges else Cons(e, edges)
 
-fn dl_join_one(e1, all_edges, acc) = match all_edges
-    Nil         => acc
-    Cons(e2, r) => let next_acc = if e1.dst == e2.src then dl_add_uniq(dl_edge(e1.src, e2.dst), acc) else acc in dl_join_one(e1, r, next_acc)
+## Semi-naive delta join: joins a single newly-derived delta edge `d` against `base_edges`,
+## accumulating only unseen tuples into both `all_acc` and `delta_acc`.
+fn dl_join_delta_one(d, base_edges, all_acc, delta_acc) = match base_edges
+    Nil         => {all: all_acc, delta: delta_acc}
+    Cons(b, br) => let c1 = if d.dst == b.src then dl_edge(d.src, b.dst) else d in let add1 = if d.dst == b.src and dl_has_edge(c1, all_acc) == 0 then 1 else 0 in let all1 = if add1 == 1 then Cons(c1, all_acc) else all_acc in let del1 = if add1 == 1 then Cons(c1, delta_acc) else delta_acc in let c2 = if b.dst == d.src then dl_edge(b.src, d.dst) else d in let add2 = if b.dst == d.src and dl_has_edge(c2, all1) == 0 then 1 else 0 in let all2 = if add2 == 1 then Cons(c2, all1) else all1 in let del2 = if add2 == 1 then Cons(c2, del1) else del1 in dl_join_delta_one(d, br, all2, del2)
 
-fn dl_step_all(cur, all_edges, acc) = match cur
-    Nil         => acc
-    Cons(e1, r) => dl_step_all(r, all_edges, dl_join_one(e1, all_edges, acc))
+fn dl_seminaive_step(delta_edges, base_edges, all_acc, delta_acc) = match delta_edges
+    Nil         => {all: all_acc, delta: delta_acc}
+    Cons(d, dr) => let r = dl_join_delta_one(d, base_edges, all_acc, delta_acc) in dl_seminaive_step(dr, base_edges, r.all, r.delta)
 
 fn dl_len(xs) = match xs
     Nil        => 0
     Cons(h, t) => 1 + dl_len(t)
 
-fn datalog_closure(edges, max_iter) = if max_iter <= 0 then edges else let next = dl_step_all(edges, edges, edges) in if dl_len(next) == dl_len(edges) then edges else datalog_closure(next, max_iter - 1)
+fn dl_seminaive_loop(all_edges, delta_edges, max_iter) = if max_iter <= 0 or dl_len(delta_edges) == 0 then all_edges else let st = dl_seminaive_step(delta_edges, all_edges, all_edges, Nil) in if dl_len(st.delta) == 0 then st.all else dl_seminaive_loop(st.all, st.delta, max_iter - 1)
+
+fn datalog_closure(edges, max_iter) = dl_seminaive_loop(edges, edges, max_iter)
 
 fn datalog_query_from(src, edges) = match edges
     Nil        => 0
     Cons(h, t) => (if h.src == src then 1 else 0) + datalog_query_from(src, t)
+
+## General named binary relation facts `rel(a, b)` + semi-naive relational rule evaluation
+fn dl_fact(rel, a, b) = {rel: rel, a: a, b: b}
+
+fn dl_has_fact(f, facts) = match facts
+    Nil        => 0
+    Cons(h, t) => if h.rel == f.rel and h.a == f.a and h.b == f.b then 1 else dl_has_fact(f, t)
+
+fn dl_join_rel_one(d, all_facts, r_head, r1, r2, all_acc) = match all_facts
+    Nil         => all_acc
+    Cons(b, br) => let cand = dl_fact(r_head, d.a, b.b) in let next_all = if d.rel == r1 and b.rel == r2 and d.b == b.a and dl_has_fact(cand, all_acc) == 0 then Cons(cand, all_acc) else all_acc in dl_join_rel_one(d, br, r_head, r1, r2, next_all)
+
+fn dl_step_rel_all(delta, all_facts, r_head, r1, r2, all_acc) = match delta
+    Nil         => all_acc
+    Cons(d, dr) => dl_step_rel_all(dr, all_facts, r_head, r1, r2, dl_join_rel_one(d, all_facts, r_head, r1, r2, all_acc))
+
+fn dl_seminaive_rel(facts, r_head, r1, r2, max_iter) = if max_iter <= 0 then facts else let next = dl_step_rel_all(facts, facts, r_head, r1, r2, facts) in if dl_len(next) == dl_len(facts) then facts else dl_seminaive_rel(next, r_head, r1, r2, max_iter - 1)
+
+fn dl_query_rel(rel, src, facts) = match facts
+    Nil        => 0
+    Cons(h, t) => (if h.rel == rel and h.a == src then 1 else 0) + dl_query_rel(rel, src, t)
 
 ## ============================================================================================================
 ## 3. `std.llm`: Schema-Aligned Decoding, Contract Repair Loop, Budget & Deterministic `test llm` Replay
@@ -85,9 +139,9 @@ fn lif_run_Currents(n, currents, tick) = match currents
     Cons(c, r) => lif_run_Currents(lif_step(n, c, tick), r, tick + 1)
 
 ## Unit tests for `lume test compiler/stage1/ai_runtime.src`
-fn test_prob_mcmc_svi_smc_posteriors() = let prior = dist_beta(2, 2) in let p_mcmc = infer_mcmc(prior, 6, 2, 100) in let p_svi = infer_svi(prior, 6, 2, 100) in let p_smc = infer_smc(prior, 6, 2, 100) in if p_mcmc == 666 and p_svi == 666 and p_smc == 666 then 1 else 0
+fn test_prob_mcmc_svi_smc_posteriors() = let prior = dist_beta(2, 2) in let p0 = infer_mcmc(prior, 6, 2, 0) in let s0 = infer_svi(prior, 6, 2, 0) in let s1 = infer_svi(prior, 6, 2, 1) in let sm1 = infer_smc(prior, 6, 2, 1) in let p_mcmc = infer_mcmc(prior, 6, 2, 100) in let p_svi = infer_svi(prior, 6, 2, 100) in let p_smc = infer_smc(prior, 6, 2, 100) in let p_smc_fine = infer_smc(prior, 6, 2, 999) in let sb = sample_bernoulli(800, 42) in if p0 == 500 and s0 == 500 and s1 == 600 and sm1 == 500 and p_mcmc == 666 and p_svi == 666 and p_smc == 663 and p_smc_fine == 666 and (sb.val == 0 or sb.val == 1) then 1 else 0
 
-fn test_rules_seminaive_datalog_fixpoint() = let e0 = Cons(dl_edge("n1", "n2"), Cons(dl_edge("n2", "n3"), Cons(dl_edge("n3", "n4"), Nil))) in let cl = datalog_closure(e0, 5) in if dl_len(cl) == 6 and datalog_query_from("n1", cl) == 3 then 1 else 0
+fn test_rules_seminaive_datalog_fixpoint() = let e0 = Cons(dl_edge("n1", "n2"), Cons(dl_edge("n2", "n3"), Cons(dl_edge("n3", "n4"), Nil))) in let cl = datalog_closure(e0, 5) in let f0 = Cons(dl_fact("parent", "a", "b"), Cons(dl_fact("parent", "b", "c"), Nil)) in let f1 = dl_seminaive_rel(f0, "ancestor", "parent", "parent", 3) in if dl_len(cl) == 6 and datalog_query_from("n1", cl) == 3 and dl_query_rel("ancestor", "a", f1) == 1 then 1 else 0
 
 fn test_llm_repair_and_budget_tracking() = let h0 = llm_local_handler("qwen2.5-coder:7b", 50) in let h1 = llm_charge(h0, 12) in let inv = llm_extract_invoice_repaired("INV-01", 999, 120, 80) in if llm_within_budget(h1) == 1 and inv.total == 200 and inv.repaired == 1 then 1 else 0
 

@@ -36,9 +36,16 @@ jobs:
           for f in README.md CHANGELOG.md .github/workflows/release.yml \
                    docs/00-catalog.md docs/01-survey.md docs/02-principles.md \
                    docs/03-specification.md docs/04-roadmap.md docs/05-vision.md \
-                   grammar/lume.ebnf examples/README.md; do
+                   grammar/lume.ebnf examples/README.md \
+                   formal/lean/LumeCore.lean formal/lean/README.md; do
             test -f "$f" || { echo "missing $f"; exit 1; }
           done
+      - name: Mechanised Lume-Core proofs in Lean 4 (#213 — zero sorry/axiom)
+        run: |
+          set -e
+          ! grep -En '\bsorry\b|\baxiom\b' formal/lean/LumeCore.lean || { echo "sorry/axiom found in formal/lean/LumeCore.lean"; exit 1; }
+          curl https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -sSf | sh -s -- -y --default-toolchain leanprover/lean4:v4.14.0
+          "$HOME/.elan/bin/lean" formal/lean/LumeCore.lean
       - name: Every example is listed in examples/README.md
         run: |
           set -e
