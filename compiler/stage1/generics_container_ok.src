@@ -1,0 +1,39 @@
+## C4c (#212): `comptime T: type` generics over user-declared record/enum types and container types (`Box[T]`, `Option[T]`, `[T]`).
+## Comptime type arguments (`Point`, `Status`, `Box[int]`, `Option[str]`, `[int]`) are checked gradually at compile time
+## and completely erased at runtime (`gerase` drops every comptime argument before codegen).
+
+type Point = record x: int, y: int
+type Status = enum Ok(int) | Fail(str)
+type Box[T] = record value: T
+type Option[T] = enum None | Some(T)
+
+fn id(comptime T: type, x: T) -> T = x
+fn box_of(comptime T: type, x: T) -> Box[T] = Box{value: x}
+fn unbox(comptime T: type, b: Box[T]) -> T = b.value
+fn unwrap_or(comptime T: type, opt: Option[T], fallback: T) -> T = match opt
+    None    => fallback
+    Some(v) => v
+fn head_or(comptime T: type, xs: [T], fallback: T) -> T = match xs
+    Nil        => fallback
+    Cons(h, t) => h
+
+fn pt_sum(p: Point) -> int = p.x + p.y
+fn status_code(s: Status) -> int = match s
+    Ok(n)     => n
+    Fail(msg) => 0 - count(msg)
+
+fn demo_total() -> int =
+    let p0 = id(Point, Point{x: 19, y: 23}) in
+    let s0 = id(Status, Ok(77)) in
+    let b1 = box_of(int, 42) in
+    let b2 = id(Box[Point], Box{value: p0}) in
+    let o2 = unwrap_or(int, None, 99) in
+    let xs = id([int], Cons(10, Cons(20, Nil))) in
+    pt_sum(p0) + status_code(s0) + unbox(int, b1) + pt_sum(unbox(Point, b2)) + o2 + head_or(int, xs, 0)
+
+fn demo_label() -> str =
+    let o1 = id(Option[str], Some("container-ok")) in
+    unwrap_or(str, o1, "fallback")
+
+print demo_total()
+print demo_label()

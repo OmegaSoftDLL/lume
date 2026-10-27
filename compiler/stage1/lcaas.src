@@ -80,9 +80,9 @@ fn cs_skiprp(ts) = cs_dropkw(ts, ")")
 fn cs_skiprk(ts) = cs_dropkw(ts, "]")
 
 fn cs_prim(ts) = cs_postfix(cs_atom(ts))
-fn cs_atom(ts) = if cs_hdkind(ts) == "NM" then {node: Num(toint(cs_hdtext(ts))), rest: cs_drop1(ts)} else if cs_hdkind(ts) == "ST" then {node: Str(cs_hdtext(ts)), rest: cs_drop1(ts)} else if cs_hdtext(ts) == "(" then cs_paren(cs_drop1(ts)) else if cs_hdtext(ts) == "{" then cs_rec(cs_drop1(ts)) else if cs_hdtext(ts) == "if" then cs_if(cs_drop1(ts)) else if cs_hdtext(ts) == "let" then cs_let(cs_drop1(ts)) else if cs_hdtext(ts) == "var" then cs_var(cs_drop1(ts)) else if cs_hdtext(ts) == "own" then cs_owne(cs_drop1(ts)) else if cs_hdtext(ts) == "mut" then cs_mute(cs_drop1(ts)) else if cs_hdtext(ts) == "defer" then cs_defer(cs_drop1(ts)) else if cs_hdtext(ts) == "errdefer" then cs_errdefer(cs_drop1(ts)) else if cs_hdtext(ts) == "with" then cs_with(cs_drop1(ts)) else if cs_hdtext(ts) == "scope" then cs_scope(cs_drop1(ts)) else if cs_hdtext(ts) == "spawn" then cs_spawn(cs_drop1(ts)) else if cs_hdtext(ts) == "match" then cs_match(cs_drop1(ts)) else if cs_hdtext(ts) == "comptime" then cs_ct(cs_drop1(ts)) else if cs_hdtext(ts) == "quote" then cs_quote(cs_drop1(ts)) else if cs_hdtext(ts) == "splice" then cs_splice(cs_drop1(ts)) else if cs_hdkind(ts) == "ID" then cs_ident(cs_hdtext(ts), cs_drop1(ts)) else {node: Num(0), rest: cs_drop1(ts)}
+fn cs_atom(ts) = if cs_hdkind(ts) == "NM" then {node: Num(toint(cs_hdtext(ts))), rest: cs_drop1(ts)} else if cs_hdkind(ts) == "ST" then {node: Str(cs_hdtext(ts)), rest: cs_drop1(ts)} else if cs_hdtext(ts) == "(" then cs_paren(cs_drop1(ts)) else if cs_hdtext(ts) == "[" then (let r = cs_expr(cs_drop1(ts)) in {node: Call("_tylist_", Cons(r.node, Nil)), rest: cs_skiprk(r.rest)}) else if cs_hdtext(ts) == "{" then cs_rec(cs_drop1(ts)) else if cs_hdtext(ts) == "if" then cs_if(cs_drop1(ts)) else if cs_hdtext(ts) == "let" then cs_let(cs_drop1(ts)) else if cs_hdtext(ts) == "var" then cs_var(cs_drop1(ts)) else if cs_hdtext(ts) == "own" then cs_owne(cs_drop1(ts)) else if cs_hdtext(ts) == "mut" then cs_mute(cs_drop1(ts)) else if cs_hdtext(ts) == "defer" then cs_defer(cs_drop1(ts)) else if cs_hdtext(ts) == "errdefer" then cs_errdefer(cs_drop1(ts)) else if cs_hdtext(ts) == "with" then cs_with(cs_drop1(ts)) else if cs_hdtext(ts) == "scope" then cs_scope(cs_drop1(ts)) else if cs_hdtext(ts) == "spawn" then cs_spawn(cs_drop1(ts)) else if cs_hdtext(ts) == "match" then cs_match(cs_drop1(ts)) else if cs_hdtext(ts) == "comptime" then cs_ct(cs_drop1(ts)) else if cs_hdtext(ts) == "quote" then cs_quote(cs_drop1(ts)) else if cs_hdtext(ts) == "splice" then cs_splice(cs_drop1(ts)) else if cs_hdkind(ts) == "ID" then cs_ident(cs_hdtext(ts), cs_drop1(ts)) else {node: Num(0), rest: cs_drop1(ts)}
 fn cs_paren(ts) = let r = cs_expr(ts) in {node: r.node, rest: cs_skiprp(r.rest)}
-fn cs_ident(nm, ts) = if cs_hdtext(ts) == "(" then cs_call(nm, cs_arglist(cs_drop1(ts))) else if cs_hdtext(ts) == "{" then cs_rect(nm, cs_rec(cs_drop1(ts))) else {node: Var(nm), rest: ts}
+fn cs_ident(nm, ts) = if cs_hdtext(ts) == "(" then cs_call(nm, cs_arglist(cs_drop1(ts))) else if cs_hdtext(ts) == "{" then cs_rect(nm, cs_rec(cs_drop1(ts))) else if cs_hdtext(ts) == "[" then (let ta = cs_expr(cs_drop1(ts)) in let t2 = cs_skiprk(ta.rest) in if cs_hdtext(t2) == "{" then cs_rect(nm, cs_rec(cs_drop1(t2))) else {node: Call("_tyapp_" + nm, Cons(ta.node, Nil)), rest: t2}) else {node: Var(nm), rest: ts}
 fn cs_call(nm, a) = {node: Call(nm, a.items), rest: a.rest}
 fn cs_rect(nm, r) = cs_rect2(nm, r.node, r.rest)
 fn cs_rect2(nm, nd, rest) = match nd
@@ -154,7 +154,7 @@ fn cs_armcons(p, b, rr) = {items: Cons({pat: p, body: b}, rr.items), rest: rr.re
 
 ## --- declarations (type / fn / print / expr) ---
 fn cs_istyapp1(nm) = nm == "table" or nm == "rc" or nm == "arc" or nm == "weak" or nm == "cell" or nm == "chan" or nm == "Ref" or nm == "View" or nm == "unverified" or nm == "cap"
-fn cs_ptype1(ts) = if cs_hdtext(ts) == "[" then cs_ptlist(cs_ptype1(cs_drop1(ts))) else if cs_hdtext(ts) == "tensor" and cs_hdtext(cs_drop1(ts)) == "[" then cs_pttensor(cs_ptype1(cs_drop1(cs_drop1(ts)))) else if cs_istyapp1(cs_hdtext(ts)) and cs_hdtext(cs_drop1(ts)) == "[" then cs_ptapp(cs_hdtext(ts), cs_ptype1(cs_drop1(cs_drop1(ts)))) else {node: TyName(cs_hdtext(ts)), rest: cs_drop1(ts)}
+fn cs_ptype1(ts) = if cs_hdtext(ts) == "[" then cs_ptlist(cs_ptype1(cs_drop1(ts))) else if cs_hdtext(ts) == "tensor" and cs_hdtext(cs_drop1(ts)) == "[" then cs_pttensor(cs_ptype1(cs_drop1(cs_drop1(ts)))) else if cs_hdtext(ts) != "" and cs_hdtext(cs_drop1(ts)) == "[" then cs_ptapp(cs_hdtext(ts), cs_ptype1(cs_drop1(cs_drop1(ts)))) else {node: TyName(cs_hdtext(ts)), rest: cs_drop1(ts)}
 fn cs_ptlist(r) = {node: TyList(r.node), rest: cs_skiprk(r.rest)}
 fn cs_ptapp(kind, r) = {node: TyApply(kind, r.node), rest: cs_skiprk(r.rest)}
 fn cs_ptdims(ts) = if cs_hdtext(ts) == "]" then {items: Nil, rest: cs_drop1(ts)} else let d = cs_hdtext(ts) in let t1 = cs_drop1(ts) in if cs_hdtext(t1) == "," then let rr = cs_ptdims(cs_drop1(t1)) in {items: Cons(d, rr.items), rest: rr.rest} else {items: Cons(d, Nil), rest: cs_skiprk(t1)}
@@ -194,7 +194,9 @@ fn cs_mkvsig(nm, ps, reqs, enss) = if cs_isnil(reqs) == 0 or cs_isnil(enss) == 0
 fn cs_pfnp(ts, pubf, freef) = let nm = cs_hdtext(ts) in let ps = cs_pparams(cs_dropkw(cs_drop1(ts), "(")) in let rt = cs_pret(ps.rest) in let b = if cs_hdtext(rt.rest) == "=" then cs_expr(cs_drop1(rt.rest)) else if (freef / 4) % 2 == 1 then {node: Call("llm_prompt", Cons(Str(nm), Nil)), rest: rt.rest} else if (freef / 32) % 2 == 1 then {node: Nil, rest: rt.rest} else cs_expr(rt.rest) in {node: if cs_isnil(b.node) == 1 then Nil else Fn(nm, ps.items, b.node), sg: cs_mksig(nm, ps, rt.ty), osg: cs_mkosig(nm, pubf, freef, ps.plist, rt.ty, rt.fromp), ksg: cs_mkksig(nm, rt.effs), vsg: cs_mkvsig(nm, ps.items, rt.reqs, rt.enss), rest: b.rest}
 fn cs_pfn(ts) = cs_pfnp(ts, 0, 0)
 
-fn cs_ptype(ts) = let nm = cs_hdtext(ts) in let rest = cs_dropkw(cs_drop1(ts), "=") in if cs_hdtext(rest) == "record" or cs_hdtext(rest) == "model" then cs_precordty(nm, cs_dropkw(cs_drop1(rest), "{")) else if cs_hdtext(rest) == "{" then cs_precordty(nm, cs_drop1(rest)) else cs_penumty(nm, cs_dropkw(rest, "enum"))
+fn cs_skiptp1(ts, close, d) = if d <= 0 then ts else if cs_isnil(ts) == 1 then Nil else if cs_hdtext(ts) == "[" or cs_hdtext(ts) == "(" then cs_skiptp1(cs_drop1(ts), close, d + 1) else if cs_hdtext(ts) == close then cs_skiptp1(cs_drop1(ts), close, d - 1) else cs_skiptp1(cs_drop1(ts), close, d)
+fn cs_skiptp(ts) = if cs_hdtext(ts) == "[" then cs_skiptp1(cs_drop1(ts), "]", 1) else if cs_hdtext(ts) == "(" then cs_skiptp1(cs_drop1(ts), ")", 1) else ts
+fn cs_ptype(ts) = let nm = cs_hdtext(ts) in let rest = cs_dropkw(cs_skiptp(cs_drop1(ts)), "=") in if cs_hdtext(rest) == "record" or cs_hdtext(rest) == "model" then cs_precordty(nm, cs_dropkw(cs_drop1(rest), "{")) else if cs_hdtext(rest) == "{" then cs_precordty(nm, cs_drop1(rest)) else cs_penumty(nm, cs_dropkw(rest, "enum"))
 fn cs_penumty(nm, ts) = let vs = cs_pvariants(ts) in {node: TypeS(nm, "enum", vs.items), inv: Nil, rest: vs.rest}
 fn cs_pvariants(ts) = cs_pvariant(cs_hdtext(ts), cs_drop1(ts))
 fn cs_pvariant(tag, ts) = if cs_hdtext(ts) == "(" then let a = cs_ptypes(cs_drop1(ts)) in cs_pvariantend(tag, cs_len(a.items), a.rest) else cs_pvariantend(tag, 0, ts)
@@ -379,8 +381,9 @@ fn cs_chk_args3(fnm, idx, pn, pr, pts, a, ar, tt) = match pts
     Cons(pt, tr) => cs_app(cs_chk_arg1(fnm, idx, pn, pt, a, tt), cs_chk_args(fnm, idx + 1, pr, tr, ar, tt))
 
 fn cs_tyarg(e) = match e
-    Var(nm) => nm
-    _       => ""
+    Var(nm)      => nm
+    Call(nm, xs) => if nm == "_tylist_" and cs_len(xs) == 1 then "[" + cs_tyarg(cs_asthead(xs)) + "]" else if count(nm) > 7 and slice(nm, 0, 7) == "_tyapp_" and cs_len(xs) == 1 then slice(nm, 7, count(nm)) + "[" + cs_tyarg(cs_asthead(xs)) + "]" else ""
+    _            => ""
 fn cs_glookup(nm, env) = match env
     Nil        => nm
     Cons(h, t) => if h.k == nm then h.v else cs_glookup(nm, t)

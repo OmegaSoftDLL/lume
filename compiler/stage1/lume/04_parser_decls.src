@@ -100,12 +100,14 @@ fn parseprogram(s) = parseprog(lex(s, 0))
 ## emits NO code (compile-time information only); `kind` is "enum" (items are `{tag, ar}`) or "record" (items are
 ## `{fname, fty}`). The `enum` keyword is optional (so `type T = A | B` is accepted); anything that is not
 ## `record` is parsed as an enum. Type expressions are kept (`TyName`/`TyList`); F2 checks them against call arguments.
-fn parsetype(t) = parsetypebody(headtext(t), dropkw(droponce(t), "="))
+fn skiptp1(ts, close, d) = if d <= 0 then ts else if isnil(ts) == 1 then Nil else if headtext(ts) == "[" or headtext(ts) == "(" then skiptp1(droponce(ts), close, d + 1) else if headtext(ts) == close then skiptp1(droponce(ts), close, d - 1) else skiptp1(droponce(ts), close, d)
+fn skiptypeparams(ts) = if headtext(ts) == "[" then skiptp1(droponce(ts), "]", 1) else if headtext(ts) == "(" then skiptp1(droponce(ts), ")", 1) else ts
+fn parsetype(t) = parsetypebody(headtext(t), dropkw(skiptypeparams(droponce(t)), "="))
 fn parsetypebody(nm, t) = if headtext(t) == "record" or headtext(t) == "model" then parserecordty(nm, droponce(t)) else parseenumty(nm, dropkw(t, "enum"))
 fn parseenumty(nm, t) = let hb = if headtext(t) == "{" then 1 else 0 in parseenumty2(nm, hb, parsevariants(dropkw(dropkw(t, "{"), "|")))
 fn parseenumty2(nm, hb, vs) = {node: TypeS(nm, "enum", vs.items), inv: Nil, rest: if hb == 1 then skiprb(vs.rest) else vs.rest}
 fn parsevariants(ts) = parsevariant(headtext(ts), droponce(ts))
-fn parsevariant(tag, ts) = if headtext(ts) == "(" then parsevariantp(tag, parsevpayload(droponce(ts))) else parsevariantend(tag, 0, ts)
+fn parsevariant(tag, ts) = if headtext(ts) == "(" then parsevariantp(tag, parsevpayload(droponce(ts))) else parsevariantend(tag, 0, TyAny, ts)
 ## F4 (front-end unification, slice 1): an enum variant payload accepts BOTH the Lume-Core positional form
 ## `Cons(int, Node)` and the surface form with NAMED fields `Cons(value: int, next: Node)`. A leading `name :`
 ## is consumed and discarded, so both forms lower to the SAME `{tag, ar}` AST (arity = field count) and emit
@@ -115,9 +117,12 @@ fn parsevpayload(ts) = if headtext(ts) == ")" then {items: Nil, rest: droponce(t
 fn parsevpfield(ts) = if headtext(droponce(ts)) == ":" then parsetype1(droponce(droponce(ts))) else parsetype1(ts)
 fn parsevpmore(r) = if headtext(r.rest) == "," then parsevpcons(r.node, parsevpayload(droponce(r.rest))) else {items: Cons(r.node, Nil), rest: skiprp(r.rest)}
 fn parsevpcons(n, rr) = {items: Cons(n, rr.items), rest: rr.rest}
-fn parsevariantp(tag, a) = parsevariantend(tag, len(a.items), a.rest)
-fn parsevariantend(tag, ar, ts) requires ar >= 0 ensures isnil(result.items) == 0 = if headtext(ts) == "|" then parsevariantcons(tag, ar, parsevariants(droponce(ts))) else {items: Cons({tag: tag, ar: ar}, Nil), rest: ts}
-fn parsevariantcons(tag, ar, rr) = {items: Cons({tag: tag, ar: ar}, rr.items), rest: rr.rest}
+fn vphd(xs) = match xs
+    Nil        => TyAny
+    Cons(h, t) => h
+fn parsevariantp(tag, a) = parsevariantend(tag, len(a.items), if len(a.items) == 1 then vphd(a.items) else TyAny, a.rest)
+fn parsevariantend(tag, ar, pty, ts) requires ar >= 0 ensures isnil(result.items) == 0 = if headtext(ts) == "|" then parsevariantcons(tag, ar, pty, parsevariants(droponce(ts))) else {items: Cons({tag: tag, ar: ar, pty: pty}, Nil), rest: ts}
+fn parsevariantcons(tag, ar, pty, rr) = {items: Cons({tag: tag, ar: ar, pty: pty}, rr.items), rest: rr.rest}
 fn parserecordty(nm, t) = let hb = if headtext(t) == "{" then 1 else 0 in parserecordty2(nm, hb, parsefields(dropkw(t, "{")))
 fn parserecordty2(nm, hb, fs) = let rest1 = if hb == 1 then skiprb(fs.rest) else fs.rest in if headtext(rest1) == "invariant" then let inv = expr(droponce(rest1)) in {node: TypeS(nm, "record", fs.items), inv: VTypeInvariant(nm, fs.items, inv.node), rest: inv.rest} else {node: TypeS(nm, "record", fs.items), inv: Nil, rest: rest1}
 fn parsefields(ts) = parsefield(headtext(ts), dropkw(droponce(ts), ":"))
@@ -132,7 +137,7 @@ fn parsetypecons(n, rr) = {items: Cons(n, rr.items), rest: rr.rest}
 fn istyapp1(nm) = nm == "table" or nm == "rc" or nm == "arc" or nm == "weak" or nm == "cell" or nm == "chan" or nm == "Ref" or nm == "View" or nm == "unverified" or nm == "cap"
 fn parsedims(ts) = if headtext(ts) == "]" then {items: Nil, rest: droponce(ts)} else let d = headtext(ts) in let t1 = droponce(ts) in if headtext(t1) == "," then let rr = parsedims(droponce(t1)) in {items: Cons(d, rr.items), rest: rr.rest} else {items: Cons(d, Nil), rest: skiprk(t1)}
 fn parsetypetensor(ts) = let et = parsetype1(ts) in if headtext(et.rest) == "," then let ds = parsedims(droponce(et.rest)) in {node: TyTensor(et.node, ds.items), rest: ds.rest} else {node: TyTensor(et.node, Nil), rest: skiprk(et.rest)}
-fn parsetype1(ts) = if headtext(ts) == "[" then parsetypelistof(parsetype1(droponce(ts))) else if headtext(ts) == "decimal" and headtext(droponce(ts)) == "(" then parsetypedecimal(droponce(droponce(ts))) else if headtext(ts) == "tensor" and headtext(droponce(ts)) == "[" then parsetypetensor(droponce(droponce(ts))) else if istyapp1(headtext(ts)) and headtext(droponce(ts)) == "[" then parsetypeapp(headtext(ts), droponce(droponce(ts))) else {node: TyName(headtext(ts)), rest: droponce(ts)}
+fn parsetype1(ts) = if headtext(ts) == "[" then parsetypelistof(parsetype1(droponce(ts))) else if headtext(ts) == "decimal" and headtext(droponce(ts)) == "(" then parsetypedecimal(droponce(droponce(ts))) else if headtext(ts) == "tensor" and headtext(droponce(ts)) == "[" then parsetypetensor(droponce(droponce(ts))) else if headtext(ts) != "" and headtext(droponce(ts)) == "[" then parsetypeapp(headtext(ts), droponce(droponce(ts))) else {node: TyName(headtext(ts)), rest: droponce(ts)}
 fn parsetypelistof(r) = {node: TyList(r.node), rest: skiprk(r.rest)}
 fn parsetypeapp(kind, ts) = parsetypeapp2(kind, parsetype1(ts))
 fn parsetypeapp2(kind, r) = {node: TyApply(kind, r.node), rest: skiprk(r.rest)}
