@@ -314,7 +314,7 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_
     printf 'fn test_ok() = 2 + 2 == 4\nfn test_broken() = 2 + 2 == 5\n' >"$ntmp/bad_test.src"
     LUME_BIN_DIR="$ntmp" ../../lume test "$ntmp/bad_test.src" >"$ntmp/bt.out" 2>"$ntmp/bt.err"; bt_code=$?
     if LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/sample_test.src 2>/dev/null | diff -u ../../tests/conformance/stage1/ltest_pass_asm.expected - >/dev/null && [ "$bt_code" != 0 ] && grep -q "FAIL test_broken" "$ntmp/bt.out" && grep -q "1 passed, 1 failed" "$ntmp/bt.out"; then ok "phase-2 T1: lume test (native ltest.src) discovers fn test_*(), passes valid suite and fails broken suite"; else bad "phase-2 T1: lume test (native ltest.src) discovers and runs fn test_*()"; fi
-    if LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/decimal.src 2>/dev/null | grep -q "15 passed, 0 failed"; then ok "phase-2 D1: decimal precision/scale helper regressions pass through native lume test"; else bad "phase-2 D1: decimal precision/scale helper regressions"; fi
+    if LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/decimal.src 2>/dev/null | grep -q "16 passed, 0 failed"; then ok "phase-2 D1: decimal precision/scale helper regressions pass through native lume test"; else bad "phase-2 D1: decimal precision/scale helper regressions"; fi
     cat ../../compiler/stage1/decimal.src >"$ntmp/decimal_bad.src"
     printf 'print decimal_format(decimal_cast(decimal_parse("1.234"), 4, 2))\n' >>"$ntmp/decimal_bad.src"
     if LUME_BIN_DIR="$ntmp" ../../lume build "$ntmp/decimal_bad.src" -o "$ntmp/decimal_bad" >/dev/null 2>&1; then
@@ -632,28 +632,39 @@ PY
     # 6 automated gates `compile`/`conformance`/`api_compat`/`capability`/`budget`/`fixpoint`, and mandatory human approval).
     if LUME_BIN_DIR="$ntmp" ../../lume run ../../compiler/stage1/evolve_demo.src >"$ntmp/ev_demo.out" 2>"$ntmp/ev_demo.err" && diff -u ../../tests/conformance/stage1/evolve_demo_asm.expected "$ntmp/ev_demo.out" >/dev/null; then ok "phase-2 E3: in-process self-evolution & governance engine (use levolve: AI fix-it repair + 6 gates + human approval)"; else bad "phase-2 E3: in-process self-evolution & governance engine (use levolve)"; cat "$ntmp/ev_demo.err" "$ntmp/ev_demo.out"; fi
     if command -v python3 >/dev/null 2>&1; then
+        _sig_0001=$(tr -d '\r\n' < ../../evolve/proposals/0001_math_clamp/approval.sig)
         LUME_BIN_DIR="$ntmp" ../../lume evolve verify ../../evolve/proposals/0001_math_clamp >"$ntmp/ev_verify.json" 2>"$ntmp/ev_v.err" || true
-        LUME_BIN_DIR="$ntmp" ../../lume evolve approve ../../evolve/proposals/0001_math_clamp --by ricardo >"$ntmp/ev_approve.json" 2>"$ntmp/ev_a.err" || true
-        LUME_BIN_DIR="$ntmp" ../../lume evolve approve ../../evolve/proposals/0001_math_clamp --by untrusted >"$ntmp/ev_unauth.json" 2>/dev/null; ev_unauth_rc=$?
-        LUME_BIN_DIR="$ntmp" ../../lume evolve approve ../../evolve/proposals/0001_math_clamp --by ricardo --sig sha256:0000000000000000000000000000000000000000000000000000000000000000 >"$ntmp/ev_forged.json" 2>/dev/null; ev_forged_rc=$?
+        LUME_BIN_DIR="$ntmp" ../../lume evolve approve ../../evolve/proposals/0001_math_clamp --by ricardo --sig "$_sig_0001" >"$ntmp/ev_approve.json" 2>"$ntmp/ev_a.err" || true
+        LUME_BIN_DIR="$ntmp" ../../lume evolve approve ../../evolve/proposals/0001_math_clamp --by ricardo >"$ntmp/ev_nosig.json" 2>/dev/null; ev_nosig_rc=$?
+        LUME_BIN_DIR="$ntmp" ../../lume evolve approve ../../evolve/proposals/0001_math_clamp --by untrusted --sig "$_sig_0001" >"$ntmp/ev_unauth.json" 2>/dev/null; ev_unauth_rc=$?
+        LUME_BIN_DIR="$ntmp" ../../lume evolve approve ../../evolve/proposals/0001_math_clamp --by ricardo --sig ed25519:00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 >"$ntmp/ev_forged.json" 2>/dev/null; ev_forged_rc=$?
         LUME_BIN_DIR="$ntmp" ../../lume evolve propose "Add bounded range helper" >"$ntmp/ev_prop_goal.json" 2>/dev/null || true
-        if [ "$ev_unauth_rc" != 0 ] && [ "$ev_forged_rc" != 0 ] && python3 - "$ntmp/ev_verify.json" "$ntmp/ev_approve.json" "$ntmp/ev_unauth.json" "$ntmp/ev_forged.json" "$ntmp/ev_prop_goal.json" <<'PY' >/dev/null 2>&1
+        awk '/^@baseline$/{p=1;next} /^@end$/&&p{exit} p{print}' ../../evolve/proposals/0003_decimal_clamp/proposal.bundle >"$ntmp/dec_apply_test.src"
+        LUME_BIN_DIR="$ntmp" ../../lume evolve apply ../../evolve/proposals/0001_math_clamp --target "$ntmp/dec_apply_test.src" >"$ntmp/ev_apply_bad.json" 2>/dev/null; ev_app_bad_rc=$?
+        ! grep -q "fn decimal_clamp" "$ntmp/dec_apply_test.src" && ev_unmod_ok=1 || ev_unmod_ok=0
+        LUME_BIN_DIR="$ntmp" ../../lume evolve apply ../../evolve/proposals/0003_decimal_clamp --target "$ntmp/dec_apply_test.src" >"$ntmp/ev_apply_ok.json" 2>"$ntmp/ev_app.err"; ev_app_ok_rc=$?
+        if [ "$ev_nosig_rc" != 0 ] && [ "$ev_unauth_rc" != 0 ] && [ "$ev_forged_rc" != 0 ] && [ "$ev_app_bad_rc" != 0 ] && [ "$ev_unmod_ok" = 1 ] && [ "$ev_app_ok_rc" = 0 ] && cmp -s "$ntmp/dec_apply_test.src" ../../compiler/stage1/decimal.src && LUME_BIN_DIR="$ntmp" ../../lume test "$ntmp/dec_apply_test.src" 2>/dev/null | grep -q "16 passed, 0 failed" && python3 - "$ntmp/ev_verify.json" "$ntmp/ev_approve.json" "$ntmp/ev_nosig.json" "$ntmp/ev_unauth.json" "$ntmp/ev_forged.json" "$ntmp/ev_prop_goal.json" "$ntmp/ev_apply_ok.json" <<'PY' >/dev/null 2>&1
 import json, sys
 v = json.load(open(sys.argv[1]))
 a = json.load(open(sys.argv[2]))
-u = json.load(open(sys.argv[3]))
-f = json.load(open(sys.argv[4]))
-g = json.load(open(sys.argv[5]))
+ns = json.load(open(sys.argv[3]))
+u = json.load(open(sys.argv[4]))
+f = json.load(open(sys.argv[5]))
+g = json.load(open(sys.argv[6]))
+ap = json.load(open(sys.argv[7]))
 assert v["id"] == "0001_math_clamp" and v["gates_ok"] is True and v["gates_passed"] == 6 and v["gates_total"] == 6
 assert v["proofs_ok"] is True and v["benchmark_ok"] is True and v["fixpoint_stage2_eq_stage3"] is True
 assert v["status"] == "verified_awaiting_human_approval" and v["human_approved"] is False and v["can_merge"] is False
+assert len(v["candidate_sha256"]) == 64
 assert a["gates_ok"] is True and a["status"] == "approved_ready_to_apply" and a["human_approved"] is True
-assert a["approver"] == "ricardo" and a["signature_verified"] is True and a["signature"].startswith("sha256:") and len(a["signature"]) == 71 and a["can_merge"] is True
+assert a["approver"] == "ricardo" and a["signature_verified"] is True and a["signature"].startswith("ed25519:") and len(a["signature"]) == 136 and a["can_merge"] is True
+assert ns["status"] == "rejected_invalid_signature" and ns["human_approved"] is False and ns["signature_verified"] is False and ns["can_merge"] is False
 assert u["status"] == "rejected_invalid_signature" and u["human_approved"] is False and u["signature_verified"] is False and u["can_merge"] is False
 assert f["status"] == "rejected_invalid_signature" and f["human_approved"] is False and f["signature_verified"] is False and f["can_merge"] is False
 assert g["goal"] == "Add bounded range helper" and g["gates_ok"] is True and g["proofs_ok"] is True and g["benchmark_ok"] is True and g["fixpoint_stage2_eq_stage3"] is True
+assert ap["id"] == "0003_decimal_clamp" and ap["target"] == "compiler/stage1/decimal.src" and ap["gates_ok"] is True and ap["signature_verified"] is True and ap["can_merge"] is True
 PY
-        then ok "phase-2 E3 (#194): lume evolve verify/propose/approve enforces 6 gates (incl. proofs, benchmark, stage2==stage3 fixpoint) + cryptographic SHA-256 maintainer signature verification"; else bad "phase-2 E3 (#194): lume evolve CLI verify/propose/approve JSON governance"; cat "$ntmp/ev_v.err" "$ntmp/ev_verify.json" "$ntmp/ev_a.err" "$ntmp/ev_approve.json" "$ntmp/ev_unauth.json" "$ntmp/ev_forged.json" "$ntmp/ev_prop_goal.json"; fi
+        then ok "phase-2 E3 (#194, #203): lume evolve verify/propose/approve/apply enforces 6 gates + asymmetric Ed25519 maintainer signature verification + applies 0003_decimal_clamp"; else bad "phase-2 E3 (#194, #203): lume evolve Ed25519 governance & apply loop"; cat "$ntmp/ev_v.err" "$ntmp/ev_verify.json" "$ntmp/ev_a.err" "$ntmp/ev_approve.json" "$ntmp/ev_nosig.json" "$ntmp/ev_unauth.json" "$ntmp/ev_forged.json" "$ntmp/ev_prop_goal.json" "$ntmp/ev_app.err" "$ntmp/ev_apply_ok.json" 2>/dev/null; fi
     fi
     # phase-2 F3c (structural inference): a let-bound anonymous record's field access is checked without annotation.
     "$ntmp/lc" <../../compiler/stage1/field_ok.src >"$ntmp/fo.s" 2>"$ntmp/fo.err"; "$ntmp/lasm" <"$ntmp/fo.s" >"$ntmp/fo.elf" 2>/dev/null; chmod +x "$ntmp/fo.elf"
@@ -973,7 +984,7 @@ else
     ok "no-toolchain ELF pipeline (skipped: not linux/x86_64, or under ASan)"
 fi
 
-if ../../lume --version | grep -q "^lume " && ../../lume check ../../examples/01_hello.lume >/dev/null 2>&1 && ../../lume test ../../examples/01_hello.lume | grep -q "1 passed, 0 failed"; then ok "phase-2 T1: lume CLI (--version, check, test on surface .lume)"; else bad "phase-2 T1: lume CLI (--version, check, test on surface .lume)"; fi
+if ../../lume --version | grep -q "^lume " && ../../lume describe | grep -q '"stage": "self-hosted (lumec + lasm + lcli)"' && ../../lume check ../../examples/01_hello.lume >/dev/null 2>&1 && ../../lume test ../../examples/01_hello.lume | grep -q "1 passed, 0 failed"; then ok "phase-2 T1 (#204): lume CLI (--version, describe, check, test via self-hosted lcli.src)"; else bad "phase-2 T1 (#204): lume CLI (--version, describe, check, test via self-hosted lcli.src)"; fi
 
 if [ -z "${LUME0_ASAN:-}" ]; then
     _k2x_tmp=$(mktemp)

@@ -75,3 +75,23 @@ assembled native ELF with `lasm`, and `cc`/`gcc`/`clang`/`as`/`ld` were never in
 
 Run it locally with `make zero-c`; in CI it is the job *"Zero-C steady state
 (no cc/as/ld)"*, alongside the self-host fixpoint gate (`make bootstrap`).
+
+## Frozen C seed policy & `lasm.src` self-validation (`#205`)
+
+Now that the self-host loop is closed, **`bootstrap/lume0/*.c` and `bootstrap/lume0/*.h` are strictly frozen**:
+
+1. **Cryptographic seed freeze (`bootstrap/lume0/SEED_FREEZE.sha256`):**
+   `scripts/check-zero-c.sh` verifies the exact SHA-256 of every `.c` and `.h` file in
+   `bootstrap/lume0/` before minting stage 0. New language features, directives (such as
+   `.byte` for P33 `.rodata` protection), and target formats **must** be implemented in
+   Lume (`compiler/stage1/lasm.src`, `compiler/stage1/lume/*.src`), never by growing the C
+   seed. The only permitted edits to `bootstrap/lume0/` are critical security/UB fixes that
+   update `SEED_FREEZE.sha256` in an explicitly reviewed seed-maintenance commit.
+2. **Retiring `lume0 asm` as an assembler oracle:**
+   In `bootstrap/lume0/tests/run.sh`, `lasm.src` is initially cross-checked against `lume0 asm`
+   on the minimal bootstrap instruction subset (`cmp -s lasm.elf c.elf`). For all post-Stage-1
+   features (`.byte`, P33 protection, new target triples in `docs/26-targets.md`), `lasm.src`
+   is **self-validating**: its output is verified by executing the resulting binary, checking
+   its ELF/section invariants and contracts, and proving `stage 2 == stage 3` bit-for-bit
+   without consulting `lume0 asm`.
+

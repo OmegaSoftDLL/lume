@@ -34,9 +34,10 @@ jobs:
           mkdir -p "dist/${PKG}/bin"
           cp build/bootstrap/lumec3 "dist/${PKG}/bin/lumec"
           cp build/bootstrap/lasm3  "dist/${PKG}/bin/lasm"
+          cp build/bootstrap/lcli3  "dist/${PKG}/bin/lcli"
           cp bootstrap/lume0/lume0  "dist/${PKG}/bin/lume0"
           cp lume                   "dist/${PKG}/bin/lume"
-          chmod +x "dist/${PKG}/bin/lumec" "dist/${PKG}/bin/lasm" "dist/${PKG}/bin/lume0" "dist/${PKG}/bin/lume"
+          chmod +x "dist/${PKG}/bin/lumec" "dist/${PKG}/bin/lasm" "dist/${PKG}/bin/lcli" "dist/${PKG}/bin/lume0" "dist/${PKG}/bin/lume"
           cp README.md CHANGELOG.md LICENSE-MIT LICENSE-APACHE "dist/${PKG}/" 2>/dev/null || cp README.md CHANGELOG.md "dist/${PKG}/"
           tar -C dist -czf "dist/${PKG}.tar.gz" "${PKG}"
           cp build/bootstrap/lumec3 dist/lumec-linux-x86_64

@@ -30,20 +30,24 @@ mkdir -p "$OUT"
 # so the stage 2 == stage 3 fixpoint is untouched).
 sh scripts/amalgamate.sh
 
-echo "== Stage 0: frozen C seed mints lumec + lasm =="
+echo "== Stage 0: frozen C seed mints lumec + lasm + lcli =="
 make -s -C bootstrap/lume0
 "$L0" run "$SRC/data_asm_cc.lume" "$SRC/lumec.src" "$OUT/lumec0.s"
 "$L0" asm "$OUT/lumec0.s" "$OUT/lumec0"
 "$L0" run "$SRC/data_asm_cc.lume" "$SRC/lasm.src" "$OUT/lasm0.s"
 "$L0" asm "$OUT/lasm0.s" "$OUT/lasm0"
+"$L0" run "$SRC/data_asm_cc.lume" "$SRC/lcli.src" "$OUT/lcli0.s"
+"$L0" asm "$OUT/lcli0.s" "$OUT/lcli0"
 
-# stage N: use $1=lumec $2=lasm to build the next lumec+lasm into $3_*
+# stage N: use $1=lumec $2=lasm to build the next lumec+lasm+lcli into $3_*
 stage() {
   _lc=$1; _la=$2; _tag=$3
   "$_lc" < "$SRC/lumec.src" > "$OUT/lumec$_tag.s"
   "$_la" < "$OUT/lumec$_tag.s" > "$OUT/lumec$_tag"; chmod +x "$OUT/lumec$_tag"
   "$_lc" < "$SRC/lasm.src"  > "$OUT/lasm$_tag.s"
   "$_la" < "$OUT/lasm$_tag.s"  > "$OUT/lasm$_tag";  chmod +x "$OUT/lasm$_tag"
+  "$_lc" < "$SRC/lcli.src"  > "$OUT/lcli$_tag.s"
+  "$_la" < "$OUT/lcli$_tag.s"  > "$OUT/lcli$_tag";  chmod +x "$OUT/lcli$_tag"
 }
 
 echo "== Stage 1: Lume rebuilds Lume (no C) =="
@@ -58,6 +62,8 @@ cmp "$OUT/lumec2.s" "$OUT/lumec3.s"
 cmp "$OUT/lumec2"   "$OUT/lumec3"
 cmp "$OUT/lasm2.s"  "$OUT/lasm3.s"
 cmp "$OUT/lasm2"    "$OUT/lasm3"
+cmp "$OUT/lcli2.s"  "$OUT/lcli3.s"
+cmp "$OUT/lcli2"    "$OUT/lcli3"
 
 echo "== Sanity: the self-built toolchain compiles and runs a program =="
 echo 'fn fib(n) = if n < 2 then n else fib(n - 1) + fib(n - 2)
