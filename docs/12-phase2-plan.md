@@ -79,16 +79,14 @@ getting stuck), one green PR with a regression test, and the **self-host fixpoin
   is `type error: argument 2 of 'id' has type str but parameter 'x' expects int` (exit 3, no asm) while an argument of
   unknown type is never flagged (zero false positives). Depends on F. *Ref: Zig generics-via-comptime. Superior to Zig:
   gradual (annotations optional), AI-first (one clear message), zero false positives, and the fixpoint stays bit-identical.*
-  NOT yet (deferred to **C4**): generics over declared types / containers as the bound type argument, `comptime assert`,
-  and comptime tables / build-time data embedding.
+  **(C4c ✅ done #212)** Generics over user-declared `type` (`record`/`enum`) and parameterized container types (`type Box[T] = record value: T`, `type Option[T] = enum None | Some(T)`, `[T]`, `table[T]`) as the bound comptime type argument (`id(Point, ...)`, `id(Box[int], ...)`, `id([int], ...)`, `unbox(int, Box{value: 42})`, `unwrap_or(str, Some("ok"), "")`) with gradual type checking and full runtime type erasure (`compiler/stage1/generics_container_ok.src`).
 - **C4a ✅ done** `comptime assert(cond)` / `comptime assert(cond, "msg")`: the condition is evaluated entirely
   at compile time by the comptime evaluator and the build is aborted (exit 3, no asm) with a legible message if it
   is false; a passing assert folds to a constant, so the condition itself leaves **no check in the binary**. It is
   recognised only as the head of a `comptime` node and only when no user `fn assert` shadows it, so a comptime-free
   program — `lumec.src` included — is rebuilt unchanged and the self-host fixpoint stays bit-identical. *Ref: Zig
   `comptime` assertions, C `static_assert`. Superior: the condition may call pure user functions (C2), runs fully
-  at build time with exact integers, and emits an AI-legible error.* NOT yet (**C4b**): precomputed tables and
-  build-time data embedding.
+  at build time with exact integers, and emits an AI-legible error.*
 - **C4b ✅ done (precomputed tables)** a `comptime` whose body is a pure function returning a data structure
   (e.g. a list) folds the **whole table** at compile time: every element is computed during the build and the
   generating function is never called at runtime — only the constant table survives (proven by `grep -c 'call

@@ -455,6 +455,18 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_
     printf 'fn id(comptime T: type, x: T) = x\nprint id(int, "hi")\n' >"$ntmp/c3n.src"
     "$ntmp/lc" <"$ntmp/c3n.src" >"$ntmp/c3n.s" 2>"$ntmp/c3n.err"; c3n=$?
     if [ "$c3n" = 3 ] && [ ! -s "$ntmp/c3n.s" ] && grep -q "argument 2 of 'id' has type str but parameter 'x' expects int" "$ntmp/c3n.err"; then ok "phase-2 C3: wrong-typed argument after binding T is a clear type error (exit 3, no asm)"; else bad "phase-2 C3: wrong-typed argument after binding T is a clear type error"; fi
+    # phase-2 C4c (#212): comptime T: type generics over user-declared record/enum and container types (`Box[T]`, `Option[T]`, `[T]`).
+    "$ntmp/lc" <../../compiler/stage1/generics_container_ok.src >"$ntmp/gc.s" 2>"$ntmp/gc.err"; "$ntmp/lasm" <"$ntmp/gc.s" >"$ntmp/gc.elf" 2>/dev/null; chmod +x "$ntmp/gc.elf"
+    if [ -x "$ntmp/gc.elf" ] && "$ntmp/gc.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/generics_container_ok_asm.expected - >/dev/null; then ok "phase-2 C4c (#212): comptime T: type generics over declared records/enums and containers (Box[T], Option[T], [T]) compile + run"; else bad "phase-2 C4c (#212): comptime T: type generics over declared records/enums and containers"; cat "$ntmp/gc.err"; fi
+    printf 'type Point = record x: int, y: int\nfn id(comptime T: type, x: T) -> T = x\nprint id(Point, 42)\n' >"$ntmp/gc_bad1.src"
+    "$ntmp/lc" <"$ntmp/gc_bad1.src" >"$ntmp/gc_bad1.s" 2>"$ntmp/gc_bad1.err"; gcb1=$?
+    printf 'type Box[T] = record value: T\nfn unbox(comptime T: type, b: Box[T]) -> T = b.value\nprint unbox(int, Box{value: "bad"})\n' >"$ntmp/gc_bad2.src"
+    "$ntmp/lc" <"$ntmp/gc_bad2.src" >"$ntmp/gc_bad2.s" 2>"$ntmp/gc_bad2.err"; gcb2=$?
+    printf 'type Option[T] = enum None | Some(T)\nfn id(comptime T: type, x: T) -> T = x\nprint id(Option[int], Some("bad"))\n' >"$ntmp/gc_bad3.src"
+    "$ntmp/lc" <"$ntmp/gc_bad3.src" >"$ntmp/gc_bad3.s" 2>"$ntmp/gc_bad3.err"; gcb3=$?
+    printf 'fn id(comptime T: type, x: T) -> T = x\nprint id([int], Cons("bad", Nil))\n' >"$ntmp/gc_bad4.src"
+    "$ntmp/lc" <"$ntmp/gc_bad4.src" >"$ntmp/gc_bad4.s" 2>"$ntmp/gc_bad4.err"; gcb4=$?
+    if [ "$gcb1" = 3 ] && grep -q "argument 2 of 'id' has type int but parameter 'x' expects Point" "$ntmp/gc_bad1.err" && [ "$gcb2" = 3 ] && grep -q "argument 2 of 'unbox' has type Box\[str\] but parameter 'b' expects Box\[int\]" "$ntmp/gc_bad2.err" && [ "$gcb3" = 3 ] && grep -q "argument 2 of 'id' has type Option\[str\] but parameter 'x' expects Option\[int\]" "$ntmp/gc_bad3.err" && [ "$gcb4" = 3 ] && grep -q "argument 2 of 'id' has type \[str\] but parameter 'x' expects \[int\]" "$ntmp/gc_bad4.err"; then ok "phase-2 C4c (#212): gradual checker rejects mismatched declared record/container type arguments (Point, Box[T], Option[T], [T])"; else bad "phase-2 C4c (#212): gradual checker rejects mismatched declared record/container type arguments"; cat "$ntmp/gc_bad1.err" "$ntmp/gc_bad2.err" "$ntmp/gc_bad3.err" "$ntmp/gc_bad4.err"; fi
     # BACKWARD-COMPAT: programs that use no comptime parameter compile byte-identically through the C3 compiler.
     for prog in annot_ok types_ok ev nfib; do
         "$ntmp/lc" <../../compiler/stage1/$prog.src >"$ntmp/c3_$prog.s" 2>/dev/null; "$ntmp/lasm" <"$ntmp/c3_$prog.s" >"$ntmp/c3_$prog.elf" 2>/dev/null; chmod +x "$ntmp/c3_$prog.elf"
@@ -631,6 +643,7 @@ PY
     # phase-2 E3: `lume evolve` self-evolution & governance loop (`use levolve`: AI repair via `lcaas` fix-its,
     # 6 automated gates `compile`/`conformance`/`api_compat`/`capability`/`budget`/`fixpoint`, and mandatory human approval).
     if LUME_BIN_DIR="$ntmp" ../../lume run ../../compiler/stage1/evolve_demo.src >"$ntmp/ev_demo.out" 2>"$ntmp/ev_demo.err" && diff -u ../../tests/conformance/stage1/evolve_demo_asm.expected "$ntmp/ev_demo.out" >/dev/null; then ok "phase-2 E3: in-process self-evolution & governance engine (use levolve: AI fix-it repair + 6 gates + human approval)"; else bad "phase-2 E3: in-process self-evolution & governance engine (use levolve)"; cat "$ntmp/ev_demo.err" "$ntmp/ev_demo.out"; fi
+    if LUME_BIN_DIR="$ntmp" ../../lume run ../../compiler/stage1/ed25519_rfc8032_ok.src >"$ntmp/ed_rfc.out" 2>"$ntmp/ed_rfc.err" && diff -u ../../tests/conformance/stage1/ed25519_rfc8032_ok_asm.expected "$ntmp/ed_rfc.out" >/dev/null; then ok "phase-2 E3 (#222): ed25519_verify passes official RFC 8032 Section 7.1 test vectors (empty, 1B, 2B, 1024B, SHA(abc) + bit-flip/non-canonical rejection)"; else bad "phase-2 E3 (#222): ed25519_verify official RFC 8032 Section 7.1 test vectors"; cat "$ntmp/ed_rfc.err" "$ntmp/ed_rfc.out"; fi
     if command -v python3 >/dev/null 2>&1; then
         _sig_0001=$(tr -d '\r\n' < ../../evolve/proposals/0001_math_clamp/approval.sig)
         LUME_BIN_DIR="$ntmp" ../../lume evolve verify ../../evolve/proposals/0001_math_clamp >"$ntmp/ev_verify.json" 2>"$ntmp/ev_v.err" || true
@@ -898,7 +911,7 @@ PY
     LUME_BIN_DIR="$ntmp" ../../lume agent fill "$ntmp/io_pub.src" >"$ntmp/io_fill.json" 2>/dev/null || true
     # 3. `lume evolve` synthesizes and repairs `A0001` holes from contracts/laws (`evolve/proposals/0002_intent_oracle/proposal.bundle`):
     LUME_BIN_DIR="$ntmp" ../../lume evolve verify ../../evolve/proposals/0002_intent_oracle/proposal.bundle >"$ntmp/io_ev.json" 2>/dev/null || true
-    # 4. `lume agent witness|repair|impact` & `lume mcp` queries (#195 — docs/19 §2):
+    # 4. `lume agent witness|repair|impact` & `lume mcp` queries (#195 — docs/19 Section 2):
     printf 'fn bad_inc(x: int) -> int requires x >= 0 ensures result > x = x - 1\nfn caller(a: int) -> int requires a >= 0 ensures result > a = bad_inc(a)\nlaw inc_pos(x: int) = bad_inc(x) >= 0\nprint caller(4)\n' >"$ntmp/io_wri.src"
     LUME_BIN_DIR="$ntmp" ../../lume agent witness "$ntmp/io_wri.src" >"$ntmp/io_wit.json" 2>/dev/null || true
     LUME_BIN_DIR="$ntmp" ../../lume agent repair "$ntmp/io_wri.src" >"$ntmp/io_rep.json" 2>/dev/null || true

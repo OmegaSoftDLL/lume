@@ -152,8 +152,10 @@ see the Phase 1–5 entries in §5 for the current state.
   (`fn id(comptime T: type, x: T)`): a type name is a comptime value, the comptime parameter is erased at runtime
   (recorded in a `GSig` statement, dropped from `Fn` and from every call by the `gerase` pass, so the fixpoint is
   byte-identical), and the call site binds the type parameter and checks the remaining annotated arguments via the
-  F2 checker (`id(int, "hi")` → clear type error, exit 3). NOT yet: generics over declared types/containers,
-  `comptime assert`, comptime tables (C4). See `compiler/stage1/{ct,ct2,generics_ok}.src` and the `phase-2` tests.
+  F2 checker (`id(int, "hi")` → clear type error, exit 3); **(C4 ✅)** `comptime assert(cond, "msg")`, precomputed
+  comptime lookup tables (`comptime(squares(6))`), and `comptime T: type` generics over user-declared `record`/`enum`
+  and parameterized container types (`Box[T]`, `Option[T]`, `[T]`, `table[T]`, #212). See
+  `compiler/stage1/{ct,ct2,generics_ok,generics_container_ok,comptime_assert,comptime_table}.src` and the `phase-2` tests.
 - Domain features D1–D3 (`decimal`, `table[T]`, and typed table queries) are implemented;
   tensor/`grad`/`llm fn` remain future work, and `examples/future/*` pass the lexer only.
   Track D1 (`#120`) parses exact decimal literals as signed integer
