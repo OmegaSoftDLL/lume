@@ -1,6 +1,6 @@
 # 17 — F4: unifying the two front-ends into one grammar / AST
 
-This is the plan for **F4** (the last open piece of the type/front-end track). It is written as a
+This is the plan for **F4** (the last piece of the type/front-end track — **now complete, all 4 slices shipped**). It is written as a
 handoff reference: the goal, what already shipped, the one hard constraint that makes the core
 risky, and the safe route (surface-to-core desugaring).
 
@@ -79,8 +79,8 @@ the two surface forms to one, which is the operational proof of "one AST". F4 is
 layout form and the inline form of a non-trivial program produce byte-identical codegen and `lume
 fmt` converts between them.
 
-## Note
+## Note (historical)
 
-F4's remaining heavy work (layout, one shared parser) and the F3c Hindley–Milner engine
+At the time this plan was written, F4's remaining heavy work (layout, one shared parser) and the F3c Hindley–Milner engine
 (`feat/f3c-hm-core`, see the PR #151 close note) are the compiler-surgery pieces that need a machine
 able to run the self-hosted toolchain for debugging (the ~117 KB compiler; a 4 GB host OOMs).
