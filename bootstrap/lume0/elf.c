@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <sys/stat.h>
 
 #define ELF_VBASE 0x400000ULL
 #define ELF_HDRS  120          /* ELF header (64) + one program header (56) */
@@ -378,7 +379,7 @@ int elf_assemble(const char *src, const char *outpath) {
 
         FILE *o=fopen(outpath,"wb"); if(!o){snprintf(err,sizeof(err),"cannot write %s",outpath);free(code.d);free(payload.d);free(f.d);goto fail;}
         fwrite(f.d,1,f.n,o); fclose(o);
-        { char cmd[512]; snprintf(cmd,sizeof(cmd),"chmod +x '%s'",outpath); int rc=system(cmd);(void)rc; }
+        chmod(outpath, 0755); /* was system("chmod +x '%s'") — avoid shell command injection via outpath (CodeQL #2) */
         free(code.d); free(payload.d); free(f.d);
     }
 
