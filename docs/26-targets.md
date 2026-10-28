@@ -43,14 +43,14 @@ contracts and checked by the prover — *using everything Lume has.*
 
 | Triple | ISA | Format | ABI / OS | Status |
 |--------|-----|--------|----------|--------|
-| `x86_64-linux-elf` | x86-64 | ELF64 (`EM_X86_64=62`) | System V AMD64 | **shipped** (`lumec` + `lasm`) |
-| `aarch64-linux-elf` | AArch64 A64 | ELF64 (`EM_AARCH64=183`) | Linux AAPCS64 (`svc #0`) | **shipped** (`ltarget.src`; verified in `qemu-aarch64`) |
-| `aarch64-macos-macho` | AArch64 A64 | Mach-O 64 (`MH_MAGIC_64`, 16 KB page) | Darwin / AAPCS64 (`svc #0x80`) | **emits** (`ltarget.src` — Mach-O magic verified; **not yet run on Apple Silicon**) |
-| `x86_64-windows-pe` | x86-64 | PE32+/COFF (`0x8664`) | Windows x64 (`subq $40, %rsp`) | **emits** (`ltarget.src` — PE32+ magic verified; **not yet run on Windows**) |
-| `riscv64-linux-elf` | RISC-V RV64IM | ELF64 (`EM_RISCV=243`) | Linux LP64 (`ecall`) | **shipped** (`ltarget.src`; verified in `qemu-riscv64`) |
-| `<isa>-none-ihex` | AArch64 / RV64 / x86-64 | Intel HEX (`.hex` with two's-complement checksum) | bare-metal `@freestanding` | **emits** (`ltarget.src` — HEX record framing verified; **not yet run on hardware**) |
-| `x86_64-none-raw` | x86-64 | Bootable MBR + 64-bit Long Mode kernel image | bare-metal `@freestanding` | **shipped** (`lasm` `.kernel`; verified in `qemu-system-x86_64`) |
-| `wasm32-wasi` | WASM | Binary WebAssembly (`\0asm\x01\0\0\0`) | WASI | **emits** (`#191` — module written; **not yet executed under WASI**) |
+| `x86_64-linux-elf` | x86-64 | ELF64 (`EM_X86_64=62`) | System V AMD64 | **shipped** (`lumec` + `lasm`; run-verified natively on `ubuntu-latest`) |
+| `aarch64-linux-elf` | AArch64 A64 | ELF64 (`EM_AARCH64=183`) | Linux AAPCS64 (`svc #0`) | **shipped** (`ltarget.src`; run-verified in `qemu-aarch64` with `QF_LIA` guard elision + exit-3 trap) |
+| `aarch64-macos-macho` | AArch64 A64 | Mach-O 64 (`MH_MAGIC_64`, 16 KB page) | Darwin / AAPCS64 (`svc #0x80`) | **shipped** (`ltarget.src`; run-verified natively on Apple Silicon `macos-latest` `Darwin arm64` with `QF_LIA` guard elision + exit-3 trap) |
+| `x86_64-windows-pe` | x86-64 | PE32+/COFF (`0x8664`, `.text` RX + `.idata` RW) | Windows x64 (`KERNEL32.dll` `WriteFile`/`ExitProcess`) | **shipped** (`ltarget.src`; run-verified natively on `windows-latest` Windows x64 with `QF_LIA` guard elision + exit-3 trap) |
+| `riscv64-linux-elf` | RISC-V RV64IM | ELF64 (`EM_RISCV=243`) | Linux LP64 (`ecall`) | **shipped** (`ltarget.src`; run-verified in `qemu-riscv64` with `QF_LIA` guard elision + exit-3 trap) |
+| `<isa>-none-ihex` | AArch64 / RV64 / x86-64 | Intel HEX (`.hex` with two's-complement checksum) | bare-metal `@freestanding` | **shipped** (`ltarget.src`; `x86_64-none-ihex` firmware unpacked and run-verified in `qemu-system-x86_64` over hardware COM1 UART `0x3F8` + exit-3 trap) |
+| `x86_64-none-raw` | x86-64 | Bootable MBR + 64-bit Long Mode kernel image | bare-metal `@freestanding` | **shipped** (`lasm` `.kernel`; run-verified in `qemu-system-x86_64 -smp 2`) |
+| `wasm32-wasi` | WASM | Binary WebAssembly 1.0 (`\0asm\x01\0\0\0`) | WASI `wasi_snapshot_preview1` (`fd_write`/`proc_exit`) | **shipped** (`ltarget.src`; run-verified under Node.js WASI on Linux, macOS, and Windows with `QF_LIA` guard elision + exit-3 trap) |
 | `lumb` | LUMB | Portable Lume Bytecode (`LUMB\x01`) | Deterministic stack VM | **shipped** (`#215` `lume build --target lumb` + `lume run *.lumb`) |
 
 ## Sequence (each brick is one real PR)

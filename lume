@@ -381,24 +381,6 @@ cmd_build() {
             *.hex|*.ihex) _target="aarch64-none-ihex" ;;
         esac
     fi
-    if [ "$_target" = "wasm32-wasi" ] || [ "$_target" = "wasm32" ]; then
-        _ce_in=$(mktemp)
-        printf '@mode c-export\n' > "$_ce_in"
-        cat "$_bundled" >> "$_ce_in"
-        _ce_json=$(run_core_tool lcaas "$_ce_in")
-        rm -f "$_ce_in"
-        case "$_ce_json" in
-            *'"ok":false'*)
-                printf '%s\n' "$_ce_json" >&2
-                rm -f "$_bundled" "$_out"
-                exit 3
-                ;;
-        esac
-        _whex=$(jsonrpc_extract_str "$_ce_json" "wasm_hex")
-        hex_to_bin_file "$_whex" "$_out"
-        rm -f "$_bundled"
-        return 0
-    fi
     if [ -n "$_target" ] && [ "$_target" != "x86_64-linux-elf" ] && [ "$_target" != "linux-x86_64" ] && [ "$_target" != "x86_64-unknown-linux-gnu" ] && [ "$_target" != "x86_64-none-raw" ] && [ "$_target" != "x86_64-none-mbr" ]; then
         _tin=$(mktemp)
         printf '@compile %s\n' "$_target" > "$_tin"
@@ -419,6 +401,24 @@ cmd_build() {
                 _thex=${_tres#HEX:*:}
                 hex_to_bin_file "$_thex" "$_out"
                 chmod +x "$_out" 2>/dev/null || true
+                if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
+                    case "$_target" in
+                        *macos*|*darwin*)
+                            if command -v perl >/dev/null 2>&1 && command -v cc >/dev/null 2>&1; then
+                                _ms=$(mktemp).s
+                                perl -e '
+                                    open my $fh, "<:raw", $ARGV[0] or die;
+                                    local $/; my $b = <$fh>;
+                                    my ($csz) = unpack("Q<", substr($b, 216, 8));
+                                    my $code = substr($b, 1024, $csz);
+                                    print ".globl _main\n.p2align 2\n_main:\n.byte ";
+                                    print join(",", unpack("C*", $code)) . "\n";
+                                ' "$_out" > "$_ms" 2>/dev/null && cc -arch arm64 "$_ms" -o "$_out" 2>/dev/null || true
+                                rm -f "$_ms"
+                            fi
+                            ;;
+                    esac
+                fi
                 return 0
                 ;;
             *)
@@ -591,6 +591,12 @@ cmd_run() {
                     my $out = substr($b, 16);
                     print "$out\n" if length($out) > 0;
                 ' "$_file"
+                return $?
+            fi
+            ;;
+        *.wasm)
+            if command -v node >/dev/null 2>&1; then
+                node --no-warnings -e 'const fs=require("fs"),{WASI}=require("wasi");const wasi=new WASI({version:"preview1"});const m=new WebAssembly.Module(fs.readFileSync(process.argv[1]));const i=new WebAssembly.Instance(m,wasi.getImportObject());process.exit(wasi.start(i)||0);' "$_file"
                 return $?
             fi
             ;;
