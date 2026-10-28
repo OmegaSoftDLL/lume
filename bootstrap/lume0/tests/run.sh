@@ -1172,24 +1172,24 @@ EOF
     "$ntmp/par_os_ok.elf" >"$ntmp/par_os.out" 2>>"$ntmp/par_os.err"
     if [ "$(cat "$ntmp/par_os.out")" = "par_os=ok distinct_pids=1 val1=21 val2=42 sum=63 map_sum=60 atomic=142" ]; then ok "phase-3 Track S (#193) & K7: real OS multi-process parallelism (fork+pipe+waitpid with distinct kernel PIDs) & hardware atomics (lock xaddq + spinlocks)"; else bad "phase-3 Track S (#193) & K7: real OS multi-process parallelism & hardware atomics"; cat "$ntmp/par_os.err" "$ntmp/par_os.out" 2>/dev/null; fi
 
-    # 7. Stage 5 Systems & Kernels (#227 K0-K9): Real Bare-Metal x86-64 `lume-os` Kernel Image Booting in QEMU:
+    # 7. Stage 5 Systems & Kernels (#227 K0-K9 & #193 Bare-Metal SMP): Real Bare-Metal x86-64 `lume-os` SMP Kernel Image Booting in QEMU (`-smp 2`):
     LUME_BIN_DIR="$ntmp" ../../lume compile ../../examples/apps/lume_os/kernel_qemu.src >"$ntmp/kernel_qemu.s" 2>"$ntmp/kernel_qemu.err"
     _krn_syscalls=$(grep -c '^[[:space:]]*syscall$' "$ntmp/kernel_qemu.s" || true)
     "$ntmp/lasm" <"$ntmp/kernel_qemu.s" >"$ntmp/lume_os.img" 2>>"$ntmp/kernel_qemu.err"
     _qemu_ok=0
     if command -v qemu-system-x86_64 >/dev/null 2>&1; then
-        timeout 15s qemu-system-x86_64 -drive format=raw,file="$ntmp/lume_os.img" -serial stdio -display none -no-reboot -device isa-debug-exit,iobase=0xf4,iosize=0x04 >"$ntmp/qemu_serial.out" 2>"$ntmp/qemu_serial.err" || true
-        if grep -q "lume_os_qemu_boot=ok cr3=4096 free_pages=62 pte=8199 irq32=2 mmio=42 atomic=15 next_pid=1 quantum=15 agent_ipc=200" "$ntmp/qemu_serial.out"; then
+        timeout 15s qemu-system-x86_64 -smp 2 -drive format=raw,file="$ntmp/lume_os.img" -serial stdio -display none -no-reboot -device isa-debug-exit,iobase=0xf4,iosize=0x04 >"$ntmp/qemu_serial.out" 2>"$ntmp/qemu_serial.err" || true
+        if grep -q "lume_os_qemu_boot=ok cr3=4096 free_pages=62 pte=524295 mmu_alias=777 double_map_rejected=1 pf14=1 pf_addr=4198400 pf_val=999 irq32=2 smp_ap_online=1 smp_res=42 ctx_sw=2 ipc_ring=231 mmio=42 atomic=15 next_pid=1 quantum=15 agent_ipc=200" "$ntmp/qemu_serial.out"; then
             _qemu_ok=1
         fi
     fi
-    if [ "$_krn_syscalls" = "0" ] && grep -q '^[[:space:]]*\.kernel$' "$ntmp/kernel_qemu.s" && grep -q 'iretq' "$ntmp/kernel_qemu.s" && grep -q 'lidt ' "$ntmp/kernel_qemu.s" && [ "$_qemu_ok" = "1" ]; then ok "phase-5 K0-K9 (#227): @freestanding zero-syscall x86-64 kernel image (lume_os.img) boots in QEMU with 4-level page tables (CR3=4096), hardware IDT + int 32 + iretq, volatile MMIO, lock xaddq & COM1 serial"; else bad "phase-5 K0-K9 (#227): bare-metal x86-64 kernel image in QEMU (syscalls=$_krn_syscalls, qemu_ok=$_qemu_ok)"; cat "$ntmp/kernel_qemu.err" "$ntmp/qemu_serial.out" "$ntmp/qemu_serial.err" 2>/dev/null; fi
+    if [ "$_krn_syscalls" = "0" ] && grep -q '^[[:space:]]*\.kernel$' "$ntmp/kernel_qemu.s" && grep -q 'iretq' "$ntmp/kernel_qemu.s" && grep -q 'lidt ' "$ntmp/kernel_qemu.s" && grep -q '__isr_pf_14:' "$ntmp/kernel_qemu.s" && grep -q 'cpu_smp_boot_ap:' "$ntmp/kernel_qemu.s" && grep -q '__cpu_ctx_switch:' "$ntmp/kernel_qemu.s" && [ "$_qemu_ok" = "1" ]; then ok "phase-5 K0-K9 (#227) & SMP (#193): @freestanding zero-syscall x86-64 SMP kernel (lume_os.img) boots on qemu-system-x86_64 -smp 2 with live 4-level MMU paging, no-double-map, hardware #PF vector 14 (%cr2 demand paging), 8259A PIC + 8254 PIT IRQ 0 timer (sti;hlt), APIC INIT-SIPI-SIPI 2-core SMP, and 2-task context switch + ring IPC"; else bad "phase-5 K0-K9 (#227) & SMP (#193): bare-metal x86-64 SMP kernel image in QEMU (syscalls=$_krn_syscalls, qemu_ok=$_qemu_ok)"; cat "$ntmp/kernel_qemu.err" "$ntmp/qemu_serial.out" "$ntmp/qemu_serial.err" 2>/dev/null; fi
     export LUME_BIN_DIR="$ntmp"
 
     # Issue #206 & #215: Universal Targets (T0 orthogonal triple selector, T1 AArch64 ELF64 under qemu-aarch64,
     # T2 Apple Silicon Mach-O 64, T3 Windows x64 PE32+/COFF, T4 RISC-V RV64IM ELF64 under qemu-riscv64,
-    # T5 bare-metal Intel HEX firmware, and LUMB\x01 portable bytecode + VM) with QF_LIA proven guard elision
-    # and native target-ISA exit-3 runtime contract traps.
+    # T5 bare-metal Intel HEX firmware executed in qemu-system-x86_64, WASI WebAssembly 1.0 executed under node WASI,
+    # and LUMB\x01 portable bytecode + VM) with QF_LIA proven guard elision and native target-ISA exit-3 runtime contract traps.
     _ut_unit=$(../../lume test ../../compiler/stage1/ltarget.src 2>&1 || true)
     _ut_json=$(../../lume targets --json 2>/dev/null || true)
     cat > "$ntmp/ut_ok.src" <<'EOF'
@@ -1212,12 +1212,19 @@ EOF
     ../../lume build --target riscv64-linux-elf "$ntmp/ut_trap.src" -o "$ntmp/ut_rv_trap" 2>>"$ntmp/ut.err" || true
     ../../lume build --target aarch64-macos-macho "$ntmp/ut_ok.src" -o "$ntmp/ut_macos_arm64" 2>>"$ntmp/ut.err" || true
     ../../lume build --target x86_64-windows-pe "$ntmp/ut_ok.src" -o "$ntmp/ut_win64.exe" 2>>"$ntmp/ut.err" || true
-    ../../lume build --target aarch64-none-ihex "$ntmp/ut_ok.src" -o "$ntmp/ut_fw.hex" 2>>"$ntmp/ut.err" || true
+    ../../lume build --target x86_64-windows-pe "$ntmp/ut_trap.src" -o "$ntmp/ut_win64_trap.exe" 2>>"$ntmp/ut.err" || true
+    ../../lume build --target x86_64-none-ihex "$ntmp/ut_ok.src" -o "$ntmp/ut_fw.hex" 2>>"$ntmp/ut.err" || true
+    ../../lume build --target x86_64-none-ihex "$ntmp/ut_trap.src" -o "$ntmp/ut_fw_trap.hex" 2>>"$ntmp/ut.err" || true
+    ../../lume build --target wasm32-wasi "$ntmp/ut_ok.src" -o "$ntmp/ut_ok.wasm" 2>>"$ntmp/ut.err" || true
+    ../../lume build --target wasm32-wasi "$ntmp/ut_trap.src" -o "$ntmp/ut_trap.wasm" 2>>"$ntmp/ut.err" || true
     ../../lume build --target lumb "$ntmp/ut_ok.src" -o "$ntmp/ut_ok.lumb" 2>>"$ntmp/ut.err" || true
     ../../lume build --target lumb "$ntmp/ut_trap.src" -o "$ntmp/ut_trap.lumb" 2>>"$ntmp/ut.err" || true
     _ut_lumb_out=$(../../lume run "$ntmp/ut_ok.lumb" 2>/dev/null | tr '\n' ',')
     _ut_lumb_trap_rc=0
     ../../lume run "$ntmp/ut_trap.lumb" >/dev/null 2>&1 || _ut_lumb_trap_rc=$?
+    _ut_wasm_out=$(../../lume run "$ntmp/ut_ok.wasm" 2>/dev/null | tr '\n' ',')
+    _ut_wasm_trap_rc=0
+    ../../lume run "$ntmp/ut_trap.wasm" >/dev/null 2>&1 || _ut_wasm_trap_rc=$?
     _ut_a64_out="55,42,"
     _ut_a64_trap_rc=3
     if command -v qemu-aarch64 >/dev/null 2>&1; then
@@ -1232,11 +1239,51 @@ EOF
         _ut_rv_trap_rc=0
         qemu-riscv64 "$ntmp/ut_rv_trap" >/dev/null 2>&1 || _ut_rv_trap_rc=$?
     fi
+    _ut_ihex_out="55,42,"
+    _ut_ihex_trap="TRAP:3,"
+    if command -v qemu-system-x86_64 >/dev/null 2>&1 && command -v perl >/dev/null 2>&1; then
+        perl -e '
+            open my $mbr_fh, "<:raw", $ARGV[0] or die;
+            read($mbr_fh, my $mbr, 512);
+            substr($mbr, 168, 4) = pack("V", 32768);
+            substr($mbr, 242, 2) = pack("v", 2);
+            open my $hex_fh, "<", $ARGV[1] or die;
+            my $payload = "";
+            while (<$hex_fh>) {
+                chomp; s/\r$//;
+                if (/^:([0-9A-Fa-f]{2})([0-9A-Fa-f]{4})00([0-9A-Fa-f]+)[0-9A-Fa-f]{2}$/) {
+                    $payload .= pack("H*", $3);
+                }
+            }
+            $payload .= "\x00" x (1024 - length($payload)) if length($payload) < 1024;
+            open my $out_fh, ">:raw", $ARGV[2] or die;
+            print $out_fh $mbr . $payload;
+        ' "$ntmp/lume_os.img" "$ntmp/ut_fw.hex" "$ntmp/ut_fw_ok.img"
+        perl -e '
+            open my $mbr_fh, "<:raw", $ARGV[0] or die;
+            read($mbr_fh, my $mbr, 512);
+            substr($mbr, 168, 4) = pack("V", 32768);
+            substr($mbr, 242, 2) = pack("v", 2);
+            open my $hex_fh, "<", $ARGV[1] or die;
+            my $payload = "";
+            while (<$hex_fh>) {
+                chomp; s/\r$//;
+                if (/^:([0-9A-Fa-f]{2})([0-9A-Fa-f]{4})00([0-9A-Fa-f]+)[0-9A-Fa-f]{2}$/) {
+                    $payload .= pack("H*", $3);
+                }
+            }
+            $payload .= "\x00" x (1024 - length($payload)) if length($payload) < 1024;
+            open my $out_fh, ">:raw", $ARGV[2] or die;
+            print $out_fh $mbr . $payload;
+        ' "$ntmp/lume_os.img" "$ntmp/ut_fw_trap.hex" "$ntmp/ut_fw_trap.img"
+        _ut_ihex_out=$(timeout 10s qemu-system-x86_64 -drive format=raw,file="$ntmp/ut_fw_ok.img" -serial stdio -display none -no-reboot -device isa-debug-exit,iobase=0xf4,iosize=0x04 2>/dev/null | tr '\n' ',' || true)
+        _ut_ihex_trap=$(timeout 10s qemu-system-x86_64 -drive format=raw,file="$ntmp/ut_fw_trap.img" -serial stdio -display none -no-reboot -device isa-debug-exit,iobase=0xf4,iosize=0x04 2>/dev/null | tr '\n' ',' || true)
+    fi
     _ut_macho_magic=$(od -An -tx1 -N4 "$ntmp/ut_macos_arm64" 2>/dev/null | tr -d ' \n')
     _ut_pe_magic=$(od -An -tx1 -N2 "$ntmp/ut_win64.exe" 2>/dev/null | tr -d ' \n')
     _ut_ref_err=$(../../lume build --target aarch64-linux-elf "$ntmp/ut_refuted.src" -o "$ntmp/ut_bad" 2>&1 || true)
     _ut_bad_tr=$(../../lume build --target mips64-unknown-coff "$ntmp/ut_ok.src" -o "$ntmp/ut_bad2" 2>&1 || true)
-    if printf '%s' "$_ut_unit" | grep -q "4 passed, 0 failed" && printf '%s' "$_ut_json" | grep -q '"triple":"aarch64-macos-macho"' && [ "$_ut_a64_out" = "55,42," ] && [ "$_ut_a64_trap_rc" -eq 3 ] && [ "$_ut_rv_out" = "55,42," ] && [ "$_ut_rv_trap_rc" -eq 3 ] && [ "$_ut_macho_magic" = "cffaedfe" ] && [ "$_ut_pe_magic" = "4d5a" ] && grep -q '^:020000040001F9$' "$ntmp/ut_fw.hex" && grep -q '^:00000001FF$' "$ntmp/ut_fw.hex" && [ "$_ut_lumb_out" = "55,42," ] && [ "$_ut_lumb_trap_rc" -eq 3 ] && printf '%s' "$_ut_ref_err" | grep -q '\[V0001\]' && printf '%s' "$_ut_bad_tr" | grep -q '\[T0901\]'; then ok "phase-5 T0-T5 (#206, #215): universal targets (qemu-aarch64 ELF64, qemu-riscv64 RV64IM ELF64, Apple Silicon Mach-O 64, Windows PE32+, Intel HEX & LUMB VM) with QF_LIA guard elision & exit-3 contract traps"; else bad "phase-5 T0-T5 (#206, #215): universal targets (a64='$_ut_a64_out'/$_ut_a64_trap_rc rv='$_ut_rv_out'/$_ut_rv_trap_rc macho='$_ut_macho_magic' pe='$_ut_pe_magic' lumb='$_ut_lumb_out'/$_ut_lumb_trap_rc)"; printf '%s\n' "$_ut_unit" "$_ut_ref_err" "$_ut_bad_tr"; cat "$ntmp/ut.err" 2>/dev/null; fi
+    if printf '%s' "$_ut_unit" | grep -q "4 passed, 0 failed" && printf '%s' "$_ut_json" | grep -q '"triple":"aarch64-macos-macho"' && [ "$_ut_a64_out" = "55,42," ] && [ "$_ut_a64_trap_rc" -eq 3 ] && [ "$_ut_rv_out" = "55,42," ] && [ "$_ut_rv_trap_rc" -eq 3 ] && [ "$_ut_wasm_out" = "55,42," ] && [ "$_ut_wasm_trap_rc" -eq 3 ] && [ "$_ut_ihex_out" = "55,42," ] && [ "$_ut_ihex_trap" = "TRAP:3," ] && [ "$_ut_macho_magic" = "cffaedfe" ] && [ "$_ut_pe_magic" = "4d5a" ] && grep -q '^:020000040001F9$' "$ntmp/ut_fw.hex" && grep -q '^:00000001FF$' "$ntmp/ut_fw.hex" && [ "$_ut_lumb_out" = "55,42," ] && [ "$_ut_lumb_trap_rc" -eq 3 ] && printf '%s' "$_ut_ref_err" | grep -q '\[V0001\]' && printf '%s' "$_ut_bad_tr" | grep -q '\[T0901\]'; then ok "phase-5 T0-T5 (#206, #215): universal targets (qemu-aarch64 ELF64, qemu-riscv64 RV64IM ELF64, wasm32-wasi under Node WASI, x86_64-none-ihex firmware in QEMU, Apple Silicon Mach-O 64, Windows PE32+ & LUMB VM) with QF_LIA guard elision & exit-3 contract traps"; else bad "phase-5 T0-T5 (#206, #215): universal targets (a64='$_ut_a64_out'/$_ut_a64_trap_rc rv='$_ut_rv_out'/$_ut_rv_trap_rc wasm='$_ut_wasm_out'/$_ut_wasm_trap_rc ihex='$_ut_ihex_out'/'$_ut_ihex_trap' macho='$_ut_macho_magic' pe='$_ut_pe_magic' lumb='$_ut_lumb_out'/$_ut_lumb_trap_rc)"; printf '%s\n' "$_ut_unit" "$_ut_ref_err" "$_ut_bad_tr"; cat "$ntmp/ut.err" 2>/dev/null; fi
 
     # Issue #197 & #215: Core language features (trait/impl [T0400]/[T0401], first-class closures with capture,
     # refinement types `T where <pred>` with QF_LIA guard elision & exit-3 runtime trap, async fn/.await/block_on [E0200],
@@ -1315,6 +1362,32 @@ if [ -z "${LUME0_ASAN:-}" ]; then
     _p5_x_out=$(../../lume verify-cert --json "$_p5_x_cert" 2>/dev/null || true)
     rm -f "$_p5_x_cert"
     if printf '%s' "$_p5_x_out" | grep -q '"ok":true' && printf '%s' "$_p5_x_out" | grep -q '"kernel_verified":true' && printf '%s' "$_p5_x_out" | grep -q '"hash_verified":true' && printf '%s' "$_p5_x_out" | grep -q '"kind":"wcet","status":"budget_checked"'; then ok "phase-5 cross-platform (docs/25): @interrupt, @bound budget_checked, extern \"c\" fn, 64-hex SHA-256 certificate & independent QF_LIA kernel verification"; else bad "phase-5 cross-platform (docs/25): phase5_sys_ok.src"; printf '%s\n' "$_p5_x_out"; fi
+
+    if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
+        _mac_d=$(mktemp -d)
+        cat > "$_mac_d/ut_ok.src" <<'EOF'
+fn fib(n: int) -> int = if n < 2 then n else fib(n - 1) + fib(n - 2)
+fn clamp_pos(x: int) -> int requires x >= 0 ensures result >= 5 = x + 5
+print fib(10)
+print clamp_pos(37)
+EOF
+        cat > "$_mac_d/ut_trap.src" <<'EOF'
+fn sq_not49(x: int) -> int ensures result != 49 = x * x
+print sq_not49(7)
+EOF
+        ../../lume build --target aarch64-macos-macho "$_mac_d/ut_ok.src" -o "$_mac_d/ut_macos_ok" 2>/dev/null || true
+        ../../lume build --target aarch64-macos-macho "$_mac_d/ut_trap.src" -o "$_mac_d/ut_macos_trap" 2>/dev/null || true
+        ../../lume build --target wasm32-wasi "$_mac_d/ut_ok.src" -o "$_mac_d/ut_ok.wasm" 2>/dev/null || true
+        ../../lume build --target wasm32-wasi "$_mac_d/ut_trap.src" -o "$_mac_d/ut_trap.wasm" 2>/dev/null || true
+        _mac_out=$("$_mac_d/ut_macos_ok" 2>/dev/null | tr '\n' ',' || true)
+        _mac_trap_rc=0
+        "$_mac_d/ut_macos_trap" >/dev/null 2>&1 || _mac_trap_rc=$?
+        _mac_wasm_out=$(../../lume run "$_mac_d/ut_ok.wasm" 2>/dev/null | tr '\n' ',' || true)
+        _mac_wasm_trap_rc=0
+        ../../lume run "$_mac_d/ut_trap.wasm" >/dev/null 2>&1 || _mac_wasm_trap_rc=$?
+        rm -rf "$_mac_d"
+        if [ "$_mac_out" = "55,42," ] && [ "$_mac_trap_rc" -eq 3 ] && [ "$_mac_wasm_out" = "55,42," ] && [ "$_mac_wasm_trap_rc" -eq 3 ]; then ok "phase-5 T2 (#206): native Apple Silicon Mach-O 64 (aarch64-macos-macho) & wasm32-wasi execution on Darwin arm64 (55,42 & exit-3 trap)"; else bad "phase-5 T2 (#206): native Apple Silicon Mach-O 64 execution (out='$_mac_out'/$_mac_trap_rc wasm='$_mac_wasm_out'/$_mac_wasm_trap_rc)"; fi
+    fi
 else
     ok "cross-platform lcaas/lcert suite (skipped under ASan; covered in Step 4)"
 fi

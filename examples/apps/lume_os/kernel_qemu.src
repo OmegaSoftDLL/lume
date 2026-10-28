@@ -1,16 +1,24 @@
-## Stage 5 Capstone (`lume-os` K0-K9): Real Bare-Metal x86-64 Kernel Image for QEMU (`#227`)
+## Stage 5 Capstone (`lume-os` K0-K9 & #193 SMP): Real Bare-Metal x86-64 SMP Kernel Image for QEMU (`#227`)
 ## Compiled with `lume build examples/apps/lume_os/kernel_qemu.src -o lume_os.img`.
-## Executes in 64-bit Long Mode at physical `0x8000` with 4-level page tables (`CR3=0x1000`),
-## zero Linux syscalls (`grep -c syscall == 0`), physical frame allocator at `0x200000`,
-## real hardware IDT + `int $32` + `@interrupt` + `iretq`, volatile MMIO, `lock xaddq` + spinlocks,
-## COM1 16550A UART (`0x3F8`), and QF_LIA-verified kernel memory/scheduler/IPC services.
+## Executes in 64-bit Long Mode at physical `0x8000` on `qemu-system-x86_64 -smp 2` with:
+##   - Zero Linux syscalls (`grep -c syscall == 0`) and zero software `int $32`
+##   - K6: Live 4-level MMU page table (`CR3=0x1000`, `PT` at `0x4000`) written via `cap[Page]`,
+##     no-double-map enforcement on live hardware PTEs, and real hardware `#PF` page-fault handler
+##     (IDT vector 14 reading `%cr2`, demand-mapping `0x401000`, `invlpg`, error-code pop & `iretq`)
+##   - K7 & #193: Secondary CPU core (AP) bring-up via Local APIC (`0xFEE00000`) INIT-SIPI-SIPI
+##     running real 64-bit task code across cores under hardware spinlocks & `lock xaddq`
+##   - K8: Real hardware 8259A PIC + 8254 PIT timer driver (IRQ 0 -> IDT vector 32 waking `sti; hlt`)
+##   - K9: Real 2-task hardware `%rsp`/`%rip` context switching (`__cpu_ctx_switch`) + shared-memory
+##     ring-buffer IPC at `0x5900` under hardware spinlocks.
 
 use caps
 use scheduler
 
 fn cap_page_new(pfn, perms) = {kind: "cap[Page]", pfn: pfn, perms: perms, linear_alive: 1}
 
-fn cap_page_map(cpage, vaddr) = if cpage.linear_alive == 0 then {ok: 0, pte: 0, pfn: cpage.pfn, vaddr: vaddr, linear_alive: 0} else {ok: 1, pte: cpage.pfn * 4096 + cpage.perms, pfn: cpage.pfn, vaddr: vaddr, linear_alive: 0}
+fn cap_page_map(cpage, vaddr) = let idx = (vaddr - 4194304) / 4096 in let pte_addr = 16384 + idx * 8 in let cur_pte = mmio_volatile_read64(pte_addr) in if cpage.linear_alive == 0 or cur_pte % 2 == 1 then {ok: 0, pte: cur_pte, pfn: cpage.pfn, vaddr: vaddr, linear_alive: 0} else let new_pte = cpage.pfn * 4096 + cpage.perms in let w = mmio_volatile_write64(pte_addr, new_pte) in let fl = cpu_invlpg(vaddr) in {ok: 1, pte: new_pte, pfn: cpage.pfn, vaddr: vaddr, linear_alive: 0}
+
+fn hw_pic_pit_init() = let a1 = port_out8(32, 17) in let a2 = port_out8(160, 17) in let b1 = port_out8(33, 32) in let b2 = port_out8(161, 40) in let c1 = port_out8(33, 4) in let c2 = port_out8(161, 2) in let d1 = port_out8(33, 1) in let d2 = port_out8(161, 1) in let m1 = port_out8(33, 254) in let m2 = port_out8(161, 255) in let p0 = port_out8(67, 52) in let p1 = port_out8(64, 169) in port_out8(64, 4)
 
 fn ipc_channel_new(chan_id, cap_badge) = {chan_id: chan_id, badge: cap_badge, msg_tag: 0, payload: 0, delivered: 0}
 
@@ -19,6 +27,6 @@ fn ipc_send_checked(chan, badge, tag, payload) = if chan.badge == badge then {ch
 @freestanding
 fn kernel_boot_entry() -> int = 1
 
-fn lume_os_qemu_main() = let entry_ok = kernel_boot_entry() in let cr3 = cpu_read_cr3() in let pfn1 = kernel_alloc_pfn(0, 64) in let pfn2 = kernel_alloc_pfn(pfn1, 64) in let rem_pages = kernel_region_remaining(64, pfn2) in let u_cap = cap_page_new(pfn2, 7) in let mapped = cap_page_map(u_cap, 16384) in let tlb_ok = cpu_invlpg(16384) in let idt_ok = cpu_idt_init() in let irq_a = cpu_trigger_irq32() in let irq_b = cpu_trigger_irq32() in let hw_ticks = cpu_irq32_count() in let scratch = hw_scratch_addr() in let w_mmio = mmio_volatile_write64(scratch, 42) in let r_mmio = mmio_volatile_read64(scratch) in let lock_addr = scratch + 8 in let cnt_addr = scratch + 16 in let z_lock = mmio_volatile_write64(lock_addr, 0) in let z_cnt = mmio_volatile_write64(cnt_addr, 10) in let l_acq = spinlock_acquire(lock_addr) in let old_cnt = atomic_xadd64(cnt_addr, 5) in let l_rel = spinlock_release(lock_addr) in let new_cnt = mmio_volatile_read64(cnt_addr) in let next_pid = kernel_schedule_next(0, 3) in let q_left = kernel_deduct_quantum(20, 5) in let ch0 = ipc_channel_new(1, 9001) in let ch1 = ipc_send_checked(ch0, 9001, 200, 31) in "lume_os_qemu_boot=ok cr3=" + str(cr3) + " free_pages=" + str(rem_pages) + " pte=" + str(mapped.pte) + " irq32=" + str(hw_ticks) + " mmio=" + str(r_mmio) + " atomic=" + str(new_cnt) + " next_pid=" + str(next_pid) + " quantum=" + str(q_left) + " agent_ipc=" + str(ch1.msg_tag)
+fn lume_os_qemu_main() = let entry_ok = kernel_boot_entry() in let cr3 = cpu_read_cr3() in let idt_ok = cpu_idt_init() in let pfn1 = kernel_alloc_pfn(0, 64) in let pfn2 = kernel_alloc_pfn(pfn1, 64) in let rem_pages = kernel_region_remaining(64, pfn2) in let u_cap = cap_page_new(128, 7) in let mapped = cap_page_map(u_cap, 4194304) in let w_va = mmio_volatile_write64(4194304, 777) in let mmu_phys = mmio_volatile_read64(524288) in let dup_map = cap_page_map(cap_page_new(129, 7), 4194304) in let dup_rej = (if dup_map.ok == 0 then 1 else 0) in let pf_w = mmio_volatile_write64(4198400, 999) in let pf_phys = mmio_volatile_read64(528384) in let pf_cnt = cpu_pf14_count() in let pf_va = cpu_pf14_addr() in let t_init = hw_pic_pit_init() in let w_irq1 = cpu_wait_timer_irq() in let w_irq2 = cpu_wait_timer_irq() in let m_off = port_out8(33, 255) in let hw_ticks = cpu_irq32_count() in let smp_enc = cpu_smp_boot_ap(15) in let smp_ap = smp_enc / 1000 in let smp_res = smp_enc % 1000 in let ctx_enc = cpu_run_2tasks(200) in let ctx_sw = ctx_enc / 1000 in let ipc_ring = ctx_enc % 1000 in let scratch = hw_scratch_addr() in let w_mmio = mmio_volatile_write64(scratch, 42) in let r_mmio = mmio_volatile_read64(scratch) in let lock_addr = scratch + 8 in let cnt_addr = scratch + 16 in let z_lock = mmio_volatile_write64(lock_addr, 0) in let z_cnt = mmio_volatile_write64(cnt_addr, 10) in let l_acq = spinlock_acquire(lock_addr) in let old_cnt = atomic_xadd64(cnt_addr, 5) in let l_rel = spinlock_release(lock_addr) in let new_cnt = mmio_volatile_read64(cnt_addr) in let next_pid = kernel_schedule_next(0, 3) in let q_left = kernel_deduct_quantum(20, 5) in let ch0 = ipc_channel_new(1, 9001) in let ch1 = ipc_send_checked(ch0, 9001, 200, 31) in "lume_os_qemu_boot=ok cr3=" + str(cr3) + " free_pages=" + str(rem_pages) + " pte=" + str(mapped.pte) + " mmu_alias=" + str(mmu_phys) + " double_map_rejected=" + str(dup_rej) + " pf14=" + str(pf_cnt) + " pf_addr=" + str(pf_va) + " pf_val=" + str(pf_phys) + " irq32=" + str(hw_ticks) + " smp_ap_online=" + str(smp_ap) + " smp_res=" + str(smp_res) + " ctx_sw=" + str(ctx_sw) + " ipc_ring=" + str(ipc_ring) + " mmio=" + str(r_mmio) + " atomic=" + str(new_cnt) + " next_pid=" + str(next_pid) + " quantum=" + str(q_left) + " agent_ipc=" + str(ch1.msg_tag)
 
 print lume_os_qemu_main()

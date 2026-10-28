@@ -100,3 +100,62 @@ jobs:
       - uses: actions/checkout@v7
       - name: make zero-c
         run: make zero-c
+
+  windows-pe:
+    name: Native Windows x64 PE32+ & WASI Run-Verification (#206)
+    runs-on: windows-latest
+    steps:
+      - name: Configure git LF line endings
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v7
+      - name: Build lume0 (64 MB stack) and run-verify x86_64-windows-pe & wasm32-wasi
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $cFiles = (Get-ChildItem bootstrap/lume0/*.c).FullName
+          & gcc -std=c11 -O2 "-Dfchmod(fd,mode)=0" "-Wl,--stack,67108864" -o bootstrap/lume0/lume0.exe @cFiles
+          $lume0 = (Resolve-Path bootstrap/lume0/lume0.exe).Path
+          $srcOk = "fn fib(n: int) -> int = if n < 2 then n else fib(n - 1) + fib(n - 2)`nfn clamp_pos(x: int) -> int requires x >= 0 ensures result >= 5 = x + 5`nprint fib(10)`nprint clamp_pos(37)`n"
+          $srcTrap = "fn sq_not49(x: int) -> int ensures result != 49 = x * x`nprint sq_not49(7)`n"
+          function Compile-Target($triple, $body) {
+              $inFile = Join-Path $env:TEMP "lt_in.txt"
+              [System.IO.File]::WriteAllText($inFile, "@compile $triple`n$body")
+              Push-Location compiler/stage1
+              $res = & $lume0 run "compiler_in_core.lume" "ltarget.src" $inFile
+              Pop-Location
+              $hex = ($res -split ":")[2].Trim()
+              $bytes = [byte[]]::new($hex.Length / 2)
+              for ($i = 0; $i -lt $bytes.Length; $i++) {
+                  $bytes[$i] = [Convert]::ToByte($hex.Substring($i * 2, 2), 16)
+              }
+              return $bytes
+          }
+          $winOk = Join-Path $env:TEMP "ut_win64_ok.exe"
+          $winTrap = Join-Path $env:TEMP "ut_win64_trap.exe"
+          [System.IO.File]::WriteAllBytes($winOk, (Compile-Target "x86_64-windows-pe" $srcOk))
+          [System.IO.File]::WriteAllBytes($winTrap, (Compile-Target "x86_64-windows-pe" $srcTrap))
+          $wOut = (& $winOk) -join ","
+          $wRcOk = $LASTEXITCODE
+          & $winTrap
+          $wRcTrap = $LASTEXITCODE
+          Write-Host "PE64 OK: '$wOut' (rc=$wRcOk) | TRAP: rc=$wRcTrap"
+          if ($wOut -ne "55,42" -or $wRcOk -ne 0 -or $wRcTrap -ne 3) {
+              throw "x86_64-windows-pe verification failed: out='$wOut' rcOk=$wRcOk rcTrap=$wRcTrap"
+          }
+          $wasmOk = Join-Path $env:TEMP "ut_ok.wasm"
+          $wasmTrap = Join-Path $env:TEMP "ut_trap.wasm"
+          [System.IO.File]::WriteAllBytes($wasmOk, (Compile-Target "wasm32-wasi" $srcOk))
+          [System.IO.File]::WriteAllBytes($wasmTrap, (Compile-Target "wasm32-wasi" $srcTrap))
+          $runner = 'const fs=require("fs"),{WASI}=require("wasi");const wasi=new WASI({version:"preview1"});const m=new WebAssembly.Module(fs.readFileSync(process.argv[2]));const i=new WebAssembly.Instance(m,wasi.getImportObject());process.exit(wasi.start(i)||0);'
+          $runnerFile = Join-Path $env:TEMP "run_wasi.js"
+          [System.IO.File]::WriteAllText($runnerFile, $runner)
+          $wasmOut = (node --no-warnings $runnerFile $wasmOk) -join ","
+          $wasmRcOk = $LASTEXITCODE
+          node --no-warnings $runnerFile $wasmTrap
+          $wasmRcTrap = $LASTEXITCODE
+          Write-Host "WASM32 OK: '$wasmOut' (rc=$wasmRcOk) | TRAP: rc=$wasmRcTrap"
+          if ($wasmOut -ne "55,42" -or $wasmRcOk -ne 0 -or $wasmRcTrap -ne 3) {
+              throw "wasm32-wasi verification failed: out='$wasmOut' rcOk=$wasmRcOk rcTrap=$wasmRcTrap"
+          }
+          $global:LASTEXITCODE = 0
+          exit 0
