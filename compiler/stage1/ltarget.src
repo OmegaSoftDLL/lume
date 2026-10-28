@@ -19,8 +19,6 @@
 ##   - Contracts marked `runtime_checked` (e.g., nonlinear `x * x`) emit a native target-ISA runtime trap that exits with status 3.
 ##   - Out-of-fragment constructs emit explicit `[T0900]`/`[T0901]` diagnostics (never a silent 0).
 
-type List = enum Nil | Cons(int, List)
-
 ## --- 0. Basic List, Byte & Hex Helpers ---
 
 fn tg_app(xs, ys) = match xs
