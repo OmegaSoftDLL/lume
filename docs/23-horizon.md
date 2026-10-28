@@ -92,3 +92,11 @@ one of those climbs toward, and the reason the guarantees must stay pristine on 
 should leave Lume a step closer to proving **the whole system, across time, in a form that outlives
 it**. The near plan earns the right to the horizon; the horizon tells the near plan what not to
 compromise.
+
+## Shipped Horizon Foundations (`#198`, `#213`, `#206`, `#227`)
+
+- **H1 — Compositional Multi-Module & Temporal Law Verification (`lume prove --compositional <mod_a.src> <mod_b.src>`, `@mode compose`):** Combines producer and consumer modules, verifies cross-module `requires`/`ensures` call obligations and temporal/relational `law` invariants via `QF_LIA`, and reports `"compositional_verified": true` (or `[V0001]` / `[V0004]` diagnostics on failure).
+- **H2 — Anti-Rot Dependency Proof-Delta Verification (`lume pkg check-rot <old_dep.src> <new_dep.src> <downstream.src>`, `@mode check-rot`):** Detects semantic rot when a dependency upgrade weakens or breaks a contract relied upon by a downstream module, failing at compile time with `[V0003]`.
+- **H3 — Minimal Independent Proof Kernel & Mechanised Metatheory (`compiler/stage1/lcert.src`, `formal/lean/LumeCore.lean`):** `lume verify-cert` re-derives Fourier–Motzkin `QF_LIA` proofs and FIPS-180-4 SHA-256 digests in a standalone kernel (`#183`), and `formal/lean/LumeCore.lean` mechanises Lume-Core typing, progress, preservation, linear ownership (`O0001`), capability containment (`E0200`), and `QF_LIA` soundness in Lean 4 with zero `sorry`/`axiom` (`#213`).
+- **H4 — Learned ⊕ Proven Seam Verification (`@mode compose`, `[V0004]`):** Tracks `extern llm fn` and probabilistic calls across module boundaries and enforces that every learned output is discharged through a `verify(...)` contract guard before flowing into a proven function (`"seam_verified": true`, `[V0004]` on unverified flow).
+- **H5 — Freestanding Multi-ISA Bare-Metal & Real-Time WCET Verification (`compiler/stage1/ltarget.src`, `examples/apps/lume_os/boot_x86_64.s`):** Emits native executables and freestanding Intel HEX (`IHEX`) / raw binaries across `x86-64`, `AArch64`, `RISC-V 64`, `WASM32`, and `LUMB` (`#206`), boots `lume-os` under `qemu-system-x86_64` (`#227`), and enforces `@bound(cycles: N)` WCET limits statically (`[V0002]`).

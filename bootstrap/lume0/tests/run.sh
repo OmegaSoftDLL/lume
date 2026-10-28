@@ -1319,6 +1319,56 @@ EOF
     printf 'fn bad_sig() -> int = let s: signal[int] = signal(10) in let r = s.set("wrong") in s.get()\nprint bad_sig()\n' >"$ntmp/cf_b_sig.src"
     "$ntmp/lc" <"$ntmp/cf_b_sig.src" >"$ntmp/cf_b_sig.s" 2>"$ntmp/cf_b_sig.err"; cfbsig=$?
     if [ -x "$ntmp/cf_ok.elf" ] && "$ntmp/cf_ok.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/core_features_ok_asm.expected - >/dev/null && [ -s "$ntmp/cf_dpos.s" ] && ! grep -q "call ctfail" "$ntmp/cf_dpos.s" && [ -s "$ntmp/cf_spos.s" ] && ! grep -q "call ctfail" "$ntmp/cf_spos.s" && [ "$_cf_trap_rc" -eq 3 ] && grep -q "runtime contract violation" "$ntmp/cf_rt_trap.err" && [ "$cfb400" -eq 3 ] && grep -q "\[T0400\]" "$ntmp/cf_b_t400.err" && [ "$cfb401" -eq 3 ] && grep -q "\[T0401\]" "$ntmp/cf_b_t401.err" && [ "$cfbref" -eq 3 ] && grep -q "\[V0001\]" "$ntmp/cf_b_ref.err" && [ "$cfbaw" -eq 3 ] && grep -q "\[E0200\]" "$ntmp/cf_b_aw.err" && [ "$cfbrc" -eq 3 ] && grep -q "\[O0001\]" "$ntmp/cf_b_rc.err" && [ "$cfbsh1" -eq 3 ] && grep -q "\[S0001\]" "$ntmp/cf_b_sh1.err" && [ "$cfbsh2" -eq 3 ] && grep -q "\[E0200\]" "$ntmp/cf_b_sh2.err" && [ "$cfbhm" -eq 3 ] && grep -q "\[T0500\]" "$ntmp/cf_b_hm.err" && [ "$cfbpr" -eq 3 ] && grep -q "\[T2001\]" "$ntmp/cf_b_pr.err" && [ "$cfbsig" -eq 3 ] && grep -q "\[T2001\]" "$ntmp/cf_b_sig.err"; then ok "core language features (#197, #215): trait/impl [T0400/T0401], closures, refinement types (QF_LIA elision + exit-3 trap), async/await [E0200], rc/arc/weak [O0001], shard [S0001/E0200], let-polymorphism [T0500] & promise/signal [T2001]"; else bad "core language features (#197, #215)"; cat "$ntmp/cf_ok.err" "$ntmp/cf_rt_trap.err" "$ntmp/cf_b_t400.err" "$ntmp/cf_b_t401.err" "$ntmp/cf_b_ref.err" "$ntmp/cf_b_aw.err" "$ntmp/cf_b_rc.err" "$ntmp/cf_b_sh1.err" "$ntmp/cf_b_sh2.err" "$ntmp/cf_b_hm.err" "$ntmp/cf_b_pr.err" "$ntmp/cf_b_sig.err" 2>/dev/null; fi
+
+    # Issue #196 (Adoption & Distribution G0-G9) & #198 (Horizon H1-H5 & Intent-as-Source §3-§5):
+    sh ../../scripts/install.sh --prefix "$ntmp/inst" --from-dir "$ntmp" >/dev/null 2>&1
+    _g0_ok=$(LUME_BIN_DIR="$ntmp" ../../lume self verify --prefix "$ntmp/inst" 2>/dev/null || true)
+    cp "$ntmp/inst/MANIFEST.sha256" "$ntmp/inst/MANIFEST.sha256.bak"
+    printf '0000000000000000000000000000000000000000000000000000000000000000  bin/lume\n' >"$ntmp/inst/MANIFEST.sha256"
+    _g0_bad=$(LUME_BIN_DIR="$ntmp" ../../lume self verify --prefix "$ntmp/inst" 2>/dev/null || true)
+    mv "$ntmp/inst/MANIFEST.sha256.bak" "$ntmp/inst/MANIFEST.sha256"
+    _g1_lb=$(LUME_BIN_DIR="$ntmp" sh ../../scripts/check-llm-gen-eval.sh --leaderboard 2>/dev/null || true)
+    "$ntmp/lc" <../../examples/interop/sidecar/payment_core.src >"$ntmp/sc.s" 2>/dev/null
+    "$ntmp/lasm" <"$ntmp/sc.s" >"$ntmp/sc.elf" 2>/dev/null; chmod +x "$ntmp/sc.elf"
+    _g2_out=$("$ntmp/sc.elf" 2>/dev/null | tr '\n' ',' || true)
+    LUME_BIN_DIR="$ntmp" ../../lume certify --json ../../examples/interop/sidecar/payment_core.src >"$ntmp/sc.cert.json" 2>/dev/null || true
+    _g2_cert=$(LUME_BIN_DIR="$ntmp" ../../lume verify-cert --json "$ntmp/sc.cert.json" 2>/dev/null || true)
+    "$ntmp/lc" <../../examples/apps/supply_chain_demo/ledger_guard.src >"$ntmp/scd.s" 2>/dev/null
+    "$ntmp/lasm" <"$ntmp/scd.s" >"$ntmp/scd.elf" 2>/dev/null; chmod +x "$ntmp/scd.elf"
+    _g7_out=$("$ntmp/scd.elf" 2>/dev/null | tr '\n' ',' || true)
+    cp -r ../../examples/apps/supply_chain_demo "$ntmp/scd_pkg"
+    LUME_BIN_DIR="$ntmp" ../../lume pkg lock "$ntmp/scd_pkg" >/dev/null 2>&1 || true
+    _g4_pub_ok=$(LUME_BIN_DIR="$ntmp" ../../lume pkg publish "$ntmp/scd_pkg" --store "$ntmp/reg" 2>/dev/null || true)
+    _g4_aud_ok=$(LUME_BIN_DIR="$ntmp" ../../lume pkg audit "$ntmp/reg/supply_chain_demo" 2>/dev/null || true)
+    mkdir -p "$ntmp/bad_pkg"
+    printf '[package]\nname = "bad_pkg"\nversion = "0.1.0"\nedition = "2026"\n[capabilities]\nallow = ["pure"]\n' >"$ntmp/bad_pkg/lume.toml"
+    printf 'pub fn bad_fn(x: int) -> int requires x >= 0 ensures result > 0 = 0 - x\nprint bad_fn(1)\n' >"$ntmp/bad_pkg/main.src"
+    _g4_pub_bad=$(LUME_BIN_DIR="$ntmp" ../../lume pkg publish "$ntmp/bad_pkg" --store "$ntmp/reg" 2>/dev/null || true)
+    printf 'fn f(x: int) -> int requires x >= 0 ensures result >= 0 = x + 1\n' >"$ntmp/pd_old.src"
+    printf 'fn f(x: int) -> int requires x >= 0 ensures result >= 0 = x + 2\nfn g(x: int) -> int requires x >= 0 ensures result >= 5 = x + 5\n' >"$ntmp/pd_new_ok.src"
+    printf 'fn f(x: int) -> int requires x >= 0 ensures result >= 0 = 0 - x - 1\n' >"$ntmp/pd_new_bad.src"
+    _g5_ok=$(LUME_BIN_DIR="$ntmp" ../../lume prove --diff "$ntmp/pd_old.src" "$ntmp/pd_new_ok.src" 2>/dev/null || true)
+    _g5_bad=$(LUME_BIN_DIR="$ntmp" ../../lume prove --diff "$ntmp/pd_old.src" "$ntmp/pd_new_bad.src" 2>/dev/null || true)
+    _g6_sh=$(LUME_BIN_DIR="$ntmp" ../../lume prove --share "$ntmp/pd_old.src" 2>/dev/null || true)
+    printf 'fn step(x: int) -> int requires x >= 0 ensures result >= 2 = x + 1\n' >"$ntmp/pt.src"
+    _h_pt_ok=$(LUME_BIN_DIR="$ntmp" ../../lume agent patch "$ntmp/pt.src" step "x + 2" 2>/dev/null || true)
+    _h_pt_bad=$(LUME_BIN_DIR="$ntmp" ../../lume agent patch "$ntmp/pt.src" step "0 - x - 5" 2>/dev/null || true)
+    _h_pt_syn=$(LUME_BIN_DIR="$ntmp" ../../lume agent patch "$ntmp/pt.src" no_such_fn "x + 1" 2>/dev/null || true)
+    printf 'fn calc(x: int) -> int = x - 10\nprint calc(15)\nprint calc(3)\n' >"$ntmp/rp.src"
+    _h_rp=$(LUME_BIN_DIR="$ntmp" ../../lume agent replay "$ntmp/rp.src" 2>/dev/null || true)
+    printf 'pub extern llm fn draft_amt(id: int) -> int ensures result > 0 = 100\npub fn settle(id: int, fee: int) -> int requires fee >= 0 ensures result >= 0 = let raw = verify(draft_amt(id)) in if raw > fee then raw - fee else 0\n' >"$ntmp/ln.src"
+    _h_ln=$(LUME_BIN_DIR="$ntmp" ../../lume agent lineage "$ntmp/ln.src" settle 2>/dev/null || true)
+    printf 'pub extern llm fn model_score(x: int) -> int ensures result >= 0 = 50\npub fn safe_score(x: int) -> int requires x >= 0 ensures result >= 0 = verify(model_score(x)) + x\n' >"$ntmp/cm_a.src"
+    printf 'pub fn sys_pipe(x: int) -> int requires x >= 0 ensures result >= 10 = safe_score(x) + 10\nlaw monotone_pipe(x: int) = if x >= 0 then sys_pipe(x + 1) >= sys_pipe(x) else 1 == 1\n' >"$ntmp/cm_b_ok.src"
+    printf 'pub fn sys_pipe(x: int) -> int requires x >= 0 ensures result >= 100 = 0 - x - 1\n' >"$ntmp/cm_b_bad.src"
+    _h_cm_ok=$(LUME_BIN_DIR="$ntmp" ../../lume prove --compositional "$ntmp/cm_a.src" "$ntmp/cm_b_ok.src" 2>/dev/null || true)
+    _h_cm_bad=$(LUME_BIN_DIR="$ntmp" ../../lume prove --compositional "$ntmp/cm_a.src" "$ntmp/cm_b_bad.src" 2>/dev/null || true)
+    printf 'fn dep_fee(x: int) -> int requires x >= 0 ensures result >= 0 = x + 2\n' >"$ntmp/rot_old.src"
+    printf 'fn dep_fee(x: int) -> int requires x >= 0 ensures result >= 0 = 0 - x - 5\n' >"$ntmp/rot_new.src"
+    printf 'fn app_total(x: int) -> int requires x >= 0 ensures result >= 0 = dep_fee(x)\n' >"$ntmp/rot_app.src"
+    _h_rot_ok=$(LUME_BIN_DIR="$ntmp" ../../lume pkg check-rot "$ntmp/rot_old.src" "$ntmp/rot_old.src" "$ntmp/rot_app.src" 2>/dev/null || true)
+    _h_rot_bad=$(LUME_BIN_DIR="$ntmp" ../../lume pkg check-rot "$ntmp/rot_old.src" "$ntmp/rot_new.src" "$ntmp/rot_app.src" 2>/dev/null || true)
+    if printf '%s' "$_g0_ok" | grep -q '"manifest_verified":true' && printf '%s' "$_g0_bad" | grep -q '"manifest_verified":false' && printf '%s' "$_g1_lb" | grep -q '"leaderboard":' && printf '%s' "$_g1_lb" | grep -q '"compiles_alone_rejected":true' && [ "$_g2_out" = "735,1000," ] && printf '%s' "$_g2_cert" | grep -q '"kernel_verified":true' && [ "$_g7_out" = "3800,25," ] && printf '%s' "$_g4_pub_ok" | grep -q '"ok":true' && printf '%s' "$_g4_aud_ok" | grep -q '"proof_certificate_verified":true' && printf '%s' "$_g4_pub_bad" | grep -q '"ok":false' && printf '%s' "$_g5_ok" | grep -q '"status":"strengthened"' && printf '%s' "$_g5_bad" | grep -q '"code":"V0003"' && printf '%s' "$_g6_sh" | grep -q 'lume://verify/sha256:' && printf '%s' "$_h_pt_ok" | grep -q '"proof_status":"proven"' && printf '%s' "$_h_pt_bad" | grep -q '"ok":false' && printf '%s' "$_h_pt_syn" | grep -q '"code":"A0004"' && printf '%s' "$_h_rp" | grep -q '"replay_verified":true' && printf '%s' "$_h_rp" | grep -q '"first_negative_step":2' && printf '%s' "$_h_ln" | grep -q '"origin":"discharged_verified"' && printf '%s' "$_h_cm_ok" | grep -q '"compositional_verified":true' && printf '%s' "$_h_cm_bad" | grep -q '"code":"V0004"' && printf '%s' "$_h_rot_ok" | grep -q '"rot_detected":false' && printf '%s' "$_h_rot_bad" | grep -q '"rot_detected":true'; then ok "adoption & horizon (#196 G0-G9, #198 docs/19 §3-§5 & docs/23 H1-H5): zero-C install/self-verify, leaderboard, sidecar, proof-gated registry publish/audit, proof-diff [V0003], share URI, AST patch [A0004/V0001], deterministic replay bisection, provenance lineage, compositional & seam verification [V0004], and anti-rot [V0003]"; else bad "adoption & horizon (#196, #198)"; printf '%s\n' "$_g0_ok" "$_g0_bad" "$_g1_lb" "$_g2_out" "$_g7_out" "$_g4_pub_ok" "$_g4_aud_ok" "$_g4_pub_bad" "$_g5_ok" "$_g5_bad" "$_g6_sh" "$_h_pt_ok" "$_h_pt_bad" "$_h_pt_syn" "$_h_rp" "$_h_ln" "$_h_cm_ok" "$_h_cm_bad" "$_h_rot_ok" "$_h_rot_bad"; fi
 else
     ok "no-toolchain ELF pipeline (skipped: not linux/x86_64, or under ASan)"
 fi

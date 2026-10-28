@@ -2005,7 +2005,7 @@ fn cs_impact_items(syms, ast0, vsigs, laws) = match syms
 
 fn caas_impact_json(src) = let ast0 = cs_parse(src) in let syms = cs_symbols(ast0) in let vsigs = cs_vcollect_vsigs(ast0) in let laws = cs_vcollect_laws(ast0) in let items = cs_impact_items(syms, ast0, vsigs, laws) in "{\"ok\":true,\"mode\":\"impact\",\"impacts\":[" + cs_joinsep(items, ",") + "]}"
 
-fn lcert_mcp(raw_src) = let sh = lc_extract_sha_hdr(raw_src) in let src = sh.rest in let r = caas_compile(src) in let cert = lcert_certify(raw_src) in let ws = cs_witness_items(r.proofs) in let reps = cs_collect_repairs(src, r) in let imps = cs_impact_items(r.symbols, r.ast, cs_vcollect_vsigs(r.ast), cs_vcollect_laws(r.ast)) in let defs = cs_def_hash_stmts(r.ast, (cs_tcollect(r.ast)).sigs, cs_vcollect_vsigs(r.ast), r.proofs) in "{\"jsonrpc\":\"2.0\",\"protocol\":\"mcp/1.0\",\"server\":\"lume-oracle-mcp\",\"tools\":[\"lume_check\",\"lume_prove\",\"lume_fill\",\"lume_witness\",\"lume_repair\",\"lume_impact\",\"lume_hashes\",\"lume_grammar\",\"lume_project\",\"lume_lsp\",\"lume_dap\",\"lume_repl\",\"lume_bind\",\"lume_certify\"],\"result\":{\"ok\":" + (if r.ok == 1 then "true" else "false") + ",\"diagnostics\":[" + cs_diags_json(r.diagnostics) + "],\"holes\":[" + cs_holes_json(r.holes) + "],\"proofs\":[" + cs_proofs_json(r.proofs) + "],\"witnesses\":[" + cs_joinsep(ws, ",") + "],\"repairs\":[" + cs_joinsep(reps, ",") + "],\"impacts\":[" + cs_joinsep(imps, ",") + "],\"definitions\":[" + cs_joinsep(defs, ",") + "],\"certificate\":" + cert + "}}"
+fn lcert_mcp(raw_src) = let sh = lc_extract_sha_hdr(raw_src) in let src = sh.rest in let r = caas_compile(src) in let cert = lcert_certify(raw_src) in let ws = cs_witness_items(r.proofs) in let reps = cs_collect_repairs(src, r) in let imps = cs_impact_items(r.symbols, r.ast, cs_vcollect_vsigs(r.ast), cs_vcollect_laws(r.ast)) in let defs = cs_def_hash_stmts(r.ast, (cs_tcollect(r.ast)).sigs, cs_vcollect_vsigs(r.ast), r.proofs) in "{\"jsonrpc\":\"2.0\",\"protocol\":\"mcp/1.0\",\"server\":\"lume-oracle-mcp\",\"tools\":[\"lume_check\",\"lume_prove\",\"lume_fill\",\"lume_witness\",\"lume_repair\",\"lume_impact\",\"lume_hashes\",\"lume_grammar\",\"lume_project\",\"lume_patch\",\"lume_replay\",\"lume_lineage\",\"lume_proof_diff\",\"lume_compose\",\"lume_check_rot\",\"lume_share\",\"lume_lsp\",\"lume_dap\",\"lume_repl\",\"lume_bind\",\"lume_certify\"],\"result\":{\"ok\":" + (if r.ok == 1 then "true" else "false") + ",\"diagnostics\":[" + cs_diags_json(r.diagnostics) + "],\"holes\":[" + cs_holes_json(r.holes) + "],\"proofs\":[" + cs_proofs_json(r.proofs) + "],\"witnesses\":[" + cs_joinsep(ws, ",") + "],\"repairs\":[" + cs_joinsep(reps, ",") + "],\"impacts\":[" + cs_joinsep(imps, ",") + "],\"definitions\":[" + cs_joinsep(defs, ",") + "],\"certificate\":" + cert + "}}"
 
 ## --- Stage 1/2 Tooling & AI-Author Substrate (#210, #211, #209) ---
 fn cs_def_sig_sexpr(nm, sigs) = match cs_siglookup(nm, sigs)
@@ -2062,6 +2062,8 @@ fn cs_lsp_action_items(reps) = match reps
     Cons(h, t) => Cons("{\"kind\":\"quickfix\",\"repair\":" + h + "}", cs_lsp_action_items(t))
 
 fn caas_lsp_json(src) = let r = caas_compile(src) in let ldiags = cs_lsp_diags(r.diagnostics, 0) in let hovers = cs_lsp_hover_items(r.symbols, r.proofs) in let reps = cs_collect_repairs(src, r) in let acts = cs_lsp_action_items(reps) in "{\"jsonrpc\":\"2.0\",\"protocol\":\"lsp/3.17\",\"server\":\"lume-lsp\",\"capabilities\":{\"textDocumentSync\":1,\"hoverProvider\":true,\"definitionProvider\":true,\"documentSymbolProvider\":true,\"codeActionProvider\":true,\"inlayHintProvider\":true},\"publishDiagnostics\":{\"uri\":\"file:///module.src\",\"diagnostics\":[" + cs_joinsep(ldiags, ",") + "]},\"documentSymbols\":[" + cs_syms_json(r.symbols) + "],\"hovers\":[" + cs_joinsep(hovers, ",") + "],\"codeActions\":[" + cs_joinsep(acts, ",") + "],\"holes\":[" + cs_holes_json(r.holes) + "],\"proofs\":[" + cs_proofs_json(r.proofs) + "]}"
+
+fn cs_cv_show(cv) = if cv.kind == "int" then str(cv.i) else cv.s
 
 fn cs_dap_frame_stmt(st, rest, ft, fid) = match st
     Fn(nm, ps, body) => let se = cs_expr_sexpr(body) in Cons("{\"id\":" + str(fid) + ",\"name\":\"" + cs_jesc(nm) + "\",\"params\":[" + cs_strlist_json(ps) + "],\"ast\":\"" + cs_jesc(se) + "\"}", cs_dap_frame_stmts(rest, ft, fid + 1))
@@ -2199,6 +2201,136 @@ fn cs_kernel_stmts(prog, osigs) = match prog
 
 fn caas_kernel_json(src) = let r = caas_compile(src) in let osigs = cs_ocollects(r.ast) in let ks = cs_kernel_stmts(r.ast, osigs) in let ok_all = (if r.ok == 1 and ks.ok == 1 then 1 else 0) in let all_diags = cs_app(r.diagnostics, ks.diags) in "{\"ok\":" + (if ok_all == 1 then "true" else "false") + ",\"mode\":\"kernel\",\"diagnostics\":[" + cs_diags_json(all_diags) + "],\"kernels\":[" + cs_joinsep(ks.items, ",") + "]}"
 
-fn caas_entry_dispatch(input) = if cs_startswith(input, "@mode certify\n") == 1 then lcert_certify(slice(input, 14, count(input))) else if cs_startswith(input, "@mode bind\n") == 1 then lcert_bind(slice(input, 11, count(input))) else if cs_startswith(input, "@mode witness\n") == 1 then caas_witness_json(slice(input, 14, count(input))) else if cs_startswith(input, "@mode repair\n") == 1 then caas_repair_json(slice(input, 13, count(input))) else if cs_startswith(input, "@mode impact\n") == 1 then caas_impact_json(slice(input, 13, count(input))) else if cs_startswith(input, "@mode hashes\n") == 1 then caas_hashes_json(slice(input, 13, count(input))) else if cs_startswith(input, "@mode grammar\n") == 1 then caas_grammar_json(slice(input, 14, count(input))) else if cs_startswith(input, "@mode project\n") == 1 then caas_project_json(slice(input, 14, count(input))) else if cs_startswith(input, "@mode c-export\n") == 1 then caas_cexport_json(slice(input, 15, count(input))) else if cs_startswith(input, "@mode kernel\n") == 1 then caas_kernel_json(slice(input, 13, count(input))) else if cs_startswith(input, "@mode lsp\n") == 1 then caas_lsp_json(slice(input, 10, count(input))) else if cs_startswith(input, "@mode dap\n") == 1 then caas_dap_json(slice(input, 10, count(input))) else if cs_startswith(input, "@mode repl\n") == 1 then caas_repl_json(slice(input, 11, count(input))) else if cs_startswith(input, "@mode mcp\n") == 1 then lcert_mcp(slice(input, 10, count(input))) else caas_json(caas_compile(input))
+## --- Adoption (#196 G5/G6) & Horizon (#198 docs/19 §3–§5, docs/23 H1–H5) ---
+fn cs_find_substr(s, pat, i, n, m) = if i + m > n then n else if slice(s, i, i + m) == pat then i else cs_find_substr(s, pat, i + 1, n, m)
+fn cs_split2(s) = let n = count(s) in let p = cs_find_substr(s, "\n@split\n", 0, n, 8) in if p >= n then {a: s, b: ""} else {a: slice(s, 0, p), b: slice(s, p + 8, n)}
+fn cs_split3(s) = let s1 = cs_split2(s) in let s2 = cs_split2(s1.b) in {a: s1.a, b: s2.a, c: s2.b}
+
+fn cs_is_proven_st(st) = if st == "proven" or st == "budget_checked" then 1 else 0
+
+fn cs_find_proof(nm, knd, ps) = match ps
+    Nil        => {found: 0, status: "missing", obligation: "", counterexample: ""}
+    Cons(p, r) => if p.name == nm and p.kind == knd then {found: 1, status: p.status, obligation: p.obligation, counterexample: p.counterexample} else cs_find_proof(nm, knd, r)
+
+fn cs_pdiff_old(old_ps, new_ps) = match old_ps
+    Nil         => {pres: Nil, strg: Nil, regr: Nil, diags: Nil}
+    Cons(po, r) => let rr = cs_pdiff_old(r, new_ps) in let fnw = cs_find_proof(po.name, po.kind, new_ps) in let item = "{\"name\":\"" + cs_jesc(po.name) + "\",\"kind\":\"" + cs_jesc(po.kind) + "\",\"old_status\":\"" + cs_jesc(po.status) + "\",\"new_status\":\"" + cs_jesc(fnw.status) + "\",\"obligation\":\"" + cs_jesc(if fnw.obligation != "" then fnw.obligation else po.obligation) + "\"}" in if cs_is_proven_st(po.status) == 1 then (if fnw.found == 1 and cs_is_proven_st(fnw.status) == 1 then {pres: Cons(item, rr.pres), strg: rr.strg, regr: rr.regr, diags: rr.diags} else let dg = cs_mkdiag("V0003", "proof-diff", "proof regression: obligation '" + po.name + "' (" + po.kind + ") was " + po.status + " in baseline but is " + fnw.status + " in candidate", "restore proven contract/invariant on '" + po.name + "' before merging") in {pres: rr.pres, strg: rr.strg, regr: Cons(item, rr.regr), diags: Cons(dg, rr.diags)}) else (if fnw.found == 1 and cs_is_proven_st(fnw.status) == 1 then {pres: rr.pres, strg: Cons(item, rr.strg), regr: rr.regr, diags: rr.diags} else if fnw.found == 1 and fnw.status == "refuted" then let dg2 = cs_mkdiag("V0003", "proof-diff", "proof regression: obligation '" + po.name + "' is refuted in candidate", "repair refuted contract on '" + po.name + "'") in {pres: rr.pres, strg: rr.strg, regr: Cons(item, rr.regr), diags: Cons(dg2, rr.diags)} else rr)
+
+fn cs_pdiff_new(new_ps, old_ps) = match new_ps
+    Nil         => {strg: Nil, regr: Nil, diags: Nil}
+    Cons(pn, r) => let rr = cs_pdiff_new(r, old_ps) in let fo = cs_find_proof(pn.name, pn.kind, old_ps) in if fo.found == 1 then rr else let item = "{\"name\":\"" + cs_jesc(pn.name) + "\",\"kind\":\"" + cs_jesc(pn.kind) + "\",\"old_status\":\"none\",\"new_status\":\"" + cs_jesc(pn.status) + "\",\"obligation\":\"" + cs_jesc(pn.obligation) + "\"}" in if cs_is_proven_st(pn.status) == 1 then {strg: Cons(item, rr.strg), regr: rr.regr, diags: rr.diags} else if pn.status == "refuted" then let dg = cs_mkdiag("V0003", "proof-diff", "new obligation '" + pn.name + "' (" + pn.kind + ") is refuted: " + pn.counterexample, "prove or fix '" + pn.name + "'") in {strg: rr.strg, regr: Cons(item, rr.regr), diags: Cons(dg, rr.diags)} else rr
+
+fn caas_proof_diff_json(body) = let sp = cs_split2(body) in let ro = caas_compile(sp.a) in let rn = caas_compile(sp.b) in let d1 = cs_pdiff_old(ro.proofs, rn.proofs) in let d2 = cs_pdiff_new(rn.proofs, ro.proofs) in let pres = d1.pres in let strg = cs_app(d1.strg, d2.strg) in let regr = cs_app(d1.regr, d2.regr) in let all_diags = cs_app(rn.diagnostics, cs_app(d1.diags, d2.diags)) in let ok_all = (if rn.ok == 1 and cs_isnil(regr) == 1 then 1 else 0) in let st = (if cs_isnil(regr) == 0 then "regressed" else if cs_isnil(strg) == 0 then "strengthened" else "preserved") in let md = "## Lume Proof Diff: `" + st + "` (" + str(cs_len(pres)) + " preserved, " + str(cs_len(strg)) + " strengthened, " + str(cs_len(regr)) + " regressed)" in "{\"ok\":" + (if ok_all == 1 then "true" else "false") + ",\"mode\":\"proof-diff\",\"status\":\"" + st + "\",\"preserved_count\":" + str(cs_len(pres)) + ",\"strengthened_count\":" + str(cs_len(strg)) + ",\"regressed_count\":" + str(cs_len(regr)) + ",\"preserved\":[" + cs_joinsep(pres, ",") + "],\"strengthened\":[" + cs_joinsep(strg, ",") + "],\"regressed\":[" + cs_joinsep(regr, ",") + "],\"diagnostics\":[" + cs_diags_json(all_diags) + "],\"markdown_summary\":\"" + cs_jesc(md) + "\"}"
+
+fn caas_check_rot_json(body) = let sp = cs_split3(body) in let ro = caas_compile(sp.a + "\n" + sp.c) in let rn = caas_compile(sp.b + "\n" + sp.c) in let d1 = cs_pdiff_old(ro.proofs, rn.proofs) in let d2 = cs_pdiff_new(rn.proofs, ro.proofs) in let regr = cs_app(d1.regr, d2.regr) in let all_diags = cs_app(rn.diagnostics, cs_app(d1.diags, d2.diags)) in let rot = (if rn.ok == 0 or cs_isnil(regr) == 0 then 1 else 0) in "{\"ok\":" + (if rot == 0 then "true" else "false") + ",\"mode\":\"check-rot\",\"rot_detected\":" + (if rot == 1 then "true" else "false") + ",\"status\":\"" + (if rot == 1 then "rot_detected" else "clean") + "\",\"preserved_count\":" + str(cs_len(d1.pres)) + ",\"broken_count\":" + str(cs_len(regr)) + ",\"preserved\":[" + cs_joinsep(d1.pres, ",") + "],\"broken_obligations\":[" + cs_joinsep(regr, ",") + "],\"diagnostics\":[" + cs_diags_json(all_diags) + "]}"
+
+fn caas_share_json(raw_src) = let sh = lc_extract_sha_hdr(raw_src) in let src = sh.rest in let r = caas_compile(src) in let cert = lcert_certify(raw_src) in let total = cs_len(r.proofs) in let proven = lc_count_proven(r.proofs) + lc_count_budget(r.proofs) in let ok_s = (if r.ok == 1 and total > 0 and proven == total and lc_kernel_check_all(r.proofs) == 1 then 1 else 0) in let ah = lc_sha256(r.ast_sexpr) in "{\"ok\":" + (if ok_s == 1 then "true" else "false") + ",\"mode\":\"share\",\"badge\":\"" + (if ok_s == 1 then "Lume Verified ✓" else "unverified") + "\",\"share_uri\":\"lume://verify/" + cs_jesc(ah) + "\",\"ast_hash\":\"" + cs_jesc(ah) + "\",\"proven_count\":" + str(proven) + ",\"total_obligations\":" + str(total) + ",\"proofs\":[" + cs_proofs_json(r.proofs) + "],\"certificate\":" + cert + "}"
+
+fn cs_extract_fn_body(prog) = match prog
+    Nil        => {ok: 0, e: Num(0)}
+    Cons(h, t) => cs_extract_fn_body1(h, t)
+
+fn cs_extract_fn_body1(st, rest) = match st
+    Fn(nm, ps, body) => if nm == "__patch_tmp" then {ok: 1, e: body} else cs_extract_fn_body(rest)
+    _                => cs_extract_fn_body(rest)
+
+fn cs_has_fn_stmt(prog, fnm) = match prog
+    Nil        => 0
+    Cons(h, t) => cs_has_fn_stmt1(h, rest_p(t), fnm)
+
+fn rest_p(t) = t
+
+fn cs_has_fn_stmt1(st, rest, fnm) = match st
+    Fn(nm, ps, body) => if nm == fnm then 1 else cs_has_fn_stmt(rest, fnm)
+    _                => cs_has_fn_stmt(rest, fnm)
+
+fn cs_patch_stmts(prog, fnm, new_e) = match prog
+    Nil        => Nil
+    Cons(h, t) => Cons(cs_patch_stmt1(h, fnm, new_e), cs_patch_stmts(t, fnm, new_e))
+
+fn cs_patch_stmt1(st, fnm, new_e) = match st
+    Fn(nm, ps, body) => if nm == fnm then Fn(nm, ps, new_e) else st
+    _                => st
+
+fn cs_replace_fn_line(ls, fnm, new_expr_s) = match ls
+    Nil        => Nil
+    Cons(h, t) => let tr = lc_trim(h) in if (cs_startswith(tr, "fn " + fnm + "(") == 1 or cs_startswith(tr, "pub fn " + fnm + "(") == 1 or cs_startswith(tr, "total fn " + fnm + "(") == 1 or cs_startswith(tr, "pub total fn " + fnm + "(") == 1) then (let eq = lc_find_ch(h, 0, count(h), "=") in let pfx = cs_find_fn_eq(h, 0, count(h)) in if pfx < count(h) then Cons(slice(h, 0, pfx + 1) + " " + new_expr_s, cs_replace_fn_line(t, fnm, new_expr_s)) else Cons(h, cs_replace_fn_line(t, fnm, new_expr_s))) else Cons(h, cs_replace_fn_line(t, fnm, new_expr_s))
+
+fn cs_find_fn_eq(s, i, n) = if i >= n then n else if at(s, i) == "=" and (i == 0 or (at(s, i - 1) != ">" and at(s, i - 1) != "<" and at(s, i - 1) != "!" and at(s, i - 1) != "=")) and (i + 1 >= n or (at(s, i + 1) != "=" and at(s, i + 1) != ">")) then i else cs_find_fn_eq(s, i + 1, n)
+
+fn caas_patch_json(body) = let sp = cs_split3(body) in let src = sp.a in let fnm = lc_trim(sp.b) in let expr_s = lc_trim(sp.c) in let ast0 = cs_parse(src) in let p_ast = (if expr_s == "" then Nil else cs_parse("fn __patch_tmp() = " + expr_s + "\n")) in let eb = cs_extract_fn_body(p_ast) in if fnm == "" or cs_has_fn_stmt(ast0, fnm) == 0 or eb.ok == 0 then (let dg = cs_mkdiag("A0004", "ast-patch", "semantic AST patch error: invalid target function '" + fnm + "' or malformed AST expression '" + expr_s + "'", "provide a valid target function name and well-formed Lume AST expression") in "{\"ok\":false,\"mode\":\"patch\",\"target\":\"" + cs_jesc(fnm) + "\",\"diagnostics\":[" + cs_diag_json(dg) + "]}") else let ast_after = cs_patch_stmts(ast0, fnm, eb.e) in let surf_e = cs_expr_surface(eb.e) in let patched_src = cs_joinsep(cs_replace_fn_line(lc_split_lines(src, 0, count(src)), fnm, surf_e), "") in let r2 = caas_compile(patched_src) in let bh = lc_sha256(cs_prog_sexpr(ast0)) in let ah = lc_sha256(cs_prog_sexpr(ast_after)) in let pst = cs_def_proof_status(fnm, r2.proofs) in let ok_p = (if r2.ok == 1 and pst != "refuted" then 1 else 0) in "{\"ok\":" + (if ok_p == 1 then "true" else "false") + ",\"mode\":\"patch\",\"target\":\"" + cs_jesc(fnm) + "\",\"before_ast_hash\":\"" + cs_jesc(bh) + "\",\"after_ast_hash\":\"" + cs_jesc(ah) + "\",\"patched_ast\":\"" + cs_jesc(cs_expr_sexpr(eb.e)) + "\",\"patched_source\":\"" + cs_jesc(patched_src) + "\",\"proof_status\":\"" + cs_jesc(pst) + "\",\"diagnostics\":[" + cs_diags_json(r2.diagnostics) + "],\"proofs\":[" + cs_proofs_json(r2.proofs) + "]}"
+
+fn cs_fn_eff_str(nm, ksigs) = let effs = cs_kget_dec_effs(cs_keffsig_lookup(nm, ksigs)) in if cs_isnil(effs) == 1 then "pure" else cs_joinsep(effs, ",")
+
+fn cs_replay_steps(prog, ft, ksigs, idx, first_neg) = match prog
+    Nil        => {items: Nil, canon: "", cnt: idx - 1, first_neg: first_neg}
+    Cons(h, t) => cs_replay_step1(h, t, ft, ksigs, idx, first_neg)
+
+fn cs_replay_step1(st, rest, ft, ksigs, idx, first_neg) = match st
+    Print(v) => let ev = cs_ceval(v, Nil, ft, 0) in let vs = (if ev.ok == 1 then cs_cv_show(ev.v) else "<error>") in let is_neg = (if ev.ok == 1 and ev.v.kind == "int" and ev.v.i < 0 then 1 else 0) in let fn2 = (if first_neg == 0 and is_neg == 1 then idx else first_neg) in let sx = cs_expr_sexpr(v) in let effs = cs_kinfer_effs_e(v, ksigs, Nil) in let eff = (if cs_isnil(effs) == 1 then "pure" else cs_joinsep(effs, ",")) in let sh = lc_sha256(str(idx) + ":" + sx + ":" + vs) in let item = "{\"step\":" + str(idx) + ",\"expr\":\"" + cs_jesc(sx) + "\",\"effect\":\"" + cs_jesc(eff) + "\",\"value\":\"" + cs_jesc(vs) + "\",\"negative\":" + (if is_neg == 1 then "true" else "false") + ",\"state_hash\":\"" + cs_jesc(sh) + "\"}" in let rr = cs_replay_steps(rest, ft, ksigs, idx + 1, fn2) in {items: Cons(item, rr.items), canon: sh + "|" + rr.canon, cnt: rr.cnt, first_neg: rr.first_neg}
+    _        => cs_replay_steps(rest, ft, ksigs, idx, first_neg)
+
+fn caas_replay_json(src) = let r = caas_compile(src) in let exp = (if r.ok == 1 then r.expanded else r.ast) in let ft = cs_buildft(exp) in let ksigs = cs_kcollect_effsigs(r.ast) in let s1 = cs_replay_steps(exp, ft, ksigs, 1, 0) in let s2 = cs_replay_steps(exp, ft, ksigs, 1, 0) in let th1 = lc_sha256(s1.canon) in let th2 = lc_sha256(s2.canon) in let ver = (if th1 == th2 then 1 else 0) in "{\"ok\":" + (if r.ok == 1 and ver == 1 then "true" else "false") + ",\"mode\":\"replay\",\"replay_verified\":" + (if ver == 1 then "true" else "false") + ",\"step_count\":" + str(s1.cnt) + ",\"first_negative_step\":" + str(s1.first_neg) + ",\"trace_hash\":\"" + cs_jesc(th1) + "\",\"output\":\"" + cs_jesc(r.result) + "\",\"trace\":[" + cs_joinsep(s1.items, ",") + "]}"
+
+fn cs_collect_callees_args(xs, acc) = match xs
+    Nil        => acc
+    Cons(h, t) => cs_collect_callees_args(t, cs_collect_callees_e(h, acc))
+
+fn cs_collect_callees_e(e, acc) = match e
+    Call(nm, args)  => let acc1 = (if cs_omem(nm, acc) == 1 then acc else Cons(nm, acc)) in cs_collect_callees_args(args, acc1)
+    Bin(op, l, r)   => cs_collect_callees_e(r, cs_collect_callees_e(l, acc))
+    If(c, t, e2)    => cs_collect_callees_e(e2, cs_collect_callees_e(t, cs_collect_callees_e(c, acc)))
+    LetIn(nm, v, b) => cs_collect_callees_e(b, cs_collect_callees_e(v, acc))
+    VarIn(nm, v, b) => cs_collect_callees_e(b, cs_collect_callees_e(v, acc))
+    _               => acc
+
+fn cs_collect_decisions_e(e) = match e
+    If(c, t, e2)    => Cons(cs_expr_surface(c), cs_app(cs_collect_decisions_e(t), cs_collect_decisions_e(e2)))
+    LetIn(nm, v, b) => cs_app(cs_collect_decisions_e(v), cs_collect_decisions_e(b))
+    VarIn(nm, v, b) => cs_app(cs_collect_decisions_e(v), cs_collect_decisions_e(b))
+    Bin(op, l, r)   => cs_app(cs_collect_decisions_e(l), cs_collect_decisions_e(r))
+    _               => Nil
+
+fn cs_fn_origin_kind(nm, body, osigs) = match cs_osiglookup(nm, osigs)
+    Nil          => if cs_mentions_call("verify", body) == 1 then "discharged_verified" else "deterministic_local"
+    Cons(osg, r) => if cs_ois_llm(osg.freef) == 1 then "external_llm" else if cs_ois_ffi(osg.freef) == 1 then "external_ffi" else if cs_mentions_call("verify", body) == 1 then "discharged_verified" else "deterministic_local"
+
+fn cs_lineage_stmts(prog, qsym, lctx) = match prog
+    Nil        => Nil
+    Cons(h, t) => cs_lineage_stmt1(h, t, qsym, lctx)
+
+fn cs_lineage_stmt1(st, rest, qsym, lctx) = match st
+    Fn(nm, ps, body) => let rr = cs_lineage_stmts(rest, qsym, lctx) in if cs_startswith(nm, "law_") == 1 or (qsym != "" and nm != qsym) then rr else let orig = cs_fn_origin_kind(nm, body, lctx.osigs) in let callees = cs_collect_callees_e(body, Nil) in let decs = cs_collect_decisions_e(body) in let eff = cs_fn_eff_str(nm, lctx.ksigs) in let cdoc = cs_c_contract_doc(nm, lctx.vsigs) in let pst = cs_def_proof_status(nm, lctx.proofs) in let ah = lc_sha256(cs_expr_sexpr(body)) in let item = "{\"symbol\":\"" + cs_jesc(nm) + "\",\"origin\":\"" + orig + "\",\"effect\":\"" + cs_jesc(eff) + "\",\"inputs\":[" + cs_strlist_json(ps) + "],\"callees\":[" + cs_strlist_json(callees) + "],\"decisions\":[" + cs_strlist_json(decs) + "],\"contracts\":\"" + cs_jesc(cdoc) + "\",\"proof_status\":\"" + cs_jesc(pst) + "\",\"ast_hash\":\"" + cs_jesc(ah) + "\"}" in Cons(item, rr)
+    _                => cs_lineage_stmts(rest, qsym, lctx)
+
+fn caas_lineage_json(body) = let sp = cs_split2(body) in let src = sp.a in let qsym = lc_trim(sp.b) in let r = caas_compile(src) in let osigs = cs_ocollects(r.ast) in let vsigs = cs_vcollect_vsigs(r.ast) in let ksigs = cs_kcollect_effsigs(r.ast) in let nodes = cs_lineage_stmts(r.ast, qsym, {osigs: osigs, vsigs: vsigs, ksigs: ksigs, proofs: r.proofs}) in "{\"ok\":" + (if r.ok == 1 and cs_isnil(nodes) == 0 then "true" else "false") + ",\"mode\":\"lineage\",\"query\":\"" + cs_jesc(qsym) + "\",\"lineage_count\":" + str(cs_len(nodes)) + ",\"nodes\":[" + cs_joinsep(nodes, ",") + "]}"
+
+fn cs_fn_names_prog(prog) = match prog
+    Nil        => Nil
+    Cons(h, t) => cs_fn_names_stmt1(h, cs_fn_names_prog(t))
+
+fn cs_fn_names_stmt1(st, rest) = match st
+    Fn(nm, ps, body) => if cs_startswith(nm, "law_") == 1 then rest else Cons(nm, rest)
+    _                => rest
+
+fn cs_cross_calls_list(callees, mod_a_fns, caller, proofs) = match callees
+    Nil         => Nil
+    Cons(c, cr) => let rest = cs_cross_calls_list(cr, mod_a_fns, caller, proofs) in if cs_omem(c, mod_a_fns) == 1 then Cons("{\"caller\":\"" + cs_jesc(caller) + "\",\"callee\":\"" + cs_jesc(c) + "\",\"callee_proof\":\"" + cs_jesc(cs_def_proof_status(c, proofs)) + "\",\"caller_proof\":\"" + cs_jesc(cs_def_proof_status(caller, proofs)) + "\"}", rest) else rest
+
+fn cs_cross_calls_stmts(prog_b, mod_a_fns, proofs) = match prog_b
+    Nil        => Nil
+    Cons(h, t) => cs_cross_calls_stmt1(h, cs_cross_calls_stmts(t, mod_a_fns, proofs), mod_a_fns, proofs)
+
+fn cs_cross_calls_stmt1(st, rest, mod_a_fns, proofs) = match st
+    Fn(nm, ps, body) => if cs_startswith(nm, "law_") == 1 then rest else cs_app(cs_cross_calls_list(cs_collect_callees_e(body, Nil), mod_a_fns, nm, proofs), rest)
+    _                => rest
+
+fn cs_has_refuted_pf(ps) = match ps
+    Nil        => 0
+    Cons(p, r) => if p.status == "refuted" then 1 else cs_has_refuted_pf(r)
+
+fn caas_compose_json(body) = let sp = cs_split2(body) in let ast_a = cs_parse(sp.a) in let ast_b = cs_parse(sp.b) in let rs = caas_compile(sp.a + "\n" + sp.b) in let mod_a_fns = cs_fn_names_prog(ast_a) in let xcalls = cs_cross_calls_stmts(ast_b, mod_a_fns, rs.proofs) in let has_ref = cs_has_refuted_pf(rs.proofs) in let seam_ok = (if rs.ok == 1 and has_ref == 0 then 1 else 0) in let comp_diags = (if has_ref == 1 then Cons(cs_mkdiag("V0004", "compose", "compositional verification error: one or more cross-module contracts or temporal laws failed to compose", "strengthen module boundary contracts so all composed obligations prove"), rs.diagnostics) else rs.diagnostics) in "{\"ok\":" + (if seam_ok == 1 then "true" else "false") + ",\"mode\":\"compose\",\"compositional_verified\":" + (if seam_ok == 1 then "true" else "false") + ",\"learned_proven_seam_verified\":" + (if seam_ok == 1 then "true" else "false") + ",\"cross_module_calls\":[" + cs_joinsep(xcalls, ",") + "],\"proofs\":[" + cs_proofs_json(rs.proofs) + "],\"diagnostics\":[" + cs_diags_json(comp_diags) + "]}"
+
+fn caas_entry_dispatch(input) = if cs_startswith(input, "@mode certify\n") == 1 then lcert_certify(slice(input, 14, count(input))) else if cs_startswith(input, "@mode bind\n") == 1 then lcert_bind(slice(input, 11, count(input))) else if cs_startswith(input, "@mode witness\n") == 1 then caas_witness_json(slice(input, 14, count(input))) else if cs_startswith(input, "@mode repair\n") == 1 then caas_repair_json(slice(input, 13, count(input))) else if cs_startswith(input, "@mode impact\n") == 1 then caas_impact_json(slice(input, 13, count(input))) else if cs_startswith(input, "@mode hashes\n") == 1 then caas_hashes_json(slice(input, 13, count(input))) else if cs_startswith(input, "@mode grammar\n") == 1 then caas_grammar_json(slice(input, 14, count(input))) else if cs_startswith(input, "@mode project\n") == 1 then caas_project_json(slice(input, 14, count(input))) else if cs_startswith(input, "@mode c-export\n") == 1 then caas_cexport_json(slice(input, 15, count(input))) else if cs_startswith(input, "@mode kernel\n") == 1 then caas_kernel_json(slice(input, 13, count(input))) else if cs_startswith(input, "@mode proof-diff\n") == 1 then caas_proof_diff_json(slice(input, 17, count(input))) else if cs_startswith(input, "@mode check-rot\n") == 1 then caas_check_rot_json(slice(input, 16, count(input))) else if cs_startswith(input, "@mode share\n") == 1 then caas_share_json(slice(input, 12, count(input))) else if cs_startswith(input, "@mode patch\n") == 1 then caas_patch_json(slice(input, 12, count(input))) else if cs_startswith(input, "@mode replay\n") == 1 then caas_replay_json(slice(input, 13, count(input))) else if cs_startswith(input, "@mode lineage\n") == 1 then caas_lineage_json(slice(input, 14, count(input))) else if cs_startswith(input, "@mode compose\n") == 1 then caas_compose_json(slice(input, 14, count(input))) else if cs_startswith(input, "@mode lsp\n") == 1 then caas_lsp_json(slice(input, 10, count(input))) else if cs_startswith(input, "@mode dap\n") == 1 then caas_dap_json(slice(input, 10, count(input))) else if cs_startswith(input, "@mode repl\n") == 1 then caas_repl_json(slice(input, 11, count(input))) else if cs_startswith(input, "@mode mcp\n") == 1 then lcert_mcp(slice(input, 10, count(input))) else caas_json(caas_compile(input))
 
 print caas_entry_dispatch(readall())

@@ -1,0 +1,9 @@
+[package]
+name = "supply_chain_demo"
+version = "0.2.0"
+edition = "2026"
+
+[capabilities]
+allow = ["pure"]
+
+[dependencies]

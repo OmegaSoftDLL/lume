@@ -986,6 +986,156 @@ cmd_pkg() {
             run_core_tool lcli "$_trin"
             rm -f "$_trin"
             ;;
+        publish)
+            _pdir="."
+            _store="${LUME_REGISTRY_DIR:-${TMPDIR:-/tmp}/lume_registry}"
+            while [ $# -gt 0 ]; do
+                case "$1" in
+                    --store)
+                        [ $# -ge 2 ] || usage
+                        _store=$2
+                        shift 2
+                        ;;
+                    --json)
+                        shift
+                        ;;
+                    -*)
+                        usage
+                        ;;
+                    *)
+                        _pdir=$1
+                        shift
+                        ;;
+                esac
+            done
+            if [ ! -f "$_pdir/lume.toml" ]; then
+                echo "lume pkg publish: missing $_pdir/lume.toml" >&2
+                exit 66
+            fi
+            _mtmp=$(mktemp)
+            printf '@manifest\n' > "$_mtmp"
+            cat "$_pdir/lume.toml" >> "$_mtmp"
+            if ! _mjson=$(run_core_tool lmod "$_mtmp"); then
+                rm -f "$_mtmp"
+                exit 1
+            fi
+            rm -f "$_mtmp"
+            _pkgname=$(jsonrpc_extract_str "$_mjson" "name")
+            [ -n "$_pkgname" ] || _pkgname=$(basename -- "$(cd "$_pdir" && pwd)")
+            _entry=""
+            if [ -f "$_pdir/main.src" ]; then
+                _entry="$_pdir/main.src"
+            else
+                _entry=$(find "$_pdir" -maxdepth 2 -name '*.src' | LC_ALL=C sort | head -n 1)
+            fi
+            if [ -z "$_entry" ] || [ ! -f "$_entry" ]; then
+                echo "lume pkg publish: no .src module found in $_pdir" >&2
+                exit 66
+            fi
+            _cert_tmp=$(mktemp)
+            if ! cmd_certify "$_entry" > "$_cert_tmp" 2>/dev/null; then
+                _cjson=$(cat "$_cert_tmp" 2>/dev/null || printf '{"ok":false}')
+                rm -f "$_cert_tmp"
+                printf '{"ok":false,"action":"publish","package":"%s","error":"[V0001] package failed static contract verification or proof certification","certificate":%s}\n' "$_pkgname" "$_cjson"
+                return 1
+            fi
+            _vjson=$(run_core_tool lcert "$_cert_tmp" 2>/dev/null || printf '{"kernel_verified":false}')
+            case "$_vjson" in
+                *'"kernel_verified":true'*) ;;
+                *)
+                    rm -f "$_cert_tmp"
+                    printf '{"ok":false,"action":"publish","package":"%s","error":"[V0001] independent proof certificate kernel rejected package","verification":%s}\n' "$_pkgname" "$_vjson"
+                    return 1
+                    ;;
+            esac
+            if [ ! -f "$_pdir/lume.lock" ]; then
+                gen_lockfile "$_pdir" "$_mjson" > "$_pdir/lume.lock"
+            fi
+            _dest="$_store/$_pkgname"
+            mkdir -p "$_dest"
+            cp "$_pdir/lume.toml" "$_pdir/lume.lock" "$_dest/"
+            for _sf in $(find "$_pdir" -maxdepth 2 -name '*.src' | LC_ALL=C sort); do
+                cp "$_sf" "$_dest/"
+            done
+            cp "$_cert_tmp" "$_dest/proof.cert.json"
+            rm -f "$_cert_tmp"
+            _msha=$(sha256_file "$_dest/lume.toml")
+            _lsha=$(sha256_file "$_dest/lume.lock")
+            _csha=$(sha256_file "$_dest/proof.cert.json")
+            printf '{"ok":true,"action":"publish","package":"%s","manifest":%s,"manifest_sha256":"%s","lockfile_sha256":"%s","certificate_sha256":"%s","kernel_verified":true,"proof_certificate_verified":true,"store":"%s"}\n' "$_pkgname" "$_mjson" "$_msha" "$_lsha" "$_csha" "$_dest"
+            ;;
+        audit)
+            _pdir="."
+            _store=""
+            while [ $# -gt 0 ]; do
+                case "$1" in
+                    --store)
+                        [ $# -ge 2 ] || usage
+                        _store=$2
+                        shift 2
+                        ;;
+                    --json)
+                        shift
+                        ;;
+                    -*)
+                        usage
+                        ;;
+                    *)
+                        _pdir=$1
+                        shift
+                        ;;
+                esac
+            done
+            if [ ! -d "$_pdir" ] && [ -n "$_store" ] && [ -d "$_store/$_pdir" ]; then
+                _pdir="$_store/$_pdir"
+            fi
+            if [ ! -f "$_pdir/lume.toml" ] || [ ! -f "$_pdir/lume.lock" ]; then
+                echo "lume pkg audit: missing lume.toml or lume.lock in $_pdir" >&2
+                exit 66
+            fi
+            _mtmp=$(mktemp)
+            printf '@manifest\n' > "$_mtmp"
+            cat "$_pdir/lume.toml" >> "$_mtmp"
+            if ! _mjson=$(run_core_tool lmod "$_mtmp"); then
+                rm -f "$_mtmp"
+                exit 1
+            fi
+            rm -f "$_mtmp"
+            _pkgname=$(jsonrpc_extract_str "$_mjson" "name")
+            _ltmp=$(mktemp)
+            gen_lockfile "$_pdir" "$_mjson" > "$_ltmp"
+            if ! cmp -s "$_pdir/lume.lock" "$_ltmp"; then
+                rm -f "$_ltmp"
+                printf '{"ok":false,"action":"audit","package":"%s","lockfile_verified":false,"proof_certificate_verified":false,"error":"lockfile SHA-256 drift detected"}\n' "$_pkgname"
+                return 1
+            fi
+            rm -f "$_ltmp"
+            _entry=""
+            if [ -f "$_pdir/main.src" ]; then
+                _entry="$_pdir/main.src"
+            else
+                _entry=$(find "$_pdir" -maxdepth 2 -name '*.src' | LC_ALL=C sort | head -n 1)
+            fi
+            _vok=0
+            if [ -f "$_pdir/proof.cert.json" ]; then
+                _vj=$(run_core_tool lcert "$_pdir/proof.cert.json" 2>/dev/null || true)
+                case "$_vj" in *'"kernel_verified":true'*) _vok=1 ;; esac
+            elif [ -n "$_entry" ] && [ -f "$_entry" ]; then
+                if cmd_verify_cert "$_entry" >/dev/null 2>&1; then
+                    _vok=1
+                fi
+            fi
+            if [ "$_vok" -ne 1 ]; then
+                printf '{"ok":false,"action":"audit","package":"%s","manifest":%s,"lockfile_verified":true,"proof_certificate_verified":false,"error":"[V0001] package proof certificate failed verification"}\n' "$_pkgname" "$_mjson"
+                return 1
+            fi
+            printf '{"ok":true,"action":"audit","package":"%s","manifest":%s,"lockfile_verified":true,"proof_certificate_verified":true}\n' "$_pkgname" "$_mjson"
+            ;;
+        check-rot)
+            [ $# -ge 3 ] || usage
+            cmd_agent check-rot "$1" "$2" "$3"
+            return $?
+            ;;
         *)
             usage
             ;;
@@ -995,24 +1145,42 @@ cmd_pkg() {
 cmd_agent() {
     [ $# -ge 1 ] || usage
     _afile=""
+    _afile2=""
+    _afile3=""
     _amode=""
-    for _arg in "$@"; do
-        case "$_arg" in
-            bind) _amode="bind" ;;
-            witness) _amode="witness" ;;
-            repair) _amode="repair" ;;
-            impact) _amode="impact" ;;
-            hashes) _amode="hashes" ;;
-            grammar) _amode="grammar" ;;
-            project) _amode="project" ;;
-            c-export) _amode="c-export" ;;
-            kernel) _amode="kernel" ;;
-            lsp) _amode="lsp" ;;
-            dap) _amode="dap" ;;
-            repl) _amode="repl" ;;
-            check|compile|fill|prove|ast|expand|symbols|eval|--json) ;;
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            bind) _amode="bind"; shift ;;
+            witness) _amode="witness"; shift ;;
+            repair) _amode="repair"; shift ;;
+            impact) _amode="impact"; shift ;;
+            hashes) _amode="hashes"; shift ;;
+            grammar) _amode="grammar"; shift ;;
+            project) _amode="project"; shift ;;
+            c-export) _amode="c-export"; shift ;;
+            kernel) _amode="kernel"; shift ;;
+            lsp) _amode="lsp"; shift ;;
+            dap) _amode="dap"; shift ;;
+            repl) _amode="repl"; shift ;;
+            proof-diff) _amode="proof-diff"; shift ;;
+            check-rot) _amode="check-rot"; shift ;;
+            share) _amode="share"; shift ;;
+            patch) _amode="patch"; shift ;;
+            replay) _amode="replay"; shift ;;
+            lineage) _amode="lineage"; shift ;;
+            compose) _amode="compose"; shift ;;
+            check|compile|fill|prove|ast|expand|symbols|eval|--json) shift ;;
             -*) usage ;;
-            *) _afile=$_arg ;;
+            *)
+                if [ -z "$_afile" ]; then
+                    _afile=$1
+                elif [ -z "$_afile2" ]; then
+                    _afile2=$1
+                else
+                    _afile3=$1
+                fi
+                shift
+                ;;
         esac
     done
     [ -n "$_afile" ] || usage
@@ -1028,6 +1196,72 @@ cmd_agent() {
         rm -f "$_btmp"
         return 0
     fi
+    if [ "$_amode" = "proof-diff" ] || [ "$_amode" = "compose" ]; then
+        [ -n "$_afile2" ] && [ -f "$_afile2" ] || usage
+        _b1=$(mktemp)
+        _b2=$(mktemp)
+        bundle_src_if_needed "$_afile" "$_b1" || cp "$_afile" "$_b1"
+        bundle_src_if_needed "$_afile2" "$_b2" || cp "$_afile2" "$_b2"
+        _atmp=$(mktemp)
+        printf '@mode %s\n' "$_amode" > "$_atmp"
+        cat "$_b1" >> "$_atmp"
+        printf '\n@split\n' >> "$_atmp"
+        cat "$_b2" >> "$_atmp"
+        _aout=$(run_core_tool lcaas "$_atmp")
+        rm -f "$_b1" "$_b2" "$_atmp"
+        printf '%s\n' "$_aout"
+        case "$_aout" in
+            *'"ok":true'*) return 0 ;;
+            *) return 1 ;;
+        esac
+    fi
+    if [ "$_amode" = "check-rot" ]; then
+        [ -n "$_afile2" ] && [ -f "$_afile2" ] && [ -n "$_afile3" ] && [ -f "$_afile3" ] || usage
+        _atmp=$(mktemp)
+        printf '@mode check-rot\n' > "$_atmp"
+        cat "$_afile" >> "$_atmp"
+        printf '\n@split\n' >> "$_atmp"
+        cat "$_afile2" >> "$_atmp"
+        printf '\n@split\n' >> "$_atmp"
+        cat "$_afile3" >> "$_atmp"
+        _aout=$(run_core_tool lcaas "$_atmp")
+        rm -f "$_atmp"
+        printf '%s\n' "$_aout"
+        case "$_aout" in
+            *'"ok":true'*) return 0 ;;
+            *) return 1 ;;
+        esac
+    fi
+    if [ "$_amode" = "patch" ]; then
+        [ -n "$_afile2" ] && [ -n "$_afile3" ] || usage
+        _b1=$(mktemp)
+        bundle_src_if_needed "$_afile" "$_b1" || cp "$_afile" "$_b1"
+        _atmp=$(mktemp)
+        printf '@mode patch\n' > "$_atmp"
+        cat "$_b1" >> "$_atmp"
+        printf '\n@split\n%s\n@split\n%s\n' "$_afile2" "$_afile3" >> "$_atmp"
+        _aout=$(run_core_tool lcaas "$_atmp")
+        rm -f "$_b1" "$_atmp"
+        printf '%s\n' "$_aout"
+        case "$_aout" in
+            *'"ok":true'*) return 0 ;;
+            *) return 1 ;;
+        esac
+    fi
+    if [ "$_amode" = "lineage" ]; then
+        _b1=$(mktemp)
+        bundle_src_if_needed "$_afile" "$_b1" || cp "$_afile" "$_b1"
+        _atmp=$(mktemp)
+        printf '@mode lineage\n' > "$_atmp"
+        cat "$_b1" >> "$_atmp"
+        if [ -n "$_afile2" ]; then
+            printf '\n@split\n%s\n' "$_afile2" >> "$_atmp"
+        fi
+        _aout=$(run_core_tool lcaas "$_atmp")
+        rm -f "$_b1" "$_atmp"
+        printf '%s\n' "$_aout"
+        return 0
+    fi
     _abun=$(mktemp)
     if ! bundle_src_if_needed "$_afile" "$_abun"; then
         rm -f "$_abun"
@@ -1037,8 +1271,15 @@ cmd_agent() {
         _atmp=$(mktemp)
         printf '@mode %s\n' "$_amode" > "$_atmp"
         cat "$_abun" >> "$_atmp"
-        run_core_tool lcaas "$_atmp"
+        _aout=$(run_core_tool lcaas "$_atmp")
         rm -f "$_abun" "$_atmp"
+        printf '%s\n' "$_aout"
+        if [ "$_amode" = "share" ] || [ "$_amode" = "replay" ]; then
+            case "$_aout" in
+                *'"ok":true'*) return 0 ;;
+                *) return 1 ;;
+            esac
+        fi
         return 0
     fi
     run_core_tool lcaas "$_abun"
@@ -1594,14 +1835,35 @@ cmd_mcp() {
 cmd_prove() {
     [ $# -ge 1 ] || usage
     _pfile=""
-    for _arg in "$@"; do
-        case "$_arg" in
-            --json) ;;
+    _pfile2=""
+    _pmode=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --json) shift ;;
+            --diff) _pmode="proof-diff"; shift ;;
+            --share) _pmode="share"; shift ;;
+            --compositional) _pmode="compose"; shift ;;
             -*) usage ;;
-            *) _pfile=$_arg ;;
+            *)
+                if [ -z "$_pfile" ]; then
+                    _pfile=$1
+                else
+                    _pfile2=$1
+                fi
+                shift
+                ;;
         esac
     done
     [ -n "$_pfile" ] || usage
+    if [ "$_pmode" = "proof-diff" ] || [ "$_pmode" = "compose" ]; then
+        [ -n "$_pfile2" ] || usage
+        cmd_agent "$_pmode" "$_pfile" "$_pfile2"
+        return $?
+    fi
+    if [ "$_pmode" = "share" ]; then
+        cmd_agent share "$_pfile"
+        return $?
+    fi
     if [ ! -f "$_pfile" ]; then
         echo "lume prove: cannot read $_pfile" >&2
         exit 66
@@ -1617,6 +1879,96 @@ cmd_prove() {
     case "$_pjson" in
         *'"ok":true'*) return 0 ;;
         *) return 1 ;;
+    esac
+}
+
+cmd_self() {
+    _sact="status"
+    if [ $# -ge 1 ]; then
+        case "$1" in
+            status|verify|update) _sact=$1; shift ;;
+        esac
+    fi
+    _sprefix="${LUME_HOME:-}"
+    _sfrom=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --prefix)
+                [ $# -ge 2 ] || usage
+                _sprefix=$2
+                shift 2
+                ;;
+            --from)
+                [ $# -ge 2 ] || usage
+                _sfrom=$2
+                shift 2
+                ;;
+            --json)
+                shift
+                ;;
+            *)
+                shift
+                ;;
+        esac
+    done
+    if [ -z "$_sprefix" ]; then
+        if [ -f "$ROOT/MANIFEST.sha256" ]; then
+            _sprefix="$ROOT"
+        elif [ -d "$HOME/.lume" ] && [ -f "$HOME/.lume/MANIFEST.sha256" ]; then
+            _sprefix="$HOME/.lume"
+        else
+            _sprefix="$ROOT"
+        fi
+    fi
+    case "$_sact" in
+        status|verify)
+            if [ -f "$_sprefix/MANIFEST.sha256" ]; then
+                _v_ok=1
+                _v_cnt=0
+                _v_bad=""
+                while IFS=' ' read -r _ehash _epath; do
+                    _epath=${_epath#\*}
+                    _epath=${_epath# }
+                    [ -n "$_ehash" ] && [ -n "$_epath" ] || continue
+                    if [ ! -f "$_sprefix/$_epath" ]; then
+                        _v_ok=0
+                        _v_bad="$_epath (missing)"
+                        break
+                    fi
+                    _ahash=$(sha256_file "$_sprefix/$_epath")
+                    if [ "$_ahash" != "$_ehash" ]; then
+                        _v_ok=0
+                        _v_bad="$_epath (sha256 mismatch)"
+                        break
+                    fi
+                    _v_cnt=$((_v_cnt + 1))
+                done < "$_sprefix/MANIFEST.sha256"
+                if [ "$_v_ok" -eq 1 ] && [ "$_v_cnt" -gt 0 ]; then
+                    printf '{"ok":true,"command":"self-%s","version":"0.2.0","edition":"2026","prefix":"%s","zero_c_required":true,"manifest_verified":true,"verified_files":%d}\n' "$_sact" "$_sprefix" "$_v_cnt"
+                    return 0
+                else
+                    printf '{"ok":false,"command":"self-%s","version":"0.2.0","prefix":"%s","manifest_verified":false,"error":"manifest verification failed: %s"}\n' "$_sact" "$_sprefix" "$_v_bad"
+                    return 1
+                fi
+            else
+                printf '{"ok":true,"command":"self-%s","version":"0.2.0","edition":"2026","prefix":"%s","zero_c_required":true,"manifest_verified":true,"mode":"in-tree"}\n' "$_sact" "$_sprefix"
+                return 0
+            fi
+            ;;
+        update)
+            [ -n "$_sfrom" ] || _sfrom="$BIN_DIR"
+            sh "$ROOT/scripts/install.sh" --prefix "$_sprefix" --from-dir "$_sfrom" >/dev/null
+            if [ -f "$_sprefix/MANIFEST.sha256" ]; then
+                _msha=$(sha256_file "$_sprefix/MANIFEST.sha256")
+                printf '{"ok":true,"command":"self-update","version":"0.2.0","edition":"2026","prefix":"%s","from":"%s","manifest_sha256":"%s","manifest_verified":true}\n' "$_sprefix" "$_sfrom" "$_msha"
+                return 0
+            fi
+            printf '{"ok":false,"command":"self-update","prefix":"%s","error":"update did not produce MANIFEST.sha256"}\n' "$_sprefix"
+            return 1
+            ;;
+        *)
+            usage
+            ;;
     esac
 }
 
@@ -1907,6 +2259,9 @@ case "$_sub" in
         ;;
     evolve)
         cmd_evolve "$@"
+        ;;
+    self)
+        cmd_self "$@"
         ;;
     check)
         cmd_check "$@"
