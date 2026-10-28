@@ -68,6 +68,6 @@ fn postdotcall(nd, mnm, a) = match nd
 fn is_lambda_nd(nd) = match nd
     LambdaE(ps, tys, rt, b) => 1
     _                       => 0
-fn postloop(r) = if headtext(r.rest) == "." then (let t1 = droponce(r.rest) in let mnm = headtext(t1) in let t2 = droponce(t1) in if headtext(t2) == "(" then postloop(postdotcall(r.node, mnm, arglist(droponce(t2)))) else if mnm == "await" then postloop({node: AwaitE(r.node), rest: t2}) else postloop({node: Field(r.node, mnm), rest: t2})) else if headtext(r.rest) == "(" and is_lambda_nd(r.node) == 1 then (let a = arglist(droponce(r.rest)) in postloop({node: Call("_call", Cons(r.node, a.items)), rest: a.rest})) else r
+fn postloop(r) = if headtext(r.rest) == "." and headtext(droponce(r.rest)) != "." then (let t1 = droponce(r.rest) in let mnm = headtext(t1) in let t2 = droponce(t1) in if headtext(t2) == "(" then postloop(postdotcall(r.node, mnm, arglist(droponce(t2)))) else if mnm == "await" then postloop({node: AwaitE(r.node), rest: t2}) else postloop({node: Field(r.node, mnm), rest: t2})) else if headtext(r.rest) == "(" and is_lambda_nd(r.node) == 1 then (let a = arglist(droponce(r.rest)) in postloop({node: Call("_call", Cons(r.node, a.items)), rest: a.rest})) else r
 fn post(ts) = postloop(prim(ts))
 
