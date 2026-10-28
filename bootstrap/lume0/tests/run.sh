@@ -1017,7 +1017,6 @@ PY
     cat >"$ntmp/d4_writer.src" <<'EOF'
 use decimal
 use table
-use query
 @soa type LedgerEntry = record id: int, account: str, amount: decimal(10, 2), units: int
 fn ledger_schema() = Cons({name: "id", type: "int"}, Cons({name: "account", type: "str"}, Cons({name: "amount", type: "decimal"}, Cons({name: "units", type: "int"}, Nil))))
 fn initial_ledger() -> table[LedgerEntry] = read_csv("id,account,amount,units\n1,Cash,120.50,10\n2,Revenue,340.00,25", ledger_schema())
@@ -1028,7 +1027,6 @@ EOF
     cat >"$ntmp/d4_tx_worker.src" <<'EOF'
 use decimal
 use table
-use query
 fn ledger_schema() = Cons({name: "id", type: "int"}, Cons({name: "account", type: "str"}, Cons({name: "amount", type: "decimal"}, Cons({name: "units", type: "int"}, Nil))))
 fn new_row_v3() = Cons({kind: "int", value: 4}, Cons({kind: "str", value: "Reserve"}, Cons({kind: "decimal", value: decimal_parse("100.00")}, Cons({kind: "int", value: 15}, Nil))))
 fn run_tx() -> int = let s = persist_tx_insert_row("lume_crossproc_crash.wal", ledger_schema(), new_row_v3()) in s.ok
@@ -1037,7 +1035,6 @@ EOF
     cat >"$ntmp/d4_reader.src" <<'EOF'
 use decimal
 use table
-use query
 fn ledger_schema() = Cons({name: "id", type: "int"}, Cons({name: "account", type: "str"}, Cons({name: "amount", type: "decimal"}, Cons({name: "units", type: "int"}, Nil))))
 fn run_reader() -> str = let rec = persist_recover_path("lume_crossproc_crash.wal", ledger_schema()) in if rec.ok == 1 then str(rec.version) + ":" + str(table_row_count(rec.current)) + ":" + table_cell(rec.current, 2, 1).value.value else "ERR"
 print run_reader()

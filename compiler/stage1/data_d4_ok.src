@@ -2,7 +2,6 @@
 ## unit-typed money[CCY] currency arithmetic & FX conversion, and @soa columnar vectorised layout.
 use decimal
 use table
-use query
 
 @soa type LedgerEntry = record id: int, account: str, amount: decimal(10, 2), units: int
 
