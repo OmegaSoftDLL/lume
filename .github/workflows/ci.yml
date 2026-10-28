@@ -113,7 +113,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $cFiles = (Get-ChildItem bootstrap/lume0/*.c).FullName
-          & gcc -std=c11 -O2 "-Wl,--stack,67108864" -o bootstrap/lume0/lume0.exe @cFiles
+          & gcc -std=c11 -O2 "-Dfchmod(fd,mode)=0" "-Wl,--stack,67108864" -o bootstrap/lume0/lume0.exe @cFiles
           $lume0 = (Resolve-Path bootstrap/lume0/lume0.exe).Path
           $srcOk = "fn fib(n: int) -> int = if n < 2 then n else fib(n - 1) + fib(n - 2)`nfn clamp_pos(x: int) -> int requires x >= 0 ensures result >= 5 = x + 5`nprint fib(10)`nprint clamp_pos(37)`n"
           $srcTrap = "fn sq_not49(x: int) -> int ensures result != 49 = x * x`nprint sq_not49(7)`n"
@@ -157,3 +157,5 @@ jobs:
           if ($wasmOut -ne "55,42" -or $wasmRcOk -ne 0 -or $wasmRcTrap -ne 3) {
               throw "wasm32-wasi verification failed: out='$wasmOut' rcOk=$wasmRcOk rcTrap=$wasmRcTrap"
           }
+          $global:LASTEXITCODE = 0
+          exit 0
