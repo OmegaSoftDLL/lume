@@ -1,6 +1,13 @@
 ## ownership.src -- Lume Phase 3 Track O standard library for ownership tiers, interior mutability,
 ## and scoped arena allocators (`use ownership`, docs/16-phase3-plan.md O1-O4 & Issue #197).
 ##
+## ⚠️ MODEL / placeholder, NOT the typed compiler feature (`#197` is OPEN). `rc[T]`/`arc[T]`/`weak[T]`
+## here are an in-language **library of plain functions** over a shared control block (records like
+## `{tier:"rc", cb, val}`), and `[O0001]` is a **hand-written `ctfail("…[O0001]…")` string**, not the
+## compiler's ownership analysis. The real feature (`docs/03` §6: literal `rc(value)`/`arc(value)`,
+## automatic deref, compiler-enforced `[O0001]` on a real ownership tier) is **not implemented** —
+## tracked in `#197`. Do not treat this module as the real `rc[T]`/`arc[T]`/`weak[T]`.
+##
 ## Provides:
 ##   - `rc[T]`: single-threaded reference-counted pointer backed by a shared heap control block (`rc_new`, `rc_get`, `rc_clone`, `rc_drop`, `rc_strong_count`, `rc_weak_count`, `rc_is_alive`)
 ##   - `arc[T]`: atomic/thread-safe (`Send + Sync`) reference-counted pointer using hardware `lock xaddq` (`atomic_xadd64`) on a shared control block (`arc_new`, `arc_get`, `arc_clone`, `arc_drop`, `arc_strong_count`, `arc_is_alive`)
