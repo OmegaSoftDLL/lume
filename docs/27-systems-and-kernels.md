@@ -27,6 +27,28 @@ instruction subset; `@freestanding`/`@interrupt`/`std.os.cap` and `lume-os` exis
 and in-language models**, not real hardware codegen. So none of (A) is possible yet. The bricks below
 close that.
 
+## Sequencing & entry point (decided 2026-10-28)
+This track is **in the roadmap, not parked** — it enters in the sequence below. Its only hard
+prerequisite is the **existing x86-64 native backend, which already ships**, so there is no deep
+technical gate; "sequence" here is priority order.
+
+1. **In progress now:** `#191` (real FFI linking — C-ABI + WASM export). A from-scratch kernel does
+   **not** use C FFI, so `#191` does **not** block this track — it merely finishes first because it is
+   the current work.
+2. **Then `#227` enters at K0 on x86-64.** K0→K9 proceed on the x86-64 backend that already ships;
+   each brick is a QEMU-running PR (no model-as-hardware), with `stage2 == stage3`, `zero-c` and the
+   suite staying green.
+3. **`#206` (other ISAs) interleaves later, it is not an upfront prerequisite:** per "Per-ISA" above,
+   the x86-64 kernel is built first; AArch64/RISC-V ports of K2/K3/K4 are the kernel's **second-target**
+   phase, needed only after x86-64 K9. They can run in parallel but do not gate K0.
+4. **`#193` is closed *by* K7, not before it:** the real parallel runtime (atomics, spinlocks, SMP
+   bring-up, real scheduler) **is** the K7 deliverable, so there is no separate "do `#193` first" step.
+5. **Independent of this track** (run in parallel, no gating either way): `#210` LSP/DAP, `#211`
+   REPL/Jupyter, `#214` data, `#230` LLM-generation eval, `#196` adoption/distribution.
+
+Net: `#227` enters **right after `#191`**, at K0 on x86-64, and climbs K0→K9; multi-ISA (`#206`) and
+real parallelism (`#193`) fold in at K-brick boundaries rather than as upfront prerequisites.
+
 ## The bricks (K0–K9) — each a real PR, running on QEMU
 
 - **K0 — Freestanding/no-OS codegen.** A real `@freestanding` lowering: no libc, no syscalls, a
