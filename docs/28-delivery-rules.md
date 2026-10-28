@@ -102,6 +102,34 @@ seductive form of theater: it runs, it prints the right numbers, and it is still
   look-alike library) and closing the issue as done is a false completion (§1). Deliver the real thing,
   or label it honestly and leave the issue open.
 
+### 7. Zero placeholders — everything documented must run, exhaustively tested (the hard line)
+The failures this project kept hitting must not happen again: a fixed-op GPU `kernel fn` placeholder
+shipped while `#192` was closed over it (`#250`); emit-only Mach-O/PE/HEX targets and `rc`/`promise`
+record-mocks presented as features; a test tuned to a stale expected; docs claiming *shipped* while the
+code was a stub; a milestone closed on a model.
+- **No placeholder, stub, mock, fixed/hardcoded output, or one-shot may ship in the path of a claimed
+  feature — not even labelled.** If it is not the real thing, it is an **open issue**, not a shipped
+  feature, and nothing — docs, CLI, a status line, a test, a *closed* issue — may reference it as
+  working. A reference model is allowed only as an explicitly separate artifact that nothing presents
+  as the feature.
+- **Every claim in the docs, spec, roadmap, README or CLI is a promise the CI must prove.** If a doc
+  says a feature compiles / runs / proves, a test compiles / runs / proves it on a real target or a
+  faithful emulator. Nothing is documented or claimed present until it is run-verified; stale
+  "not implemented" notes are corrected too — docs match reality **in both directions**.
+- **Tests are exhaustive and generalising, never anecdotal or fitted.** Cover the feature's surface,
+  not one happy input; include adversarial and negative cases; property/fuzz where applicable;
+  **regenerate expected output from a real run and never tune inputs to hit a target number**; run on
+  **every** platform/ISA the feature claims. A green CI on one hand-picked example is not acceptance.
+- **Re-test exhaustively, every change.** The full suite plus the GOLDEN RULE invariants
+  (`stage 2 == stage 3`, `make zero-c`, the oracle) stay green on every PR; a feature is re-verified,
+  not assumed to still hold.
+- **Closing an issue requires the real, run-verified, exhaustively-tested deliverable** — never a
+  placeholder, model, or partial. Premature close is itself a defect (it happened with `#192`,
+  `#197`, `#206`, `#227` this round — all had to be reopened). Large items (a full OS, `#241`) ship
+  **incrementally**, each increment real and exhaustively tested; size is never an excuse to ship a
+  fake, nor a reason to claim the whole as done.
+- **When unsure, it is not done.** Default to `planned` and an open issue over a hopeful "shipped".
+
 ## In one line
 Build the real thing or label it honestly; prove it with a test that would fail if it were fake; and
 never let a word in the docs, the CLI, or a status line promise more than the code does.
