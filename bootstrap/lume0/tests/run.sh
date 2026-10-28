@@ -1178,7 +1178,7 @@ EOF
     "$ntmp/lasm" <"$ntmp/kernel_qemu.s" >"$ntmp/lume_os.img" 2>>"$ntmp/kernel_qemu.err"
     _qemu_ok=0
     if command -v qemu-system-x86_64 >/dev/null 2>&1; then
-        qemu-system-x86_64 -drive format=raw,file="$ntmp/lume_os.img" -serial stdio -display none -no-reboot -device isa-debug-exit,iobase=0xf4,iosize=0x04 >"$ntmp/qemu_serial.out" 2>"$ntmp/qemu_serial.err" || true
+        timeout 15s qemu-system-x86_64 -drive format=raw,file="$ntmp/lume_os.img" -serial stdio -display none -no-reboot -device isa-debug-exit,iobase=0xf4,iosize=0x04 >"$ntmp/qemu_serial.out" 2>"$ntmp/qemu_serial.err" || true
         if grep -q "lume_os_qemu_boot=ok cr3=4096 free_pages=62 pte=8199 irq32=2 mmio=42 atomic=15 next_pid=1 quantum=15 agent_ipc=200" "$ntmp/qemu_serial.out"; then
             _qemu_ok=1
         fi
