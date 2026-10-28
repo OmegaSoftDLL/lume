@@ -196,7 +196,15 @@ fn lk_prove_implies_sx(sx) = match sx
     SList(xs) => if lk_len(xs) == 3 and lk_svar_name(lk_shd(xs)) == "implies" then (let reqs_sx = lk_shd(lk_stl(xs)) in let goal_sx = lk_shd(lk_stl(lk_stl(xs))) in let rh = lk_cond_pos(reqs_sx, Nil, Nil) in if rh.ok == 0 then 0 else lk_prove_goal(goal_sx, rh.hyps, Nil)) else 0
     _         => 0
 
-fn lk_prove_term(term_str) = let n = count(term_str) in let r = lk_parse_sexpr(term_str, 0, n) in if r.ok == 1 and lk_skip_ws(term_str, r.next, n) == n then lk_prove_implies_sx(r.node) else 0
+fn lk_prove_all_implies(xs) = match xs
+    Nil        => 1
+    Cons(h, t) => if lk_prove_implies_sx(h) == 1 then lk_prove_all_implies(t) else 0
+
+fn lk_prove_sx(sx) = match sx
+    SList(xs) => let tag = lk_svar_name(lk_shd(xs)) in if tag == "implies" then lk_prove_implies_sx(sx) else if (tag == "temporal-always" or tag == "temporal-eventually") and lk_len(xs) == 3 then lk_prove_all_implies(lk_stl(xs)) else if tag == "temporal-until" and lk_len(xs) == 5 then lk_prove_all_implies(lk_stl(xs)) else 0
+    _         => 0
+
+fn lk_prove_term(term_str) = let n = count(term_str) in let r = lk_parse_sexpr(term_str, 0, n) in if r.ok == 1 and lk_skip_ws(term_str, r.next, n) == n then lk_prove_sx(r.node) else 0
 
 ## --- 4. Independent WCET Structural Budget Checker ---
 fn lk_find_sub_at(s, pat, i, n, m) = if i + m > n then 0 - 1 else if slice(s, i, i + m) == pat then i else lk_find_sub_at(s, pat, i + 1, n, m)

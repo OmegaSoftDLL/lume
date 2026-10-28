@@ -28,18 +28,18 @@ lume self verify
 
 Lume defaults to immutable values with Perceus in-place reuse (`own`) and provides explicit compiler-enforced ownership tiers when shared references are required:
 
-- `rc[T]` (`rc_new`, `.get()`, `.clone()`, `.strong_count()`) — deterministic single-threaded reference counting; rejected across `spawn`/`par` boundaries (`[O0010]`).
-- `arc[T]` (`arc_new`, `.get()`, `.clone()`, `.downgrade()`) — atomic reference counting (`lock xaddq`) safe across `spawn`, `par`, and `shard`.
-- `weak[T]` (`weak_ref`, `.upgrade() -> Option[T]`) — non-owning reference that upgrades to `Some(v)` while alive or `None` after drop.
+- `rc[T]` (`rc(v)`, `.get()`, `.clone()`, `.drop()`, `.strong_count()`, `.downgrade()`) — deterministic single-threaded reference counting; rejected across `spawn`/`par` boundaries (`[S0001]`).
+- `arc[T]` (`arc(v)`, `.get()`, `.clone()`, `.drop()`, `.strong_count()`, `.downgrade()`) — atomic reference counting (`lock xaddq`) safe across `spawn`, `par`, and `shard`.
+- `weak[T]` (`.downgrade()`, `.upgrade(fallback) -> T`, `.is_alive()`) — non-owning reference that upgrades to the live payload while strong count > 0 or returns `fallback` after drop.
 
 ```lume
 fn tier_example() -> int =
-    let shared = arc_new(21) in
-    let w = shared.downgrade() in
-    let upgraded = match w.upgrade()
-        Some(v) => v
-        None    => 0
-    in shared.get() + upgraded
+    let shared: arc[int] = arc(21) in
+    let w: weak[int] = shared.downgrade() in
+    let upgraded = w.upgrade(0) in
+    let res = shared.get() + upgraded in
+    let d = shared.drop() in
+    res
 ```
 
 ---

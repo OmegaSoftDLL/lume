@@ -24,12 +24,8 @@ from a thousand-line root.
 - **Dream.** State a **system-level, time-spanning** property — *"no user's balance is ever negative,
   on every path, forever"* — and have it proven end to end, across modules and across the FFI
   boundary, not function by function.
-- **Foothold.** V1–V3 contracts + the sound `QF_LIA` prover (Stage B); the effect system (K) already
-  tracks what crosses boundaries.
-- **Missing.** Compositional verification (proof-carrying modules that compose), **temporal** logic
-  over effect traces (safety *and* liveness: "always", "eventually"), refinement types, and a frame
-  discipline so local proofs lift to global ones. This is the largest leap — "proven functions" →
-  "proven systems".
+- **Foothold.** V1–V3 contracts + the sound `QF_LIA` prover (Stage B), compositional verification (`@mode compose`), and LTL `temporal law` (`always` $\Box$, `eventually` $\Diamond$, `until` $\mathcal{U}$, `leads_to` $\leadsto$ proved by `QF_LIA` inductive invariants and ranking functions, with `[V0005]` multi-step trace & Büchi lasso counterexamples and standalone `lcert.src` certificate verification, `#198`); the effect system (K) tracks what crosses boundaries.
+- **Remaining horizon.** Full branching-time CTL* / $\mu$-calculus over concurrent actor message graphs and global heap separation-logic frame inference across arbitrary pointer graphs.
 
 ## H2 — Software that does not rot
 - **Dream.** Code today decays silently: a dependency changes, a platform shifts, an assumption
@@ -95,7 +91,13 @@ compromise.
 
 ## Shipped Horizon Foundations (`#198`, `#213`, `#206`, `#227`)
 
-- **H1 (partial) — Compositional Multi-Module & Relational Law Verification (`lume prove --compositional <mod_a.src> <mod_b.src>`, `@mode compose`):** Combines producer and consumer modules, verifies cross-module `requires`/`ensures` call obligations and **relational/algebraic** `law` invariants via `QF_LIA`, and reports `"compositional_verified": true` (or `[V0001]` / `[V0004]` diagnostics on failure). **Not temporal:** `QF_LIA` is quantifier-free linear arithmetic and cannot express temporal logic (LTL/CTL over traces/time); real **temporal** proof stays the open part of H1 (`#198`; this doc's §H1 still lists temporal logic as *Missing*). The shipped mechanism is sound for what it is — just not temporal.
+- **H1 — Compositional Multi-Module & LTL Temporal Proof (`lume prove --compositional <mod_a.src> <mod_b.src>`, `temporal law`, `@mode compose`, `#198`):**
+  1. **Compositional & Relational Law Verification:** Combines producer and consumer modules, verifies cross-module `requires`/`ensures` call obligations and relational/algebraic `law` invariants via `QF_LIA`, and reports `"compositional_verified": true` (or `[V0001]` / `[V0004]` diagnostics on failure).
+  2. **LTL Temporal Logic Verification (`always` $\Box$, `eventually` $\Diamond$, `until` $\mathcal{U}$, `leads_to` $\leadsto$):** First-class `temporal law <name>(s: int) = ...` declarations in `compiler/stage1/lume/04_parser_decls.src`, `compiler/stage1/lume/06b_phase3.src`, `compiler/stage1/lcaas.src`, and `compiler/stage1/lcert.src` prove infinite-horizon state-transition traces:
+     - `always(init, step(s), inv)` ($\Box P$): proves inductive invariance (`init => inv` base case and `inv => let _s_next = step(s) in inv[s := _s_next]` inductive step in `QF_LIA`, with `If`-branch case splitting) plus bounded trajectory simulation, refuting invariant violations with `[V0005]` and a concrete multi-step state trace (`"trace: t=0: s=5 -> t=1: s=2 -> t=2: s=-1 (violates always invariant at t=2)"`).
+     - `eventually(init, step(s), goal[, rank])` ($\Diamond Q$) & `leads_to(init, step(s), trigger, goal[, rank])` ($P \leadsto Q$): proves termination/liveness via a well-founded ranking measure (`not_goal => rank(s) > 0` and `not_goal => let _s_next = step(s) in rank(_s_next) < rank(s)` in `QF_LIA`) plus Büchi lasso cycle detection over state trajectories, refuting stuttering fixed points or cycles with `[V0005]` (`"lasso/diverging trace: ... (lasso cycle at s=1 while eventually goal false)"`).
+     - `until(init, step(s), hold, goal)` ($P\ \mathcal{U}\ Q$): proves both prior-to-goal invariant preservation (`init => (goal or hold)` and `(not_goal and hold) => let _s_next = step(s) in (hold(_s_next) or goal(_s_next))`) and eventual goal reachability (`eventually`).
+     - **Independent Proof Kernel (`compiler/stage1/lcert.src`):** `lume certify` emits compound temporal proof terms `(temporal-always <base> <step>)`, `(temporal-eventually <bound> <dec>)`, and `(temporal-until <hbase> <hstep> <bound> <dec>)`, and `lume verify-cert` independently re-verifies every sub-implication in `lcert.src` (`"kernel_verified": true`, `"badge": "Lume Verified ✓"`).
 - **H2 — Anti-Rot Dependency Proof-Delta Verification (`lume pkg check-rot <old_dep.src> <new_dep.src> <downstream.src>`, `@mode check-rot`):** Detects semantic rot when a dependency upgrade weakens or breaks a contract relied upon by a downstream module, failing at compile time with `[V0003]`.
 - **H3 — Minimal Independent Proof Kernel & Mechanised Metatheory (`compiler/stage1/lcert.src`, `formal/lean/LumeCore.lean`):** `lume verify-cert` re-derives Fourier–Motzkin `QF_LIA` proofs and FIPS-180-4 SHA-256 digests in a standalone kernel (`#183`), and `formal/lean/LumeCore.lean` mechanises Lume-Core typing, progress, preservation, linear ownership (`O0001`), capability containment (`E0200`), and `QF_LIA` soundness in Lean 4 with zero `sorry`/`axiom` (`#213`).
 - **H4 — Learned ⊕ Proven Seam Verification (`@mode compose`, `[V0004]`):** Tracks `extern llm fn` and probabilistic calls across module boundaries and enforces that every learned output is discharged through a `verify(...)` contract guard before flowing into a proven function (`"seam_verified": true`, `[V0004]` on unverified flow).
