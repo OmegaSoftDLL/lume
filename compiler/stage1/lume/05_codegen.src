@@ -393,7 +393,7 @@ fn lhas_free_osig(prog) = match prog
     Nil        => 0
     Cons(h, t) => if lis_free_osig1(h) == 1 then 1 else lhas_free_osig(t)
 fn lis_free_osig1(s0) = match s0
-    OSig(nm, pubf, freef, pl, rty, fromp) => freef % 2
+    OSig(nm, pubf, freef, pl, rty, fromp) => if freef % 2 == 1 and nm == "kernel_boot_entry" then 1 else 0
     _                                     => 0
 fn lfind_isr_fn(prog) = match prog
     Nil        => ""
