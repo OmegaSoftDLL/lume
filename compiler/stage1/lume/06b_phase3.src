@@ -68,6 +68,14 @@ fn ohas_refine_tys(tys) = match tys
     Nil        => 0
     Cons(h, t) => if ois_refine_ty(h) == 1 then 1 else ohas_refine_tys(t)
 
+fn ois_tier_ty(ty) = match ty
+    TyApply(n, e) => if n == "rc" or n == "arc" or n == "weak" or n == "promise" or n == "signal" then 1 else ois_tier_ty(e)
+    _             => 0
+
+fn ohas_tier_tys(tys) = match tys
+    Nil        => 0
+    Cons(h, t) => if ois_tier_ty(h) == 1 then 1 else ohas_tier_tys(t)
+
 fn oany(prog) = match prog
     Nil        => 0
     Cons(h, t) => if oanystmt(h) == 1 then 1 else oany(t)
@@ -85,7 +93,7 @@ fn oanystmt(st) = match st
     TypeRefineS(nm, bty, pr)              => 1
     TraitDecl(tnm, ops)                   => 1
     ImplDecl(tnm, tty, mths)              => 1
-    Sig(nm, ps, ts, rt)                   => if ohas_unverified_tys(ts) == 1 or ois_unverified_ty(rt) == 1 or ohas_tensor_tys(ts) == 1 or ois_tensor_ty(rt) == 1 or ohas_refine_tys(ts) == 1 or ois_refine_ty(rt) == 1 then 1 else 0
+    Sig(nm, ps, ts, rt)                   => if ohas_unverified_tys(ts) == 1 or ois_unverified_ty(rt) == 1 or ohas_tensor_tys(ts) == 1 or ois_tensor_ty(rt) == 1 or ohas_refine_tys(ts) == 1 or ois_refine_ty(rt) == 1 or ohas_tier_tys(ts) == 1 or ois_tier_ty(rt) == 1 then 1 else 0
     Fn(nm, ps, body)                      => oanye(body)
     Print(v)                              => oanye(v)
     ExprS(v)                              => oanye(v)
@@ -108,7 +116,7 @@ fn oanye(e) = match e
     LetIn(nm, v, b)            => if oanye(v) == 1 then 1 else oanye(b)
     If(c, t, e2)               => if oanye(c) == 1 then 1 else if oanye(t) == 1 then 1 else oanye(e2)
     Bin(op, l, r)              => if oanye(l) == 1 then 1 else oanye(r)
-    Call(nm, args)             => if nm == "borrow" or nm == "borrow_mut" or nm == "move" or nm == "clone" or nm == "verify" or nm == "law_check" or nm == "evolve_approve" or nm == "llm_complete" or nm == "prob_sample" or nm == "sample_dist" or nm == "observe_lik" or nm == "old" or nm == "grad" or nm == "jvp" or nm == "vjp" or nm == "vmap" or nm == "jit" or nm == "matmul" or nm == "tensor_matmul" or nm == "tensor_add" or nm == "tensor_sub" or nm == "tensor_mul" or nm == "tensor_add_bias" or nm == "cap_page_map" or nm == "rc_drop" or nm == "arc_drop" or nm == "block_on" or nm == "shard" or nm == "_call" then 1 else oanyargs(args)
+    Call(nm, args)             => if nm == "borrow" or nm == "borrow_mut" or nm == "move" or nm == "clone" or nm == "verify" or nm == "law_check" or nm == "evolve_approve" or nm == "llm_complete" or nm == "prob_sample" or nm == "sample_dist" or nm == "observe_lik" or nm == "old" or nm == "grad" or nm == "jvp" or nm == "vjp" or nm == "vmap" or nm == "jit" or nm == "matmul" or nm == "tensor_matmul" or nm == "tensor_add" or nm == "tensor_sub" or nm == "tensor_mul" or nm == "tensor_add_bias" or nm == "cap_page_map" or nm == "rc" or nm == "arc" or nm == "rc_new" or nm == "arc_new" or nm == "rc_clone" or nm == "arc_clone" or nm == "rc_drop" or nm == "arc_drop" or nm == "rc_get" or nm == "arc_get" or nm == "rc_strong_count" or nm == "arc_strong_count" or nm == "weak_downgrade" or nm == "weak_upgrade" or nm == "downgrade" or nm == "upgrade" or nm == "strong_count" or (nm == "drop" and len(args) == 1) or (nm == "get" and len(args) == 1) or nm == "promise" or nm == "promise_new" or nm == "promise_resolve" or nm == "promise_await" or (nm == "resolve" and len(args) == 2) or nm == "signal" or nm == "signal_new" or nm == "signal_get" or nm == "signal_set" or nm == "signal_version" or (nm == "set" and len(args) == 2) or (nm == "version" and len(args) == 1) or nm == "block_on" or nm == "shard" or nm == "_call" then 1 else oanyargs(args)
     Field(o, fld)           => oanye(o)
     Rec(items)              => oanyrec(items)
     RecT(tn, items)         => oanyrec(items)
@@ -467,7 +475,7 @@ fn oarg_for_param2(fromp, args, p, r) = match args
     Nil         => Num(0)
     Cons(a, ar) => if p.pn == fromp then a else oarg_for_param(fromp, ar, r)
 
-fn ois_heap_alloc(nm) = if nm == "rc_new" or nm == "arc_new" or nm == "alloc_heap" or nm == "table_new" or nm == "box_new" then 1 else 0
+fn ois_heap_alloc(nm) = if nm == "rc" or nm == "arc" or nm == "rc_new" or nm == "arc_new" or nm == "promise" or nm == "signal" or nm == "promise_new" or nm == "signal_new" or nm == "alloc_heap" or nm == "table_new" or nm == "box_new" then 1 else 0
 
 ## --- core expression ownership/borrow/region check: returns {moved, origin} ---
 fn ochk_own_field(o, fld, ctx, moved) = match o
@@ -532,7 +540,7 @@ fn ochkargs(args, ctx, moved) = match args
     Nil        => moved
     Cons(h, t) => let r = ochke(h, ctx, moved) in ochkargs(t, ctx, r.moved)
 
-fn ochkcall(fnm, args, ctx, moved) = if ois_free(ctx.freef) == 1 and ctx.halloc == 0 and ois_heap_alloc(fnm) == 1 then ctfail("lume: ownership error [O0030]: ambient heap allocation '" + fnm + "' in '@freestanding' function '" + ctx.fnm + "' (help: pass an explicit allocator via 'with alloc = <arena> in ...')\n") else if (fnm == "move" or fnm == "rc_drop" or fnm == "arc_drop") and len(args) == 1 then ochk_own_target(ohd_e(args), ctx, moved) else if fnm == "cap_page_map" and len(args) >= 1 then let r0 = ochk_own_target(ohd_e(args), ctx, moved) in {moved: ochkargs(ptl(args), ctx, r0.moved), origin: ""} else if fnm == "borrow" and len(args) == 1 then let ra = ochke(ohd_e(args), ctx, moved) in {moved: ra.moved, origin: "borrow:" + ra.origin} else if fnm == "borrow_mut" and len(args) == 1 then ochk_mut_target(ohd_e(args), ctx, moved) else ochkcall_sig(fnm, args, osiglookup(fnm, ctx.osigs), ctx, moved)
+fn ochkcall(fnm, args, ctx, moved) = if ois_free(ctx.freef) == 1 and ctx.halloc == 0 and ois_heap_alloc(fnm) == 1 then ctfail("lume: ownership error [O0030]: ambient heap allocation '" + fnm + "' in '@freestanding' function '" + ctx.fnm + "' (help: pass an explicit allocator via 'with alloc = <arena> in ...')\n") else if (fnm == "move" or fnm == "drop" or fnm == "rc_drop" or fnm == "arc_drop") and len(args) == 1 then ochk_own_target(ohd_e(args), ctx, moved) else if fnm == "cap_page_map" and len(args) >= 1 then let r0 = ochk_own_target(ohd_e(args), ctx, moved) in {moved: ochkargs(ptl(args), ctx, r0.moved), origin: ""} else if fnm == "borrow" and len(args) == 1 then let ra = ochke(ohd_e(args), ctx, moved) in {moved: ra.moved, origin: "borrow:" + ra.origin} else if fnm == "borrow_mut" and len(args) == 1 then ochk_mut_target(ohd_e(args), ctx, moved) else ochkcall_sig(fnm, args, osiglookup(fnm, ctx.osigs), ctx, moved)
 
 fn ochkcall_sig(fnm, args, msig, ctx, moved) = match msig
     Nil          => let z = ochk_conflicts(fnm, ocollect_mut_args(args, Nil), args) in {moved: ochkargs(args, ctx, moved), origin: ""}
@@ -892,7 +900,7 @@ fn sis_nonsend_ty(ty) = match ty
     _             => 0
 
 fn sis_nonsend_init(e, nsvars, mvars) = match e
-    Call(cnm, args) => if cnm == "rc_new" or cnm == "cell_new" or cnm == "borrow_mut" then 1 else sis_nonsend_args(args, nsvars, mvars)
+    Call(cnm, args) => if cnm == "rc" or cnm == "rc_new" or cnm == "rc_clone" or cnm == "cell_new" or cnm == "borrow_mut" then 1 else sis_nonsend_args(args, nsvars, mvars)
     MutE(inner)     => 1
     Var(x)          => if omem(x, nsvars) == 1 or omem(x, mvars) == 1 then 1 else 0
     Field(o, fld)   => sis_nonsend_init(o, nsvars, mvars)
@@ -1127,7 +1135,7 @@ fn veval_args(args, env, old_env, fns, d) = match args
     Nil        => {ok: 1, vals: Nil}
     Cons(h, t) => let rh = veval(h, env, old_env, fns, d) in if rh.ok == 0 then {ok: 0, vals: Nil} else let rt = veval_args(t, env, old_env, fns, d) in if rt.ok == 0 then {ok: 0, vals: Nil} else {ok: 1, vals: Cons(rh, rt.vals)}
 
-fn veval_call(cnm, args, env, old_env, fns, d) = if cnm == "old" and len(args) == 1 then veval(ohd_e(args), old_env, old_env, fns, d) else if (cnm == "verify" or cnm == "law_check" or cnm == "evolve_approve" or cnm == "borrow" or cnm == "borrow_mut" or cnm == "move" or cnm == "clone" or cnm == "block_on") and len(args) >= 1 then veval(ohd_e(args), env, old_env, fns, d) else if cnm == "grad" and len(args) >= 2 then veval_call("__ad_grad_" + n4_var_name(ohd_e(args)), ptl(args), env, old_env, fns, d) else if cnm == "jit" and len(args) >= 2 then veval_call(n4_var_name(ohd_e(args)), ptl(args), env, old_env, fns, d) else if cnm == "dec_add" and len(args) == 2 then veval_bin("+", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else if cnm == "dec_sub" and len(args) == 2 then veval_bin("-", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else if cnm == "dec_eq" and len(args) == 2 then veval_bin("==", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else if cnm == "dec_lt" and len(args) == 2 then veval_bin("<", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else if cnm == "dec_le" and len(args) == 2 then veval_bin("<=", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else if cnm == "dec_gt" and len(args) == 2 then veval_bin(">", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else if cnm == "dec_ge" and len(args) == 2 then veval_bin(">=", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else veval_ufn(vfnlookup(cnm, fns), veval_args(args, env, old_env, fns, d), fns, d)
+fn veval_call(cnm, args, env, old_env, fns, d) = if cnm == "old" and len(args) == 1 then veval(ohd_e(args), old_env, old_env, fns, d) else if (cnm == "verify" or cnm == "law_check" or cnm == "evolve_approve" or cnm == "borrow" or cnm == "borrow_mut" or cnm == "move" or cnm == "clone" or cnm == "block_on" or cnm == "rc" or cnm == "arc" or cnm == "rc_new" or cnm == "arc_new" or cnm == "rc_clone" or cnm == "arc_clone" or cnm == "rc_get" or cnm == "arc_get" or cnm == "get" or cnm == "promise" or cnm == "promise_new" or cnm == "promise_await" or cnm == "signal" or cnm == "signal_new" or cnm == "signal_get") and len(args) >= 1 then veval(ohd_e(args), env, old_env, fns, d) else if cnm == "grad" and len(args) >= 2 then veval_call("__ad_grad_" + n4_var_name(ohd_e(args)), ptl(args), env, old_env, fns, d) else if cnm == "jit" and len(args) >= 2 then veval_call(n4_var_name(ohd_e(args)), ptl(args), env, old_env, fns, d) else if cnm == "dec_add" and len(args) == 2 then veval_bin("+", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else if cnm == "dec_sub" and len(args) == 2 then veval_bin("-", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else if cnm == "dec_eq" and len(args) == 2 then veval_bin("==", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else if cnm == "dec_lt" and len(args) == 2 then veval_bin("<", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else if cnm == "dec_le" and len(args) == 2 then veval_bin("<=", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else if cnm == "dec_gt" and len(args) == 2 then veval_bin(">", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else if cnm == "dec_ge" and len(args) == 2 then veval_bin(">=", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else veval_ufn(vfnlookup(cnm, fns), veval_args(args, env, old_env, fns, d), fns, d)
 
 fn veval_ufn(mf, ra, fns, d) = match mf
     Nil        => vv_err()
@@ -1695,7 +1703,7 @@ fn ochkstmt1(st, rest, ot, moved) = match st
     _                      => ochkstmts(rest, ot, moved)
 
 ## --- lower Track O, Track A, Track K, Track S & Track V surface AST nodes into canonical Lume-Core (`LetIn`/`If`) ---
-fn ois_intrinsic(nm, ufns) = if (nm == "borrow" or nm == "borrow_mut" or nm == "move" or nm == "clone" or nm == "evolve_approve" or nm == "old") and omem(nm, ufns) == 0 then 1 else 0
+fn ois_intrinsic(nm, ufns) = if (nm == "borrow" or nm == "borrow_mut" or nm == "move" or nm == "evolve_approve" or nm == "old") and omem(nm, ufns) == 0 then 1 else 0
 
 fn ois_verify_call(nm, ufns) = if (nm == "verify" or nm == "law_check") and omem(nm, ufns) == 0 then 1 else 0
 
@@ -1827,7 +1835,7 @@ fn olowere(e, lctx, d) = match e
     WithHandlerE(en, hs, b) => olowere(b, {ufns: lctx.ufns, hops: app(hs, lctx.hops), ownps: lctx.ownps, fns: lctx.fns}, d + 1)
     ScopeE(snm, b)          => LetIn(snm, Num(1), olowere(b, lctx, d + 1))
     SpawnE(inner)           => olowere(inner, lctx, d + 1)
-    AwaitE(inner)           => Field(olowere(inner, lctx, d + 1), "__future_val")
+    AwaitE(inner)           => Call("__lume_rc_get", Cons(olowere(inner, lctx, d + 1), Nil))
     ShardE(vnm, lo, hi, b)  => let v_lo = "_sh_lo_" + str(d) in let v_hi = "_sh_hi_" + str(d) in LetIn(v_lo, olowere(lo, lctx, d + 1), LetIn(v_hi, olowere(hi, lctx, d + 2), Bin("+", LetIn(vnm, Var(v_lo), olowere(b, lctx, d + 3)), LetIn(vnm, Var(v_hi), olowere(b, lctx, d + 4)))))
     LetIn(nm, v, b)         => let gfn = n4_is_grad_let(v) in if gfn != "" then olowere(n4_subst_call(b, nm, n4_grad_fn_name(gfn, lctx.ufns)), {ufns: lctx.ufns, hops: lctx.hops, ownps: orem(nm, lctx.ownps), fns: lctx.fns}, d + 17) else LetIn(nm, olowere(v, lctx, d + 1), olowere(b, {ufns: lctx.ufns, hops: lctx.hops, ownps: orem(nm, lctx.ownps), fns: lctx.fns}, d + 17))
     If(c, t, e2)            => If(olowere(c, lctx, d + 1), olowere(t, lctx, d + 17), olowere(e2, lctx, d + 33))
@@ -1882,9 +1890,11 @@ fn olower_shard_call(fe, a, b, lctx, d) = let la = olowere(a, lctx, d + 1) in le
 
 fn n4_lower_ad_call(nm, args, lctx, d) = if nm == "grad" and len(args) >= 2 then Call(n4_grad_fn_name(n4_var_name(ohd_e(args)), lctx.ufns), olowerargs(ptl(args), lctx, d)) else if nm == "jvp" and len(args) == 3 then Bin("*", Call(n4_grad_fn_name(n4_var_name(ohd_e(args)), lctx.ufns), Cons(olowere(ohd_e(ptl(args)), lctx, d), Nil)), olowere(ohd_e(ptl(ptl(args))), lctx, d + 1)) else if nm == "vjp" and len(args) == 3 then Bin("*", olowere(ohd_e(ptl(ptl(args))), lctx, d + 1), Call(n4_grad_fn_name(n4_var_name(ohd_e(args)), lctx.ufns), Cons(olowere(ohd_e(ptl(args)), lctx, d), Nil))) else if nm == "jit" and len(args) >= 2 then (let fnm = n4_var_name(ohd_e(args)) in let largs = olowerargs(ptl(args), lctx, d) in n4_lower_jit_call(fnm, largs, vfnlookup(fnm, lctx.fns), d)) else Call(nm, olowerargs(args, lctx, d))
 
+fn olower_tier_conc_nm(nm, ar) = if (nm == "rc" or nm == "rc_new") and ar == 1 then "__lume_rc_new" else if (nm == "arc" or nm == "arc_new") and ar == 1 then "__lume_arc_new" else if (nm == "clone" or nm == "rc_clone" or nm == "arc_clone") and ar == 1 then "__lume_rc_clone" else if (nm == "drop" or nm == "rc_drop" or nm == "arc_drop") and ar == 1 then "__lume_rc_drop" else if (nm == "get" or nm == "rc_get" or nm == "arc_get" or nm == "promise_await" or nm == "signal_get" or nm == "block_on") and ar == 1 then "__lume_rc_get" else if (nm == "strong_count" or nm == "rc_strong_count" or nm == "arc_strong_count") and ar == 1 then "__lume_rc_strong_count" else if (nm == "downgrade" or nm == "weak_downgrade") and ar == 1 then "__lume_weak_downgrade" else if (nm == "upgrade" or nm == "weak_upgrade") and ar == 2 then "__lume_weak_upgrade" else if (nm == "promise" or nm == "promise_new") and ar == 1 then "__lume_promise_new" else if (nm == "resolve" or nm == "promise_resolve") and ar == 2 then "__lume_promise_resolve" else if (nm == "signal" or nm == "signal_new") and ar == 1 then "__lume_signal_new" else if (nm == "set" or nm == "signal_set") and ar == 2 then "__lume_signal_set" else if (nm == "version" or nm == "signal_version") and ar == 1 then "__lume_signal_version" else ""
+
 fn olowercall(nm, args, mhop, lctx, d) = match mhop
     Cons(hop, r) => kbind_hop_args(hop.ps, args, hop.body, "_khop_" + str(d) + "_" + hop.op + "_", lctx, d)
-    Nil          => if ois_intrinsic(nm, lctx.ufns) == 1 and len(args) == 1 then olowere(ohd_e(args), lctx, d) else if nm == "block_on" and len(args) == 1 and omem(nm, lctx.ufns) == 0 then Field(olowere(ohd_e(args), lctx, d), "__future_val") else if (nm == "shard" or nm == "vmap") and len(args) == 3 and omem(nm, lctx.ufns) == 0 then olower_shard_call(ohd_e(args), ohd_e(ptl(args)), ohd_e(ptl(ptl(args))), lctx, d) else if ois_verify_call(nm, lctx.ufns) == 1 then olower_verify(args, lctx, d) else if (nm == "grad" or nm == "jvp" or nm == "vjp" or nm == "jit") and omem(nm, lctx.ufns) == 0 then n4_lower_ad_call(nm, args, lctx, d) else if isnil(lctx.hops) == 0 and d < 200 then olowercall_fn(nm, args, vfnlookup(nm, lctx.fns), lctx, d) else Call(nm, olowerargs(args, lctx, d))
+    Nil          => let tnm = if omem(nm, lctx.ufns) == 0 then olower_tier_conc_nm(nm, len(args)) else "" in if ois_intrinsic(nm, lctx.ufns) == 1 and len(args) == 1 then olowere(ohd_e(args), lctx, d) else if tnm != "" then Call(tnm, olowerargs(args, lctx, d)) else if (nm == "shard" or nm == "vmap") and len(args) == 3 and omem(nm, lctx.ufns) == 0 then olower_shard_call(ohd_e(args), ohd_e(ptl(args)), ohd_e(ptl(ptl(args))), lctx, d) else if ois_verify_call(nm, lctx.ufns) == 1 then olower_verify(args, lctx, d) else if (nm == "grad" or nm == "jvp" or nm == "vjp" or nm == "jit") and omem(nm, lctx.ufns) == 0 then n4_lower_ad_call(nm, args, lctx, d) else if isnil(lctx.hops) == 0 and d < 200 then olowercall_fn(nm, args, vfnlookup(nm, lctx.fns), lctx, d) else Call(nm, olowerargs(args, lctx, d))
 
 fn olowercall_fn(nm, args, mf, lctx, d) = match mf
     Nil        => Call(nm, olowerargs(args, lctx, d))
@@ -1934,7 +1944,7 @@ fn ois_async_fn(nm, osigs) = match osiglookup(nm, osigs)
     Nil          => 0
     Cons(osg, r) => ois_async(osg.freef)
 
-fn owrap_async_body(nm, wb, osigs) = if ois_async_fn(nm, osigs) == 1 then Rec(Cons({key: "__future_state", val: Num(1)}, Cons({key: "__future_val", val: wb}, Nil))) else wb
+fn owrap_async_body(nm, wb, osigs) = if ois_async_fn(nm, osigs) == 1 then Call("__lume_promise_new", Cons(wb, Nil)) else wb
 
 fn olowerprog(prog, ufns, osigs, vctx) = match prog
     Nil        => Nil
@@ -2012,6 +2022,7 @@ fn t4_has_impl(tnm, tty, impls) = match impls
 fn t4_ty_name(ty) = match ty
     TyName(n)         => n
     TyRefine(bty, pr) => t4_ty_name(bty)
+    TyApply(kn, sub)  => if kn == "rc" or kn == "arc" or kn == "weak" or kn == "promise" or kn == "signal" then t4_ty_name(sub) else ""
     _                 => ""
 
 fn t4_env_lookup(nm, tenv) = match tenv
@@ -2031,7 +2042,8 @@ fn t4_expr_tyname(e, tenv, tctx) = match e
     Str(s)          => "str"
     Var(nm)         => let lt = t4_env_lookup(nm, tenv) in if lt != "" then lt else t4_ctor_tyname(nm, tctx.ctors)
     RecT(tn, items) => tn
-    Call(cnm, args) => let ct = t4_ctor_tyname(cnm, tctx.ctors) in if ct != "" then ct else t4_sig_ret_tyname(tsiglookup(cnm, tctx.sigs))
+    AwaitE(inner)   => t4_expr_tyname(inner, tenv, tctx)
+    Call(cnm, args) => if (cnm == "rc" or cnm == "arc" or cnm == "rc_new" or cnm == "arc_new" or cnm == "clone" or cnm == "rc_clone" or cnm == "arc_clone" or cnm == "get" or cnm == "rc_get" or cnm == "arc_get" or cnm == "downgrade" or cnm == "weak_downgrade" or cnm == "promise" or cnm == "promise_new" or cnm == "promise_await" or cnm == "signal" or cnm == "signal_new" or cnm == "signal_get") and len(args) == 1 then t4_expr_tyname(ohd_e(args), tenv, tctx) else if (cnm == "upgrade" or cnm == "weak_upgrade") and len(args) == 2 then (let t0 = t4_expr_tyname(ohd_e(args), tenv, tctx) in if t0 != "" then t0 else t4_expr_tyname(ohd_e(ptl(args)), tenv, tctx)) else let ct = t4_ctor_tyname(cnm, tctx.ctors) in if ct != "" then ct else t4_sig_ret_tyname(tsiglookup(cnm, tctx.sigs))
     _               => ""
 
 fn t4_ctor_tyname(nm, ctors) = if isctor(nm) == 0 then "" else t4_ctor_tyname2(tctorlookup(nm, ctors))

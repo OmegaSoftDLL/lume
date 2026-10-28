@@ -50,8 +50,9 @@ fn parseifcore(t) = let rc = expr(t) in let tb = expr(dropkw(rc.rest, "then")) i
 fn parseifelse(c, tb, rest) = if headtext(rest) == "elif" then parseifelif(c, tb, parseifcore(droponce(rest))) else parseifplain(c, tb, expr(dropkw(rest, "else")))
 fn parseifelif(c, tb, r) = {node: If(c, tb, r.node), rest: r.rest}
 fn parseifplain(c, tb, eb) = {node: If(c, tb, eb.node), rest: eb.rest}
-fn parselet(t) = let nm = headtext(t) in let rv = expr(dropkw(droponce(t), "=")) in let rb = expr(dropin(rv.rest)) in {node: LetIn(nm, rv.node, rb.node), rest: rb.rest}
-fn parsevar(t) = let nm = headtext(t) in let rv = expr(dropkw(droponce(t), "=")) in let rb = expr(dropin(rv.rest)) in {node: VarIn(nm, rv.node, rb.node), rest: rb.rest}
+fn dropletty(ts) = if headtext(ts) == ":" then (parsetype1(droponce(ts))).rest else ts
+fn parselet(t) = let nm = headtext(t) in let rv = expr(dropkw(dropletty(droponce(t)), "=")) in let rb = expr(dropin(rv.rest)) in {node: LetIn(nm, rv.node, rb.node), rest: rb.rest}
+fn parsevar(t) = let nm = headtext(t) in let rv = expr(dropkw(dropletty(droponce(t)), "=")) in let rb = expr(dropin(rv.rest)) in {node: VarIn(nm, rv.node, rb.node), rest: rb.rest}
 fn parseowne(t) = let r = post(t) in {node: OwnE(r.node), rest: r.rest}
 fn parsemute(t) = let r = post(t) in {node: MutE(r.node), rest: r.rest}
 fn parsedefer(t) = let rc = expr(t) in let rb = expr(dropin(rc.rest)) in {node: DeferE(rc.node, rb.node), rest: rb.rest}

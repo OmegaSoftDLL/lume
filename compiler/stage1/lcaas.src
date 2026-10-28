@@ -59,7 +59,7 @@ fn cs_escchar(c) = if c == "n" then "\n" else if c == "t" then "\t" else if c ==
 fn cs_strplain(s, i, n) = if i >= n then i else let c = at(s, i) in if c == "\"" or c == "\\" then i else cs_strplain(s, i + 1, n)
 fn cs_strend(s, i, n, acc) = let j = cs_strplain(s, i, n) in let acc2 = if j > i then acc + slice(s, i, j) else acc in if j >= n then {txt: acc2, next: n} else if at(s, j) == "\"" then {txt: acc2, next: j + 1} else cs_strend(s, j + 2, n, acc2 + cs_escchar(at(s, j + 1)))
 fn cs_istwo(s, i, n) = if i + 1 >= n then 0 else cs_istwopair(slice(s, i, i + 2))
-fn cs_istwopair(p) = p == "==" or p == "!=" or p == "<=" or p == ">=" or p == "=>"
+fn cs_istwopair(p) = p == "==" or p == "!=" or p == "<=" or p == ">=" or p == "=>" or p == ".."
 fn cs_lex(s, i) = if i >= count(s) then Nil else cs_lex1(s, i, count(s), at(s, i))
 fn cs_lex1(s, i, n, c) = if cs_isws(c) then cs_lex(s, i + 1) else if c == "#" then cs_lex(s, cs_lineend(s, i + 1, n)) else if cs_isdigit(c) then cs_lexnum(s, i, cs_numend(s, i, n)) else if cs_isalpha(c) then cs_lexid(s, i, cs_idend(s, i, n)) else if c == "\"" then cs_lexstr(s, cs_strend(s, i + 1, n, "")) else if cs_istwo(s, i, n) == 1 then Cons({kind: "SY", text: slice(s, i, i + 2)}, cs_lex(s, i + 2)) else Cons({kind: "SY", text: c}, cs_lex(s, i + 1))
 fn cs_lexnum(s, i, j) = Cons({kind: "NM", text: slice(s, i, j)}, cs_lex(s, j))
@@ -80,7 +80,7 @@ fn cs_skiprp(ts) = cs_dropkw(ts, ")")
 fn cs_skiprk(ts) = cs_dropkw(ts, "]")
 
 fn cs_prim(ts) = cs_postfix(cs_atom(ts))
-fn cs_atom(ts) = if cs_hdkind(ts) == "NM" then {node: Num(toint(cs_hdtext(ts))), rest: cs_drop1(ts)} else if cs_hdkind(ts) == "ST" then {node: Str(cs_hdtext(ts)), rest: cs_drop1(ts)} else if cs_hdtext(ts) == "(" then cs_paren(cs_drop1(ts)) else if cs_hdtext(ts) == "[" then (let r = cs_expr(cs_drop1(ts)) in {node: Call("_tylist_", Cons(r.node, Nil)), rest: cs_skiprk(r.rest)}) else if cs_hdtext(ts) == "{" then cs_rec(cs_drop1(ts)) else if cs_hdtext(ts) == "if" then cs_if(cs_drop1(ts)) else if cs_hdtext(ts) == "let" then cs_let(cs_drop1(ts)) else if cs_hdtext(ts) == "var" then cs_var(cs_drop1(ts)) else if cs_hdtext(ts) == "own" then cs_owne(cs_drop1(ts)) else if cs_hdtext(ts) == "mut" then cs_mute(cs_drop1(ts)) else if cs_hdtext(ts) == "defer" then cs_defer(cs_drop1(ts)) else if cs_hdtext(ts) == "errdefer" then cs_errdefer(cs_drop1(ts)) else if cs_hdtext(ts) == "with" then cs_with(cs_drop1(ts)) else if cs_hdtext(ts) == "scope" then cs_scope(cs_drop1(ts)) else if cs_hdtext(ts) == "spawn" then cs_spawn(cs_drop1(ts)) else if cs_hdtext(ts) == "match" then cs_match(cs_drop1(ts)) else if cs_hdtext(ts) == "comptime" then cs_ct(cs_drop1(ts)) else if cs_hdtext(ts) == "quote" then cs_quote(cs_drop1(ts)) else if cs_hdtext(ts) == "splice" then cs_splice(cs_drop1(ts)) else if cs_hdkind(ts) == "ID" then cs_ident(cs_hdtext(ts), cs_drop1(ts)) else {node: Num(0), rest: cs_drop1(ts)}
+fn cs_atom(ts) = if cs_hdkind(ts) == "NM" then {node: Num(toint(cs_hdtext(ts))), rest: cs_drop1(ts)} else if cs_hdkind(ts) == "ST" then {node: Str(cs_hdtext(ts)), rest: cs_drop1(ts)} else if cs_hdtext(ts) == "(" then cs_paren(cs_drop1(ts)) else if cs_hdtext(ts) == "[" then (let r = cs_expr(cs_drop1(ts)) in {node: Call("_tylist_", Cons(r.node, Nil)), rest: cs_skiprk(r.rest)}) else if cs_hdtext(ts) == "{" then cs_rec(cs_drop1(ts)) else if cs_hdtext(ts) == "if" then cs_if(cs_drop1(ts)) else if cs_hdtext(ts) == "let" then cs_let(cs_drop1(ts)) else if cs_hdtext(ts) == "var" then cs_var(cs_drop1(ts)) else if cs_hdtext(ts) == "own" then cs_owne(cs_drop1(ts)) else if cs_hdtext(ts) == "mut" then cs_mute(cs_drop1(ts)) else if cs_hdtext(ts) == "defer" then cs_defer(cs_drop1(ts)) else if cs_hdtext(ts) == "errdefer" then cs_errdefer(cs_drop1(ts)) else if cs_hdtext(ts) == "with" then cs_with(cs_drop1(ts)) else if cs_hdtext(ts) == "scope" then cs_scope(cs_drop1(ts)) else if cs_hdtext(ts) == "spawn" then cs_spawn(cs_drop1(ts)) else if cs_hdtext(ts) == "shard" then cs_shard(cs_drop1(ts)) else if cs_hdtext(ts) == "match" then cs_match(cs_drop1(ts)) else if cs_hdtext(ts) == "comptime" then cs_ct(cs_drop1(ts)) else if cs_hdtext(ts) == "quote" then cs_quote(cs_drop1(ts)) else if cs_hdtext(ts) == "splice" then cs_splice(cs_drop1(ts)) else if cs_hdkind(ts) == "ID" then cs_ident(cs_hdtext(ts), cs_drop1(ts)) else {node: Num(0), rest: cs_drop1(ts)}
 fn cs_paren(ts) = let r = cs_expr(ts) in {node: r.node, rest: cs_skiprp(r.rest)}
 fn cs_ident(nm, ts) = if cs_hdtext(ts) == "(" then cs_call(nm, cs_arglist(cs_drop1(ts))) else if cs_hdtext(ts) == "{" then cs_rect(nm, cs_rec(cs_drop1(ts))) else if cs_hdtext(ts) == "[" then (let ta = cs_expr(cs_drop1(ts)) in let t2 = cs_skiprk(ta.rest) in if cs_hdtext(t2) == "{" then cs_rect(nm, cs_rec(cs_drop1(t2))) else {node: Call("_tyapp_" + nm, Cons(ta.node, Nil)), rest: t2}) else {node: Var(nm), rest: ts}
 fn cs_call(nm, a) = {node: Call(nm, a.items), rest: a.rest}
@@ -98,9 +98,9 @@ fn cs_reccons2(k, v, nd, rest) = match nd
     Rec(items) => {node: Rec(Cons({key: k, val: v}, items)), rest: rest}
     _          => {node: nd, rest: rest}
 fn cs_postdotcall(nd, mnm, a) = match nd
-    Var(enm) => {node: Call(mnm, a.items), rest: a.rest}
+    Var(enm) => if cs_isupper(at(enm, 0)) then {node: Call(mnm, a.items), rest: a.rest} else {node: Call(mnm, Cons(nd, a.items)), rest: a.rest}
     _        => {node: Call(mnm, Cons(nd, a.items)), rest: a.rest}
-fn cs_postfix(r) = if cs_hdtext(r.rest) == "." then (let t1 = cs_drop1(r.rest) in let mnm = cs_hdtext(t1) in let t2 = cs_drop1(t1) in if cs_hdtext(t2) == "(" then cs_postfix(cs_postdotcall(r.node, mnm, cs_arglist(cs_drop1(t2)))) else cs_postfix({node: Field(r.node, mnm), rest: t2})) else if cs_hdtext(r.rest) == "(" then (let a = cs_arglist(cs_drop1(r.rest)) in cs_postfix(cs_postcall(r.node, a))) else r
+fn cs_postfix(r) = if cs_hdtext(r.rest) == "." then (let t1 = cs_drop1(r.rest) in let mnm = cs_hdtext(t1) in let t2 = cs_drop1(t1) in if cs_hdtext(t2) == "(" then cs_postfix(cs_postdotcall(r.node, mnm, cs_arglist(cs_drop1(t2)))) else if mnm == "await" then cs_postfix({node: Call("await", Cons(r.node, Nil)), rest: t2}) else cs_postfix({node: Field(r.node, mnm), rest: t2})) else if cs_hdtext(r.rest) == "(" then (let a = cs_arglist(cs_drop1(r.rest)) in cs_postfix(cs_postcall(r.node, a))) else r
 fn cs_postcall(nd, a) = match nd
     Var(nm) => {node: Call(nm, a.items), rest: a.rest}
     _       => {node: Call("_call", Cons(nd, a.items)), rest: a.rest}
@@ -124,8 +124,8 @@ fn cs_expr(ts) = cs_or(ts)
 
 fn cs_if(ts) = let c = cs_expr(ts) in let t = cs_expr(cs_dropkw(c.rest, "then")) in let e2 = cs_expr(cs_dropkw(t.rest, "else")) in {node: If(c.node, t.node, e2.node), rest: e2.rest}
 fn cs_dropin(ts) = if cs_hdtext(ts) == "in" or cs_hdtext(ts) == ";" then cs_drop1(ts) else ts
-fn cs_let(ts) = let nm = cs_hdtext(ts) in let v = cs_expr(cs_dropkw(cs_drop1(ts), "=")) in let b = cs_expr(cs_dropin(v.rest)) in {node: LetIn(nm, v.node, b.node), rest: b.rest}
-fn cs_var(ts) = let nm = cs_hdtext(ts) in let v = cs_expr(cs_dropkw(cs_drop1(ts), "=")) in let b = cs_expr(cs_dropin(v.rest)) in {node: VarIn(nm, v.node, b.node), rest: b.rest}
+fn cs_let(ts) = let nm = cs_hdtext(ts) in let t1 = cs_drop1(ts) in let t2 = if cs_hdtext(t1) == ":" then (cs_ptype1(cs_drop1(t1))).rest else t1 in let v = cs_expr(cs_dropkw(t2, "=")) in let b = cs_expr(cs_dropin(v.rest)) in {node: LetIn(nm, v.node, b.node), rest: b.rest}
+fn cs_var(ts) = let nm = cs_hdtext(ts) in let t1 = cs_drop1(ts) in let t2 = if cs_hdtext(t1) == ":" then (cs_ptype1(cs_drop1(t1))).rest else t1 in let v = cs_expr(cs_dropkw(t2, "=")) in let b = cs_expr(cs_dropin(v.rest)) in {node: VarIn(nm, v.node, b.node), rest: b.rest}
 fn cs_owne(ts) = let r = cs_prim(ts) in {node: OwnE(r.node), rest: r.rest}
 fn cs_mute(ts) = let r = cs_prim(ts) in {node: MutE(r.node), rest: r.rest}
 fn cs_defer(ts) = let c = cs_expr(ts) in let b = cs_expr(cs_dropin(c.rest)) in {node: DeferE(c.node, b.node), rest: b.rest}
@@ -136,6 +136,7 @@ fn cs_withhandler(t) = let enm = cs_hdtext(t) in let hs = cs_parsehops(cs_dropkw
 fn cs_with(ts) = if cs_hdtext(ts) == "alloc" then let a = cs_expr(cs_dropkw(cs_drop1(ts), "=")) in let b = cs_expr(cs_dropin(a.rest)) in {node: WithAllocE(a.node, b.node), rest: b.rest} else if cs_hdtext(ts) == "handler" then cs_withhandler(cs_drop1(ts)) else cs_expr(ts)
 fn cs_scope(t) = if cs_hdtext(cs_drop1(t)) == "in" or cs_hdtext(cs_drop1(t)) == ";" or cs_hdtext(cs_drop1(t)) == "{" then (let snm = cs_hdtext(t) in let t1 = cs_drop1(t) in let hb = if cs_hdtext(t1) == "{" then 1 else 0 in let rb = cs_expr(if hb == 1 then cs_drop1(t1) else cs_dropin(t1)) in {node: ScopeE(snm, rb.node), rest: if hb == 1 then cs_dropkw(rb.rest, "}") else rb.rest}) else let hb = if cs_hdtext(t) == "{" then 1 else 0 in let rb = cs_expr(if hb == 1 then cs_drop1(t) else cs_dropin(t)) in {node: ScopeE("_scope", rb.node), rest: if hb == 1 then cs_dropkw(rb.rest, "}") else rb.rest}
 fn cs_spawn(t) = if cs_hdtext(t) == "(" then let a = cs_arglist(cs_drop1(t)) in {node: SpawnE(cs_asthead(a.items)), rest: a.rest} else let r = cs_expr(t) in {node: SpawnE(r.node), rest: r.rest}
+fn cs_shard(t) = let iv = cs_hdtext(t) in let rlo = cs_add(cs_dropkw(cs_drop1(t), "in")) in let rhi = cs_add(cs_dropkw(rlo.rest, "..")) in let rb = cs_expr(cs_dropkw(rhi.rest, "=>")) in {node: ShardE(iv, rlo.node, rhi.node, rb.node), rest: rb.rest}
 
 fn cs_ispatstart(ts) = if cs_hdkind(ts) == "NM" or cs_hdkind(ts) == "ST" then 1 else if cs_hdkind(ts) == "ID" then cs_ispatid(cs_hdtext(ts)) else 0
 fn cs_ispatid(s) = if s == "fn" or s == "pub" or s == "total" or s == "llm" or s == "effect" or s == "law" or s == "resource" or s == "print" or s == "type" or s == "let" or s == "var" or s == "if" or s == "then" or s == "else" or s == "in" or s == "match" or s == "and" or s == "or" then 0 else 1
@@ -153,7 +154,7 @@ fn cs_arms(ts) = let p = cs_pat(ts) in let b = cs_expr(cs_dropkw(p.rest, "=>")) 
 fn cs_armcons(p, b, rr) = {items: Cons({pat: p, body: b}, rr.items), rest: rr.rest}
 
 ## --- declarations (type / fn / print / expr) ---
-fn cs_istyapp1(nm) = nm == "table" or nm == "rc" or nm == "arc" or nm == "weak" or nm == "cell" or nm == "chan" or nm == "Ref" or nm == "View" or nm == "unverified" or nm == "cap"
+fn cs_istyapp1(nm) = nm == "table" or nm == "rc" or nm == "arc" or nm == "weak" or nm == "promise" or nm == "signal" or nm == "cell" or nm == "chan" or nm == "Ref" or nm == "View" or nm == "unverified" or nm == "cap"
 fn cs_ptype1(ts) = if cs_hdtext(ts) == "[" then cs_ptlist(cs_ptype1(cs_drop1(ts))) else if cs_hdtext(ts) == "tensor" and cs_hdtext(cs_drop1(ts)) == "[" then cs_pttensor(cs_ptype1(cs_drop1(cs_drop1(ts)))) else if cs_hdtext(ts) != "" and cs_hdtext(cs_drop1(ts)) == "[" then cs_ptapp(cs_hdtext(ts), cs_ptype1(cs_drop1(cs_drop1(ts)))) else {node: TyName(cs_hdtext(ts)), rest: cs_drop1(ts)}
 fn cs_ptlist(r) = {node: TyList(r.node), rest: cs_skiprk(r.rest)}
 fn cs_ptapp(kind, r) = {node: TyApply(kind, r.node), rest: cs_skiprk(r.rest)}
@@ -313,7 +314,7 @@ fn cs_buildft(prog) = match prog
 fn cs_buildft2(h, rest) = match h
     Fn(nm, ps, body) => Cons(h, rest)
     _                => rest
-fn cs_tcollect(prog) = {ctors: cs_tcollectc(prog), recs: cs_tcollectr(prog), sigs: cs_tcollects(prog), gsigs: cs_tcollectg(prog), decl: cs_tanydecl(prog), ft: cs_buildft(prog)}
+fn cs_tcollect(prog) = {ctors: cs_tcollectc(prog), recs: cs_tcollectr(prog), sigs: cs_tcollects(prog), gsigs: cs_tcollectg(prog), decl: cs_tanydecl(prog), ft: cs_buildft(prog), lenv: Nil}
 
 fn cs_clookup(tag, ctors) = match ctors
     Nil        => Nil
@@ -337,15 +338,20 @@ fn cs_fnlookup(nm, ft) = match ft
     Nil        => Nil
     Cons(h, t) => if cs_fnname(h) == nm then Cons(h, Nil) else cs_fnlookup(nm, t)
 
+fn cs_glookup_empty(nm, env) = match env
+    Nil        => ""
+    Cons(h, t) => if h.k == nm then h.v else cs_glookup_empty(nm, t)
+fn cs_tier_inner(s) = if cs_startswith(s, "rc[") == 1 then slice(s, 3, count(s) - 1) else if cs_startswith(s, "arc[") == 1 then slice(s, 4, count(s) - 1) else if cs_startswith(s, "weak[") == 1 then slice(s, 5, count(s) - 1) else if cs_startswith(s, "promise[") == 1 then slice(s, 8, count(s) - 1) else if cs_startswith(s, "signal[") == 1 then slice(s, 7, count(s) - 1) else ""
 fn cs_exprty_money(xs) = match xs
     Cons(Str(ccy), rest) => if ccy != "" then "money[" + ccy + "]" else ""
     _                    => ""
+fn cs_exprty_tier(nm, args, tt) = if (nm == "rc" or nm == "rc_new") and cs_len(args) == 1 then (let sub = cs_exprty(cs_asthead(args), tt) in if sub != "" then "rc[" + sub + "]" else "") else if (nm == "arc" or nm == "arc_new") and cs_len(args) == 1 then (let sub = cs_exprty(cs_asthead(args), tt) in if sub != "" then "arc[" + sub + "]" else "") else if (nm == "clone" or nm == "rc_clone" or nm == "arc_clone") and cs_len(args) == 1 then cs_exprty(cs_asthead(args), tt) else if (nm == "downgrade" or nm == "weak_downgrade") and cs_len(args) == 1 then (let sub = cs_tier_inner(cs_exprty(cs_asthead(args), tt)) in if sub != "" then "weak[" + sub + "]" else "") else if (nm == "promise" or nm == "promise_new") and cs_len(args) == 1 then (let sub = cs_exprty(cs_asthead(args), tt) in if sub != "" then "promise[" + sub + "]" else "") else if (nm == "signal" or nm == "signal_new") and cs_len(args) == 1 then (let sub = cs_exprty(cs_asthead(args), tt) in if sub != "" then "signal[" + sub + "]" else "") else if (nm == "get" or nm == "rc_get" or nm == "arc_get" or nm == "signal_get" or nm == "await" or nm == "promise_await") and cs_len(args) == 1 then cs_tier_inner(cs_exprty(cs_asthead(args), tt)) else if (nm == "upgrade" or nm == "weak_upgrade") and cs_len(args) == 2 then cs_tier_inner(cs_exprty(cs_asthead(args), tt)) else if (nm == "strong_count" or nm == "rc_strong_count" or nm == "arc_strong_count" or nm == "version" or nm == "signal_version") and cs_len(args) == 1 then "int" else ""
 fn cs_exprty(e, tt) = match e
     Num(n)          => "int"
     Str(v)          => "str"
     RecT(tn, items) => tn
-    Call(nm, args)  => if nm == "money_parse" or nm == "money_make" then cs_exprty_money(args) else if cs_isupper(at(nm, 0)) then cs_ctorty(cs_clookup(nm, tt.ctors)) else ""
-    Var(nm)         => if cs_isupper(at(nm, 0)) then cs_ctorty(cs_clookup(nm, tt.ctors)) else ""
+    Call(nm, args)  => let tr = cs_exprty_tier(nm, args, tt) in if tr != "" then tr else if nm == "money_parse" or nm == "money_make" then cs_exprty_money(args) else if cs_isupper(at(nm, 0)) then cs_ctorty(cs_clookup(nm, tt.ctors)) else ""
+    Var(nm)         => if cs_isupper(at(nm, 0)) then cs_ctorty(cs_clookup(nm, tt.ctors)) else cs_glookup_empty(nm, tt.lenv)
     _               => ""
 fn cs_ctorty(m) = match m
     Nil        => ""
@@ -401,7 +407,8 @@ fn cs_chk_gparams2(fnm, idx, p, pr, args, env, tt) = match args
     Nil         => Nil
     Cons(a, ar) => if p.cf == 1 then let tnm = cs_tyarg(a) in (if tnm == "" then Cons(cs_mkdiag("T3001", "typecheck", "type error: comptime parameter '" + p.pn + "' of '" + fnm + "' expects a type name", "pass a type name such as 'int' or 'str'"), cs_chk_gparams(fnm, idx + 1, pr, ar, env, tt)) else cs_chk_gparams(fnm, idx + 1, pr, ar, Cons({k: p.pn, v: tnm}, env), tt)) else cs_app(cs_chk_arg1(fnm, idx, p.pn, cs_tsubst(p.pt, env), a, tt), cs_chk_gparams(fnm, idx + 1, pr, ar, env, tt))
 
-fn cs_chk_callsig(nm, args, tt) = cs_chk_callsig2(nm, args, cs_gsiglookup(nm, tt.gsigs), tt)
+fn cs_chk_tier_call(nm, args, tt) = if (nm == "resolve" or nm == "promise_resolve" or nm == "set" or nm == "signal_set" or nm == "upgrade" or nm == "weak_upgrade") and cs_len(args) == 2 then (let pty = cs_exprty(cs_asthead(args), tt) in let exp = cs_tier_inner(pty) in let got = cs_exprty(cs_asthead(cs_cvtl(args)), tt) in if exp != "" and got != "" and exp != got then Cons(cs_mkdiag("T2001", "typecheck", "type error: argument 2 of '" + nm + "' has type " + got + " but '" + pty + "' expects " + exp, "pass a value of type " + exp + " to '" + nm + "'"), Nil) else Nil) else Nil
+fn cs_chk_callsig(nm, args, tt) = cs_app(cs_chk_tier_call(nm, args, tt), cs_chk_callsig2(nm, args, cs_gsiglookup(nm, tt.gsigs), tt))
 fn cs_chk_callsig2(nm, args, gm, tt) = match gm
     Cons(g, gr) => cs_chk_gparams(nm, 1, g.params, args, Nil, tt)
     Nil         => cs_chk_callsig3(nm, args, cs_siglookup(nm, tt.sigs), tt)
@@ -432,11 +439,13 @@ fn cs_asthead(xs) = match xs
     Cons(h, t) => h
 
 fn cs_chk_expr(e, tt) = match e
-    Var(nm)         => if cs_isupper(at(nm, 0)) then cs_chk_ctor(nm, 0, tt) else Nil
-    Bin(op, a, b)   => cs_app(cs_chk_expr(a, tt), cs_chk_expr(b, tt))
-    If(c, t, e2)    => cs_app(cs_chk_expr(c, tt), cs_app(cs_chk_expr(t, tt), cs_chk_expr(e2, tt)))
-    LetIn(nm, v, b) => cs_app(cs_chk_expr(v, tt), cs_chk_expr(b, tt))
-    Call(nm, args)  => if nm == "unquote" and cs_isnil(cs_fnlookup("unquote", tt.ft)) == 1 then Cons(cs_mkdiag("C1001", "comptime", "comptime error: 'unquote' may only appear inside 'quote(...)'", "wrap the expression in 'quote(...)' or remove 'unquote'"), cs_chk_elist(args, tt)) else cs_app(if cs_isupper(at(nm, 0)) then cs_chk_ctor(nm, cs_len(args), tt) else cs_chk_callsig(nm, args, tt), cs_chk_elist(args, tt))
+    Var(nm)                 => if cs_isupper(at(nm, 0)) then cs_chk_ctor(nm, 0, tt) else Nil
+    Bin(op, a, b)           => cs_app(cs_chk_expr(a, tt), cs_chk_expr(b, tt))
+    If(c, t, e2)            => cs_app(cs_chk_expr(c, tt), cs_app(cs_chk_expr(t, tt), cs_chk_expr(e2, tt)))
+    LetIn(nm, v, b)         => let vty = cs_exprty(v, tt) in let tt2 = if vty != "" then {ctors: tt.ctors, recs: tt.recs, sigs: tt.sigs, gsigs: tt.gsigs, decl: tt.decl, ft: tt.ft, lenv: Cons({k: nm, v: vty}, tt.lenv)} else tt in cs_app(cs_chk_expr(v, tt), cs_chk_expr(b, tt2))
+    VarIn(nm, v, b)         => let vty = cs_exprty(v, tt) in let tt2 = if vty != "" then {ctors: tt.ctors, recs: tt.recs, sigs: tt.sigs, gsigs: tt.gsigs, decl: tt.decl, ft: tt.ft, lenv: Cons({k: nm, v: vty}, tt.lenv)} else tt in cs_app(cs_chk_expr(v, tt), cs_chk_expr(b, tt2))
+    ShardE(iv, lo, hi, b)   => cs_app(cs_chk_expr(lo, tt), cs_app(cs_chk_expr(hi, tt), cs_chk_expr(b, tt)))
+    Call(nm, args)          => if nm == "unquote" and cs_isnil(cs_fnlookup("unquote", tt.ft)) == 1 then Cons(cs_mkdiag("C1001", "comptime", "comptime error: 'unquote' may only appear inside 'quote(...)'", "wrap the expression in 'quote(...)' or remove 'unquote'"), cs_chk_elist(args, tt)) else cs_app(if cs_isupper(at(nm, 0)) then cs_chk_ctor(nm, cs_len(args), tt) else cs_chk_callsig(nm, args, tt), cs_chk_elist(args, tt))
     Rec(items)      => cs_chk_reclist(items, tt)
     RecT(tn, items) => cs_chk_rect(tn, items, tt)
     Field(o, nm)    => cs_chk_expr(o, tt)
@@ -723,7 +732,7 @@ fn cs_w33_chk_sec_e(e, fnm) = match e
 fn cs_w33_chk_sec_args(xs, fnm) = match xs
     Nil        => Nil
     Cons(h, t) => cs_app(cs_w33_chk_sec_e(h, fnm), cs_w33_chk_sec_args(t, fnm))
-fn cs_ochkcall(fnm, args, ctx, moved) = let d0 = if cs_ois_free(ctx.freef) == 1 and ctx.halloc == 0 and cs_ois_heap(fnm) then Cons(cs_mkdiag("O0030", "ownership", "ownership error: ambient heap allocation '" + fnm + "' in '@freestanding' function '" + ctx.fnm + "'", "wrap allocation in 'with alloc = <arena> in ...'"), Nil) else Nil in if fnm == "borrow" and cs_len(args) == 1 then let ra = cs_ochke(cs_asthead(args), ctx, moved) in {diags: cs_app(d0, ra.diags), moved: ra.moved, origin: "borrow:" + ra.origin} else if fnm == "cap_page_map" and cs_len(args) >= 1 then let r0 = cs_ochk_own_tgt(cs_asthead(args), ctx, moved) in let r1 = cs_ochkargs(cs_cvtl(args), ctx, r0.moved) in {diags: cs_app(d0, cs_app(r0.diags, r1.diags)), moved: r1.moved, origin: ""} else cs_ochkcall_sig(fnm, args, cs_osiglookup(fnm, ctx.osigs), ctx, moved, d0)
+fn cs_ochkcall(fnm, args, ctx, moved) = let d0 = if cs_ois_free(ctx.freef) == 1 and ctx.halloc == 0 and cs_ois_heap(fnm) then Cons(cs_mkdiag("O0030", "ownership", "ownership error: ambient heap allocation '" + fnm + "' in '@freestanding' function '" + ctx.fnm + "'", "wrap allocation in 'with alloc = <arena> in ...'"), Nil) else Nil in if fnm == "borrow" and cs_len(args) == 1 then let ra = cs_ochke(cs_asthead(args), ctx, moved) in {diags: cs_app(d0, ra.diags), moved: ra.moved, origin: "borrow:" + ra.origin} else if (fnm == "move" or fnm == "drop" or fnm == "rc_drop" or fnm == "arc_drop") and cs_len(args) == 1 then let r0 = cs_ochk_own_tgt(cs_asthead(args), ctx, moved) in {diags: cs_app(d0, r0.diags), moved: r0.moved, origin: ""} else if fnm == "cap_page_map" and cs_len(args) >= 1 then let r0 = cs_ochk_own_tgt(cs_asthead(args), ctx, moved) in let r1 = cs_ochkargs(cs_cvtl(args), ctx, r0.moved) in {diags: cs_app(d0, cs_app(r0.diags, r1.diags)), moved: r1.moved, origin: ""} else cs_ochkcall_sig(fnm, args, cs_osiglookup(fnm, ctx.osigs), ctx, moved, d0)
 fn cs_ochkcall_sig(fnm, args, msig, ctx, moved, d0) = match msig
     Nil          => let dc = cs_ochk_conf(fnm, cs_ocollect_muts(args, Nil), args) in let ra = cs_ochkargs(args, ctx, moved) in {diags: cs_app(d0, cs_app(dc, ra.diags)), moved: ra.moved, origin: ""}
     Cons(sg, sr) => let dm = cs_ochk_modes(fnm, args, sg.pl, ctx) in let dc = cs_ochk_conf(fnm, cs_ocollect_muts(args, sg.pl), args) in let ra = cs_ochkargs(args, ctx, moved) in {diags: cs_app(d0, cs_app(dm, cs_app(dc, ra.diags))), moved: ra.moved, origin: ""}
@@ -1052,9 +1061,15 @@ fn cs_sis_nonsend_ty(ty) = match ty
     TyList(e)     => cs_sis_nonsend_ty(e)
     _             => 0
 fn cs_sis_nonsend_init(e) = match e
-    Call(cnm, args) => if cnm == "rc_new" or cnm == "cell_new" or cnm == "borrow_mut" then 1 else 0
+    Call(cnm, args) => if cnm == "rc" or cnm == "rc_new" or cnm == "rc_clone" or cnm == "cell_new" or cnm == "borrow_mut" then 1 else 0
     MutE(inner)     => 1
     _               => 0
+fn cs_sis_nonsend_clone(e, nsvars) = match e
+    Call(cnm, args) => if cnm == "clone" and cs_len(args) == 1 then cs_sis_nonsend_clone_arg(cs_asthead(args), nsvars) else 0
+    _               => 0
+fn cs_sis_nonsend_clone_arg(a, nsvars) = match a
+    Var(x) => cs_omem(x, nsvars)
+    _      => 0
 fn cs_sinit_ns(pns, pts) = match pns
     Nil         => Nil
     Cons(pn, r) => if cs_sis_nonsend_ty(cs_hd_ty(pts)) == 1 then Cons(pn, cs_sinit_ns(r, cs_tl_ty(pts))) else cs_sinit_ns(r, cs_tl_ty(pts))
@@ -1081,8 +1096,9 @@ fn cs_schk_spawn_args(args, fnm, nsvars, mvars) = match args
 fn cs_schk_conc_e(e, fnm, in_scope, nsvars, mvars) = match e
     ScopeE(snm, b)          => cs_schk_conc_e(b, fnm, 1, nsvars, mvars)
     SpawnE(inner)           => let d0 = if in_scope == 0 then Cons(cs_mkdiag("S0001", "concurrency", "concurrency error: unstructured 'spawn' in '" + fnm + "' is forbidden outside a lexical 'scope' block", "wrap the task in 'scope s in spawn(...)'"), Nil) else Nil in cs_app(d0, cs_app(cs_schk_spawn_body(inner, fnm, nsvars, mvars), cs_schk_conc_e(inner, fnm, in_scope, nsvars, mvars)))
-    LetIn(nm, v, b)         => let d1 = cs_schk_conc_e(v, fnm, in_scope, nsvars, mvars) in let ns2 = if cs_sis_nonsend_init(v) == 1 then Cons(nm, cs_orem(nm, nsvars)) else cs_orem(nm, nsvars) in cs_app(d1, cs_schk_conc_e(b, fnm, in_scope, ns2, cs_orem(nm, mvars)))
-    VarIn(nm, v, b)         => let d1 = cs_schk_conc_e(v, fnm, in_scope, nsvars, mvars) in let ns2 = if cs_sis_nonsend_init(v) == 1 then Cons(nm, cs_orem(nm, nsvars)) else cs_orem(nm, nsvars) in cs_app(d1, cs_schk_conc_e(b, fnm, in_scope, ns2, Cons(nm, cs_orem(nm, mvars))))
+    ShardE(iv, lo, hi, b)   => cs_app(cs_schk_conc_e(lo, fnm, in_scope, nsvars, mvars), cs_app(cs_schk_conc_e(hi, fnm, in_scope, nsvars, mvars), cs_app(cs_schk_spawn_body(b, fnm, cs_orem(iv, nsvars), cs_orem(iv, mvars)), cs_schk_conc_e(b, fnm, 1, cs_orem(iv, nsvars), cs_orem(iv, mvars)))))
+    LetIn(nm, v, b)         => let d1 = cs_schk_conc_e(v, fnm, in_scope, nsvars, mvars) in let ns2 = if cs_sis_nonsend_init(v) == 1 or cs_sis_nonsend_clone(v, nsvars) == 1 then Cons(nm, cs_orem(nm, nsvars)) else cs_orem(nm, nsvars) in cs_app(d1, cs_schk_conc_e(b, fnm, in_scope, ns2, cs_orem(nm, mvars)))
+    VarIn(nm, v, b)         => let d1 = cs_schk_conc_e(v, fnm, in_scope, nsvars, mvars) in let ns2 = if cs_sis_nonsend_init(v) == 1 or cs_sis_nonsend_clone(v, nsvars) == 1 then Cons(nm, cs_orem(nm, nsvars)) else cs_orem(nm, nsvars) in cs_app(d1, cs_schk_conc_e(b, fnm, in_scope, ns2, Cons(nm, cs_orem(nm, mvars))))
     Bin(op, l, r)           => cs_app(cs_schk_conc_e(l, fnm, in_scope, nsvars, mvars), cs_schk_conc_e(r, fnm, in_scope, nsvars, mvars))
     If(c, t, e2)            => cs_app(cs_schk_conc_e(c, fnm, in_scope, nsvars, mvars), cs_app(cs_schk_conc_e(t, fnm, in_scope, nsvars, mvars), cs_schk_conc_e(e2, fnm, in_scope, nsvars, mvars)))
     DeferE(c, b)            => cs_app(cs_schk_conc_e(c, fnm, in_scope, nsvars, mvars), cs_schk_conc_e(b, fnm, in_scope, nsvars, mvars))
@@ -1620,15 +1636,15 @@ fn cs_odiagnose_stmts(prog, osigs, sigs, kt, moved) = match prog
     Cons(h, t) => cs_odiagnose_stmt1(h, t, osigs, sigs, kt, moved)
 fn cs_odiagnose_stmt1(s0, rest, osigs, sigs, kt, moved) = match s0
     Fn(nm, ps, body) => cs_app(cs_ochk_fn(nm, ps, body, cs_osiglookup(nm, osigs), osigs, sigs, kt), cs_odiagnose_stmts(rest, osigs, sigs, kt, moved))
-    Print(v)         => let r = cs_ochke(v, {fnm: "<main>", pubf: 0, freef: 0, halloc: 0, bparams: Nil, mvars: Nil, origins: Nil, osigs: osigs}, moved) in cs_app(r.diags, cs_odiagnose_stmts(rest, osigs, sigs, kt, r.moved))
-    ExprS(v)         => let r = cs_ochke(v, {fnm: "<main>", pubf: 0, freef: 0, halloc: 0, bparams: Nil, mvars: Nil, origins: Nil, osigs: osigs}, moved) in cs_app(r.diags, cs_odiagnose_stmts(rest, osigs, sigs, kt, r.moved))
+    Print(v)         => let ds = cs_schk_conc_e(v, "<main>", 0, Nil, Nil) in let r = cs_ochke(v, {fnm: "<main>", pubf: 0, freef: 0, halloc: 0, bparams: Nil, mvars: Nil, origins: Nil, osigs: osigs}, moved) in cs_app(ds, cs_app(r.diags, cs_odiagnose_stmts(rest, osigs, sigs, kt, r.moved)))
+    ExprS(v)         => let ds = cs_schk_conc_e(v, "<main>", 0, Nil, Nil) in let r = cs_ochke(v, {fnm: "<main>", pubf: 0, freef: 0, halloc: 0, bparams: Nil, mvars: Nil, origins: Nil, osigs: osigs}, moved) in cs_app(ds, cs_app(r.diags, cs_odiagnose_stmts(rest, osigs, sigs, kt, r.moved)))
     _                => cs_odiagnose_stmts(rest, osigs, sigs, kt, moved)
 
 fn cs_diagnose_stmts(prog, tt) = match prog
     Nil        => Nil
     Cons(h, t) => cs_app(cs_diagnose_stmt(h, tt), cs_diagnose_stmts(t, tt))
 fn cs_diagnose_stmt(s0, tt) = match s0
-    Fn(nm, ps, body) => cs_app(cs_chk_ret(nm, body, tt), cs_chk_expr(body, tt))
+    Fn(nm, ps, body) => let tt2 = {ctors: tt.ctors, recs: tt.recs, sigs: tt.sigs, gsigs: tt.gsigs, decl: tt.decl, ft: tt.ft, lenv: cs_fn_lenv(cs_siglookup(nm, tt.sigs))} in cs_app(cs_chk_ret(nm, body, tt2), cs_chk_expr(body, tt2))
     Print(v)         => cs_chk_expr(v, tt)
     ExprS(v)         => cs_chk_expr(v, tt)
     _                => Nil

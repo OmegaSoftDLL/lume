@@ -19,6 +19,15 @@
 ## (no `type` declaration) enable argument checking but NOT the F1 constructor/record declaration checks, so a
 ## program that only annotates `int`/`str` never gets a false "constructor not declared".
 fn tcheck(prog) = if tanydecl(prog) == 0 and tanysig(prog) == 0 then prog else tcheckforce(prog, tcollect(prog))
+fn tany_tier_args(xs) = match xs
+    Nil        => 0
+    Cons(h, t) => if tany_tier_e(h) == 1 then 1 else tany_tier_args(t)
+fn tany_tier_e(e) = match e
+    Call(nm, xs)    => if nm == "rc" or nm == "arc" or nm == "promise" or nm == "signal" or nm == "rc_new" or nm == "arc_new" or nm == "promise_new" or nm == "signal_new" or nm == "__lume_rc_new" or nm == "__lume_arc_new" or nm == "__lume_promise_new" or nm == "__lume_signal_new" then 1 else tany_tier_args(xs)
+    LetIn(nm, v, b) => if tany_tier_e(v) == 1 then 1 else tany_tier_e(b)
+    Bin(op, a, b)   => if tany_tier_e(a) == 1 then 1 else tany_tier_e(b)
+    If(c, t, e2)    => if tany_tier_e(c) == 1 or tany_tier_e(t) == 1 then 1 else tany_tier_e(e2)
+    _               => 0
 fn tanysig(prog) = match prog
     Nil        => 0
     Cons(h, t) => tanysig2(h, t)
@@ -28,6 +37,9 @@ fn tanysig2(h, t) = match h
     TypeRefineS(nm, bty, pr)  => 1
     TraitDecl(tnm, ops)       => 1
     ImplDecl(tnm, tty, mths)  => 1
+    Fn(nm, ps, body)          => if tany_tier_e(body) == 1 then 1 else tanysig(t)
+    Print(v)                  => if tany_tier_e(v) == 1 then 1 else tanysig(t)
+    ExprS(v)                  => if tany_tier_e(v) == 1 then 1 else tanysig(t)
     _                         => tanysig(t)
 fn tcheckforce(prog, tt) = tforced(tchkstmts(prog, tt), prog)
 fn tforced(chk, prog) = tcoerce_program(prog, tcollects(prog))
@@ -104,31 +116,55 @@ fn tletbind(tt, nm, v) = twith(tt, Cons({k: nm, v: tletscheme(v, tt)}, tt.lenv),
 fn tletscheme(v, tt) = match v
     LambdaE(ps, tys, rt, body) => tlambda_scheme(ps, tys, rt, body, tt.lenv)
     _                          => tnarrow(tknownl(v, tt, tt.lenv))
+fn trecbind_nominal(nm, m, renv) = match m
+    Nil         => renv
+    Cons(rd, r) => Cons({k: nm, fields: rd.fields}, renv)
+fn trecbind_clone(nm, m, renv) = match m
+    Nil         => renv
+    Cons(rd, r) => Cons({k: nm, fields: rd.fields}, renv)
 fn trecbind(nm, v, tt) = match v
-    Rec(items) => Cons({k: nm, fields: recfields(items, tt)}, tt.recenv)
-    _          => tt.recenv
+    Rec(items)      => Cons({k: nm, fields: recfields(items, tt)}, tt.recenv)
+    RecT(tn, items) => trecbind_nominal(nm, trecptypelookup(tn, tt.recs), tt.recenv)
+    Call(cnm, args) => if (cnm == "rc" or cnm == "arc" or cnm == "rc_new" or cnm == "arc_new" or cnm == "__lume_rc_new" or cnm == "__lume_arc_new") and len(args) == 1 then trecbind(nm, asthead(args), tt) else if (cnm == "clone" or cnm == "rc_clone" or cnm == "arc_clone" or cnm == "__lume_rc_clone") and len(args) == 1 then trecbind_clone(nm, trecenvlookup_e(asthead(args), tt.recenv), tt.recenv) else tt.recenv
+    _               => tt.recenv
+fn trecenvlookup_e(e, renv) = match e
+    Var(x) => trecenvlookup(x, renv)
+    _      => Nil
 fn recfields(items, tt) = match items
     Nil        => Nil
     Cons(h, t) => Cons({fname: h.key, fty: tnarrow(tknownl(h.val, tt, tt.lenv))}, recfields(t, tt))
+fn tlenv_recname(ty) = match ty
+    TyName(rn)     => rn
+    TyApply(kn, e) => if kn == "rc" or kn == "arc" then tlenv_recname(e) else ""
+    _              => ""
+fn tlenv_recfields(m, recs) = match m
+    Nil         => Nil
+    Cons(ty, r) => let rn = tlenv_recname(ty) in if rn == "" then Nil else trecptypelookup(rn, recs)
+fn tchkfield_nominal(x, nm, m) = match m
+    Nil         => 0
+    Cons(rd, r) => if tfieldname(rd.fields, nm) == 1 then 1 else ctfail("lume: type error: record '" + x + "' has no field '" + nm + "'\n")
 fn tchkfieldaccess(o, nm, tt) = match o
-    Var(x) => tchkfieldv(x, nm, trecenvlookup(x, tt.recenv))
+    Var(x) => tchkfieldv(x, nm, trecenvlookup(x, tt.recenv), tt)
     _      => 0
 fn trecenvlookup(x, renv) = match renv
     Nil        => Nil
     Cons(h, t) => if h.k == x then Cons(h, Nil) else trecenvlookup(x, t)
-fn tchkfieldv(x, nm, m) = match m
-    Nil           => 0
+fn tchkfieldv(x, nm, m, tt) = match m
+    Nil           => tchkfield_nominal(x, nm, tlenv_recfields(tlookuplenv(x, tt.lenv), tt.recs))
     Cons(r, rest) => if tfieldname(r.fields, nm) == 1 then 1 else ctfail("lume: type error: record '" + x + "' has no field '" + nm + "'\n")
 fn tfieldname(fields, nm) = match fields
     Nil        => 0
     Cons(f, t) => if f.fname == nm then 1 else tfieldname(t, nm)
 ## F3c field-type inference: `<var>.<field>` on a known let-bound record has the field's inferred type, so it
 ## flows into the argument/return checks (a record field of one type used where another is expected is caught).
+fn tfieldtype_nominal(nm, m) = match m
+    Nil         => TyAny
+    Cons(rd, r) => tfieldtylook(rd.fields, nm)
 fn tfieldtype(o, nm, tt) = match o
-    Var(x) => tfieldtype2(nm, trecenvlookup(x, tt.recenv))
+    Var(x) => tfieldtype2(x, nm, trecenvlookup(x, tt.recenv), tt)
     _      => TyAny
-fn tfieldtype2(nm, m) = match m
-    Nil           => TyAny
+fn tfieldtype2(x, nm, m, tt) = match m
+    Nil           => tfieldtype_nominal(nm, tlenv_recfields(tlookuplenv(x, tt.lenv), tt.recs))
     Cons(r, rest) => tfieldtylook(r.fields, nm)
 fn tfieldtylook(fields, nm) = match fields
     Nil        => TyAny
@@ -212,7 +248,7 @@ fn tchke(e, tt) = match e
     Bin(op, a, b)   => tchke(a, tt) + tchke(b, tt)
     If(c, t, e2)    => tchke(c, tt) + tchke(t, tt) + tchke(e2, tt)
     LetIn(nm, v, b)            => tchke(v, tt) + tchke(b, tletbind(tt, nm, v))
-    Call(nm, args)             => tchkquerycall(nm, args, tt) + tchkcall(nm, args, tt) + tchkeargsc(nm, args, tglookup(nm, tt.gsigs), tt) + tchkinferargs(nm, args, tt) + tchk_letpoly_call(nm, args, tt)
+    Call(nm, args)             => tchkquerycall(nm, args, tt) + tchk_tier_conc_call(nm, args, tt) + tchkcall(nm, args, tt) + tchkeargsc(nm, args, tglookup(nm, tt.gsigs), tt) + tchkinferargs(nm, args, tt) + tchk_letpoly_call(nm, args, tt)
     Var(nm)                    => tchkvar(nm, tt)
     Rec(items)      => tchkerec(items, tt)
     RecT(tn, items) => tchkrect(tn, items, tt) + tchkerec(items, tt)
@@ -332,6 +368,14 @@ fn tknown_money_fx(xs) = match xs
 fn tknown_money_bin(xs, tt) = match xs
     Cons(a, Cons(b, Nil)) => let ka = tknown(a, tt) in let kb = tknown(b, tt) in if isany(ka) == 0 and isany(kb) == 0 and tcompat(ka, kb) == 0 then ctfail("lume: type error: currency mismatch in money operation: cannot mix " + tystr(ka) + " and " + tystr(kb) + "\n") else if isany(ka) == 0 then ka else kb
     _ => TyAny
+fn tunwrap_inner(ty) = match ty
+    TyApply(n, e) => e
+    _             => TyAny
+fn tchk_tier_apply(op, recv_ty, val_ty, want_kind) = match recv_ty
+    TyApply(kn, ety) => if kn == want_kind and tcompat(ety, val_ty) == 0 then ctfail("lume: type error [T2001]: cannot pass value of type " + tystr(val_ty) + " to '" + op + "' on '" + tystr(recv_ty) + "' (expected " + tystr(ety) + ")\n") else 0
+    _                => 0
+fn tchk_tier_conc_call(nm, args, tt) = if (nm == "resolve" or nm == "promise_resolve" or nm == "__lume_promise_resolve") and len(args) == 2 then tchk_tier_apply("resolve", tknownl(asthead(args), tt, tt.lenv), tknownl(asthead(ptl(args)), tt, tt.lenv), "promise") else if (nm == "set" or nm == "signal_set" or nm == "__lume_signal_set") and len(args) == 2 then tchk_tier_apply("set", tknownl(asthead(args), tt, tt.lenv), tknownl(asthead(ptl(args)), tt, tt.lenv), "signal") else if (nm == "upgrade" or nm == "weak_upgrade" or nm == "__lume_weak_upgrade") and len(args) == 2 then tchk_tier_apply("upgrade", tknownl(asthead(args), tt, tt.lenv), tknownl(asthead(ptl(args)), tt, tt.lenv), "weak") else 0
+fn tknown_tier_conc_call(nm, xs, tt, lenv) = if (nm == "rc" or nm == "rc_new" or nm == "__lume_rc_new") and len(xs) == 1 then (let ke = tknownl(asthead(xs), tt, lenv) in if isany(ke) == 1 then TyAny else TyApply("rc", ke)) else if (nm == "arc" or nm == "arc_new" or nm == "__lume_arc_new") and len(xs) == 1 then (let ke = tknownl(asthead(xs), tt, lenv) in if isany(ke) == 1 then TyAny else TyApply("arc", ke)) else if (nm == "downgrade" or nm == "weak_downgrade" or nm == "__lume_weak_downgrade") and len(xs) == 1 then (let ke = tunwrap_inner(tknownl(asthead(xs), tt, lenv)) in if isany(ke) == 1 then TyAny else TyApply("weak", ke)) else if (nm == "upgrade" or nm == "weak_upgrade" or nm == "__lume_weak_upgrade") and len(xs) == 2 then tunwrap_inner(tknownl(asthead(xs), tt, lenv)) else if (nm == "clone" or nm == "rc_clone" or nm == "arc_clone" or nm == "__lume_rc_clone") and len(xs) == 1 then tknownl(asthead(xs), tt, lenv) else if (nm == "get" or nm == "rc_get" or nm == "arc_get" or nm == "promise_await" or nm == "signal_get" or nm == "__lume_rc_get") and len(xs) == 1 then tunwrap_inner(tknownl(asthead(xs), tt, lenv)) else if (nm == "strong_count" or nm == "rc_strong_count" or nm == "arc_strong_count" or nm == "drop" or nm == "rc_drop" or nm == "arc_drop" or nm == "version" or nm == "signal_version" or nm == "__lume_rc_strong_count" or nm == "__lume_rc_drop" or nm == "__lume_signal_version") and len(xs) == 1 then TyName("int") else if (nm == "promise" or nm == "promise_new" or nm == "__lume_promise_new") and len(xs) == 1 then (let ke = tknownl(asthead(xs), tt, lenv) in if isany(ke) == 1 then TyAny else TyApply("promise", ke)) else if (nm == "resolve" or nm == "promise_resolve" or nm == "set" or nm == "signal_set" or nm == "__lume_promise_resolve" or nm == "__lume_signal_set") and len(xs) == 2 then tknownl(asthead(xs), tt, lenv) else if (nm == "signal" or nm == "signal_new" or nm == "__lume_signal_new") and len(xs) == 1 then (let ke = tknownl(asthead(xs), tt, lenv) in if isany(ke) == 1 then TyAny else TyApply("signal", ke)) else TyAny
 fn tknowncall(nm, xs, tt) = if nm == "decimal" then tknown_decimal_call(xs) else if nm == "decimal_cast" then tknown_decimal_cast(xs) else if nm == "money_parse" or nm == "money_make" then tknown_money_call(xs) else if nm == "money_convert_fx" then tknown_money_fx(xs) else if nm == "money_add" or nm == "money_sub" then tknown_money_bin(xs, tt) else if nm == "money_cmp" then (let m = tknown_money_bin(xs, tt) in TyName("int")) else if nm == "Cons" and len(xs) == 2 and isnil(tctorlookup("Cons", tt.ctors)) == 1 then tknown_cons_list(asthead(xs), tt) else if tqname(nm) then tknownquery(nm, xs) else tknown_call_result(nm, xs, tt)
 fn tqname(nm) = nm == "query_where" or nm == "query_order" or nm == "query_join" or nm == "query_group"
 fn tknownquery(nm, xs) = if nm == "query_join" then tknownqueryout(xs, 2) else if nm == "query_group" then tknownqueryout(xs, 1) else tknownqueryout(xs, 0)
@@ -343,7 +387,8 @@ fn tknownquerytypearg(arg) = match arg
     _ => TyAny
 fn tknown_call_result(nm, xs, tt) = match tglookup(nm, tt.gsigs)
     Cons(g, rest) => tsubst(g.rt, tknown_gbind(xs, g.params, Nil), tpset(g.params))
-    Nil => tknown_simple_result(tsiglookup(nm, tt.sigs), tknownctorcall(nm, xs, tt))
+    Nil => tknown_simple_result(tsiglookup(nm, tt.sigs), tknown_tier_or_ctor(nm, xs, tt))
+fn tknown_tier_or_ctor(nm, xs, tt) = let tc = tknown_tier_conc_call(nm, xs, tt, tt.lenv) in if isany(tc) == 0 then tc else tknownctorcall(nm, xs, tt)
 fn tknown_simple_result(signature, fallback) = match signature
     Nil => fallback
     Cons(sg, rest) => sg.rt
@@ -412,6 +457,7 @@ fn tknownl(e, tt, lenv) = match e
     LetIn(nm, v, b) => tknownl(b, tt, Cons({k: nm, v: tletscheme_lenv(v, tt, lenv)}, lenv))
     Field(o, nm)    => tfieldtype(o, nm, tt)
     Call(nm, xs)    => tknownlcall(nm, xs, tt, lenv)
+    AwaitE(inner)   => let ki = tknownl(inner, tt, lenv) in let ku = tunwrap_inner(ki) in if isany(ku) == 0 then ku else ki
     _               => tknown(e, tt)
 fn tletscheme_lenv(v, tt, lenv) = match v
     LambdaE(ps, tys, rt, body) => tlambda_scheme(ps, tys, rt, body, lenv)
@@ -424,9 +470,10 @@ fn tknownl_direct_call(xs, tt, lenv) = match xs
 fn tknownlcall_env(nm, xs, tt, lenv, m) = match m
     Cons(sch, r) => tinst_apply_scheme(nm, sch, xs, tt, lenv)
     Nil          => tknownlcall_isig(nm, xs, tt, lenv, tilookup(nm, tt.isigs))
+fn tknownl_fallback(nm, xs, tt, lenv) = let tc = tknown_tier_conc_call(nm, xs, tt, lenv) in if isany(tc) == 0 and isnil(tsiglookup(nm, tt.sigs)) == 1 then tc else tknown(Call(nm, xs), tt)
 fn tknownlcall_isig(nm, xs, tt, lenv, m) = match m
     Cons(isg, r) => tknownlcall_isig2(nm, xs, tt, lenv, isg.rscheme)
-    Nil          => tknown(Call(nm, xs), tt)
+    Nil          => tknownl_fallback(nm, xs, tt, lenv)
 fn tknownlcall_isig2(nm, xs, tt, lenv, rsch) = match rsch
     Forall(tvs, fty) => let rt = tinst_apply_scheme(nm, rsch, xs, tt, lenv) in if isany(rt) == 0 then rt else tknown(Call(nm, xs), tt)
     _                => tknown(Call(nm, xs), tt)
@@ -453,9 +500,11 @@ fn tinst_unify_arg2(nm, i, pt, ka, subst) = match pt
 ## F3 nominal inference: keep int/str AND any declared NOMINAL type name (enum/record); drop decimal/list/
 ## table/literal, whose equality is scale/element-sensitive and coercion-prone. Nominal names compare by exact
 ## identity (no coercion), so inferring and checking them adds real cross-type catches with zero false positives.
+fn is_tier_or_conc_ty(n) = n == "rc" or n == "arc" or n == "weak" or n == "promise" or n == "signal"
 fn tnarrow(ty) = match ty
-    TyName(n) => ty
-    _         => TyAny
+    TyName(n)     => ty
+    TyApply(n, e) => if is_tier_or_conc_ty(n) then TyApply(n, tnarrow(e)) else TyAny
+    _             => TyAny
 fn tisname(ty) = match ty
     TyName(n) => 1
     _         => 0
@@ -731,7 +780,7 @@ fn tcompatl(e, k) = match k
     TyList(e2) => tcompat(e, e2)
     TyDecimal(p, s) => 0
     TyDecimalLiteral(c, s) => 0
-fn tiswrapty(n) = if n == "Ref" or n == "View" or n == "rc" or n == "arc" or n == "weak" or n == "cell" or n == "chan" or n == "unverified" then 1 else 0
+fn tiswrapty(n) = if n == "Ref" or n == "View" or n == "rc" or n == "arc" or n == "weak" or n == "promise" or n == "signal" or n == "cell" or n == "chan" or n == "unverified" then 1 else 0
 fn tcompatapply(n, e, k) = match k
     TyAny => 1
     TyApply(n2, e2) => if n == n2 then tcompat(e, e2) else 0
