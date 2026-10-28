@@ -51,6 +51,13 @@ detail: `docs/28-delivery-rules.md`.
    stay green; new features/backends are in Lume, not new C in the frozen seed (`#205`); every fix
    ships a regression test. If a shortcut is unavoidable, it ships labelled `model`/`planned` — never
    as a guarantee. Zero theater inside Lume.
+6. **Deliver the real construct, not a mock of it.** A typed feature is the compiler type
+   (`rc[T]` = the real ownership tier, not user functions `rc_new`/`rc_drop` returning records); a
+   `[CODE]` diagnostic must come from the real analysis, **never faked** with a hardcoded
+   `ctfail("...[CODE]...")` string or hand-returned JSON; the test must exercise the real syntax, not
+   a stand-in (`fn rc_drop(x: int) = x`). A mock that only works inside its own test and imitates a
+   feature the compiler lacks does not ship and must **not** close the feature's issue — label it
+   `planned` and keep the issue open. Build what the issue asks, not an easier look-alike.
 
 ## Workflow
 

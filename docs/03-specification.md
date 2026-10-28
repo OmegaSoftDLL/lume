@@ -4,7 +4,7 @@ Status: **draft**, edition `2026`. This document is normative for Stage 0/1 impl
 Sections marked **[Stage N]** describe features whose syntax is reserved now and implemented in that
 roadmap stage; Stage 0 implements §1–§9 (the "core subset"). Grammar: `grammar/lume.ebnf`.
 
-> **Implementation note.** The **[Stage N]** tags mark the stage at which the spec *intends* a feature to land; they do not mean it is implemented in the self-hosted `lumec` today. For example, traits/`impl`, closures, refinement `T where …`, `.await`, `shard` and the AArch64/RISC-V/WASI targets have no hits in `compiler/stage1/lume/` or `lcaas.src`, and `rc`/`arc` are only recognised as names for ownership tiers, not fully implemented. See `docs/10-stage1-status.md` and `docs/PROJECT_STATE.md` for what is real.
+> **Implementation note.** The **[Stage N]** tags mark the stage at which the spec *intends* a feature to land; they do not all mean it is implemented in the self-hosted `lumec` today. As of `#239`, traits/`impl`, closures, refinement `T where ...`, `async`/`.await`, `shard`, and `let`-polymorphism **are** implemented and tested; AArch64/RISC-V ELF targets run under QEMU and Mach-O/PE/Intel-HEX are *emitted* (`#238`, see `docs/26`). Still **not** real as language types: `rc[T]`/`arc[T]`/`weak[T]` ownership tiers and `promise[T]`/`signal[T]` (today only hand-written library mocks - reopened `#197`/`#215`). See `docs/10-stage1-status.md` and `docs/PROJECT_STATE.md` for what is real.
 
 Notation: `code` for syntax; *italics* for metavariables; "MUST/SHOULD" as in RFC 2119.
 
