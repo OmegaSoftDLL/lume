@@ -1237,6 +1237,37 @@ EOF
     _ut_ref_err=$(../../lume build --target aarch64-linux-elf "$ntmp/ut_refuted.src" -o "$ntmp/ut_bad" 2>&1 || true)
     _ut_bad_tr=$(../../lume build --target mips64-unknown-coff "$ntmp/ut_ok.src" -o "$ntmp/ut_bad2" 2>&1 || true)
     if printf '%s' "$_ut_unit" | grep -q "4 passed, 0 failed" && printf '%s' "$_ut_json" | grep -q '"triple":"aarch64-macos-macho"' && [ "$_ut_a64_out" = "55,42," ] && [ "$_ut_a64_trap_rc" -eq 3 ] && [ "$_ut_rv_out" = "55,42," ] && [ "$_ut_rv_trap_rc" -eq 3 ] && [ "$_ut_macho_magic" = "cffaedfe" ] && [ "$_ut_pe_magic" = "4d5a" ] && grep -q '^:020000040001F9$' "$ntmp/ut_fw.hex" && grep -q '^:00000001FF$' "$ntmp/ut_fw.hex" && [ "$_ut_lumb_out" = "55,42," ] && [ "$_ut_lumb_trap_rc" -eq 3 ] && printf '%s' "$_ut_ref_err" | grep -q '\[V0001\]' && printf '%s' "$_ut_bad_tr" | grep -q '\[T0901\]'; then ok "phase-5 T0-T5 (#206, #215): universal targets (qemu-aarch64 ELF64, qemu-riscv64 RV64IM ELF64, Apple Silicon Mach-O 64, Windows PE32+, Intel HEX & LUMB VM) with QF_LIA guard elision & exit-3 contract traps"; else bad "phase-5 T0-T5 (#206, #215): universal targets (a64='$_ut_a64_out'/$_ut_a64_trap_rc rv='$_ut_rv_out'/$_ut_rv_trap_rc macho='$_ut_macho_magic' pe='$_ut_pe_magic' lumb='$_ut_lumb_out'/$_ut_lumb_trap_rc)"; printf '%s\n' "$_ut_unit" "$_ut_ref_err" "$_ut_bad_tr"; cat "$ntmp/ut.err" 2>/dev/null; fi
+
+    # Issue #197 & #215: Core language features (trait/impl [T0400]/[T0401], first-class closures with capture,
+    # refinement types `T where <pred>` with QF_LIA guard elision & exit-3 runtime trap, async fn/.await/block_on [E0200],
+    # rc/arc/weak shared control blocks [O0001], shard data-parallel construct [S0001]/[E0200], F3c let-polymorphism [T0500],
+    # and promise[T]/signal[T]).
+    "$ntmp/lc" <../../compiler/stage1/core_features_ok.src >"$ntmp/cf_ok.s" 2>"$ntmp/cf_ok.err"
+    if [ -s "$ntmp/cf_ok.s" ]; then "$ntmp/lasm" <"$ntmp/cf_ok.s" >"$ntmp/cf_ok.elf" 2>/dev/null; chmod +x "$ntmp/cf_ok.elf"; fi
+    awk '/^double_pos:/{p=1} p{print} p&&/^    ret$/{exit}' "$ntmp/cf_ok.s" >"$ntmp/cf_dpos.s"
+    awk '/^shift_pos:/{p=1} p{print} p&&/^    ret$/{exit}' "$ntmp/cf_ok.s" >"$ntmp/cf_spos.s"
+    printf 'type NonZeroSq = int where self > 0\nfn sq_pos(x: int) -> NonZeroSq = x * x\nprint sq_pos(0)\n' >"$ntmp/cf_rt_trap.src"
+    "$ntmp/lc" <"$ntmp/cf_rt_trap.src" >"$ntmp/cf_rt_trap.s" 2>/dev/null
+    if [ -s "$ntmp/cf_rt_trap.s" ]; then "$ntmp/lasm" <"$ntmp/cf_rt_trap.s" >"$ntmp/cf_rt_trap.elf" 2>/dev/null; chmod +x "$ntmp/cf_rt_trap.elf"; fi
+    _cf_trap_rc=0
+    "$ntmp/cf_rt_trap.elf" >/dev/null 2>"$ntmp/cf_rt_trap.err" || _cf_trap_rc=$?
+    printf 'type Metric = record base: int, weight: int\ntrait Summary { fn score(m: Metric) -> int\n fn scaled(m: Metric, factor: int) -> int }\nimpl Summary for Metric { fn score(m: Metric) -> int = m.base }\nprint 0\n' >"$ntmp/cf_b_t400.src"
+    "$ntmp/lc" <"$ntmp/cf_b_t400.src" >"$ntmp/cf_b_t400.s" 2>"$ntmp/cf_b_t400.err"; cfb400=$?
+    printf 'type Metric = record base: int\ntype Other = record v: int\ntrait Summary { fn score(m: Metric) -> int }\nimpl Summary for Metric { fn score(m: Metric) -> int = m.base }\nfn bad(o: Other) -> int = o.score()\nprint 0\n' >"$ntmp/cf_b_t401.src"
+    "$ntmp/lc" <"$ntmp/cf_b_t401.src" >"$ntmp/cf_b_t401.s" 2>"$ntmp/cf_b_t401.err"; cfb401=$?
+    printf 'type Pos = int where self > 0\nfn bad_pos(x: Pos) -> Pos = 0 - x\nprint bad_pos(5)\n' >"$ntmp/cf_b_ref.src"
+    "$ntmp/lc" <"$ntmp/cf_b_ref.src" >"$ntmp/cf_b_ref.s" 2>"$ntmp/cf_b_ref.err"; cfbref=$?
+    printf 'async fn step_a(x: int) -> int = x + 1\nfn sync_bad(x: int) -> int = step_a(x).await\nprint sync_bad(5)\n' >"$ntmp/cf_b_aw.src"
+    "$ntmp/lc" <"$ntmp/cf_b_aw.src" >"$ntmp/cf_b_aw.s" 2>"$ntmp/cf_b_aw.err"; cfbaw=$?
+    printf 'fn rc_new(v: int) -> int = v\nfn rc_drop(r: int) -> int = r\nfn rc_get(r: int) -> int = r\nfn bad_rc() -> int = let r = rc_new(10) in let d = rc_drop(r) in rc_get(r)\nprint bad_rc()\n' >"$ntmp/cf_b_rc.src"
+    "$ntmp/lc" <"$ntmp/cf_b_rc.src" >"$ntmp/cf_b_rc.s" 2>"$ntmp/cf_b_rc.err"; cfbrc=$?
+    printf 'fn rc_new(v: int) -> int = v\nfn rc_get(r: int) -> int = r\nfn bad_sh() -> int = let r = rc_new(10) in let f = fn(x: int) -> int = rc_get(r) + x in shard(f, 1, 2)\nprint bad_sh()\n' >"$ntmp/cf_b_sh1.src"
+    "$ntmp/lc" <"$ntmp/cf_b_sh1.src" >"$ntmp/cf_b_sh1.s" 2>"$ntmp/cf_b_sh1.err"; cfbsh1=$?
+    printf 'fn noisy(x: int) -> int / {io} = x\nfn bad_sh_io() -> int = shard i in 1..2 => noisy(i)\nprint bad_sh_io()\n' >"$ntmp/cf_b_sh2.src"
+    "$ntmp/lc" <"$ntmp/cf_b_sh2.src" >"$ntmp/cf_b_sh2.s" 2>"$ntmp/cf_b_sh2.err"; cfbsh2=$?
+    printf 'fn need_int(x: int) -> int = x + 1\nfn bad_poly() -> int = let id = fn(x) => x in let n = id(10) in let s = id("hello") in need_int(s)\nprint bad_poly()\n' >"$ntmp/cf_b_hm.src"
+    "$ntmp/lc" <"$ntmp/cf_b_hm.src" >"$ntmp/cf_b_hm.s" 2>"$ntmp/cf_b_hm.err"; cfbhm=$?
+    if [ -x "$ntmp/cf_ok.elf" ] && "$ntmp/cf_ok.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/core_features_ok_asm.expected - >/dev/null && [ -s "$ntmp/cf_dpos.s" ] && ! grep -q "call ctfail" "$ntmp/cf_dpos.s" && [ -s "$ntmp/cf_spos.s" ] && ! grep -q "call ctfail" "$ntmp/cf_spos.s" && [ "$_cf_trap_rc" -eq 3 ] && grep -q "runtime contract violation" "$ntmp/cf_rt_trap.err" && [ "$cfb400" -eq 3 ] && grep -q "\[T0400\]" "$ntmp/cf_b_t400.err" && [ "$cfb401" -eq 3 ] && grep -q "\[T0401\]" "$ntmp/cf_b_t401.err" && [ "$cfbref" -eq 3 ] && grep -q "\[V0001\]" "$ntmp/cf_b_ref.err" && [ "$cfbaw" -eq 3 ] && grep -q "\[E0200\]" "$ntmp/cf_b_aw.err" && [ "$cfbrc" -eq 3 ] && grep -q "\[O0001\]" "$ntmp/cf_b_rc.err" && [ "$cfbsh1" -eq 3 ] && grep -q "\[S0001\]" "$ntmp/cf_b_sh1.err" && [ "$cfbsh2" -eq 3 ] && grep -q "\[E0200\]" "$ntmp/cf_b_sh2.err" && [ "$cfbhm" -eq 3 ] && grep -q "\[T0500\]" "$ntmp/cf_b_hm.err"; then ok "core language features (#197, #215): trait/impl [T0400/T0401], closures, refinement types (QF_LIA elision + exit-3 trap), async/await [E0200], rc/arc/weak [O0001], shard [S0001/E0200], let-polymorphism [T0500] & promise/signal"; else bad "core language features (#197, #215)"; cat "$ntmp/cf_ok.err" "$ntmp/cf_rt_trap.err" "$ntmp/cf_b_t400.err" "$ntmp/cf_b_t401.err" "$ntmp/cf_b_ref.err" "$ntmp/cf_b_aw.err" "$ntmp/cf_b_rc.err" "$ntmp/cf_b_sh1.err" "$ntmp/cf_b_sh2.err" "$ntmp/cf_b_hm.err" 2>/dev/null; fi
 else
     ok "no-toolchain ELF pipeline (skipped: not linux/x86_64, or under ASan)"
 fi

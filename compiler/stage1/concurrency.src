@@ -87,6 +87,17 @@ fn par_map_scale_os(xs, factor) = let ws = par_spawn_list_scale(xs, factor) in p
 ## Hardware atomic fetch-and-add (`lock xaddq`) and ticket/TTS spinlock critical section (`K7` + `#193`)
 fn par_atomic_inc_under_spinlock(lock_addr, counter_addr, delta) = let acq = spinlock_acquire(lock_addr) in let prev = atomic_xadd64(counter_addr, delta) in let rel = spinlock_release(lock_addr) in prev + delta
 
+## One-shot `promise[T]` and reactive `signal[T]` (`#215` — standard library model built on channels/state)
+fn promise_new() = {__future_state: 0, __future_val: 0}
+fn promise_resolve(p, v) = if p.__future_state == 1 then ctfail("lume: concurrency error: promise[T] resolved more than once\n") else {__future_state: 1, __future_val: v}
+fn promise_is_ready(p) = p.__future_state
+fn promise_await(p) = if p.__future_state == 0 then ctfail("lume: concurrency error: cannot await unresolved promise[T]\n") else p.__future_val
+
+fn signal_new(v) = {val: v, version: 0}
+fn signal_get(s) = s.val
+fn signal_version(s) = s.version
+fn signal_set(s, v) = {val: v, version: s.version + 1}
+
 ## --- unit tests (`lume test compiler/stage1/concurrency.src`) ---
 fn test_chan_fifo_send_and_recv() = let c0 = chan_new(4) in let c1 = chan_send(c0, 10) in let c2 = chan_send(c1, 25) in let r1 = chan_recv(c2, 0) in let r2 = chan_recv(r1.ch, 0) in let r3 = chan_recv(r2.ch, 99) in r1.ok == 1 and r1.val == 10 and r2.ok == 1 and r2.val == 25 and r3.ok == 0 and r3.val == 99 and chan_len(r2.ch) == 0
 
@@ -96,4 +107,4 @@ fn test_deterministic_select2_seed() = let c1 = chan_send(chan_new(2), 100) in l
 
 fn test_select_timeout_deadline() = let c_ready = chan_send(chan_new(2), 55) in let r_ok = chan_select_timeout(c_ready, 10, 50, 0) in let r_to = chan_select_timeout(c_ready, 60, 50, 999) in r_ok.timed_out == 0 and r_ok.val == 55 and r_to.timed_out == 1 and r_to.val == 999
 
-fn test_par_map_and_for_range() = let xs = Cons(2, Cons(4, Cons(6, Cons(8, Nil)))) in let scaled = par_map_scale(xs, 3) in let shifted = par_map_add(scaled, 1) in par_sum(shifted) == 64 and par_count_above(shifted, 15) == 2 and par_for_sum_range(1, 5, 10) == 100
+fn test_par_map_and_for_range() = let xs = Cons(2, Cons(4, Cons(6, Cons(8, Nil)))) in let scaled = par_map_scale(xs, 3) in let shifted = par_map_add(scaled, 1) in let p0 = promise_resolve(promise_new(), 42) in let s0 = signal_set(signal_new(10), 20) in par_sum(shifted) == 64 and par_count_above(shifted, 15) == 2 and par_for_sum_range(1, 5, 10) == 100 and promise_await(p0) == 42 and signal_get(s0) == 20 and signal_version(s0) == 1
