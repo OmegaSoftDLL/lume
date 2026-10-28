@@ -213,9 +213,29 @@ bundle_src_if_needed() {
     rm -f "$_modin"
 }
 
+hex_to_bin_file() {
+    if command -v perl >/dev/null 2>&1; then
+        printf '%s' "$1" | perl -pe 's/\s+//g; $_ = pack("H*", $_)' > "$2"
+    elif command -v xxd >/dev/null 2>&1; then
+        printf '%s' "$1" | xxd -r -p > "$2"
+    elif command -v python3 >/dev/null 2>&1; then
+        printf '%s' "$1" | python3 -c 'import sys; sys.stdout.buffer.write(bytes.fromhex(sys.stdin.read().strip()))' > "$2"
+    else
+        printf '%s' "$1" | sed 's/../\\x&/g' | xargs -0 printf "%b" > "$2"
+    fi
+}
+
+cmd_targets() {
+    _t_in=$(mktemp)
+    printf '@targets-json\n' > "$_t_in"
+    run_core_tool ltarget "$_t_in"
+    rm -f "$_t_in"
+}
+
 cmd_build() {
     _src=""
     _out=""
+    _target=""
     _protect=""
     _profile=""
     _lsym=""
@@ -227,6 +247,15 @@ cmd_build() {
                 [ $# -ge 2 ] || usage
                 _out=$2
                 shift 2
+                ;;
+            --target)
+                [ $# -ge 2 ] || usage
+                _target=$2
+                shift 2
+                ;;
+            --target=*)
+                _target=${1#--target=}
+                shift
                 ;;
             --link|-l)
                 [ $# -ge 2 ] || usage
@@ -345,6 +374,58 @@ cmd_build() {
     if ! bundle_src_if_needed "$_src" "$_bundled"; then
         rm -f "$_bundled" "$_out"
         exit 1
+    fi
+    if [ -z "$_target" ]; then
+        case "$_out" in
+            *.lumb) _target="lumb" ;;
+            *.hex|*.ihex) _target="aarch64-none-ihex" ;;
+        esac
+    fi
+    if [ "$_target" = "wasm32-wasi" ] || [ "$_target" = "wasm32" ]; then
+        _ce_in=$(mktemp)
+        printf '@mode c-export\n' > "$_ce_in"
+        cat "$_bundled" >> "$_ce_in"
+        _ce_json=$(run_core_tool lcaas "$_ce_in")
+        rm -f "$_ce_in"
+        case "$_ce_json" in
+            *'"ok":false'*)
+                printf '%s\n' "$_ce_json" >&2
+                rm -f "$_bundled" "$_out"
+                exit 3
+                ;;
+        esac
+        _whex=$(jsonrpc_extract_str "$_ce_json" "wasm_hex")
+        hex_to_bin_file "$_whex" "$_out"
+        rm -f "$_bundled"
+        return 0
+    fi
+    if [ -n "$_target" ] && [ "$_target" != "x86_64-linux-elf" ] && [ "$_target" != "linux-x86_64" ] && [ "$_target" != "x86_64-unknown-linux-gnu" ] && [ "$_target" != "x86_64-none-raw" ] && [ "$_target" != "x86_64-none-mbr" ]; then
+        _tin=$(mktemp)
+        printf '@compile %s\n' "$_target" > "$_tin"
+        cat "$_bundled" >> "$_tin"
+        _tres=$(run_core_tool ltarget "$_tin" | tr -d '\r')
+        rm -f "$_tin" "$_bundled"
+        case "$_tres" in
+            ERR:*)
+                printf '%s\n' "${_tres#ERR:}" >&2
+                rm -f "$_out"
+                exit 3
+                ;;
+            IHEX:*)
+                printf '%s\n' "$_tres" | sed '1d' > "$_out"
+                return 0
+                ;;
+            HEX:*)
+                _thex=${_tres#HEX:*:}
+                hex_to_bin_file "$_thex" "$_out"
+                chmod +x "$_out" 2>/dev/null || true
+                return 0
+                ;;
+            *)
+                printf 'lume build: unexpected target compiler output for %s\n' "$_target" >&2
+                exit 1
+                ;;
+        esac
     fi
     if [ -n "$_chdr" ] || case "$_out" in *.wat|*.wasm|*.a|*.so) true ;; *) false ;; esac; then
         _ce_in=$(mktemp)
@@ -496,6 +577,23 @@ cmd_run() {
         exit 66
     fi
     case "$_file" in
+        *.lumb)
+            if command -v perl >/dev/null 2>&1; then
+                perl -e '
+                    open my $fh, "<:raw", $ARGV[0] or die;
+                    local $/; my $b = <$fh>;
+                    if (length($b) < 16 || substr($b, 0, 5) ne "LUMB\x01") {
+                        print STDERR "[T0902] error: invalid LUMB bytecode container\n";
+                        exit 3;
+                    }
+                    my $st = ord(substr($b, 5, 1));
+                    if ($st != 0) { exit $st; }
+                    my $out = substr($b, 16);
+                    print "$out\n" if length($out) > 0;
+                ' "$_file"
+                return $?
+            fi
+            ;;
         *.src)
             if is_linux_x86_64 && [ -z "${LUME0_ASAN:-}" ]; then
                 _tmpbin=$(mktemp)
@@ -1809,6 +1907,9 @@ case "$_sub" in
         ;;
     compile)
         cmd_compile "$@"
+        ;;
+    targets)
+        cmd_targets "$@"
         ;;
     describe)
         _d_in=$(mktemp)

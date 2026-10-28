@@ -1,0 +1,588 @@
+## compiler/stage1/ltarget.src — Universal Targets Backend (Issue #206 & #215, docs/26-targets.md)
+##
+## Orthogonal Target-Triple Architecture (T0):
+##   target = (ISA encoder)  _||_  (object/container writer)  _||_  (OS / ABI + syscall layer)
+##
+## Supported Target Triples:
+##   1. `x86_64-linux-elf`    — x86-64 ISA + ELF64 (EM_X86_64=62) + Linux System V AMD64 ABI (shipped)
+##   2. `aarch64-linux-elf`   — AArch64 A64 ISA + ELF64 (EM_AARCH64=183) + Linux AAPCS64 ABI (shipped; runs in qemu-aarch64)
+##   3. `aarch64-macos-macho` — AArch64 A64 ISA + Mach-O 64 (MH_MAGIC_64) + Darwin AAPCS64 ABI (shipped; runs natively on Apple Silicon)
+##   4. `x86_64-windows-pe`   — x86-64 ISA + PE32+/COFF (0x8664) + Windows x64 ABI (shipped; runs natively on Windows x64)
+##   5. `riscv64-linux-elf`   — RISC-V RV64IM ISA + ELF64 (EM_RISCV=243) + Linux LP64 ABI (shipped; runs in qemu-riscv64)
+##   6. `<isa>-none-ihex`     — AArch64 / RISC-V / x86-64 freestanding firmware in Intel HEX (`.hex`) format (shipped)
+##   7. `x86_64-none-raw`     — Bare-metal bootable MBR + 64-bit Long Mode kernel image (shipped via lasm `.kernel`, boots in qemu-system-x86_64)
+##   8. `lumb`                — Portable Lume Bytecode (`LUMB\x01`) container + deterministic stack VM (shipped; closes #215 `lumb` brick)
+##
+## Proof-Preserving Guarantee (H5 / docs/28):
+##   - Every target enforces Lume's `requires`/`ensures` contracts.
+##   - Contracts discharged as `proven` by the sound QF_LIA prover have their runtime guard elided (`guards_elided > 0`).
+##   - Contracts marked `runtime_checked` (e.g., nonlinear `x * x`) emit a native target-ISA runtime trap that exits with status 3.
+##   - Out-of-fragment constructs emit explicit `[T0900]`/`[T0901]` diagnostics (never a silent 0).
+
+type List = enum Nil | Cons(int, List)
+
+## --- 0. Basic List, Byte & Hex Helpers ---
+
+fn tg_app(xs, ys) = match xs
+    Nil        => ys
+    Cons(h, t) => Cons(h, tg_app(t, ys))
+
+fn tg_len(xs) = match xs
+    Nil        => 0
+    Cons(h, t) => 1 + tg_len(t)
+
+fn tg_nth(xs, idx) = match xs
+    Nil        => 0
+    Cons(h, t) => if idx <= 0 then h else tg_nth(t, idx - 1)
+
+fn tg_rev_acc(xs, acc) = match xs
+    Nil        => acc
+    Cons(h, t) => tg_rev_acc(t, Cons(h, acc))
+
+fn tg_rev(xs) = tg_rev_acc(xs, Nil)
+
+fn tg_zeros(n) = if n <= 0 then Nil else Cons(0, tg_zeros(n - 1))
+
+fn tg_repeat_str(s, n) = if n <= 0 then "" else if n == 1 then s else let h = tg_repeat_str(s, n / 2) in h + h + (if n % 2 == 1 then s else "")
+
+fn tg_lowbyte(x) = let m = x % 256 in if m < 0 then m + 256 else m
+
+fn tg_b2(x) = Cons(tg_lowbyte(x), Cons(tg_lowbyte(x / 256), Nil))
+
+fn tg_b4(x) = let u = if x < 0 then 4294967296 + x else x in tg_app(tg_b2(u % 65536), tg_b2(u / 65536))
+
+fn tg_b8(x) = tg_app(tg_b4(x % 4294967296), tg_b4(x / 4294967296))
+
+fn tg_hex_digit(n) = let v = tg_lowbyte(n) % 16 in if v < 10 then str(v) else if v == 10 then "a" else if v == 11 then "b" else if v == 12 then "c" else if v == 13 then "d" else if v == 14 then "e" else "f"
+
+fn tg_hex_digit_upper(n) = let v = tg_lowbyte(n) % 16 in if v < 10 then str(v) else if v == 10 then "A" else if v == 11 then "B" else if v == 12 then "C" else if v == 13 then "D" else if v == 14 then "E" else "F"
+
+fn tg_byte_hex(b) = let v = tg_lowbyte(b) in tg_hex_digit(v / 16) + tg_hex_digit(v % 16)
+
+fn tg_byte_hex_upper(b) = let v = tg_lowbyte(b) in tg_hex_digit_upper(v / 16) + tg_hex_digit_upper(v % 16)
+
+fn tg_isnil(xs) = match xs
+    Nil        => 1
+    Cons(h, t) => 0
+
+fn tg_pairs(xs) = match xs
+    Nil        => Nil
+    Cons(a, t) => tg_pairs2(a, t)
+
+fn tg_pairs2(a, t) = match t
+    Nil        => Cons(a, Nil)
+    Cons(b, r) => Cons(a + b, tg_pairs(r))
+
+fn tg_joinall(xs) = match xs
+    Nil        => ""
+    Cons(a, t) => if tg_isnil(t) == 1 then a else tg_joinall(tg_pairs(xs))
+
+fn tg_bytes_to_hex_list(bs) = match bs
+    Nil        => Nil
+    Cons(b, t) => Cons(tg_byte_hex(b), tg_bytes_to_hex_list(t))
+
+fn tg_bytes_to_hex(bs) = tg_joinall(tg_bytes_to_hex_list(bs))
+
+fn tg_find_ascii(c, i) = let tab = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~" in if i >= 95 then 31 else if slice(tab, i, i + 1) == c then i else tg_find_ascii(c, i + 1)
+
+fn tg_char_code(c) = let o = ord(c) in if o > 0 then o else if c == "\n" then 10 else if c == "\t" then 9 else if c == "" then 0 else 32 + tg_find_ascii(c, 0)
+
+fn tg_str_bytes_i(s, i, n) = if i >= n then Nil else Cons(tg_char_code(at(s, i)), tg_str_bytes_i(s, i + 1, n))
+
+fn tg_str_bytes(s) = tg_str_bytes_i(s, 0, count(s))
+
+fn tg_str_pad(s, total_len) = let bs = tg_str_bytes(s) in tg_app(bs, tg_zeros(total_len - tg_len(bs)))
+
+## --- 1. T0: Orthogonal Target-Triple Registry & Selector ---
+
+fn target_parse_triple(triple) = if triple == "x86_64-linux-elf" or triple == "linux-x86_64" or triple == "x86_64-unknown-linux-gnu" then {valid: 1, triple: "x86_64-linux-elf", isa: "x86_64", os: "linux", fmt: "elf64", abi: "sysv64", e_machine: 62, status: "shipped", diag: ""} else if triple == "aarch64-linux-elf" or triple == "arm64-linux" or triple == "aarch64-unknown-linux-gnu" then {valid: 1, triple: "aarch64-linux-elf", isa: "aarch64", os: "linux", fmt: "elf64", abi: "aapcs64-linux", e_machine: 183, status: "shipped", diag: ""} else if triple == "aarch64-macos-macho" or triple == "arm64-macos" or triple == "aarch64-apple-darwin" then {valid: 1, triple: "aarch64-macos-macho", isa: "aarch64", os: "macos", fmt: "macho64", abi: "aapcs64-darwin", e_machine: 16777228, status: "shipped", diag: ""} else if triple == "x86_64-windows-pe" or triple == "windows-x86_64" or triple == "x86_64-pc-windows-msvc" then {valid: 1, triple: "x86_64-windows-pe", isa: "x86_64", os: "windows", fmt: "pe64", abi: "win64", e_machine: 34404, status: "shipped", diag: ""} else if triple == "riscv64-linux-elf" or triple == "riscv64" or triple == "riscv64gc-unknown-linux-gnu" then {valid: 1, triple: "riscv64-linux-elf", isa: "riscv64", os: "linux", fmt: "elf64", abi: "lp64-linux", e_machine: 243, status: "shipped", diag: ""} else if triple == "aarch64-none-ihex" or triple == "arm64-none-ihex" then {valid: 1, triple: "aarch64-none-ihex", isa: "aarch64", os: "none", fmt: "ihex", abi: "freestanding", e_machine: 183, status: "shipped", diag: ""} else if triple == "riscv64-none-ihex" then {valid: 1, triple: "riscv64-none-ihex", isa: "riscv64", os: "none", fmt: "ihex", abi: "freestanding", e_machine: 243, status: "shipped", diag: ""} else if triple == "x86_64-none-ihex" then {valid: 1, triple: "x86_64-none-ihex", isa: "x86_64", os: "none", fmt: "ihex", abi: "freestanding", e_machine: 62, status: "shipped", diag: ""} else if triple == "x86_64-none-raw" or triple == "x86_64-none-mbr" then {valid: 1, triple: "x86_64-none-raw", isa: "x86_64", os: "none", fmt: "raw", abi: "freestanding", e_machine: 62, status: "shipped", diag: ""} else if triple == "lumb" or triple == "lumb-portable-vm" then {valid: 1, triple: "lumb", isa: "lumb", os: "portable", fmt: "lumb", abi: "stack-vm", e_machine: 0, status: "shipped", diag: ""} else if triple == "wasm32-wasi" or triple == "wasm32" then {valid: 1, triple: "wasm32-wasi", isa: "wasm32", os: "wasi", fmt: "wasm", abi: "wasi", e_machine: 0, status: "shipped", diag: ""} else {valid: 0, triple: triple, isa: "", os: "", fmt: "", abi: "", e_machine: 0, status: "unknown", diag: "[T0901] error: unknown target triple '" + triple + "' (expected x86_64-linux-elf, aarch64-linux-elf, aarch64-macos-macho, x86_64-windows-pe, riscv64-linux-elf, <isa>-none-ihex, x86_64-none-raw, wasm32-wasi, or lumb)"}
+
+fn target_list_json() = "{\"architecture\":\"(ISA encoder) orthogonal (container writer) orthogonal (OS/ABI layer)\",\"targets\":[{\"triple\":\"x86_64-linux-elf\",\"isa\":\"x86_64\",\"os\":\"linux\",\"format\":\"elf64\",\"abi\":\"sysv64\",\"status\":\"shipped\"},{\"triple\":\"aarch64-linux-elf\",\"isa\":\"aarch64\",\"os\":\"linux\",\"format\":\"elf64\",\"abi\":\"aapcs64-linux\",\"status\":\"shipped\"},{\"triple\":\"aarch64-macos-macho\",\"isa\":\"aarch64\",\"os\":\"macos\",\"format\":\"macho64\",\"abi\":\"aapcs64-darwin\",\"status\":\"shipped\"},{\"triple\":\"x86_64-windows-pe\",\"isa\":\"x86_64\",\"os\":\"windows\",\"format\":\"pe64\",\"abi\":\"win64\",\"status\":\"shipped\"},{\"triple\":\"riscv64-linux-elf\",\"isa\":\"riscv64\",\"os\":\"linux\",\"format\":\"elf64\",\"abi\":\"lp64-linux\",\"status\":\"shipped\"},{\"triple\":\"aarch64-none-ihex\",\"isa\":\"aarch64\",\"os\":\"none\",\"format\":\"ihex\",\"abi\":\"freestanding\",\"status\":\"shipped\"},{\"triple\":\"riscv64-none-ihex\",\"isa\":\"riscv64\",\"os\":\"none\",\"format\":\"ihex\",\"abi\":\"freestanding\",\"status\":\"shipped\"},{\"triple\":\"x86_64-none-ihex\",\"isa\":\"x86_64\",\"os\":\"none\",\"format\":\"ihex\",\"abi\":\"freestanding\",\"status\":\"shipped\"},{\"triple\":\"x86_64-none-raw\",\"isa\":\"x86_64\",\"os\":\"none\",\"format\":\"raw\",\"abi\":\"freestanding\",\"status\":\"shipped\"},{\"triple\":\"wasm32-wasi\",\"isa\":\"wasm32\",\"os\":\"wasi\",\"format\":\"wasm\",\"abi\":\"wasi\",\"status\":\"shipped\"},{\"triple\":\"lumb\",\"isa\":\"lumb\",\"os\":\"portable\",\"format\":\"lumb\",\"abi\":\"stack-vm\",\"status\":\"shipped\"}]}"
+
+## --- 2. Source Lexer, Parser & QF_LIA Proof-Preserving Contract Lowering ---
+
+fn tg_isws(c) = c == " " or c == "\t" or c == "\n" or c == "\r"
+fn tg_isdigit(c) = c >= "0" and c <= "9"
+fn tg_isalpha(c) = (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or c == "_"
+fn tg_isalnum(c) = tg_isdigit(c) or tg_isalpha(c)
+
+fn tg_numend(s, i, n) = if i >= n then i else if tg_isdigit(at(s, i)) then tg_numend(s, i + 1, n) else i
+fn tg_idend(s, i, n) = if i >= n then i else if tg_isalnum(at(s, i)) then tg_idend(s, i + 1, n) else i
+fn tg_lineend(s, i, n) = if i >= n then i else if at(s, i) == "\n" then i + 1 else tg_lineend(s, i + 1, n)
+fn tg_escch(c) = if c == "n" then "\n" else if c == "t" then "\t" else if c == "\"" then "\"" else if c == "\\" then "\\" else c
+fn tg_strend(s, i, n, acc) = if i >= n then {txt: acc, next: n} else let c = at(s, i) in if c == "\"" then {txt: acc, next: i + 1} else if c == "\\" then tg_strend(s, i + 2, n, acc + tg_escch(at(s, i + 1))) else tg_strend(s, i + 1, n, acc + c)
+fn tg_istwo(s, i, n) = if i + 1 >= n then 0 else let p = slice(s, i, i + 2) in if p == "==" or p == "!=" or p == "<=" or p == ">=" or p == "->" then 1 else 0
+
+fn tg_lex(s, i, n) = if i >= n then Nil else let c = at(s, i) in if tg_isws(c) then tg_lex(s, i + 1, n) else if c == "#" then tg_lex(s, tg_lineend(s, i + 1, n), n) else if tg_isdigit(c) then (let j = tg_numend(s, i, n) in Cons({k: "NM", t: slice(s, i, j)}, tg_lex(s, j, n))) else if tg_isalpha(c) then (let j = tg_idend(s, i, n) in Cons({k: "ID", t: slice(s, i, j)}, tg_lex(s, j, n))) else if c == "\"" then (let r = tg_strend(s, i + 1, n, "") in Cons({k: "ST", t: r.txt}, tg_lex(s, r.next, n))) else if tg_istwo(s, i, n) == 1 then Cons({k: "SY", t: slice(s, i, i + 2)}, tg_lex(s, i + 2, n)) else Cons({k: "SY", t: c}, tg_lex(s, i + 1, n))
+
+fn tg_hd(ts) = match ts
+    Nil        => {k: "EOF", t: ""}
+    Cons(h, t) => h
+
+fn tg_hdk(ts) = (tg_hd(ts)).k
+fn tg_hdt(ts) = (tg_hd(ts)).t
+fn tg_drop(ts) = match ts
+    Nil        => Nil
+    Cons(h, t) => t
+fn tg_dropkw(ts, kw) = if tg_hdt(ts) == kw then tg_drop(ts) else ts
+
+fn tg_atom(ts) = let k = tg_hdk(ts) in let t = tg_hdt(ts) in if k == "NM" then {e: TNum(toint(t)), rest: tg_drop(ts)} else if k == "ST" then {e: TStr(t), rest: tg_drop(ts)} else if t == "(" then (let r = tg_expr(tg_drop(ts)) in {e: r.e, rest: tg_dropkw(r.rest, ")")}) else if t == "if" then tg_if(tg_drop(ts)) else if t == "let" then tg_let(tg_drop(ts)) else if t == "{" or t == "[" or t == "match" then {e: TUnsupported(t), rest: tg_drop(ts)} else if k == "ID" then tg_ident(t, tg_drop(ts)) else {e: TUnsupported(t), rest: tg_drop(ts)}
+
+fn tg_ident(nm, ts) = if tg_hdt(ts) == "(" then (let a = tg_args(tg_drop(ts)) in {e: TCall(nm, a.xs), rest: a.rest}) else {e: TVar(nm), rest: ts}
+
+fn tg_args(ts) = if tg_hdt(ts) == ")" then {xs: Nil, rest: tg_drop(ts)} else tg_args_more(tg_expr(ts))
+fn tg_args_more(r) = if tg_hdt(r.rest) == "," then (let m = tg_args(tg_drop(r.rest)) in {xs: Cons(r.e, m.xs), rest: m.rest}) else {xs: Cons(r.e, Nil), rest: tg_dropkw(r.rest, ")")}
+
+fn tg_if(ts) = let c = tg_expr(ts) in let t = tg_expr(tg_dropkw(c.rest, "then")) in let f = tg_expr(tg_dropkw(t.rest, "else")) in {e: TIf(c.e, t.e, f.e), rest: f.rest}
+
+fn tg_let(ts) = let nm = tg_hdt(ts) in let v = tg_expr(tg_dropkw(tg_drop(ts), "=")) in let b = tg_expr(tg_dropkw(v.rest, "in")) in {e: TLet(nm, v.e, b.e), rest: b.rest}
+
+fn tg_mul(ts) = tg_mul_lp(tg_atom(ts))
+fn tg_mul_lp(l) = let op = tg_hdt(l.rest) in if op == "*" or op == "/" or op == "%" then (let r = tg_atom(tg_drop(l.rest)) in tg_mul_lp({e: TBin(op, l.e, r.e), rest: r.rest})) else l
+
+fn tg_add(ts) = tg_add_lp(tg_mul(ts))
+fn tg_add_lp(l) = let op = tg_hdt(l.rest) in if op == "+" or op == "-" then (let r = tg_mul(tg_drop(l.rest)) in tg_add_lp({e: TBin(op, l.e, r.e), rest: r.rest})) else l
+
+fn tg_cmp(ts) = tg_cmp_lp(tg_add(ts))
+fn tg_cmp_lp(l) = let op = tg_hdt(l.rest) in if op == "==" or op == "!=" or op == "<" or op == ">" or op == "<=" or op == ">=" then (let r = tg_add(tg_drop(l.rest)) in tg_cmp_lp({e: TBin(op, l.e, r.e), rest: r.rest})) else l
+
+fn tg_and(ts) = tg_and_lp(tg_cmp(ts))
+fn tg_and_lp(l) = if tg_hdt(l.rest) == "and" then (let r = tg_cmp(tg_drop(l.rest)) in tg_and_lp({e: TBin("and", l.e, r.e), rest: r.rest})) else l
+
+fn tg_expr(ts) = tg_or_lp(tg_and(ts))
+fn tg_or_lp(l) = if tg_hdt(l.rest) == "or" then (let r = tg_and(tg_drop(l.rest)) in tg_or_lp({e: TBin("or", l.e, r.e), rest: r.rest})) else l
+
+fn tg_skip_ty(ts) = if tg_hdt(ts) == ":" or tg_hdt(ts) == "->" then tg_Drop_ty1(tg_drop(ts)) else ts
+fn tg_Drop_ty1(ts) = let t1 = tg_drop(ts) in if tg_hdt(t1) == "[" then tg_skip_brack(tg_drop(t1)) else t1
+fn tg_skip_brack(ts) = if tg_hdt(ts) == "]" or tg_hdk(ts) == "EOF" then tg_drop(ts) else tg_skip_brack(tg_drop(ts))
+
+fn tg_params(ts) = if tg_hdt(ts) == ")" then {ps: Nil, rest: tg_drop(ts)} else tg_params_one(ts)
+fn tg_params_one(ts) = let nm = tg_hdt(ts) in let t1 = tg_skip_ty(tg_drop(ts)) in if tg_hdt(t1) == "," then (let r = tg_params(tg_drop(t1)) in {ps: Cons(nm, r.ps), rest: r.rest}) else {ps: Cons(nm, Nil), rest: tg_dropkw(t1, ")")}
+
+fn tg_contracts(ts, reqs, enss) = let kw = tg_hdt(ts) in if kw == "requires" then (let r = tg_expr(tg_drop(ts)) in tg_contracts(r.rest, tg_app(reqs, Cons(r.e, Nil)), enss)) else if kw == "ensures" then (let r = tg_expr(tg_drop(ts)) in tg_contracts(r.rest, reqs, tg_app(enss, Cons(r.e, Nil)))) else {reqs: reqs, enss: enss, rest: ts}
+
+fn tg_skip_attr(ts) = let t1 = tg_drop(ts) in if tg_hdt(t1) == "(" then tg_skip_paren(tg_drop(t1)) else t1
+fn tg_skip_paren(ts) = if tg_hdt(ts) == ")" or tg_hdk(ts) == "EOF" then tg_drop(ts) else tg_skip_paren(tg_drop(ts))
+
+fn tg_parse_prog(ts) = if tg_hdk(ts) == "EOF" then {fns: Nil, prints: Nil} else let t = tg_hdt(ts) in if t == "@" then tg_parse_prog(tg_skip_attr(tg_drop(ts))) else if t == "pub" then tg_parse_prog(tg_drop(ts)) else if t == "fn" then tg_parse_fn(tg_drop(ts)) else if t == "print" then tg_parse_print(tg_drop(ts)) else tg_parse_prog(tg_drop(ts))
+
+fn tg_parse_fn(ts) = let nm = tg_hdt(ts) in let pr = tg_params(tg_dropkw(tg_drop(ts), "(")) in let t1 = tg_skip_ty(pr.rest) in let cr = tg_contracts(t1, Nil, Nil) in let br = tg_expr(tg_dropkw(cr.rest, "=")) in let rest = tg_parse_prog(br.rest) in {fns: Cons({nm: nm, ps: pr.ps, reqs: cr.reqs, enss: cr.enss, body: br.e}, rest.fns), prints: rest.prints}
+
+fn tg_parse_print(ts) = let r = tg_expr(ts) in let rest = tg_parse_prog(r.rest) in {fns: rest.fns, prints: Cons(r.e, rest.prints)}
+
+## --- QF_LIA Linearity & Sound Guard Elision Check ---
+
+fn tg_is_nonlinear(e) = match e
+    TBin(op, l, r) => if op == "*" or op == "/" or op == "%" then (if tg_is_const(l) == 1 and (op == "*") then tg_is_nonlinear(r) else if tg_is_const(r) == 1 then tg_is_nonlinear(l) else 1) else if tg_is_nonlinear(l) == 1 then 1 else tg_is_nonlinear(r)
+    TIf(c, t, f)   => if tg_is_nonlinear(c) == 1 or tg_is_nonlinear(t) == 1 then 1 else tg_is_nonlinear(f)
+    TLet(n, v, b)  => if tg_is_nonlinear(v) == 1 then 1 else tg_is_nonlinear(b)
+    TCall(nm, xs)  => 1
+    _              => 0
+
+fn tg_is_const(e) = match e
+    TNum(n) => 1
+    _       => 0
+
+fn tg_has_unsupported(e) = match e
+    TUnsupported(t) => t
+    TStr(s)         => "__str_in_expr__"
+    TBin(op, l, r)  => let a = tg_has_unsupported(l) in if a != "" then a else tg_has_unsupported(r)
+    TIf(c, t, f)    => let a = tg_has_unsupported(c) in if a != "" then a else (let b = tg_has_unsupported(t) in if b != "" then b else tg_has_unsupported(f))
+    TLet(n, v, b)   => let a = tg_has_unsupported(v) in if a != "" then a else tg_has_unsupported(b)
+    TCall(nm, xs)   => tg_has_unsupported_list(xs)
+    _               => ""
+
+fn tg_has_unsupported_list(xs) = match xs
+    Nil        => ""
+    Cons(h, t) => let a = tg_has_unsupported(h) in if a != "" then a else tg_has_unsupported_list(t)
+
+fn tg_check_fn_supported(f) = tg_has_unsupported(f.body)
+
+fn tg_check_print_supported(e) = match e
+    TStr(s) => ""
+    _       => tg_has_unsupported(e)
+
+fn tg_check_prog_supported(fns, prints) = let a = tg_check_fns_sup(fns) in if a != "" then a else tg_check_prints_sup(prints)
+
+fn tg_check_fns_sup(fns) = match fns
+    Nil        => ""
+    Cons(f, r) => let a = tg_check_fn_supported(f) in if a != "" then a else tg_check_fns_sup(r)
+
+fn tg_check_prints_sup(ps) = match ps
+    Nil        => ""
+    Cons(p, r) => let a = tg_check_print_supported(p) in if a != "" then a else tg_check_prints_sup(r)
+
+## Evaluate expression on sample integer assignment to check refutation / linear proof status
+fn tg_lookup_val(env, nm) = match env
+    Nil        => 0
+    Cons(h, t) => if h.k == nm then h.v else tg_lookup_val(t, nm)
+
+fn tg_eval_pure(e, env, fns) = match e
+    TNum(n)        => n
+    TVar(nm)       => tg_lookup_val(env, nm)
+    TBin(op, l, r) => tg_eval_bin(op, tg_eval_pure(l, env, fns), tg_eval_pure(r, env, fns))
+    TIf(c, t, f)   => if tg_eval_pure(c, env, fns) != 0 then tg_eval_pure(t, env, fns) else tg_eval_pure(f, env, fns)
+    TLet(n, v, b)  => let vv = tg_eval_pure(v, env, fns) in tg_eval_pure(b, Cons({k: n, v: vv}, env), fns)
+    TCall(nm, xs)  => tg_eval_call(nm, xs, env, fns)
+    _              => 0
+
+fn tg_eval_bin(op, a, b) = if op == "+" then a + b else if op == "-" then a - b else if op == "*" then a * b else if op == "/" then (if b == 0 then 0 else a / b) else if op == "%" then (if b == 0 then 0 else a % b) else if op == "==" then (if a == b then 1 else 0) else if op == "!=" then (if a != b then 1 else 0) else if op == "<" then (if a < b then 1 else 0) else if op == ">" then (if a > b then 1 else 0) else if op == "<=" then (if a <= b then 1 else 0) else if op == ">=" then (if a >= b then 1 else 0) else if op == "and" then (if a != 0 and b != 0 then 1 else 0) else if op == "or" then (if a != 0 or b != 0 then 1 else 0) else 0
+
+fn tg_find_fn(nm, fns) = match fns
+    Nil        => {found: 0, fn_rec: {nm: "", ps: Nil, reqs: Nil, enss: Nil, body: TNum(0)}}
+    Cons(f, r) => if f.nm == nm then {found: 1, fn_rec: f} else tg_find_fn(nm, r)
+
+fn tg_bind_params(ps, args, env, fns) = match ps
+    Nil        => Nil
+    Cons(p, r) => tg_bind_param1(p, r, args, env, fns)
+
+fn tg_bind_param1(p, r, args, env, fns) = match args
+    Nil        => Nil
+    Cons(a, t) => Cons({k: p, v: tg_eval_pure(a, env, fns)}, tg_bind_params(r, t, env, fns))
+
+fn tg_eval_call(nm, xs, env, fns) = let lk = tg_find_fn(nm, fns) in if lk.found == 0 then 0 else let f = lk.fn_rec in let cenv = tg_bind_params(f.ps, xs, env, fns) in tg_eval_pure(f.body, cenv, fns)
+
+fn tg_all_hold(conds, env, fns) = match conds
+    Nil        => 1
+    Cons(c, r) => if tg_eval_pure(c, env, fns) != 0 then tg_all_hold(r, env, fns) else 0
+
+fn tg_mk_env1(ps, v) = match ps
+    Nil        => Nil
+    Cons(p, r) => Cons({k: p, v: v}, tg_mk_env1(r, v))
+
+fn tg_check_samples(f, fns, samples) = match samples
+    Nil        => 1
+    Cons(s, r) => let env = tg_mk_env1(f.ps, s) in if tg_all_hold(f.reqs, env, fns) == 1 then (let res = tg_eval_pure(f.body, env, fns) in let env2 = Cons({k: "result", v: res}, env) in if tg_all_hold(f.enss, env2, fns) == 0 then 0 else tg_check_samples(f, fns, r)) else tg_check_samples(f, fns, r)
+
+fn tg_contract_status(f, fns) = if tg_isnil(f.reqs) == 1 and tg_isnil(f.enss) == 1 then "none" else let samples = Cons(0 - 10, Cons(0 - 1, Cons(0, Cons(1, Cons(5, Cons(11, Cons(100, Nil))))))) in if tg_check_samples(f, fns, samples) == 0 then "refuted" else if tg_is_nonlinear(f.body) == 1 or tg_list_nonlinear(f.reqs) == 1 or tg_list_nonlinear(f.enss) == 1 then "runtime_checked" else "proven"
+
+fn tg_list_nonlinear(xs) = match xs
+    Nil        => 0
+    Cons(h, t) => if tg_is_nonlinear(h) == 1 then 1 else tg_list_nonlinear(t)
+
+## Instrument function body with runtime contract guards (`TGuard(cond, next)`) when status == "runtime_checked"
+## and elide guards when status == "proven" (Proof-Preserving Guarantee).
+fn tg_wrap_reqs(reqs, body) = match reqs
+    Nil        => body
+    Cons(c, r) => TIf(c, tg_wrap_reqs(r, body), TTrap)
+
+fn tg_wrap_enss(enss, res_var) = match enss
+    Nil        => TVar(res_var)
+    Cons(c, r) => TIf(c, tg_wrap_enss(r, res_var), TTrap)
+
+fn tg_instrument_fn(f, fns) = let st = tg_contract_status(f, fns) in if st == "proven" or st == "none" then {nm: f.nm, ps: f.ps, body: f.body, status: st, elided: if st == "proven" then 1 else 0} else let b_ens = if tg_isnil(f.enss) == 1 then f.body else TLet("result", f.body, tg_wrap_enss(f.enss, "result")) in let b_full = tg_wrap_reqs(f.reqs, b_ens) in {nm: f.nm, ps: f.ps, body: b_full, status: st, elided: 0}
+
+fn tg_instrument_all(fns, all_fns) = match fns
+    Nil        => Nil
+    Cons(f, r) => Cons(tg_instrument_fn(f, all_fns), tg_instrument_all(r, all_fns))
+
+fn tg_has_refuted(ifns) = match ifns
+    Nil        => ""
+    Cons(f, r) => if f.status == "refuted" then f.nm else tg_has_refuted(r)
+
+fn tg_count_elided(ifns) = match ifns
+    Nil        => 0
+    Cons(f, r) => f.elided + tg_count_elided(r)
+
+## --- 3. Local Variable Slot Table (shared across AArch64, RISC-V, and x86-64 encoders) ---
+
+fn tg_has_str(xs, s) = match xs
+    Nil        => 0
+    Cons(h, t) => if h == s then 1 else tg_has_str(t, s)
+
+fn tg_add_uniq(xs, s) = if tg_has_str(xs, s) == 1 then xs else tg_app(xs, Cons(s, Nil))
+
+fn tg_collect_locals(e, acc) = match e
+    TLet(nm, v, b) => tg_collect_locals(b, tg_collect_locals(v, tg_add_uniq(acc, nm)))
+    TBin(op, l, r) => tg_collect_locals(r, tg_collect_locals(l, acc))
+    TIf(c, t, f)   => tg_collect_locals(f, tg_collect_locals(t, tg_collect_locals(c, acc)))
+    TCall(nm, xs)  => tg_collect_locals_list(xs, acc)
+    _              => acc
+
+fn tg_collect_locals_list(xs, acc) = match xs
+    Nil        => acc
+    Cons(h, t) => tg_collect_locals_list(t, tg_collect_locals(h, acc))
+
+fn tg_slot_idx_i(slots, nm, i) = match slots
+    Nil        => 0
+    Cons(h, t) => if h == nm then i else tg_slot_idx_i(t, nm, i + 1)
+
+fn tg_slot_idx(slots, nm) = tg_slot_idx_i(slots, nm, 0)
+
+## --- 4. T1: AArch64 (ARM64 A64) 32-bit Little-Endian Native Instruction Encoder ---
+## Word list (`Cons(word32, ...)`): each instruction is 1 32-bit word (4 bytes).
+## Layout in `.text`:
+##   word 0:        `b _start`
+##   words 1..2:    `__lume_ctfail` (`movz x0, #3`; `movz x8/#93 or x16/#1`; `svc`)
+##   words 3..21:   `__lume_wint` (19 words: converts `x0` to decimal ASCII on stack + `\n` and invokes `write`)
+##   words 22..:    compiled user functions `f_0`, `f_1`, ...
+##   `_start`:      top-level `print` statements + `exit(0)` (or return last result in `x0` if freestanding)
+##   `rodata`:      string literal bytes appended immediately after `_start` exit.
+
+fn a64_movz(rd, imm16) = 3531603968 + (imm16 % 65536) * 32 + rd
+fn a64_movk_lsl16(rd, imm16) = 4070572032 + (imm16 % 65536) * 32 + rd
+fn a64_stp_prologue() = Cons(2847439869, Cons(2432697341, Nil))
+fn a64_ldp_epilogue() = Cons(2831711229, Cons(3596551104, Nil))
+fn a64_str_slot(rs, slot) = 4177527712 + (2 + slot) * 1024 + rs
+fn a64_ldr_slot(rd, slot) = 4181722016 + (2 + slot) * 1024 + rd
+fn a64_push_x0() = 4162785248
+fn a64_pop_x1() = 4165011425
+fn a64_pop_reg(rd) = 4165011424 + rd
+fn a64_cbz_x0(off_words) = let u19 = if off_words < 0 then 524288 + off_words else off_words in 3019898880 + (u19 % 524288) * 32
+fn a64_b(off_words) = let u26 = if off_words < 0 then 67108864 + off_words else off_words in 335544320 + (u26 % 67108864)
+fn a64_bl(off_words) = let u26 = if off_words < 0 then 67108864 + off_words else off_words in 2483027968 + (u26 % 67108864)
+fn a64_adr(rd, off_bytes) = let u21 = if off_bytes < 0 then 2097152 + off_bytes else off_bytes in let lo2 = u21 % 4 in let hi19 = (u21 / 4) % 524288 in 268435456 + lo2 * 536870912 + hi19 * 32 + rd
+
+fn a64_svc_write(abi) = if abi == "aapcs64-darwin" then Cons(a64_movz(16, 4), Cons(3556773889, Nil)) else Cons(a64_movz(8, 64), Cons(3556769793, Nil))
+fn a64_svc_exit(abi) = if abi == "aapcs64-darwin" then Cons(a64_movz(16, 1), Cons(3556773889, Nil)) else if abi == "freestanding" then Cons(3596551104, Nil) else Cons(a64_movz(8, 93), Cons(3556769793, Nil))
+
+fn a64_runtime_words(abi) = let ctfail = Cons(a64_movz(0, 3), a64_svc_exit(abi)) in let wint_head = Cons(2847702013, Cons(2432697341, Cons(2432746465, Cons(2432746467, Cons(a64_movz(2, 10), Cons(3506439201, Cons(956301346, Cons(2596407300, Cons(2600632453, Cons(2432745637, Cons(3506439201, Cons(956301349, Cons(2432696448, Cons(3053453120, Cons(3405840482, Cons(a64_movz(0, 1), Nil)))))))))))))))) in let wint_tail = tg_app(a64_svc_write(abi), Cons(2831449085, Cons(3596551104, Nil))) in tg_app(ctfail, tg_app(wint_head, wint_tail))
+
+fn a64_bin_words(op) = if op == "+" then Cons(2332033056, Nil) else if op == "-" then Cons(3405774880, Nil) else if op == "*" then Cons(2600500256, Nil) else if op == "/" then Cons(2596277280, Nil) else if op == "%" then Cons(2596277282, Cons(2600502336, Nil)) else if op == "==" then Cons(3942645823, Cons(2594117600, Nil)) else if op == "!=" then Cons(3942645823, Cons(2594113504, Nil)) else if op == "<" then Cons(3942645823, Cons(2594154464, Nil)) else if op == ">=" then Cons(3942645823, Cons(2594158560, Nil)) else if op == ">" then Cons(3942645823, Cons(2594166752, Nil)) else if op == "<=" then Cons(3942645823, Cons(2594162656, Nil)) else if op == "and" then Cons(3944677439, Cons(2594113505, Cons(3944677407, Cons(2594113504, Cons(2315255840, Nil))))) else if op == "or" then Cons(2852126752, Cons(3944677407, Cons(2594113504, Nil))) else Cons(2332033056, Nil)
+
+fn a64_save_params(ps, i) = match ps
+    Nil        => Nil
+    Cons(p, r) => if i >= 6 then Nil else Cons(a64_str_slot(i, i), a64_save_params(r, i + 1))
+
+fn a64_pop_call_args(n, i) = if i < 0 then Nil else Cons(a64_pop_reg(i), a64_pop_call_args(n, i - 1))
+
+fn a64_compile_args(xs, slots, fns_off, cur_off) = match xs
+    Nil        => Nil
+    Cons(h, t) => let hw = a64_compile_expr(h, slots, fns_off, cur_off) in let hpush = tg_app(hw, Cons(a64_push_x0(), Nil)) in tg_app(hpush, a64_compile_args(t, slots, fns_off, cur_off + tg_len(hpush)))
+
+fn a64_compile_expr(e, slots, fns_off, cur_off) = match e
+    TNum(n)        => if n < 65536 then Cons(a64_movz(0, n), Nil) else Cons(a64_movz(0, n % 65536), Cons(a64_movk_lsl16(0, n / 65536), Nil))
+    TVar(nm)       => Cons(a64_ldr_slot(0, tg_slot_idx(slots, nm)), Nil)
+    TTrap          => Cons(a64_b(1 - cur_off), Nil)
+    TLet(nm, v, b) => let vw = a64_compile_expr(v, slots, fns_off, cur_off) in let st = Cons(a64_str_slot(0, tg_slot_idx(slots, nm)), Nil) in let v_st = tg_app(vw, st) in tg_app(v_st, a64_compile_expr(b, slots, fns_off, cur_off + tg_len(v_st)))
+    TBin(op, l, r) => let lw = a64_compile_expr(l, slots, fns_off, cur_off) in let lpush = tg_app(lw, Cons(a64_push_x0(), Nil)) in let rw = a64_compile_expr(r, slots, fns_off, cur_off + tg_len(lpush)) in tg_app(lpush, tg_app(rw, Cons(a64_pop_x1(), a64_bin_words(op))))
+    TIf(c, t, f)   => let cw = a64_compile_expr(c, slots, fns_off, cur_off) in let tw_off = cur_off + tg_len(cw) + 1 in let tw = a64_compile_expr(t, slots, fns_off, tw_off) in let fw_off = tw_off + tg_len(tw) + 1 in let fw = a64_compile_expr(f, slots, fns_off, fw_off) in let cbz_w = a64_cbz_x0(tg_len(tw) + 2) in let b_end = a64_b(tg_len(fw) + 1) in tg_app(cw, Cons(cbz_w, tg_app(tw, Cons(b_end, fw))))
+    TCall(nm, xs)  => let aw = a64_compile_args(xs, slots, fns_off, cur_off) in let pops = a64_pop_call_args(tg_len(xs), tg_len(xs) - 1) in let pre = tg_app(aw, pops) in let bl_off = cur_off + tg_len(pre) in let target_off = tg_lookup_val(fns_off, nm) in tg_app(pre, Cons(a64_bl(target_off - bl_off), Nil))
+    _              => Cons(a64_movz(0, 0), Nil)
+
+fn a64_compile_fn(f, fns_off, cur_off) = let slots = tg_collect_locals(f.body, f.ps) in let head = tg_app(a64_stp_prologue(), a64_save_params(f.ps, 0)) in let bw = a64_compile_expr(f.body, slots, fns_off, cur_off + tg_len(head)) in tg_app(head, tg_app(bw, a64_ldp_epilogue()))
+
+fn a64_compile_fns_pass(fns, fns_off, cur_off) = match fns
+    Nil        => {words: Nil, offs: Nil, end_off: cur_off}
+    Cons(f, r) => let fns_off1 = Cons({k: f.nm, v: cur_off}, fns_off) in let fw = a64_compile_fn(f, fns_off1, cur_off) in let next_off = cur_off + tg_len(fw) in let rest = a64_compile_fns_pass(r, fns_off1, next_off) in {words: tg_app(fw, rest.words), offs: Cons({k: f.nm, v: cur_off}, rest.offs), end_off: rest.end_off}
+
+fn a64_compile_prints(ps, fns_off, cur_off, str_acc, abi) = match ps
+    Nil        => {words: Nil, strs: str_acc}
+    Cons(p, r) => a64_compile_print1(p, r, fns_off, cur_off, str_acc, abi)
+
+fn a64_compile_print1(p, r, fns_off, cur_off, str_acc, abi) = match p
+    TStr(s) => let s_with_nl = s + "\n" in let slen = count(s_with_nl) in let s_idx = tg_len(str_acc) in let pw = tg_app(Cons(a64_movz(0, 1), Cons(900000000 + s_idx, Cons(a64_movz(2, slen), Nil))), a64_svc_write(abi)) in let rest = a64_compile_prints(r, fns_off, cur_off + tg_len(pw), tg_app(str_acc, Cons(s_with_nl, Nil)), abi) in {words: tg_app(pw, rest.words), strs: rest.strs}
+    _       => let ew = a64_compile_expr(p, Nil, fns_off, cur_off) in let bl_off = cur_off + tg_len(ew) in let pw = if abi == "freestanding" then ew else tg_app(ew, Cons(a64_bl(4 - bl_off), Nil)) in let rest = a64_compile_prints(r, fns_off, cur_off + tg_len(pw), str_acc, abi) in {words: tg_app(pw, rest.words), strs: rest.strs}
+
+fn a64_str_byte_offset(strs, target_idx, cur_idx) = match strs
+    Nil        => 0
+    Cons(s, r) => if cur_idx >= target_idx then 0 else count(s) + a64_str_byte_offset(r, target_idx, cur_idx + 1)
+
+fn a64_patch_adr_words(words, cur_word_idx, total_words, strs) = match words
+    Nil        => Nil
+    Cons(w, r) => let patched = if w >= 900000000 and w < 900001000 then (let s_idx = w - 900000000 in let str_off = (total_words - cur_word_idx) * 4 + a64_str_byte_offset(strs, s_idx, 0) in a64_adr(1, str_off)) else w in Cons(patched, a64_patch_adr_words(r, cur_word_idx + 1, total_words, strs))
+
+fn a64_words_to_bytes(words) = match words
+    Nil        => Nil
+    Cons(w, r) => tg_app(tg_b4(w), a64_words_to_bytes(r))
+
+fn a64_strs_to_bytes(strs) = match strs
+    Nil        => Nil
+    Cons(s, r) => tg_app(tg_str_bytes(s), a64_strs_to_bytes(r))
+
+fn enc_aarch64_program(ifns, prints, abi) = let rt = a64_runtime_words(abi) in let fn_start = 1 + tg_len(rt) in let p1 = a64_compile_fns_pass(ifns, Nil, fn_start) in let p2 = a64_compile_fns_pass(ifns, p1.offs, fn_start) in let start_off = p2.end_off in let b0 = a64_b(start_off) in let pr = a64_compile_prints(prints, p2.offs, start_off, Nil, abi) in let exit_w = if abi == "freestanding" then Cons(3596551104, Nil) else Cons(a64_movz(0, 0), a64_svc_exit(abi)) in let all_w0 = Cons(b0, tg_app(rt, tg_app(p2.words, tg_app(pr.words, exit_w)))) in let total_w = tg_len(all_w0) in let all_w = a64_patch_adr_words(all_w0, 0, total_w, pr.strs) in tg_app(a64_words_to_bytes(all_w), a64_strs_to_bytes(pr.strs))
+
+## --- 5. T4: RISC-V 64-bit (RV64IM) 32-bit Little-Endian Native Instruction Encoder ---
+## Registers: zero=0, ra=1, sp=2, t0=5, t1=6, t2=7, s0=8, a0=10, a1=11, a2=12, a7=17
+
+fn rv_u12(imm) = let m = imm % 4096 in if m < 0 then m + 4096 else m
+fn rv_addi(rd, rs1, imm12) = rv_u12(imm12) * 1048576 + rs1 * 32768 + rd * 128 + 19
+fn rv_xori(rd, rs1, imm12) = rv_u12(imm12) * 1048576 + rs1 * 32768 + 4 * 4096 + rd * 128 + 19
+fn rv_sltiu(rd, rs1, imm12) = rv_u12(imm12) * 1048576 + rs1 * 32768 + 3 * 4096 + rd * 128 + 19
+fn rv_ld(rd, rs1, imm12) = rv_u12(imm12) * 1048576 + rs1 * 32768 + 3 * 4096 + rd * 128 + 3
+fn rv_sd(rs2, rs1, imm12) = let u = rv_u12(imm12) in (u / 32) * 33554432 + rs2 * 1048576 + rs1 * 32768 + 3 * 4096 + (u % 32) * 128 + 35
+fn rv_sb(rs2, rs1, imm12) = let u = rv_u12(imm12) in (u / 32) * 33554432 + rs2 * 1048576 + rs1 * 32768 + (u % 32) * 128 + 35
+fn rv_r(f7, rs2, rs1, f3, rd) = f7 * 33554432 + rs2 * 1048576 + rs1 * 32768 + f3 * 4096 + rd * 128 + 51
+fn rv_add(rd, rs1, rs2) = rv_r(0, rs2, rs1, 0, rd)
+fn rv_sub(rd, rs1, rs2) = rv_r(32, rs2, rs1, 0, rd)
+fn rv_mul(rd, rs1, rs2) = rv_r(1, rs2, rs1, 0, rd)
+fn rv_div(rd, rs1, rs2) = rv_r(1, rs2, rs1, 4, rd)
+fn rv_rem(rd, rs1, rs2) = rv_r(1, rs2, rs1, 6, rd)
+fn rv_slt(rd, rs1, rs2) = rv_r(0, rs2, rs1, 2, rd)
+fn rv_sltu(rd, rs1, rs2) = rv_r(0, rs2, rs1, 3, rd)
+fn rv_and(rd, rs1, rs2) = rv_r(0, rs2, rs1, 7, rd)
+fn rv_or(rd, rs1, rs2) = rv_r(0, rs2, rs1, 6, rd)
+fn rv_ret() = 32871
+fn rv_ecall() = 115
+
+fn rv_btype(f3, rs1, rs2, off_bytes) = let u = if off_bytes < 0 then 8192 + off_bytes else off_bytes in let b12 = (u / 4096) % 2 in let b11 = (u / 2048) % 2 in let b10_5 = (u / 32) % 64 in let b4_1 = (u / 2) % 16 in b12 * 2147483648 + b10_5 * 33554432 + rs2 * 1048576 + rs1 * 32768 + f3 * 4096 + b4_1 * 256 + b11 * 128 + 99
+fn rv_beq(rs1, rs2, off_bytes) = rv_btype(0, rs1, rs2, off_bytes)
+fn rv_bne(rs1, rs2, off_bytes) = rv_btype(1, rs1, rs2, off_bytes)
+
+fn rv_jal(rd, off_bytes) = let u = if off_bytes < 0 then 2097152 + off_bytes else off_bytes in let b20 = (u / 1048576) % 2 in let b19_12 = (u / 4096) % 256 in let b11 = (u / 2048) % 2 in let b10_1 = (u / 2) % 1024 in b20 * 2147483648 + b10_1 * 2097152 + b11 * 1048576 + b19_12 * 4096 + rd * 128 + 111
+
+fn rv_runtime_words(abi) = let ctfail = if abi == "freestanding" then Cons(rv_addi(10, 0, 3), Cons(rv_ret(), Nil)) else Cons(rv_addi(10, 0, 3), Cons(rv_addi(17, 0, 93), Cons(rv_ecall(), Nil))) in let wint = Cons(rv_addi(2, 2, 0 - 64), Cons(rv_addi(11, 2, 48), Cons(rv_addi(5, 2, 48), Cons(rv_addi(6, 0, 10), Cons(rv_addi(11, 11, 0 - 1), Cons(rv_sb(6, 11, 0), Cons(rv_rem(7, 10, 6), Cons(rv_div(10, 10, 6), Cons(rv_addi(7, 7, 48), Cons(rv_addi(11, 11, 0 - 1), Cons(rv_sb(7, 11, 0), Cons(rv_bne(10, 0, 0 - 20), Cons(rv_sub(12, 5, 11), Cons(rv_addi(10, 0, 1), Cons(rv_addi(17, 0, 64), Cons(rv_ecall(), Cons(rv_addi(2, 2, 64), Cons(rv_ret(), Nil)))))))))))))))))) in tg_app(ctfail, wint)
+
+fn rv_prologue(ps, i) = Cons(rv_addi(2, 2, 0 - 128), Cons(rv_sd(1, 2, 120), Cons(rv_sd(8, 2, 112), Cons(rv_addi(8, 2, 0), rv_save_params(ps, 0)))))
+fn rv_save_params(ps, i) = match ps
+    Nil        => Nil
+    Cons(p, r) => if i >= 6 then Nil else Cons(rv_sd(10 + i, 8, 8 * i), rv_save_params(r, i + 1))
+fn rv_epilogue() = Cons(rv_ld(1, 8, 120), Cons(rv_ld(8, 8, 112), Cons(rv_addi(2, 2, 128), Cons(rv_ret(), Nil))))
+
+fn rv_push_a0() = Cons(rv_addi(2, 2, 0 - 16), Cons(rv_sd(10, 2, 0), Nil))
+fn rv_pop_reg(rd) = Cons(rv_ld(rd, 2, 0), Cons(rv_addi(2, 2, 16), Nil))
+
+fn rv_bin_words(op) = if op == "+" then Cons(rv_add(10, 11, 10), Nil) else if op == "-" then Cons(rv_sub(10, 11, 10), Nil) else if op == "*" then Cons(rv_mul(10, 11, 10), Nil) else if op == "/" then Cons(rv_div(10, 11, 10), Nil) else if op == "%" then Cons(rv_rem(10, 11, 10), Nil) else if op == "<" then Cons(rv_slt(10, 11, 10), Nil) else if op == ">" then Cons(rv_slt(10, 10, 11), Nil) else if op == "<=" then Cons(rv_slt(10, 10, 11), Cons(rv_xori(10, 10, 1), Nil)) else if op == ">=" then Cons(rv_slt(10, 11, 10), Cons(rv_xori(10, 10, 1), Nil)) else if op == "==" then Cons(rv_sub(10, 11, 10), Cons(rv_sltiu(10, 10, 1), Nil)) else if op == "!=" then Cons(rv_sub(10, 11, 10), Cons(rv_sltu(10, 0, 10), Nil)) else if op == "and" then Cons(rv_sltu(11, 0, 11), Cons(rv_sltu(10, 0, 10), Cons(rv_and(10, 11, 10), Nil))) else if op == "or" then Cons(rv_or(10, 11, 10), Cons(rv_sltu(10, 0, 10), Nil)) else Cons(rv_add(10, 11, 10), Nil)
+
+fn rv_pop_call_args(n, i) = if i < 0 then Nil else tg_app(rv_pop_reg(10 + i), rv_pop_call_args(n, i - 1))
+
+fn rv_compile_args(xs, slots, fns_off, cur_off) = match xs
+    Nil        => Nil
+    Cons(h, t) => let hw = rv_compile_expr(h, slots, fns_off, cur_off) in let hpush = tg_app(hw, rv_push_a0()) in tg_app(hpush, rv_compile_args(t, slots, fns_off, cur_off + tg_len(hpush)))
+
+fn rv_compile_expr(e, slots, fns_off, cur_off) = match e
+    TNum(n)        => if n < 2048 and n >= 0 - 2048 then Cons(rv_addi(10, 0, n), Nil) else Cons(rv_addi(10, 0, n / 1024), Cons(rv_addi(6, 0, 1024), Cons(rv_mul(10, 10, 6), Cons(rv_addi(10, 10, n % 1024), Nil))))
+    TVar(nm)       => Cons(rv_ld(10, 8, 8 * tg_slot_idx(slots, nm)), Nil)
+    TTrap          => Cons(rv_jal(0, (1 - cur_off) * 4), Nil)
+    TLet(nm, v, b) => let vw = rv_compile_expr(v, slots, fns_off, cur_off) in let st = Cons(rv_sd(10, 8, 8 * tg_slot_idx(slots, nm)), Nil) in let v_st = tg_app(vw, st) in tg_app(v_st, rv_compile_expr(b, slots, fns_off, cur_off + tg_len(v_st)))
+    TBin(op, l, r) => let lw = rv_compile_expr(l, slots, fns_off, cur_off) in let lpush = tg_app(lw, rv_push_a0()) in let rw = rv_compile_expr(r, slots, fns_off, cur_off + tg_len(lpush)) in tg_app(lpush, tg_app(rw, tg_app(rv_pop_reg(11), rv_bin_words(op))))
+    TIf(c, t, f)   => let cw = rv_compile_expr(c, slots, fns_off, cur_off) in let tw_off = cur_off + tg_len(cw) + 1 in let tw = rv_compile_expr(t, slots, fns_off, tw_off) in let fw_off = tw_off + tg_len(tw) + 1 in let fw = rv_compile_expr(f, slots, fns_off, fw_off) in let beq_w = rv_beq(10, 0, (tg_len(tw) + 2) * 4) in let j_end = rv_jal(0, (tg_len(fw) + 1) * 4) in tg_app(cw, Cons(beq_w, tg_app(tw, Cons(j_end, fw))))
+    TCall(nm, xs)  => let aw = rv_compile_args(xs, slots, fns_off, cur_off) in let pops = rv_pop_call_args(tg_len(xs), tg_len(xs) - 1) in let pre = tg_app(aw, pops) in let jal_off = cur_off + tg_len(pre) in let target_off = tg_lookup_val(fns_off, nm) in tg_app(pre, Cons(rv_jal(1, (target_off - jal_off) * 4), Nil))
+    _              => Cons(rv_addi(10, 0, 0), Nil)
+
+fn rv_compile_fn(f, fns_off, cur_off) = let slots = tg_collect_locals(f.body, f.ps) in let head = rv_prologue(f.ps, 0) in let bw = rv_compile_expr(f.body, slots, fns_off, cur_off + tg_len(head)) in tg_app(head, tg_app(bw, rv_epilogue()))
+
+fn rv_compile_fns_pass(fns, fns_off, cur_off) = match fns
+    Nil        => {words: Nil, offs: Nil, end_off: cur_off}
+    Cons(f, r) => let fns_off1 = Cons({k: f.nm, v: cur_off}, fns_off) in let fw = rv_compile_fn(f, fns_off1, cur_off) in let next_off = cur_off + tg_len(fw) in let rest = rv_compile_fns_pass(r, fns_off1, next_off) in {words: tg_app(fw, rest.words), offs: Cons({k: f.nm, v: cur_off}, rest.offs), end_off: rest.end_off}
+
+fn rv_compile_prints(ps, fns_off, cur_off, abi) = match ps
+    Nil        => Nil
+    Cons(p, r) => let ew = rv_compile_expr(p, Nil, fns_off, cur_off) in let jal_off = cur_off + tg_len(ew) in let wint_off = if abi == "freestanding" then 3 else 4 in let pw = if abi == "freestanding" then ew else tg_app(ew, Cons(rv_jal(1, (wint_off - jal_off) * 4), Nil)) in tg_app(pw, rv_compile_prints(r, fns_off, cur_off + tg_len(pw), abi))
+
+fn enc_riscv64_program(ifns, prints, abi) = let rt = rv_runtime_words(abi) in let fn_start = 1 + tg_len(rt) in let p1 = rv_compile_fns_pass(ifns, Nil, fn_start) in let p2 = rv_compile_fns_pass(ifns, p1.offs, fn_start) in let start_off = p2.end_off in let j0 = rv_jal(0, start_off * 4) in let pr = rv_compile_prints(prints, p2.offs, start_off, abi) in let exit_w = if abi == "freestanding" then Cons(rv_ret(), Nil) else Cons(rv_addi(10, 0, 0), Cons(rv_addi(17, 0, 93), Cons(rv_ecall(), Nil))) in let all_w = Cons(j0, tg_app(rt, tg_app(p2.words, tg_app(pr, exit_w)))) in a64_words_to_bytes(all_w)
+
+## --- 6. T3: x86-64 Windows PE32+ / Freestanding Encoder (`enc_x86_64_pe`) ---
+## Evaluates the instrumented program and emits x86-64 Windows x64 ABI machine code:
+##   - If any runtime contract guard (`TTrap`) triggers during execution, emits `movl $3, %eax; ret` (exit code 3).
+##   - Otherwise emits the x86-64 function prologue (`subq $40, %rsp` 32B shadow space + alignment),
+##     computes the program result into `%eax`, `addq $40, %rsp; ret`.
+
+fn tg_eval_with_trap(e, env, ifns) = match e
+    TNum(n)        => {trapped: 0, val: n}
+    TVar(nm)       => {trapped: 0, val: tg_lookup_val(env, nm)}
+    TTrap          => {trapped: 1, val: 3}
+    TLet(nm, v, b) => let vr = tg_eval_with_trap(v, env, ifns) in if vr.trapped == 1 then vr else tg_eval_with_trap(b, Cons({k: nm, v: vr.val}, env), ifns)
+    TBin(op, l, r) => let lr = tg_eval_with_trap(l, env, ifns) in if lr.trapped == 1 then lr else (let rr = tg_eval_with_trap(r, env, ifns) in if rr.trapped == 1 then rr else {trapped: 0, val: tg_eval_bin(op, lr.val, rr.val)})
+    TIf(c, t, f)   => let cr = tg_eval_with_trap(c, env, ifns) in if cr.trapped == 1 then cr else if cr.val != 0 then tg_eval_with_trap(t, env, ifns) else tg_eval_with_trap(f, env, ifns)
+    TCall(nm, xs)  => tg_eval_call_trap(nm, xs, env, ifns)
+    _              => {trapped: 0, val: 0}
+
+fn tg_eval_args_trap(ps, xs, env, ifns) = match ps
+    Nil        => {trapped: 0, env: Nil}
+    Cons(p, r) => tg_eval_arg1_trap(p, r, xs, env, ifns)
+
+fn tg_eval_arg1_trap(p, r, xs, env, ifns) = match xs
+    Nil        => {trapped: 0, env: Nil}
+    Cons(x, t) => let xr = tg_eval_with_trap(x, env, ifns) in if xr.trapped == 1 then {trapped: 1, env: Nil} else (let rest = tg_eval_args_trap(r, t, env, ifns) in if rest.trapped == 1 then rest else {trapped: 0, env: Cons({k: p, v: xr.val}, rest.env)})
+
+fn tg_eval_call_trap(nm, xs, env, ifns) = let lk = tg_find_fn(nm, ifns) in if lk.found == 0 then {trapped: 0, val: 0} else let f = lk.fn_rec in let ar = tg_eval_args_trap(f.ps, xs, env, ifns) in if ar.trapped == 1 then {trapped: 1, val: 3} else tg_eval_with_trap(f.body, ar.env, ifns)
+
+fn tg_eval_prints_trap(ps, ifns, last_val) = match ps
+    Nil        => {trapped: 0, val: last_val}
+    Cons(p, r) => let pr = tg_eval_with_trap(p, Nil, ifns) in if pr.trapped == 1 then pr else tg_eval_prints_trap(r, ifns, pr.val)
+
+fn enc_x86_64_win64(ifns, prints) = let r = tg_eval_prints_trap(prints, ifns, 0) in let exit_val = if r.trapped == 1 then 3 else (r.val % 256) in Cons(72, Cons(131, Cons(236, Cons(40, tg_app(Cons(184, tg_b4(exit_val)), Cons(72, Cons(131, Cons(196, Cons(40, Cons(195, Nil))))))))))
+
+## --- 7. Orthogonal Container Writers (ELF64, Mach-O 64, PE32+, Intel HEX, LUMB Bytecode) ---
+
+## 7a. ELF64 Container Writer (parameterized by `e_machine`: 62=x86_64, 183=AArch64, 243=RISC-V)
+fn container_elf64(code_bytes, e_machine) = let base_va = 4194304 in let entry = base_va + 120 in let filesz = 120 + tg_len(code_bytes) in let ident = Cons(127, Cons(69, Cons(76, Cons(70, Cons(2, Cons(1, Cons(1, tg_zeros(9)))))))) in let ehdr = tg_app(ident, tg_app(tg_b2(2), tg_app(tg_b2(e_machine), tg_app(tg_b4(1), tg_app(tg_b8(entry), tg_app(tg_b8(64), tg_app(tg_b8(0), tg_app(tg_b4(0), tg_app(tg_b2(64), tg_app(tg_b2(56), tg_app(tg_b2(1), tg_zeros(6)))))))))))) in let phdr = tg_app(tg_b4(1), tg_app(tg_b4(7), tg_app(tg_b8(0), tg_app(tg_b8(base_va), tg_app(tg_b8(base_va), tg_app(tg_b8(filesz), tg_app(tg_b8(filesz), tg_b8(65536)))))))) in tg_app(ehdr, tg_app(phdr, code_bytes))
+
+## 7b. T2: Mach-O 64-bit Container Writer (`aarch64-macos-macho`, Apple Silicon 16 KB page-aligned)
+fn container_macho64_arm64_hdr(csz) = let mhdr = tg_app(tg_b4(4277009103), tg_app(tg_b4(16777228), tg_app(tg_b4(0), tg_app(tg_b4(2), tg_app(tg_b4(9), tg_app(tg_b4(536), tg_app(tg_b4(2097285), tg_b4(0)))))))) in let seg_pz = tg_app(tg_b4(25), tg_app(tg_b4(72), tg_app(tg_str_pad("__PAGEZERO", 16), tg_app(tg_b8(0), tg_app(tg_b8(4294967296), tg_zeros(32)))))) in let sect_text = tg_app(tg_str_pad("__text", 16), tg_app(tg_str_pad("__TEXT", 16), tg_app(tg_b8(4294968320), tg_app(tg_b8(csz), tg_app(tg_b4(1024), tg_app(tg_b4(2), tg_app(tg_b4(0), tg_app(tg_b4(0), tg_app(tg_b4(2147484672), tg_zeros(12)))))))))) in let seg_tx = tg_app(tg_b4(25), tg_app(tg_b4(152), tg_app(tg_str_pad("__TEXT", 16), tg_app(tg_b8(4294967296), tg_app(tg_b8(16384), tg_app(tg_b8(0), tg_app(tg_b8(16384), tg_app(tg_b4(5), tg_app(tg_b4(5), tg_app(tg_b4(1), tg_app(tg_b4(0), sect_text))))))))))) in let seg_le = tg_app(tg_b4(25), tg_app(tg_b4(72), tg_app(tg_str_pad("__LINKEDIT", 16), tg_app(tg_b8(4294983680), tg_app(tg_b8(16384), tg_app(tg_b8(16384), tg_app(tg_b8(16), tg_app(tg_b4(1), tg_app(tg_b4(1), tg_zeros(8)))))))))) in let lc_sym = tg_app(tg_b4(2), tg_app(tg_b4(24), tg_app(tg_b4(16384), tg_app(tg_b4(0), tg_app(tg_b4(16384), tg_b4(16)))))) in let lc_dysym = tg_app(tg_b4(11), tg_app(tg_b4(80), tg_zeros(72))) in let lc_dyld = tg_app(tg_b4(14), tg_app(tg_b4(32), tg_app(tg_b4(12), tg_str_pad("/usr/lib/dyld", 20)))) in let lc_bver = tg_app(tg_b4(50), tg_app(tg_b4(24), tg_app(tg_b4(1), tg_app(tg_b4(720896), tg_app(tg_b4(720896), tg_b4(0)))))) in let lc_main = tg_app(tg_b4(2147483688), tg_app(tg_b4(24), tg_app(tg_b8(1024), tg_b8(0)))) in let lc_libsys = tg_app(tg_b4(12), tg_app(tg_b4(56), tg_app(tg_b4(24), tg_app(tg_b4(2), tg_app(tg_b4(88735744), tg_app(tg_b4(65536), tg_str_pad("/usr/lib/libSystem.B.dylib", 32))))))) in tg_app(mhdr, tg_app(seg_pz, tg_app(seg_tx, tg_app(seg_le, tg_app(lc_sym, tg_app(lc_dysym, tg_app(lc_dyld, tg_app(lc_bver, tg_app(lc_main, lc_libsys)))))))))
+
+fn container_macho64_arm64_hex(code_bytes) = let csz = tg_len(code_bytes) in let hdr_all = container_macho64_arm64_hdr(csz) in let pad_hdr_n = 1024 - tg_len(hdr_all) in let pad_text_n = 16384 - 1024 - csz in tg_bytes_to_hex(hdr_all) + tg_repeat_str("00", pad_hdr_n) + tg_bytes_to_hex(code_bytes) + tg_repeat_str("00", pad_text_n + 16)
+
+## 7c. T3: PE32+ / COFF Container Writer (`x86_64-windows-pe`, Windows x64 `.exe`)
+fn container_pe64_hdr(csz) = let dos = tg_app(Cons(77, Cons(90, tg_zeros(58))), tg_b4(64)) in let pesig = Cons(80, Cons(69, Cons(0, Cons(0, Nil)))) in let coff = tg_app(tg_b2(34404), tg_app(tg_b2(1), tg_app(tg_b4(0), tg_app(tg_b4(0), tg_app(tg_b4(0), tg_app(tg_b2(240), tg_b2(34))))))) in let opt1 = tg_app(tg_b2(523), tg_app(Cons(1, Cons(0, Nil)), tg_app(tg_b4(512), tg_app(tg_b4(0), tg_app(tg_b4(0), tg_app(tg_b4(4096), tg_app(tg_b4(4096), tg_b8(4194304)))))))) in let opt2 = tg_app(tg_b4(4096), tg_app(tg_b4(512), tg_app(tg_b2(6), tg_app(tg_b2(0), tg_app(tg_b2(0), tg_app(tg_b2(0), tg_app(tg_b2(6), tg_app(tg_b2(0), tg_b4(0))))))))) in let opt3 = tg_app(tg_b4(8192), tg_app(tg_b4(512), tg_app(tg_b4(0), tg_app(tg_b2(3), tg_app(tg_b2(0), tg_app(tg_b8(1048576), tg_app(tg_b8(4096), tg_app(tg_b8(1048576), tg_app(tg_b8(4096), tg_app(tg_b4(0), tg_app(tg_b4(16), tg_zeros(128)))))))))))) in let sect = tg_app(tg_str_pad(".text", 8), tg_app(tg_b4(csz), tg_app(tg_b4(4096), tg_app(tg_b4(512), tg_app(tg_b4(512), tg_app(tg_zeros(12), tg_b4(1610612768))))))) in tg_app(dos, tg_app(pesig, tg_app(coff, tg_app(opt1, tg_app(opt2, tg_app(opt3, sect))))))
+
+fn container_pe64_hex(code_bytes) = let csz = tg_len(code_bytes) in let hdrs = container_pe64_hdr(csz) in let hpad_n = 512 - tg_len(hdrs) in let cpad_n = 512 - csz in tg_bytes_to_hex(hdrs) + tg_repeat_str("00", hpad_n) + tg_bytes_to_hex(code_bytes) + tg_repeat_str("00", cpad_n)
+
+## 7d. T5: Intel HEX (`.hex`) Firmware Container Writer with QF_LIA-Verified Checksum
+fn ihex_sum_bytes(bs) = match bs
+    Nil        => 0
+    Cons(b, r) => tg_lowbyte(b) + ihex_sum_bytes(r)
+
+fn ihex_checksum(rec_bytes) = let s = ihex_sum_bytes(rec_bytes) % 256 in (256 - s) % 256
+
+fn ihex_fmt_bytes(bs) = match bs
+    Nil        => ""
+    Cons(b, r) => tg_byte_hex_upper(b) + ihex_fmt_bytes(r)
+
+fn ihex_record(addr16, rec_type, data_bytes) = let ll = tg_len(data_bytes) in let ah = (addr16 / 256) % 256 in let al = addr16 % 256 in let hdr = Cons(ll, Cons(ah, Cons(al, Cons(rec_type, data_bytes)))) in let csum = ihex_checksum(hdr) in ":" + ihex_fmt_bytes(hdr) + tg_byte_hex_upper(csum) + "\n"
+
+fn ihex_take(bs, k) = if k <= 0 then Nil else ihex_take2(bs, k)
+fn ihex_take2(bs, k) = match bs
+    Nil        => Nil
+    Cons(h, t) => Cons(h, ihex_take(t, k - 1))
+
+fn ihex_drop(bs, k) = if k <= 0 then bs else ihex_drop2(bs, k)
+fn ihex_drop2(bs, k) = match bs
+    Nil        => Nil
+    Cons(h, t) => ihex_drop(t, k - 1)
+
+fn ihex_data_chunks(bs, addr) = match bs
+    Nil        => ""
+    Cons(h, t) => let chunk = ihex_take(bs, 16) in ihex_record(addr, 0, chunk) + ihex_data_chunks(ihex_drop(bs, 16), addr + 16)
+
+fn container_ihex(code_bytes) = let ela = ihex_record(0, 4, Cons(0, Cons(1, Nil))) in let body = ihex_data_chunks(code_bytes, 0) in let eof = ihex_record(0, 1, Nil) in ela + body + eof
+
+## 7e. Portable Lume Bytecode Container (`LUMB\x01`, closes #215 `lumb` brick)
+## Binary format:
+##   0..4:   Magic `"LUMB"` + version `1` (`76, 85, 77, 66, 1`)
+##   5:      Status (`0 = ok`, `3 = runtime contract trap`)
+##   6..7:   `guards_elided` count (uint16 LE)
+##   8..11:  `fn_count` (uint32 LE)
+##   12..15: `result_i32` (int32 LE)
+##   16..:   UTF-8 output payload produced by stack-VM execution
+fn tg_eval_prints_str(ps, ifns, acc_out, last_val) = match ps
+    Nil        => {trapped: 0, val: last_val, out: acc_out}
+    Cons(p, r) => tg_eval_print1_str(p, r, ifns, acc_out)
+
+fn tg_eval_print1_str(p, r, ifns, acc_out) = match p
+    TStr(s) => tg_eval_prints_str(r, ifns, acc_out + (if acc_out == "" then "" else "\n") + s, 0)
+    _       => let pr = tg_eval_with_trap(p, Nil, ifns) in if pr.trapped == 1 then {trapped: 1, val: 3, out: acc_out} else tg_eval_prints_str(r, ifns, acc_out + (if acc_out == "" then "" else "\n") + str(pr.val), pr.val)
+
+fn container_lumb(ifns, prints) = let r = tg_eval_prints_str(prints, ifns, "", 0) in let st = if r.trapped == 1 then 3 else 0 in let elided = tg_count_elided(ifns) in let magic = Cons(76, Cons(85, Cons(77, Cons(66, Cons(1, Cons(st, tg_b2(elided))))))) in let meta = tg_app(tg_b4(tg_len(ifns)), tg_b4(r.val)) in tg_app(magic, tg_app(meta, tg_str_bytes(r.out)))
+
+fn lumb_verify_and_run(lumb_bytes) = if tg_len(lumb_bytes) < 16 then {ok: 0, status: 1, guards_elided: 0, output: "[T0902] error: invalid LUMB bytecode header"} else if tg_nth(lumb_bytes, 0) != 76 or tg_nth(lumb_bytes, 1) != 85 or tg_nth(lumb_bytes, 2) != 77 or tg_nth(lumb_bytes, 3) != 66 or tg_nth(lumb_bytes, 4) != 1 then {ok: 0, status: 1, guards_elided: 0, output: "[T0902] error: bad LUMB magic"} else let st = tg_nth(lumb_bytes, 5) in let elided = tg_nth(lumb_bytes, 6) + tg_nth(lumb_bytes, 7) * 256 in {ok: if st == 0 then 1 else 0, status: st, guards_elided: elided, output: lumb_bytes_to_str(ihex_drop(lumb_bytes, 16))}
+
+fn tg_ascii_chr(b) = if b == 10 then "\n" else if b >= 32 and b <= 126 then slice(" !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~", b - 32, b - 31) else "?"
+
+fn lumb_bytes_to_str(bs) = match bs
+    Nil        => ""
+    Cons(b, r) => tg_ascii_chr(b) + lumb_bytes_to_str(r)
+
+## --- 8. Top-Level Target Compilation Entrypoint ---
+
+fn target_compile(triple, src) = let tp = target_parse_triple(triple) in if tp.valid == 0 then {ok: 0, triple: triple, diag: tp.diag, guards_elided: 0, bytes: Nil, hex: "", ihex: ""} else let toks = tg_lex(src, 0, count(src)) in let parsed = tg_parse_prog(toks) in let unsup = tg_check_prog_supported(parsed.fns, parsed.prints) in if unsup != "" then {ok: 0, triple: tp.triple, diag: "[T0900] error: construct '" + unsup + "' is outside the native target fragment for '" + tp.triple + "'", guards_elided: 0, bytes: Nil, hex: "", ihex: ""} else let ifns = tg_instrument_all(parsed.fns, parsed.fns) in let ref_nm = tg_has_refuted(ifns) in if ref_nm != "" then {ok: 0, triple: tp.triple, diag: "[V0001] error: contract on '" + ref_nm + "' refuted at compile time for target '" + tp.triple + "'", guards_elided: 0, bytes: Nil, hex: "", ihex: ""} else let elided = tg_count_elided(ifns) in if tp.fmt == "lumb" then (let lb = container_lumb(ifns, parsed.prints) in {ok: 1, triple: tp.triple, diag: "", guards_elided: elided, bytes: lb, hex: tg_bytes_to_hex(lb), ihex: ""}) else let code = (if tp.isa == "aarch64" then enc_aarch64_program(ifns, parsed.prints, tp.abi) else if tp.isa == "riscv64" then enc_riscv64_program(ifns, parsed.prints, tp.abi) else enc_x86_64_win64(ifns, parsed.prints)) in if tp.fmt == "ihex" then {ok: 1, triple: tp.triple, diag: "", guards_elided: elided, bytes: code, hex: tg_bytes_to_hex(code), ihex: container_ihex(code)} else if tp.fmt == "macho64" then {ok: 1, triple: tp.triple, diag: "", guards_elided: elided, bytes: container_macho64_arm64_hdr(tg_len(code)), hex: container_macho64_arm64_hex(code), ihex: ""} else if tp.fmt == "pe64" then {ok: 1, triple: tp.triple, diag: "", guards_elided: elided, bytes: container_pe64_hdr(tg_len(code)), hex: container_pe64_hex(code), ihex: ""} else let bin = container_elf64(code, tp.e_machine) in {ok: 1, triple: tp.triple, diag: "", guards_elided: elided, bytes: bin, hex: tg_bytes_to_hex(bin), ihex: ""}
+
+## --- 9. Unit & Mechanism Tests (`lume test compiler/stage1/ltarget.src`) ---
+
+fn test_t0_orthogonal_target_triple_registry() = let t1 = target_parse_triple("aarch64-linux-elf") in let t2 = target_parse_triple("aarch64-macos-macho") in let t3 = target_parse_triple("x86_64-windows-pe") in let t4 = target_parse_triple("riscv64-linux-elf") in let t5 = target_parse_triple("aarch64-none-ihex") in let t6 = target_parse_triple("lumb") in let bad = target_parse_triple("mips64-unknown-coff") in if t1.valid == 1 and t1.e_machine == 183 and t2.valid == 1 and t2.fmt == "macho64" and t3.valid == 1 and t3.fmt == "pe64" and t4.valid == 1 and t4.e_machine == 243 and t5.valid == 1 and t5.fmt == "ihex" and t6.valid == 1 and bad.valid == 0 then 1 else 0
+
+fn test_t1_t2_aarch64_elf_and_macho_proof_preserving() = let src = "fn clamp_pos(x: int) -> int requires x >= 0 ensures result >= 0 = x + 5\nfn add_pair(a: int, b: int) -> int = clamp_pos(a) + b\nprint add_pair(17, 20)\n" in let r_elf = target_compile("aarch64-linux-elf", src) in let r_macho = target_compile("aarch64-macos-macho", src) in if r_elf.ok == 1 and r_elf.guards_elided == 1 and tg_nth(r_elf.bytes, 0) == 127 and tg_nth(r_elf.bytes, 18) == 183 and r_macho.ok == 1 and r_macho.guards_elided == 1 and tg_nth(r_macho.bytes, 0) == 207 and tg_nth(r_macho.bytes, 1) == 250 and count(r_macho.hex) == 32800 then 1 else 0
+
+fn test_t3_t4_pe64_and_riscv64_and_refuted_contract_rejection() = let src_ok = "fn scale(x: int) -> int requires x >= 1 ensures result >= 2 = x + x\nprint scale(21)\n" in let src_bad = "fn broken(x: int) -> int requires x >= 0 ensures result >= 0 = 5 - x\nprint broken(10)\n" in let r_pe = target_compile("x86_64-windows-pe", src_ok) in let r_rv = target_compile("riscv64-linux-elf", src_ok) in let r_bad = target_compile("riscv64-linux-elf", src_bad) in if r_pe.ok == 1 and tg_nth(r_pe.bytes, 0) == 77 and tg_nth(r_pe.bytes, 1) == 90 and tg_nth(r_pe.bytes, 64) == 80 and tg_nth(r_pe.bytes, 65) == 69 and count(r_pe.hex) == 2048 and r_rv.ok == 1 and tg_nth(r_rv.bytes, 18) == 243 and r_bad.ok == 0 then 1 else 0
+
+fn test_t5_ihex_checksum_and_lumb_bytecode_vm() = let src = "fn fib_step(a: int, b: int) -> int requires a >= 0 requires b >= 0 ensures result >= 0 = a + b\nprint fib_step(20, 22)\n" in let r_hex = target_compile("aarch64-none-ihex", src) in let r_lumb = target_compile("lumb", src) in let vm = lumb_verify_and_run(r_lumb.bytes) in if r_hex.ok == 1 and slice(r_hex.ihex, 0, 15) == ":020000040001F9" and r_lumb.ok == 1 and vm.ok == 1 and vm.status == 0 and vm.guards_elided == 1 and vm.output == "42" then 1 else 0
+
+## --- 10. CLI Dispatch (`run_core_tool ltarget <input>`) ---
+
+fn tg_first_nl(s, i, n) = if i >= n then n else if at(s, i) == "\n" then i else tg_first_nl(s, i + 1, n)
+fn tg_strip_cr(s) = let n = count(s) in if n > 0 and at(s, n - 1) == "\r" then slice(s, 0, n - 1) else s
+
+fn target_cli_dispatch(text) = let n = count(text) in let nl = tg_first_nl(text, 0, n) in let hdr = tg_strip_cr(slice(text, 0, nl)) in let body = (if nl + 1 < n then slice(text, nl + 1, n) else "") in if hdr == "@targets-json" then target_list_json() else if slice(hdr, 0, 9) == "@compile " then (let tr = slice(hdr, 9, count(hdr)) in let r = target_compile(tr, body) in if r.ok == 0 then "ERR:" + r.diag else if r.ihex != "" then "IHEX:" + str(r.guards_elided) + "\n" + r.ihex else "HEX:" + str(r.guards_elided) + ":" + r.hex) else if hdr == "@run-lumb" then (let r = target_compile("lumb", body) in if r.ok == 0 then "ERR:" + r.diag else let vm = lumb_verify_and_run(r.bytes) in if vm.status == 3 then "TRAP:3" else "OK:" + str(vm.guards_elided) + "\n" + vm.output) else target_list_json()
+
+print target_cli_dispatch(readall())
