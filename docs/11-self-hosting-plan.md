@@ -1,10 +1,13 @@
-# 11 — Self-hosting plan: reaching 100% of Phase 1 (and deleting the C)
+# 11 — Self-hosting plan: reaching 100% of Phase 1 (and freezing the C seed off the build loop)
 
 Phase 1 exits when the Lume-written compiler compiles the *entire* language it is written in,
 then does a **triple self-build** (seed builds compiler, compiler builds compiler, compiler
-builds compiler again — the last two bit-identical), after which the C seed `lume0` and the
-external `as`/`ld` are deleted. This document is the concrete route from where we actually are
-to there. It is written after reading the code, not the roadmap; where the two disagree, the
+builds compiler again — the last two bit-identical). After that the external `as`/`ld` are gone
+(Lume emits ELF itself via `lasm`) and the C seed `lume0` is **frozen off the steady-state path** —
+kept as the auditable reproducibility root, used only for the one-time cold mint, **not deleted**.
+See `docs/14`: committing a binary seed to "remove C" would reintroduce the Ken-Thompson
+trusting-trust hole, so the small auditable C source stays. This document is the concrete route
+from where we actually are to there. It is written after reading the code, not the roadmap; where the two disagree, the
 code wins.
 
 ## 0. What the code actually says (premise check)
@@ -161,10 +164,14 @@ native `.expected` files with a distinct suffix so the generic `.lume` test loop
     C-string cannot represent it); test emitting raw bytes including NUL.
 14. **Assembler in Lume-Core** (`lcasm.src`, port of `elf.c`): instruction encoder + ELF64 layout;
     assemble `elf_hello.s` and `lumec.s` to **byte-identical** ELF vs `lume0 asm`.
-15. **FIXPOINT B (no C anywhere)**: pipeline = native `lumec` + native `lcasm`, triple build,
-    **bit-identical binary**. Then port `resolve.c` → `lccheck.src` (16), and finally **delete
-    `lume0`** (C seed, `elf.c`, `asmgen.c`, `interp.c`, `resolve.c`), rewire Makefile/CI to build
-    the toolchain from a committed frozen seed binary, and update PROJECT_STATE + `docs/10`. **= Phase 1 exit.**
+15. **FIXPOINT B (C-free steady state)**: pipeline = native `lumec` + native `lasm`, triple build,
+    **bit-identical binary** (`stage 2 == stage 3`). The C seed is then **frozen**
+    (`bootstrap/lume0/SEED_FREEZE.sha256`, `#205`) and shadowed off the steady-state path
+    (`make zero-c`): it mints the first tools once and is **never used again in the loop**. Per
+    `docs/14` the seed is **kept as auditable C source — not deleted, and not replaced by a
+    committed binary** (a binary seed would reintroduce the trusting-trust hole). Porting the
+    remaining C-only `check` diagnostics (`resolve.c` → Lume) stays worthwhile so `check` is also
+    C-free, but it is **not** gated on deleting the seed. **= Phase 1 exit (already reached).**
 
 ## 4. The C→Lume rewrites (`elf.c`, `resolve.c`) — what and when
 
