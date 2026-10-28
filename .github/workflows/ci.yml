@@ -105,12 +105,15 @@ jobs:
     name: Native Windows x64 PE32+ & WASI Run-Verification (#206)
     runs-on: windows-latest
     steps:
+      - name: Configure git LF line endings
+        run: git config --global core.autocrlf false
       - uses: actions/checkout@v7
       - name: Build lume0 (64 MB stack) and run-verify x86_64-windows-pe & wasm32-wasi
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          gcc -std=c11 -O2 -Wl,--stack,67108864 -o bootstrap/lume0/lume0.exe (Get-ChildItem bootstrap/lume0/*.c)
+          $cFiles = (Get-ChildItem bootstrap/lume0/*.c).FullName
+          & gcc -std=c11 -O2 "-Wl,--stack,67108864" -o bootstrap/lume0/lume0.exe @cFiles
           $lume0 = (Resolve-Path bootstrap/lume0/lume0.exe).Path
           $srcOk = "fn fib(n: int) -> int = if n < 2 then n else fib(n - 1) + fib(n - 2)`nfn clamp_pos(x: int) -> int requires x >= 0 ensures result >= 5 = x + 5`nprint fib(10)`nprint clamp_pos(37)`n"
           $srcTrap = "fn sq_not49(x: int) -> int ensures result != 49 = x * x`nprint sq_not49(7)`n"
