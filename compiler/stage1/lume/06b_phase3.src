@@ -2056,7 +2056,7 @@ fn t4_resolve_arms(xs, tenv, tctx) = match xs
     Nil        => Nil
     Cons(h, t) => Cons({pat: h.pat, body: t4_resolve_e(h.body, tenv, tctx)}, t4_resolve_arms(t, tenv, tctx))
 
-fn t4_resolve_call(cnm, args, tenv, tctx) = let rargs = t4_resolve_args(args, tenv, tctx) in let tnm = t4_find_trait_op(cnm, tctx.traits) in if tnm == "" or isnil(rargs) == 1 then Call(cnm, rargs) else let rty = t4_expr_tyname(ohd_e(args), tenv, tctx) in if rty == "" then Call(cnm, rargs) else if t4_has_impl(tnm, rty, tctx.impls) == 0 then ctfail("lume: trait error [T0401]: type '" + rty + "' does not implement trait '" + tnm + "' required by method '" + cnm + "' (fix-it: add 'impl " + tnm + " for " + rty + " { fn " + cnm + "(...) = ... }')\n") else Call(rty + "__" + cnm, rargs)
+fn t4_resolve_call(cnm, args, tenv, tctx) = let rargs = t4_resolve_args(args, tenv, tctx) in let tnm = t4_find_trait_op(cnm, tctx.traits) in if tnm == "" or isnil(rargs) == 1 then Call(cnm, rargs) else let rty = t4_expr_tyname(ohd_e(args), tenv, tctx) in if rty == "" then Call(cnm, rargs) else if t4_has_impl(tnm, rty, tctx.impls) == 0 then ctfail("lume: trait error [T0401]: type '" + rty + "' does not implement trait '" + tnm + "' required by method '" + cnm + "' (fix-it: add 'impl " + tnm + " for " + rty + " { fn " + cnm + "(...) = ... }')\n") else Call("__impl_" + rty + "_" + cnm, rargs)
 
 fn t4_resolve_e(e, tenv, tctx) = match e
     Bin(op, l, r)              => Bin(op, t4_resolve_e(l, tenv, tctx), t4_resolve_e(r, tenv, tctx))
