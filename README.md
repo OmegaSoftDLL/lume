@@ -178,6 +178,21 @@ fn eval(e) = match e
 
 **One tool:** `lume build|run|fmt|test|doc|check|pkg|describe|evolve` — the compiler (`lumec`), assembler (`lasm`), CLI control plane (`lcli.src`: `--version`, `--help`, `describe`, `compile --json`, `pkg init|lock|tree`, `evolve propose`, and surface `check`/`test`), and all subcommand tools (`ldoc`, `ltest`, `lfmt`, `lmod`, `lcaas`, `levolve`, `lcert`, `lprotect`) are written in Lume, compiled to native ELF binaries, and verified in the `stage2 == stage3` bootstrap fixpoint (#204). A thin POSIX `sh` launcher dispatches process execution across hosts. It includes a canonical formatter (`lume fmt`), zero-config test discovery (`lume test` finds `fn test_*()`), doc/contract extraction (`lume doc`), and a module system + package manager with **capability-audited dependencies and content-addressed lockfiles** (superior to cargo/go mod). Plus **exact `decimal` arithmetic** for money/data.
 
+## Install
+
+One line (self-updating — re-run to get the latest release as Lume evolves):
+
+```sh
+curl -fsSL https://omegasoftdll.github.io/lume/install.sh | sh
+export PATH="$HOME/.lume/bin:$PATH"
+lume self verify      # checks MANIFEST.sha256
+```
+
+Downloads the Lume-built toolchain from GitHub Releases and verifies its SHA-256 — no C compiler
+needed. Prebuilt binaries are published for **linux-x86_64** today; other platforms are on the way
+(see issue #262), and until then the installer points you to a from-source build. To build from
+source instead, see Quickstart below.
+
 ## Quickstart
 
 ```sh
