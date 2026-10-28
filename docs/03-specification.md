@@ -314,9 +314,9 @@ fn consume(file: own File)                   # ownership moves in
   expression creates an exclusive borrow explicitly where inference needs help.
 
 ### 6.3 Shared ownership tiers
-- `rc[T]` single-threaded reference count; `arc[T]` atomic; `weak[T]` non-owning; `cell[T]`
+- `rc[T]` single-threaded reference count; `arc[T]` atomic (`lock incq` / `lock xaddq` with `mfence`); `weak[T]` non-owning; `cell[T]`
   interior mutability (single-threaded); `mutex[T]`, `rwlock[T]`, `atomic[T]` in `std.sync`.
-  Literal syntax: `rc(value)`, `arc(value)`. Deref is automatic for field access and UFCS.
+  Literal syntax: `rc(value)`, `arc(value)`. Deref is automatic for field access (`r.field`) and UFCS (`r.method()`), and built-in tier methods `.clone()`, `.drop()`, `.strong_count()`, `.downgrade()`, `.upgrade(fallback)`, and `.get()` operate on native heap control blocks with compile-time `[O0001]` use-after-drop and `[S0001]` non-`Send` `rc[T]` capture enforcement.
 - `@gc` on a type declaration places *that type's* values under a tracing collector for the
   region they are allocated in: `@gc type Node = record …`. GC'd values may form cycles freely;
   they cannot be moved across a `pub` API without the type's `@gc` being visible **[Stage 3]**.
