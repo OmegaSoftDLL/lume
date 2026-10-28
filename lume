@@ -219,12 +219,36 @@ cmd_build() {
     _protect=""
     _profile=""
     _lsym=""
+    _links=""
+    _chdr=""
     while [ $# -gt 0 ]; do
         case "$1" in
             -o)
                 [ $# -ge 2 ] || usage
                 _out=$2
                 shift 2
+                ;;
+            --link|-l)
+                [ $# -ge 2 ] || usage
+                _links="$_links $2"
+                shift 2
+                ;;
+            --link=*)
+                _links="$_links ${1#--link=}"
+                shift
+                ;;
+            -l*)
+                _links="$_links ${1#-l}"
+                shift
+                ;;
+            --emit-c-header)
+                [ $# -ge 2 ] || usage
+                _chdr=$2
+                shift 2
+                ;;
+            --emit-c-header=*)
+                _chdr=${1#--emit-c-header=}
+                shift
                 ;;
             --protect)
                 if [ $# -ge 2 ] && case "$2" in none|standard|hardened|max) true ;; *) false ;; esac; then
@@ -285,32 +309,81 @@ cmd_build() {
             debug)   _protect="none" ;;
         esac
     fi
-    if [ -z "$_protect" ]; then
-        _bdir=$(dirname -- "$_src")
-        _btoml=""
-        if [ -f "$_bdir/lume.toml" ]; then
-            _btoml="$_bdir/lume.toml"
-        elif [ -f "$_bdir/../lume.toml" ]; then
-            _btoml="$_bdir/../lume.toml"
+    _bdir=$(dirname -- "$_src")
+    _btoml=""
+    if [ -f "$_bdir/lume.toml" ]; then
+        _btoml="$_bdir/lume.toml"
+    elif [ -f "$_bdir/../lume.toml" ]; then
+        _btoml="$_bdir/../lume.toml"
+    fi
+    if [ -n "$_btoml" ] && grep -Eq '^[ \t]*(protect|libs|link)[ \t]*=' "$_btoml"; then
+        _mtmp=$(mktemp)
+        printf '@manifest\n' > "$_mtmp"
+        cat "$_btoml" >> "$_mtmp"
+        if ! _mjson=$(run_core_tool lmod "$_mtmp"); then
+            rm -f "$_mtmp" "$_out"
+            exit 1
         fi
-        if [ -n "$_btoml" ] && grep -Eq '^[ \t]*protect[ \t]*=' "$_btoml"; then
-            _mtmp=$(mktemp)
-            printf '@manifest\n' > "$_mtmp"
-            cat "$_btoml" >> "$_mtmp"
-            if _mjson=$(run_core_tool lmod "$_mtmp" 2>/dev/null); then
-                case "$_mjson" in
-                    *'"protect":"max"'*)      _protect="max" ;;
-                    *'"protect":"hardened"'*) _protect="hardened" ;;
-                    *'"protect":"standard"'*) _protect="standard" ;;
-                esac
-            fi
-            rm -f "$_mtmp"
+        rm -f "$_mtmp"
+        if [ -z "$_protect" ]; then
+            case "$_mjson" in
+                *'"protect":"max"'*)      _protect="max" ;;
+                *'"protect":"hardened"'*) _protect="hardened" ;;
+                *'"protect":"standard"'*) _protect="standard" ;;
+            esac
         fi
+        case "$_mjson" in
+            *'"ffi_libs":'*)
+                _mlibs=$(printf '%s' "$_mjson" | sed -n 's/.*"ffi_libs":\[\([^]]*\)\].*/\1/p' | tr ',"' '  ')
+                for _ml in $_mlibs; do
+                    _links="$_links $_ml"
+                done
+                ;;
+        esac
     fi
     _bundled=$(mktemp)
     if ! bundle_src_if_needed "$_src" "$_bundled"; then
         rm -f "$_bundled" "$_out"
         exit 1
+    fi
+    if [ -n "$_chdr" ] || case "$_out" in *.wat|*.wasm|*.a|*.so) true ;; *) false ;; esac; then
+        _ce_in=$(mktemp)
+        printf '@mode c-export\n' > "$_ce_in"
+        cat "$_bundled" >> "$_ce_in"
+        _ce_json=$(run_core_tool lcaas "$_ce_in")
+        rm -f "$_ce_in"
+        if [ -n "$_chdr" ]; then
+            jsonrpc_extract_str "$_ce_json" "c_header" > "$_chdr"
+            printf '\n' >> "$_chdr"
+        fi
+        case "$_out" in
+            *.wat)
+                case "$_ce_json" in
+                    *'"ok":false'*)
+                        printf '%s\n' "$_ce_json" >&2
+                        rm -f "$_bundled" "$_out"
+                        exit 3
+                        ;;
+                esac
+                jsonrpc_extract_str "$_ce_json" "wat" > "$_out"
+                printf '\n' >> "$_out"
+                rm -f "$_bundled"
+                return 0
+                ;;
+            *.wasm)
+                case "$_ce_json" in
+                    *'"ok":false'*)
+                        printf '%s\n' "$_ce_json" >&2
+                        rm -f "$_bundled" "$_out"
+                        exit 3
+                        ;;
+                esac
+                _whex=$(jsonrpc_extract_str "$_ce_json" "wasm_hex")
+                printf '%s' "$_whex" | sed 's/../\\x&/g' | xargs -0 printf "%b" > "$_out"
+                rm -f "$_bundled"
+                return 0
+                ;;
+        esac
     fi
     ensure_native_toolchain
     _tmps=$(mktemp)
@@ -340,6 +413,74 @@ cmd_build() {
         run_core_tool lprotect "$_pin" > "$_tmps_prot"
         mv "$_tmps_prot" "$_tmps"
         rm -f "$_pin"
+    fi
+    case "$_out" in
+        *.a)
+            if [ -z "$_chdr" ]; then
+                jsonrpc_extract_str "$_ce_json" "c_header" > "${_out%.a}.h"
+                printf '\n' >> "${_out%.a}.h"
+            fi
+            sed 's/\.globl _start/.globl __lume_mod_init/; s/^_start:/__lume_mod_init:/' "$_tmps" > "$_tmps.lib.s"
+            _tmpo="$_tmps.o"
+            if ! ${CC:-cc} -c -x assembler "$_tmps.lib.s" -o "$_tmpo"; then
+                rm -f "$_bundled" "$_tmps" "$_tmps.lib.s" "$_tmpo" "$_out"
+                exit 1
+            fi
+            rm -f "$_out"
+            ${AR:-ar} rcs "$_out" "$_tmpo"
+            rm -f "$_bundled" "$_tmps" "$_tmps.lib.s" "$_tmpo"
+            return 0
+            ;;
+        *.so)
+            if [ -z "$_chdr" ]; then
+                jsonrpc_extract_str "$_ce_json" "c_header" > "${_out%.so}.h"
+                printf '\n' >> "${_out%.so}.h"
+            fi
+            sed 's/\.globl _start/.globl __lume_mod_init/; s/^_start:/__lume_mod_init:/' "$_tmps" > "$_tmps.lib.s"
+            if ! ${CC:-cc} -shared -x assembler "$_tmps.lib.s" -o "$_out"; then
+                rm -f "$_bundled" "$_tmps" "$_tmps.lib.s" "$_out"
+                exit 1
+            fi
+            rm -f "$_bundled" "$_tmps" "$_tmps.lib.s"
+            return 0
+            ;;
+    esac
+    _has_static_link=0
+    _need_hdr=""
+    for _lk in $_links; do
+        case "$_lk" in
+            *.a|*.o)
+                _has_static_link=1
+                ;;
+            c)
+                _need_hdr="${_need_hdr}    .need \"libc.so.6\"\n"
+                ;;
+            m)
+                _need_hdr="${_need_hdr}    .need \"libm.so.6\"\n"
+                ;;
+            *.so*)
+                _need_hdr="${_need_hdr}    .need \"$(basename -- "$_lk")\"\n"
+                ;;
+            *)
+                _need_hdr="${_need_hdr}    .need \"lib${_lk}.so\"\n"
+                ;;
+        esac
+    done
+    if [ "$_has_static_link" -eq 1 ]; then
+        sed '/^[ \t]*\.need /d; /^[ \t]*\.extern /d' "$_tmps" > "$_tmps.st.s"
+        if ! ${CC:-cc} -nostartfiles -no-pie -x assembler "$_tmps.st.s" -x none $_links -o "$_out"; then
+            rm -f "$_bundled" "$_tmps" "$_tmps.st.s" "$_out"
+            exit 1
+        fi
+        chmod +x "$_out"
+        rm -f "$_bundled" "$_tmps" "$_tmps.st.s"
+        return 0
+    fi
+    if [ -n "$_need_hdr" ]; then
+        _tmps_nd=$(mktemp)
+        printf '%b' "$_need_hdr" > "$_tmps_nd"
+        cat "$_tmps" >> "$_tmps_nd"
+        mv "$_tmps_nd" "$_tmps"
     fi
     "$LASM" < "$_tmps" > "$_out"
     chmod +x "$_out"

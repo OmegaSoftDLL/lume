@@ -291,8 +291,77 @@ fn luses_fs_stmt(s0) = match s0
 fn luses_fs_prog(prog) = match prog
     Nil        => 0
     Cons(h, t) => if luses_fs_stmt(h) == 1 then 1 else luses_fs_prog(t)
+fn lhas_fn(prog, nm) = match prog
+    Nil        => 0
+    Cons(h, t) => if lhas_fn1(h, nm) == 1 then 1 else lhas_fn(t, nm)
+fn lhas_fn1(s0, nm) = match s0
+    Fn(nm2, ps, body) => if nm2 == nm then 1 else 0
+    _                 => 0
+fn lcollect_ffi_osigs(prog, allp) = match prog
+    Nil        => Nil
+    Cons(h, t) => lcollect_ffi_osig1(h, allp, lcollect_ffi_osigs(t, allp))
+fn lcollect_ffi_osig1(s0, allp, rest) = match s0
+    OSig(nm, pubf, freef, pl, rty, fromp) => if (freef / 32) % 2 == 1 then (if pubf == 1 then Cons({nm: nm, pl: pl, rty: rty, exp: 1}, rest) else if lhas_fn(allp, nm) == 0 then Cons({nm: nm, pl: pl, rty: rty, exp: 0}, rest) else rest) else rest
+    _                                     => rest
+fn lcollect_ffi_links(prog) = match prog
+    Nil        => ""
+    Cons(h, t) => lcollect_ffi_link1(h) + lcollect_ffi_links(t)
+fn lcollect_ffi_link1(s0) = match s0
+    FFILink(libs) => lfmt_need_libs(libs)
+    _             => ""
+fn lfmt_need_libs(libs) = match libs
+    Nil        => ""
+    Cons(h, t) => "    .need \"" + h + "\"\n" + lfmt_need_libs(t)
+fn lfind_ffi_osig(nm, osigs) = match osigs
+    Nil        => {found: 0, exp: 0}
+    Cons(o, r) => if o.nm == nm then {found: 1, exp: o.exp} else lfind_ffi_osig(nm, r)
+fn lffi_rw_expr(e, osigs) = match e
+    Call(nm, args)  => let lk = lfind_ffi_osig(nm, osigs) in let rargs = lffi_rw_args(args, osigs) in if lk.found == 1 then Call(if lk.exp == 1 then "__lume_fn_" + nm else "__lume_ffi_" + nm, rargs) else Call(nm, rargs)
+    LetIn(nm, v, b) => LetIn(nm, lffi_rw_expr(v, osigs), lffi_rw_expr(b, osigs))
+    Bin(op, l, r)   => Bin(op, lffi_rw_expr(l, osigs), lffi_rw_expr(r, osigs))
+    If(c, t, e2)    => If(lffi_rw_expr(c, osigs), lffi_rw_expr(t, osigs), lffi_rw_expr(e2, osigs))
+    Field(o, nm)    => Field(lffi_rw_expr(o, osigs), nm)
+    Rec(items)      => Rec(lffi_rw_rec(items, osigs))
+    RecT(tn, items) => RecT(tn, lffi_rw_rec(items, osigs))
+    Match(sc, arms) => Match(lffi_rw_expr(sc, osigs), lffi_rw_arms(arms, osigs))
+    _               => e
+fn lffi_rw_args(xs, osigs) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons(lffi_rw_expr(h, osigs), lffi_rw_args(t, osigs))
+fn lffi_rw_rec(xs, osigs) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons({key: h.key, val: lffi_rw_expr(h.val, osigs)}, lffi_rw_rec(t, osigs))
+fn lffi_rw_arms(xs, osigs) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons({pat: h.pat, body: lffi_rw_expr(h.body, osigs)}, lffi_rw_arms(t, osigs))
+fn lffi_rw_stmt(s0, osigs) = match s0
+    Fn(nm, ps, body)     => let lk = lfind_ffi_osig(nm, osigs) in Fn(if lk.found == 1 and lk.exp == 1 then "__lume_fn_" + nm else nm, ps, lffi_rw_expr(body, osigs))
+    Sig(nm, ps, tys, rt) => let lk = lfind_ffi_osig(nm, osigs) in Sig(if lk.found == 1 and lk.exp == 1 then "__lume_fn_" + nm else nm, ps, tys, rt)
+    Print(v)             => Print(lffi_rw_expr(v, osigs))
+    ExprS(v)             => ExprS(lffi_rw_expr(v, osigs))
+    _                    => s0
+fn lffi_rw_prog(prog, osigs) = match prog
+    Nil        => Nil
+    Cons(h, t) => Cons(lffi_rw_stmt(h, osigs), lffi_rw_prog(t, osigs))
+fn lis_cstr_ty(ty) = match ty
+    TyName(n) => if n == "str" or n == "cstr" then 1 else 0
+    _         => 0
+fn lffi_unbox_args(pl, i) = match pl
+    Nil        => ""
+    Cons(p, r) => if p.cf == 1 then lffi_unbox_args(r, i) else if i >= 6 then "" else let rg = areg(i) in let off = if lis_cstr_ty(p.pt) == 1 then "16" else "8" in "    movq " + off + "(" + rg + "), " + rg + "\n" + lffi_unbox_args(r, i + 1)
+fn lffi_import_stub(o) = let box_ret = if lis_cstr_ty(o.rty) == 1 then "    movq %rax, %rdi\n    call mkstr\n" else "    movq %rax, %rdi\n    call mkint\n" in "    .extern " + o.nm + "\n__lume_ffi_" + o.nm + ":\n    pushq %rbp\n    movq %rsp, %rbp\n" + lffi_unbox_args(o.pl, 0) + "    call " + o.nm + "\n" + box_ret + "    movq %rbp, %rsp\n    popq %rbp\n    ret\n"
+fn lffi_box_params(pl, i) = match pl
+    Nil        => ""
+    Cons(p, r) => if p.cf == 1 then lffi_box_params(r, i) else if i >= 6 then "" else let sl = str(0 - (48 + i * 8)) + "(%rbp)" in let mk = if lis_cstr_ty(p.pt) == 1 then "mkstr" else "mkint" in "    movq " + sl + ", %rdi\n    call " + mk + "\n    movq %rax, " + sl + "\n" + lffi_box_params(r, i + 1)
+fn lffi_load_params(pl, i) = match pl
+    Nil        => ""
+    Cons(p, r) => if p.cf == 1 then lffi_load_params(r, i) else if i >= 6 then "" else let sl = str(0 - (48 + i * 8)) + "(%rbp)" in "    movq " + sl + ", " + areg(i) + "\n" + lffi_load_params(r, i + 1)
+fn lffi_export_stub(o) = let unbox_ret = if lis_cstr_ty(o.rty) == 1 then "    movq 16(%rax), %rax\n" else "    movq 8(%rax), %rax\n" in "    .globl " + o.nm + "\n" + o.nm + ":\n    pushq %rbp\n    movq %rsp, %rbp\n    pushq %rbx\n    pushq %r12\n    pushq %r13\n    pushq %r14\n    pushq %r15\n    subq $56, %rsp\n    movq %rdi, -48(%rbp)\n    movq %rsi, -56(%rbp)\n    movq %rdx, -64(%rbp)\n    movq %rcx, -72(%rbp)\n    movq %r8, -80(%rbp)\n    movq %r9, -88(%rbp)\n    movq heap_cur(%rip), %rax\n    testq %rax, %rax\n    jnz .Lhe_" + o.nm + "\n    movq $12, %rax\n    xorq %rdi, %rdi\n    syscall\n    movq %rax, heap_cur(%rip)\n    leaq 67108864(%rax), %rdi\n    movq %rdi, %rsi\n    movq $12, %rax\n    syscall\n    movq %rsi, heap_end(%rip)\n.Lhe_" + o.nm + ":\n" + lffi_box_params(o.pl, 0) + lffi_load_params(o.pl, 0) + "    call __lume_fn_" + o.nm + "\n" + unbox_ret + "    addq $56, %rsp\n    popq %r15\n    popq %r14\n    popq %r13\n    popq %r12\n    popq %rbx\n    popq %rbp\n    ret\n"
+fn lffi_stubs(osigs) = match osigs
+    Nil        => ""
+    Cons(o, r) => (if o.exp == 1 then lffi_export_stub(o) else lffi_import_stub(o)) + lffi_stubs(r)
 fn runtime_fs_tail() = "fs_write_sync:\n    pushq %r12\n    pushq %r13\n    pushq %r14\n    movq 16(%rdi), %r12\n    movq 16(%rsi), %r13\n    movq %r12, %rdi\n    movq $577, %rsi\n    movq $420, %rdx\n    movq $2, %rax\n    syscall\n    testq %rax, %rax\n    js fsw_err\n    movq %rax, %r14\n    movq %r14, %rdi\n    movq $2, %rsi\n    movq $73, %rax\n    syscall\n    movq %r13, %rdi\n    call strlen\n    movq %rax, %rdx\n    movq %r14, %rdi\n    movq %r13, %rsi\n    movq $1, %rax\n    syscall\n    movq %r14, %rdi\n    movq $74, %rax\n    syscall\n    movq %r14, %rdi\n    movq $8, %rsi\n    movq $73, %rax\n    syscall\n    movq %r14, %rdi\n    movq $3, %rax\n    syscall\n    movq $1, %rdi\n    call mkint\n    popq %r14\n    popq %r13\n    popq %r12\n    ret\nfs_append_sync:\n    pushq %r12\n    pushq %r13\n    pushq %r14\n    movq 16(%rdi), %r12\n    movq 16(%rsi), %r13\n    movq %r12, %rdi\n    movq $1089, %rsi\n    movq $420, %rdx\n    movq $2, %rax\n    syscall\n    testq %rax, %rax\n    js fsw_err\n    movq %rax, %r14\n    movq %r14, %rdi\n    movq $2, %rsi\n    movq $73, %rax\n    syscall\n    movq %r13, %rdi\n    call strlen\n    movq %rax, %rdx\n    movq %r14, %rdi\n    movq %r13, %rsi\n    movq $1, %rax\n    syscall\n    movq %r14, %rdi\n    movq $74, %rax\n    syscall\n    movq %r14, %rdi\n    movq $8, %rsi\n    movq $73, %rax\n    syscall\n    movq %r14, %rdi\n    movq $3, %rax\n    syscall\n    movq $1, %rdi\n    call mkint\n    popq %r14\n    popq %r13\n    popq %r12\n    ret\nfsw_err:\n    xorq %rdi, %rdi\n    call mkint\n    popq %r14\n    popq %r13\n    popq %r12\n    ret\nfs_read_file:\n    pushq %r12\n    pushq %r13\n    pushq %r14\n    movq 16(%rdi), %rdi\n    xorq %rsi, %rsi\n    xorq %rdx, %rdx\n    movq $2, %rax\n    syscall\n    testq %rax, %rax\n    js fsr_err\n    movq %rax, %r14\n    movq %r14, %rdi\n    movq $1, %rsi\n    movq $73, %rax\n    syscall\n    movq $262144, %rdi\n    call alloc\n    movq %rax, %r12\n    xorq %r13, %r13\nfsr_lp:\n    movq $262143, %rdx\n    subq %r13, %rdx\n    jle fsr_eof\n    movq %r14, %rdi\n    movq %r12, %rsi\n    addq %r13, %rsi\n    xorq %rax, %rax\n    syscall\n    testq %rax, %rax\n    jle fsr_eof\n    addq %rax, %r13\n    jmp fsr_lp\nfsr_eof:\n    movb $0, (%r12,%r13)\n    movq %r14, %rdi\n    movq $8, %rsi\n    movq $73, %rax\n    syscall\n    movq %r14, %rdi\n    movq $3, %rax\n    syscall\n    movq %r12, %rdi\n    call mkstr\n    popq %r14\n    popq %r13\n    popq %r12\n    ret\nfsr_err:\n    movq $1, %rdi\n    call alloc\n    movb $0, (%rax)\n    movq %rax, %rdi\n    call mkstr\n    popq %r14\n    popq %r13\n    popq %r12\n    ret\n"
-fn lgen(prog) = let mlocals = app(lmlocals(prog), lsds(0, lmdprog(prog))) in let gs = lstmts(prog, mlocals, {nl: 0, ns: 0, dt: Nil}) in let dt_l = rev(gs.dt) in let funcs_l = gs.funcs in let mains_l = gs.mains in let dt_s = joinall(own dt_l) in let funcs_s = joinall(own funcs_l) in let mains_s = joinall(own mains_l) in let mframe = lframe(len(mlocals)) in let mprol = "    movq %rsp, %rbp\n" + (if mframe > 0 then "    subq $" + str(mframe) + ", %rsp\n" else "") in let bss = "    .section .bss\n    .lcomm pbuf, 32\n    .lcomm heap_cur, 8\n    .lcomm heap_end, 8\n    .lcomm emit_buf, 8\n    .lcomm emit_len, 8\n    .lcomm emit_cap, 8\n" in let rodata = "    .section .rodata\noom_msg:\n    .asciz \"lume: out of memory (heap exhausted, brk failed)\\n\"\n" in let heapinit = "    movq $12, %rax\n    xorq %rdi, %rdi\n    syscall\n    movq %rax, heap_cur(%rip)\n    leaq 67108864(%rax), %rdi\n    movq %rdi, %rsi\n    movq $12, %rax\n    syscall\n    cmpq %rsi, %rax\n    jne alloc_oom\n    movq %rsi, heap_end(%rip)\n" in let rtail = if luses_fs_prog(prog) == 1 then runtime_tail() + runtime_fs_tail() else runtime_tail() in joinall(own Cons(bss, Cons(rodata, Cons(dt_s, Cons("    .section .text\n", Cons(funcs_s, Cons(rtail, Cons("    .globl _start\n_start:\n", Cons(heapinit, Cons(mprol, Cons(mains_s, Cons("    movq $60, %rax\n    xorq %rdi, %rdi\n    syscall\n", Nil))))))))))))
+fn lgen(prog0) = let ffi_osigs = lcollect_ffi_osigs(prog0, prog0) in let ffi_links = lcollect_ffi_links(prog0) in let prog = if isnil(ffi_osigs) == 1 then prog0 else lffi_rw_prog(prog0, ffi_osigs) in let mlocals = app(lmlocals(prog), lsds(0, lmdprog(prog))) in let gs = lstmts(prog, mlocals, {nl: 0, ns: 0, dt: Nil}) in let dt_l = rev(gs.dt) in let funcs_l = gs.funcs in let mains_l = gs.mains in let dt_s = joinall(own dt_l) in let funcs_s = ffi_links + joinall(own funcs_l) + lffi_stubs(ffi_osigs) in let mains_s = joinall(own mains_l) in let mframe = lframe(len(mlocals)) in let mprol = "    movq %rsp, %rbp\n" + (if mframe > 0 then "    subq $" + str(mframe) + ", %rsp\n" else "") in let bss = "    .section .bss\n    .lcomm pbuf, 32\n    .lcomm heap_cur, 8\n    .lcomm heap_end, 8\n    .lcomm emit_buf, 8\n    .lcomm emit_len, 8\n    .lcomm emit_cap, 8\n" in let rodata = "    .section .rodata\noom_msg:\n    .asciz \"lume: out of memory (heap exhausted, brk failed)\\n\"\n" in let heapinit = "    movq $12, %rax\n    xorq %rdi, %rdi\n    syscall\n    movq %rax, heap_cur(%rip)\n    leaq 67108864(%rax), %rdi\n    movq %rdi, %rsi\n    movq $12, %rax\n    syscall\n    cmpq %rsi, %rax\n    jne alloc_oom\n    movq %rsi, heap_end(%rip)\n" in let rtail = if luses_fs_prog(prog) == 1 then runtime_tail() + runtime_fs_tail() else runtime_tail() in joinall(own Cons(bss, Cons(rodata, Cons(dt_s, Cons("    .section .text\n", Cons(funcs_s, Cons(rtail, Cons("    .globl _start\n_start:\n", Cons(heapinit, Cons(mprol, Cons(mains_s, Cons("    movq $60, %rax\n    xorq %rdi, %rdi\n    syscall\n", Nil))))))))))))
 
 
 ## --- runtime (copied verbatim from data_asmgen.lume) ---

@@ -23,18 +23,22 @@ property of the world's missing universal ABI, not a Lume limitation.
 
 ## How it works in Lume
 
-> **Implementation status.** This section and Track I describe the *specified design*. What exists today: `extern "c"` is parsed and effect/provenance-checked (`"ffi"` effect, `[A0003]`), `lume agent bind` emits binding JSON, and `std.wasm` is an in-language **model** of a capability-scoped sandbox. **Not implemented:** native linking (no dynamic ELF/PLT/GOT, no `[ffi]` handling), real C-ABI call lowering to foreign symbols, real WASM module hosting, and reverse C-ABI/WASM export (#11, #186).
+> **Implementation status (`#191`).**
+> - **Shipped (I1, I2, I3, I5):**
+>   - **I1 (`extern "c" fn` + System V AMD64 call lowering):** `05_codegen.src` lowers `extern "c" fn` calls to System V AMD64 unboxing/boxing trampolines (`__lume_ffi_<sym>`), paired with compile-time `"ffi"` effect checking (`[E0200]`) and foreign return provenance checking (`[A0003]`).
+>   - **I2 (Dynamic & Static Linking):** `lasm.src` (`asmdyn`) emits dynamically linked ELF64 binaries (`PT_INTERP`, `PT_DYNAMIC`, `DT_NEEDED`, `.dynsym`, `.dynstr`, `.got.plt`, `.rela.dyn` `R_X86_64_GLOB_DAT`, and PLT stubs) directly from `.need` / `.extern` / `@link("<soname>")`, and `lume build --link <lib.so|lib.a>` + `[ffi] libs = [...]` in `lume.toml` (enforcing `"ffi"` in `[capabilities] allow` `[E0200]`) link dynamic `.so` and static `.a` libraries end-to-end.
+>   - **I3 (`lume agent bind <header.h>`):** Generates N-parameter `extern "c" fn` declarations and provenance-verified `pub fn safe_<name>` wrappers preserving parameter names and `int`/`str` types.
+>   - **I5 (Reverse C-ABI & WASM Export):** `pub extern "c" fn` and `@export("C")` emit System V AMD64 C-ABI entrypoints (`.globl <name>`, lazy Lume heap initialization when entered from a foreign `main`, callee-saved register preservation, argument boxing, and return unboxing). `lume build -o <out.a|out.so>` builds static/shared libraries callable from C with generated `.h` headers (`--emit-c-header`), and `lume build -o <out.wat|out.wasm>` / `lume agent c-export` compiles the scalar `i64` fragment to `.wat` and `\0asm` `.wasm` modules, rejecting unsupported constructs with `[I0002]`.
+> - **Model (I4 `std.wasm`):** `std.wasm` (`compiler/stage1/interop.src`) is an in-language reference model of linear-memory bounds, instruction fuel, and host capability flags paired with compile-time `[E0200]` capability enforcement (`wasm_call_host_fs` requires `"wasm"` and `"fs"`); in-process binary WASM VM hosting remains **planned**.
 
-1. **`extern "c"` declarations.** Declare a foreign function/type with its C signature; the backend
-   emits the call in the System V AMD64 convention (`lasm` already emits native x86-64, so this is an
-   extension of existing codegen, not a new backend).
+1. **`extern "c"` declarations (`shipped`).** Declare a foreign function with its C signature; `05_codegen.src`
+   emits the unboxing/boxing trampoline in the System V AMD64 convention and `lasm` emits the ELF relocation / PLT call.
    ```lume
-   extern "c" { fn sqlite3_open(path: cstr, out: ptr[ptr]) -> int }
+   @link("libc.so.6")
+   extern "c" fn puts(s: str) -> int
    ```
-2. **Linking** *(planned, not implemented).* `lume pkg` gains a C-dependency declaration and links against a system `.so` (dynamic:
-   ELF dynamic section + PLT/GOT, which `lasm`'s ELF writer is extended to emit) or `.a` (static).
-3. **WASM host** *(planned; today only a model).* A `wasm` capability runs a WASM module in-process with an explicit import surface, so
-   the sandbox sees only the capabilities Lume grants it (no ambient `net`/`fs`).
+2. **Linking (`shipped`).** `lume.toml` `[ffi] libs = [...]` (requiring `"ffi"` in `[capabilities] allow`) and `lume build --link <lib.so|lib.a>` link against `.so` (via `lasm`'s dynamic ELF64 writer: `PT_INTERP`, `PT_DYNAMIC`, `DT_NEEDED`, `.dynsym`, `.dynstr`, `.got.plt`, `.rela.dyn`, PLT) or static `.a` archives.
+3. **WASM host (`model` / `planned`).** `std.wasm` models linear memory, fuel, and capability grants in Lume and enforces `"wasm"`/`"fs"`/`"net"` capabilities at compile time (`[E0200]`); executing arbitrary binary `.wasm` modules in-process remains planned.
 
 ## AI-first binding generation (the Lume advantage)
 
@@ -79,21 +83,21 @@ it is strictly opt-in and never in the pure core.
 
 ## The reverse direction
 
-Interop is two-way *(planned; not implemented)*: Lume also **exposes a C ABI** (`pub extern "c" fn …`) and can compile to a `.so` /
-`.a` / WASM module, so other languages consume Lume. A Lume library becomes usable from Python, Node,
-Rust, Go — broadening adoption without those ecosystems needing to know Lume.
+Interop is two-way (`shipped`, `#191`): Lume **exposes a C ABI** (`pub extern "c" fn …` / `@export("C")`) and compiles to `.so` /
+`.a` / `.wat` / `.wasm` modules alongside a generated `.h` header (`lume build -o libfoo.so|libfoo.a|foo.wat|foo.wasm`), so C, Python, Node,
+Rust, and Go can call verified Lume libraries directly.
 
 ## Track I — interop (Phase 4/5)
 
 This is **not core** and lands after the language is systems-capable (ownership, effects, concurrency
 from Phase 3). Bricks:
 
-- *Status: I1 parse+check only; I2, I5 and the real I4 host are not implemented; I3 emits binding JSON (#11).*
-- **I1 — `extern "c"` declarations + System V AMD64 call lowering** (codegen + `lasm` call sites).
-- **I2 — Linking**: dynamic (`.so`, ELF dynamic section/PLT/GOT) and static (`.a`), wired into `lume pkg`.
-- **I3 — AI binding generator**: `lume agent bind <header.h>` → `extern "c"` + safe wrapper (JSON/`lcaas`).
-- **I4 — WASM host + sandbox**: run a WASM module with a capability-scoped import surface.
-- **I5 — Reverse export**: `pub extern "c"` + compile Lume to `.so`/`.a`/WASM for other languages.
+- *Status: I1, I2, I3, and I5 are **shipped** (`#191`); I4 `std.wasm` is an in-language capability/fuel **model** paired with compile-time `[E0200]` capability enforcement.*
+- **I1 — `extern "c"` declarations + System V AMD64 call lowering** (`shipped`: `05_codegen.src` unboxing/boxing trampolines + `lasm` `.extern`).
+- **I2 — Linking** (`shipped`: dynamic `.so` via `lasm` `PT_INTERP`/`PT_DYNAMIC`/`DT_NEEDED`/PLT/GOT and static `.a` via `lume build --link` + `[ffi] libs` in `lume.toml`).
+- **I3 — AI binding generator** (`shipped`: `lume agent bind <header.h>` → N-parameter `extern "c" fn` + provenance-verified `safe_<name>` wrapper).
+- **I4 — WASM host + sandbox** (`model`: `std.wasm` capability/fuel/bounds reference model + compile-time `[E0200]` capability gate).
+- **I5 — Reverse export** (`shipped`: `pub extern "c" fn` / `@export("C")` + `lume build -o <out.so|out.a|out.wat|out.wasm>` + `--emit-c-header` + `[I0002]` WASM fragment check).
 - **Cross-cutting**: every brick gated by capability (P26) + effect (P14) + A3 provenance; each a green
   PR with positive/negative tests; the pure core, `stage 2 == stage 3`, and the Zero-C gate stay green.
 

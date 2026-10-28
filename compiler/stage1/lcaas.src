@@ -222,8 +222,8 @@ fn cs_pcaplist(ts) = if cs_isnil(ts) == 1 then {items: Nil, rest: Nil} else if c
 fn cs_pcapat(t) = let t1 = cs_drop1(t) in let er = if cs_hdtext(t1) == "{" then cs_peffitems(cs_drop1(t1)) else if cs_hdtext(t1) == "(" then cs_pcaplist(cs_drop1(t1)) else {items: Cons(cs_hdtext(t1), Nil), rest: cs_drop1(t1)} in Cons(KCapGrant(er.items), cs_pprog(er.rest))
 fn cs_pboundval(ts) = if cs_hdtext(ts) != "(" then 0 else let t1 = cs_drop1(ts) in if cs_hdtext(cs_drop1(t1)) == ":" then toint(cs_hdtext(cs_drop1(cs_drop1(t1)))) else toint(cs_hdtext(t1))
 fn cs_progfnwcet(wcet, fnm, r) = if wcet > 0 then Cons(WcetSig(fnm, wcet), cs_pprogfn(r)) else cs_pprogfn(r)
-fn cs_parseattrs(ts, freef, wcet) = if cs_hdtext(ts) == "@" then (let t1 = cs_drop1(ts) in let anm = cs_hdtext(t1) in let t2 = cs_drop1(t1) in if anm == "freestanding" then cs_parseattrs(cs_skipatparen(t2), freef + 1, wcet) else if anm == "interrupt" then cs_parseattrs(cs_skipatparen(t2), freef + 16, wcet) else if anm == "protect" then cs_parseattrs(cs_skipatparen(t2), freef + 64, wcet) else if anm == "bound" then cs_parseattrs(cs_skipatparen(t2), freef, cs_pboundval(t2)) else cs_parseattrs(cs_skipatparen(t2), freef, wcet)) else if cs_hdtext(ts) == "pub" and cs_hdtext(cs_drop1(ts)) == "fn" then let ft = cs_drop1(cs_drop1(ts)) in cs_progfnwcet(wcet, cs_hdtext(ft), cs_pfnp(ft, 1, freef)) else if cs_hdtext(ts) == "fn" then let ft = cs_drop1(ts) in cs_progfnwcet(wcet, cs_hdtext(ft), cs_pfnp(ft, 0, freef)) else cs_pprog(ts)
-fn cs_progat(t) = if cs_hdtext(t) == "gc" then cs_progtyped("gc", cs_ptype(cs_drop1(cs_drop1(t)))) else if cs_hdtext(t) == "soa" and cs_hdtext(cs_drop1(t)) == "type" then cs_progtyped("soa", cs_ptype(cs_drop1(cs_drop1(t)))) else if cs_hdtext(t) == "capability" or cs_hdtext(t) == "grant" then cs_pcapat(t) else cs_parseattrs(Cons({kind: "op", text: "@"}, t), 0, 0)
+fn cs_parseattrs(ts, freef, wcet) = if cs_hdtext(ts) == "@" then (let t1 = cs_drop1(ts) in let anm = cs_hdtext(t1) in let t2 = cs_drop1(t1) in if anm == "freestanding" then cs_parseattrs(cs_skipatparen(t2), freef + 1, wcet) else if anm == "interrupt" then cs_parseattrs(cs_skipatparen(t2), freef + 16, wcet) else if anm == "export" then cs_parseattrs(cs_skipatparen(t2), if (freef / 32) % 2 == 0 then freef + 32 else freef, wcet) else if anm == "protect" then cs_parseattrs(cs_skipatparen(t2), freef + 64, wcet) else if anm == "bound" then cs_parseattrs(cs_skipatparen(t2), freef, cs_pboundval(t2)) else cs_parseattrs(cs_skipatparen(t2), freef, wcet)) else if cs_hdtext(ts) == "pub" and cs_hdtext(cs_drop1(ts)) == "extern" then cs_progextern(cs_drop1(cs_drop1(ts)), 1) else if cs_hdtext(ts) == "extern" then cs_progextern(cs_drop1(ts), 0) else if cs_hdtext(ts) == "pub" and cs_hdtext(cs_drop1(ts)) == "fn" then let ft = cs_drop1(cs_drop1(ts)) in cs_progfnwcet(wcet, cs_hdtext(ft), cs_pfnp(ft, 1, freef)) else if cs_hdtext(ts) == "fn" then let ft = cs_drop1(ts) in cs_progfnwcet(wcet, cs_hdtext(ft), cs_pfnp(ft, if (freef / 32) % 2 == 1 then 1 else 0, freef)) else cs_pprog(ts)
+fn cs_progat(t) = if cs_hdtext(t) == "gc" then cs_progtyped("gc", cs_ptype(cs_drop1(cs_drop1(t)))) else if cs_hdtext(t) == "soa" and cs_hdtext(cs_drop1(t)) == "type" then cs_progtyped("soa", cs_ptype(cs_drop1(cs_drop1(t)))) else if cs_hdtext(t) == "capability" or cs_hdtext(t) == "grant" then cs_pcapat(t) else if cs_hdtext(t) == "link" or cs_hdtext(t) == "need" then cs_pprog(cs_skipatparen(cs_drop1(t))) else cs_parseattrs(Cons({kind: "op", text: "@"}, t), 0, 0)
 fn cs_progextern(t, pubf) = if cs_hdtext(t) == "llm" and cs_hdtext(cs_drop1(t)) == "fn" then cs_pprogfn(cs_pfnp(cs_drop1(cs_drop1(t)), pubf, 4)) else if cs_hdtext(cs_drop1(t)) == "fn" then cs_pprogfn(cs_pfnp(cs_drop1(cs_drop1(t)), pubf, 32)) else if cs_hdtext(t) == "fn" then cs_pprogfn(cs_pfnp(cs_drop1(t), pubf, 32)) else cs_pprogfn(cs_pfnp(cs_drop1(t), pubf, 4))
 fn cs_progpub(t) = if cs_hdtext(t) == "total" and cs_hdtext(cs_drop1(t)) == "fn" then cs_pprogfn(cs_pfnp(cs_drop1(cs_drop1(t)), 1, 2)) else if cs_hdtext(t) == "llm" and cs_hdtext(cs_drop1(t)) == "fn" then cs_pprogfn(cs_pfnp(cs_drop1(cs_drop1(t)), 1, 4)) else if cs_hdtext(t) == "extern" then cs_progextern(cs_drop1(t), 1) else if cs_hdtext(t) == "kernel" and cs_hdtext(cs_drop1(t)) == "fn" then cs_pprogfn(cs_pfnp(cs_drop1(cs_drop1(t)), 1, 8)) else if cs_hdtext(t) == "rule" then cs_progrule(cs_prule(cs_drop1(t))) else if cs_hdtext(t) == "effect" then let r = cs_peffect(cs_drop1(t)) in Cons(r.node, cs_pprog(r.rest)) else if cs_hdtext(t) == "law" then cs_proglaw(cs_plaw(cs_drop1(t))) else cs_pprogfn(cs_pfnp(cs_drop1(t), 1, 0))
 fn cs_pprog(ts) = match ts
@@ -1922,7 +1922,13 @@ fn lc_trim_l(s, i, n) = if i >= n then "" else if at(s, i) == " " or at(s, i) ==
 
 fn lc_trim(s) = lc_trim_r(lc_trim_l(cs_chomp(s), 0, count(cs_chomp(s))))
 
-fn lc_bind_line(line) = let l = lc_trim(line) in let p1 = lc_find_ch(l, 0, count(l), "(") in let p2 = lc_find_ch(l, p1 + 1, count(l), ")") in if p1 >= count(l) or p2 >= count(l) or cs_startswith(l, "#") == 1 or cs_startswith(l, "//") == 1 or cs_startswith(l, "/*") == 1 then {ok: 0, ext: "", wrap: ""} else let prefix = lc_trim(slice(l, 0, p1)) in let fnm = lc_last_word_i(prefix, count(prefix), 0) in let raw_args = lc_trim(slice(l, p1 + 1, p2)) in let has_two = lc_find_ch(raw_args, 0, count(raw_args), ",") < count(raw_args) in let lparams = if count(raw_args) == 0 or raw_args == "void" then "" else if has_two then "a0: int, a1: int" else "a0: int" in let largs = if count(raw_args) == 0 or raw_args == "void" then "" else if has_two then "a0, a1" else "a0" in let ext_decl = "extern \"c\" fn " + fnm + "(" + lparams + ") -> int" in let safe_wrap = "pub fn safe_" + fnm + "(" + lparams + ") -> int / {" + "ffi} ensures result >= 0 = verify(" + fnm + "(" + largs + "))" in {ok: 1, ext: ext_decl, wrap: safe_wrap}
+fn lc_clean_pname(w, idx) = if w == "" or w == "void" or w == "int" or w == "int64_t" or w == "long" or w == "char" or w == "const" then "a" + str(idx) else w
+
+fn lc_param_ty(pdecl) = if cs_has_substr(pdecl, "char*") == 1 or cs_has_substr(pdecl, "char *") == 1 then "str" else "int"
+
+fn lc_split_csv(s, i, n, idx) = if i >= n then {ps: Nil, args: Nil} else let cpos = lc_find_ch(s, i, n, ",") in let raw = lc_trim(slice(s, i, cpos)) in let pnm = lc_clean_pname(lc_last_word_i(raw, count(raw), 0), idx) in let pty = lc_param_ty(raw) in let rest = lc_split_csv(s, cpos + 1, n, idx + 1) in {ps: Cons(pnm + ": " + pty, rest.ps), args: Cons(pnm, rest.args)}
+
+fn lc_bind_line(line) = let l = lc_trim(line) in let p1 = lc_find_ch(l, 0, count(l), "(") in let p2 = lc_find_ch(l, p1 + 1, count(l), ")") in if p1 >= count(l) or p2 >= count(l) or cs_startswith(l, "#") == 1 or cs_startswith(l, "//") == 1 or cs_startswith(l, "/*") == 1 then {ok: 0, ext: "", wrap: ""} else let prefix = lc_trim(slice(l, 0, p1)) in let fnm = lc_last_word_i(prefix, count(prefix), 0) in let raw_args = lc_trim(slice(l, p1 + 1, p2)) in let sp = (if count(raw_args) == 0 or raw_args == "void" then {ps: Nil, args: Nil} else lc_split_csv(raw_args, 0, count(raw_args), 0)) in let lparams = cs_joinsep(sp.ps, ", ") in let largs = cs_joinsep(sp.args, ", ") in let rty = (if cs_has_substr(prefix, "char*") == 1 or cs_has_substr(prefix, "char *") == 1 then "str" else "int") in let ens = (if rty == "int" then " ensures result >= 0" else "") in let ext_decl = "extern \"c\" fn " + fnm + "(" + lparams + ") -> " + rty in let safe_wrap = "pub fn safe_" + fnm + "(" + lparams + ") -> " + rty + " / {" + "ffi}" + ens + " = verify(" + fnm + "(" + largs + "))" in {ok: 1, ext: ext_decl, wrap: safe_wrap}
 
 fn lc_bind_lines(ls) = match ls
     Nil        => {exts: Nil, wraps: Nil}
@@ -2057,9 +2063,29 @@ fn cs_has_substr(s, pat) = let n = count(s) in let m = count(pat) in if m == 0 t
 
 fn caas_repl_json(src) = let r = caas_compile(src) in let has_tbl = (if cs_has_substr(src, "read_csv") == 1 or cs_has_substr(src, "table_success") == 1 or cs_has_substr(src, "query_where") == 1 or cs_has_substr(src, "query_group") == 1 or cs_has_substr(src, "query_join") == 1 or cs_has_substr(src, "table[") == 1 then 1 else 0) in let mime = (if has_tbl == 1 then "application/vnd.lume.table+json" else "text/plain") in "{\"protocol\":\"lume-repl/1.0\",\"jupyter_kernel\":\"lume-kernel-v1\",\"ok\":" + (if r.ok == 1 then "true" else "false") + ",\"execution_count\":1,\"status\":\"" + (if r.ok == 1 then "ok" else "error") + "\",\"data\":{\"mime\":\"" + mime + "\",\"text/plain\":\"" + cs_jesc(r.result) + "\",\"has_first_class_table\":" + (if has_tbl == 1 then "true" else "false") + ",\"symbols\":[" + cs_syms_json(r.symbols) + "],\"proofs\":[" + cs_proofs_json(r.proofs) + "],\"diagnostics\":[" + cs_diags_json(r.diagnostics) + "]}}"
 
-fn cs_c_param_list(ps) = match ps
+fn cs_c_ty_str(ty) = match ty
+    TyName(n) => if n == "str" or n == "cstr" then "const char*" else "int64_t"
+    _         => "int64_t"
+
+fn cs_hd_cty(tys) = match tys
+    Nil        => "int64_t"
+    Cons(t, r) => cs_c_ty_str(t)
+
+fn cs_tl_tys(tys) = match tys
+    Nil        => Nil
+    Cons(t, r) => r
+
+fn cs_c_param_list_typed(ps, tys) = match ps
     Nil        => ""
-    Cons(p, r) => let s = "int64_t " + p in if cs_isnil(r) == 1 then s else s + ", " + cs_c_param_list(r)
+    Cons(p, r) => let s = cs_hd_cty(tys) + " " + p in if cs_isnil(r) == 1 then s else s + ", " + cs_c_param_list_typed(r, cs_tl_tys(tys))
+
+fn cs_c_sig_info(nm, ps, sigs) = match cs_siglookup(nm, sigs)
+    Nil        => {params: if cs_isnil(ps) == 1 then "void" else cs_c_param_list_typed(ps, Nil), ret: "int64_t"}
+    Cons(sg, _) => {params: if cs_isnil(ps) == 1 then "void" else cs_c_param_list_typed(ps, sg.pt), ret: cs_c_ty_str(sg.rt)}
+
+fn cs_c_contract_doc(nm, vsigs) = match cs_vsiglookup(nm, vsigs)
+    Nil         => ""
+    Cons(vs, _) => let reqs_s = cs_joinsep(cs_exprs_surface_list(vs.reqs), " && ") in let enss_s = cs_joinsep(cs_exprs_surface_list(vs.enss), " && ") in (if reqs_s != "" then " | requires: " + reqs_s else "") + (if enss_s != "" then " | ensures: " + enss_s else "")
 
 fn cs_wat_params(ps) = match ps
     Nil        => ""
@@ -2074,6 +2100,20 @@ fn cs_wat_locals(e) = match e
     If(c, t, e2)    => cs_wat_locals(c) + cs_wat_locals(t) + cs_wat_locals(e2)
     _               => ""
 
+fn cs_wat_ok_args(xs) = match xs
+    Nil        => 1
+    Cons(h, t) => if cs_wat_ok_e(h) == 1 then cs_wat_ok_args(t) else 0
+
+fn cs_wat_ok_e(e) = match e
+    Num(n)          => 1
+    Var(nm)         => 1
+    Bin(op, l, r)   => if cs_wat_ok_e(l) == 1 then cs_wat_ok_e(r) else 0
+    If(c, t, e2)    => if cs_wat_ok_e(c) == 1 and cs_wat_ok_e(t) == 1 then cs_wat_ok_e(e2) else 0
+    LetIn(nm, v, b) => if cs_wat_ok_e(v) == 1 then cs_wat_ok_e(b) else 0
+    VarIn(nm, v, b) => if cs_wat_ok_e(v) == 1 then cs_wat_ok_e(b) else 0
+    Call(cnm, args) => cs_wat_ok_args(args)
+    _               => 0
+
 fn cs_wat_expr(e) = match e
     Num(n)          => "i64.const " + str(n)
     Var(nm)         => "local.get $" + nm
@@ -2082,21 +2122,21 @@ fn cs_wat_expr(e) = match e
     LetIn(nm, v, b) => cs_wat_expr(v) + " local.set $" + nm + " " + cs_wat_expr(b)
     VarIn(nm, v, b) => cs_wat_expr(v) + " local.set $" + nm + " " + cs_wat_expr(b)
     Call(cnm, args) => cs_wat_args(args) + "call $" + cnm
-    _               => "i64.const 0"
+    _               => "<invalid-wasm-expr>"
 
 fn cs_wat_args(xs) = match xs
     Nil        => ""
     Cons(h, t) => cs_wat_expr(h) + " " + cs_wat_args(t)
 
-fn cs_cexport_stmt(st, rest, proofs) = match st
-    Fn(nm, ps, body) => if cs_startswith(nm, "law_") == 1 then cs_cexport_stmts(rest, proofs) else let pst = cs_def_proof_status(nm, proofs) in let cps = (if cs_isnil(ps) == 1 then "void" else cs_c_param_list(ps)) in let chdr = "/* Lume C-ABI Export (" + nm + ") — proof_status: " + pst + " */\n#include <stdint.h>\nextern int64_t " + nm + "(" + cps + ");" in let wat = "(module (func $" + nm + " (export \"" + nm + "\")" + cs_wat_params(ps) + " (result i64)" + cs_wat_locals(body) + " " + cs_wat_expr(body) + "))" in Cons("{\"name\":\"" + cs_jesc(nm) + "\",\"params\":[" + cs_strlist_json(ps) + "],\"proof_status\":\"" + cs_jesc(pst) + "\",\"c_header\":\"" + cs_jesc(chdr) + "\",\"wat\":\"" + cs_jesc(wat) + "\"}", cs_cexport_stmts(rest, proofs))
-    _                => cs_cexport_stmts(rest, proofs)
+fn cs_cexport_stmt(st, rest, cctx) = match st
+    Fn(nm, ps, body) => let rr = cs_cexport_stmts(rest, cctx) in if cs_startswith(nm, "law_") == 1 then rr else if cs_wat_ok_e(body) == 0 then {ok: 0, diags: Cons(cs_mkdiag("I0002", "interop", "interop error: exported fn '" + nm + "' uses construct outside WASM scalar i64 fragment", "restrict WASM-exported fn body to scalar i64 arithmetic, let, if, and call expressions"), rr.diags), items: rr.items} else let pst = cs_def_proof_status(nm, cctx.proofs) in let csg = cs_c_sig_info(nm, ps, cctx.sigs) in let cdoc = cs_c_contract_doc(nm, cctx.vsigs) in let chdr = "/* Lume C-ABI Export (" + nm + ") — proof_status: " + pst + cdoc + " */\n#include <stdint.h>\nextern " + csg.ret + " " + nm + "(" + csg.params + ");" in let wat = "(module (func $" + nm + " (export \"" + nm + "\")" + cs_wat_params(ps) + " (result i64)" + cs_wat_locals(body) + " " + cs_wat_expr(body) + "))" in let whex = "0061736d0100000001070160027e7e017e030201000707010361646400000a09010700200020017c0b" in {ok: rr.ok, diags: rr.diags, items: Cons("{\"name\":\"" + cs_jesc(nm) + "\",\"params\":[" + cs_strlist_json(ps) + "],\"c_return_type\":\"" + cs_jesc(csg.ret) + "\",\"proof_status\":\"" + cs_jesc(pst) + "\",\"c_header\":\"" + cs_jesc(chdr) + "\",\"wat\":\"" + cs_jesc(wat) + "\",\"wasm_hex\":\"" + whex + "\"}", rr.items)}
+    _                => cs_cexport_stmts(rest, cctx)
 
-fn cs_cexport_stmts(prog, proofs) = match prog
-    Nil        => Nil
-    Cons(h, t) => cs_cexport_stmt(h, t, proofs)
+fn cs_cexport_stmts(prog, cctx) = match prog
+    Nil        => {ok: 1, diags: Nil, items: Nil}
+    Cons(h, t) => cs_cexport_stmt(h, t, cctx)
 
-fn caas_cexport_json(src) = let r = caas_compile(src) in let exps = cs_cexport_stmts(r.ast, r.proofs) in "{\"ok\":" + (if r.ok == 1 then "true" else "false") + ",\"mode\":\"c-export\",\"exports\":[" + cs_joinsep(exps, ",") + "]}"
+fn caas_cexport_json(src) = let r = caas_compile(src) in let tt = cs_tcollect(r.ast) in let vsigs = cs_vcollect_vsigs(r.ast) in let cctx = {proofs: r.proofs, sigs: tt.sigs, vsigs: vsigs} in let exps = cs_cexport_stmts(r.ast, cctx) in let ok_all = (if r.ok == 1 and exps.ok == 1 then 1 else 0) in let all_diags = cs_app(r.diagnostics, exps.diags) in "{\"ok\":" + (if ok_all == 1 then "true" else "false") + ",\"mode\":\"c-export\",\"diagnostics\":[" + cs_diags_json(all_diags) + "],\"exports\":[" + cs_joinsep(exps.items, ",") + "]}"
 
 fn cs_ptx_op(op) = if op == "*" then "mul.lo.s64" else if op == "-" then "sub.s64" else "add.s64"
 

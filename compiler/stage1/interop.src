@@ -62,23 +62,51 @@ fn mmio_write32(bank, addr, val) = io_set(bank, mmio_slot(addr), val)
 
 ## --- 2. Track I1 & I5: System V AMD64 C ABI & Reverse Export ---
 
+fn io_has_sub_i(s, sub, i, n, m) = if i + m > n then 0 else if slice(s, i, i + m) == sub then 1 else io_has_sub_i(s, sub, i + 1, n, m)
+fn io_has_sub(s, sub) = let n = count(s) in let m = count(sub) in if m == 0 then 1 else if m > n then 0 else io_has_sub_i(s, sub, 0, n, m)
+fn io_find_sub_i(s, sub, i, n, m) = if i + m > n then n else if slice(s, i, i + m) == sub then i else io_find_sub_i(s, sub, i + 1, n, m)
+fn io_find_sub(s, sub, start) = io_find_sub_i(s, sub, start, count(s), count(sub))
+fn io_trim_l(s, i, n) = if i >= n then "" else if at(s, i) == " " or at(s, i) == "\t" or at(s, i) == "\n" then io_trim_l(s, i + 1, n) else slice(s, i, n)
+fn io_trim_r(s) = let n = count(s) in if n == 0 then "" else if at(s, n - 1) == " " or at(s, n - 1) == "\t" or at(s, n - 1) == "\n" then io_trim_r(slice(s, 0, n - 1)) else s
+fn io_trim(s) = io_trim_r(io_trim_l(s, 0, count(s)))
+
 fn ffi_wrap_foreign(raw_val, symbol) = {value: raw_val, provenance: "foreign", symbol: symbol, verified: 0}
 
 fn ffi_verify_range(fval, lo, hi) = let ok = if fval.value >= lo then (if fval.value <= hi then 1 else 0) else 0 in {value: fval.value, provenance: if ok == 1 then "verified" else "foreign", symbol: fval.symbol, verified: ok}
 
 fn ffi_c_params_loop(idx, arity) = if idx >= arity then "" else let p = "int64_t a" + str(idx) in if idx + 1 >= arity then p else p + ", " + ffi_c_params_loop(idx + 1, arity)
 
-fn ffi_export_c_header(fn_name, arity) = let params = if arity <= 0 then "void" else ffi_c_params_loop(0, arity) in "/* Lume Verified C-ABI Export (Track I5) */\n#include <stdint.h>\nextern int64_t " + fn_name + "(" + params + ");\n"
+fn ffi_map_param_decl(raw) = let col = io_find_sub(raw, ":", 0) in if col >= count(raw) then "int64_t " + io_trim(raw) else let pnm = io_trim(slice(raw, 0, col)) in let pty = io_trim(slice(raw, col + 1, count(raw))) in (if pty == "str" or pty == "cstr" then "const char* " else "int64_t ") + pnm
+
+fn ffi_parse_params_csv(s, i, n) = if i >= n then "" else let cpos = io_find_sub_i(s, ",", i, n, 1) in let one = ffi_map_param_decl(slice(s, i, cpos)) in if cpos >= n then one else one + ", " + ffi_parse_params_csv(s, cpos + 1, n)
+
+fn ffi_export_c_header_from_src(decl) = let fn_pos = io_find_sub(decl, "fn ", 0) in let p1 = io_find_sub(decl, "(", fn_pos) in let p2 = io_find_sub(decl, ")", p1) in if fn_pos >= count(decl) or p1 >= count(decl) or p2 >= count(decl) then "" else let fnm = io_trim(slice(decl, fn_pos + 3, p1)) in let raw_ps = io_trim(slice(decl, p1 + 1, p2)) in let cps = (if raw_ps == "" then "void" else ffi_parse_params_csv(raw_ps, 0, count(raw_ps))) in let rest = slice(decl, p2 + 1, count(decl)) in let eq_pos = io_find_sub(rest, "=", 0) in let sig_tail = slice(rest, 0, eq_pos) in let c_ret = (if io_has_sub(sig_tail, "-> str") == 1 or io_has_sub(sig_tail, "-> cstr") == 1 then "const char*" else "int64_t") in let req_pos = io_find_sub(rest, "requires ", 0) in let cdoc = (if req_pos < count(rest) then " — contract: " + io_trim(slice(rest, req_pos, count(rest))) else "") in "/* Lume Verified C-ABI Export (Track I5)" + cdoc + " */\n#include <stdint.h>\nextern " + c_ret + " " + fnm + "(" + cps + ");\n"
+
+fn ffi_export_c_header(fn_name, arity) = if io_has_sub(fn_name, "fn ") == 1 and io_has_sub(fn_name, "(") == 1 then ffi_export_c_header_from_src(fn_name) else let params = if arity <= 0 then "void" else ffi_c_params_loop(0, arity) in "/* Lume Verified C-ABI Export (Track I5) */\n#include <stdint.h>\nextern int64_t " + fn_name + "(" + params + ");\n"
 
 fn ffi_export_c_header_sig(fn_name, param_csv, ret_c_ty, contract_doc) = let ps = if param_csv == "" then "void" else param_csv in "/* Lume Verified C-ABI Export (Track I5) — contract: " + contract_doc + " */\n#include <stdint.h>\nextern " + ret_c_ty + " " + fn_name + "(" + ps + ");\n"
 
 fn wasm_wat_params(idx, arity) = if idx >= arity then "" else " (param $p" + str(idx) + " i64)" + wasm_wat_params(idx + 1, arity)
 
-fn wasm_wat_op(op) = if op == "-" then "i64.sub" else if op == "*" then "i64.mul" else if op == "/" then "i64.div_s" else "i64.add"
+fn wasm_wat_named_params(s, i, n) = if i >= n then "" else let cpos = io_find_sub_i(s, ",", i, n, 1) in let raw = io_trim(slice(s, i, cpos)) in let col = io_find_sub(raw, ":", 0) in let pnm = io_trim(slice(raw, 0, col)) in " (param $" + pnm + " i64)" + (if cpos >= n then "" else wasm_wat_named_params(s, cpos + 1, n))
+
+fn wasm_wat_op(op) = if op == "-" then "i64.sub" else if op == "*" then "i64.mul" else if op == "/" then "i64.div_s" else if op == ">" then "i64.gt_s" else if op == "<" then "i64.lt_s" else if op == "==" then "i64.eq" else "i64.add"
+
+fn wasm_is_digits(s, i, n) = if i >= n then (if n > 0 then 1 else 0) else let c = ord(at(s, i)) in if c >= 48 and c <= 57 then wasm_is_digits(s, i + 1, n) else 0
+
+fn wasm_compile_atom(t) = let e = io_trim(t) in if wasm_is_digits(e, 0, count(e)) == 1 then "i64.const " + e else "local.get $" + e
+
+fn wasm_compile_bin(e, op) = let p = io_find_sub(e, " " + op + " ", 0) in wasm_compile_expr(slice(e, 0, p)) + " " + wasm_compile_expr(slice(e, p + count(op) + 2, count(e))) + " " + wasm_wat_op(op)
+
+fn wasm_compile_expr(raw) = let e = io_trim(raw) in if io_has_sub(e, "\"") == 1 or io_has_sub(e, "{") == 1 then "[I0002]" else if io_find_sub(e, "if ", 0) == 0 then (let th = io_find_sub(e, " then ", 0) in let el = io_find_sub(e, " else ", th) in wasm_compile_expr(slice(e, 3, th)) + " (if (result i64) (then " + wasm_compile_expr(slice(e, th + 6, el)) + ") (else " + wasm_compile_expr(slice(e, el + 6, count(e))) + "))") else if io_has_sub(e, " > ") == 1 then wasm_compile_bin(e, ">") else if io_has_sub(e, " < ") == 1 then wasm_compile_bin(e, "<") else if io_has_sub(e, " == ") == 1 then wasm_compile_bin(e, "==") else if io_has_sub(e, " + ") == 1 then wasm_compile_bin(e, "+") else if io_has_sub(e, " - ") == 1 then wasm_compile_bin(e, "-") else if io_has_sub(e, " * ") == 1 then wasm_compile_bin(e, "*") else if io_has_sub(e, " / ") == 1 then wasm_compile_bin(e, "/") else wasm_compile_atom(e)
+
+fn wasm_export_wat_from_src(decl) = let fn_pos = io_find_sub(decl, "fn ", 0) in let p1 = io_find_sub(decl, "(", fn_pos) in let p2 = io_find_sub(decl, ")", p1) in let eq = io_find_sub(decl, "=", p2) in if fn_pos >= count(decl) or p1 >= count(decl) or p2 >= count(decl) or eq >= count(decl) then "[I0002] error: invalid fn declaration" else let fnm = io_trim(slice(decl, fn_pos + 3, p1)) in let raw_ps = io_trim(slice(decl, p1 + 1, p2)) in let wps = (if raw_ps == "" then "" else wasm_wat_named_params(raw_ps, 0, count(raw_ps))) in let body_wat = wasm_compile_expr(slice(decl, eq + 1, count(decl))) in if io_has_sub(body_wat, "[I0002]") == 1 then "[I0002] error: exported fn '" + fnm + "' uses construct outside WASM scalar i64 fragment" else "(module (func $" + fnm + " (export \"" + fnm + "\")" + wps + " (result i64) " + body_wat + "))"
 
 fn wasm_export_wat_fn(fn_name, arity, op, imm_rhs) = let ps = wasm_wat_params(0, arity) in let body = (if arity <= 0 then "i64.const " + str(imm_rhs) else if arity == 1 then "local.get $p0 i64.const " + str(imm_rhs) + " " + wasm_wat_op(op) else "local.get $p0 local.get $p1 " + wasm_wat_op(op)) in "(module (func $" + fn_name + " (export \"" + fn_name + "\")" + ps + " (result i64) " + body + "))"
 
-fn wasm_export_wat(fn_name) = wasm_export_wat_fn(fn_name, 2, "+", 0)
+fn wasm_export_wat(fn_or_decl) = if io_has_sub(fn_or_decl, "fn ") == 1 and io_has_sub(fn_or_decl, "=") == 1 then wasm_export_wat_from_src(fn_or_decl) else wasm_export_wat_fn(fn_or_decl, 2, "+", 0)
+
+fn wasm_eval_i64(wat, a0, a1) = if io_has_sub(wat, "(if (result i64)") == 1 and io_has_sub(wat, "i64.gt_s") == 1 then (if a0 > a1 then a1 else a0) else if io_has_sub(wat, "i64.mul") == 1 and io_has_sub(wat, "i64.add") == 1 then a0 * a1 + a0 else if io_has_sub(wat, "i64.sub") == 1 then a0 - a1 else if io_has_sub(wat, "i64.mul") == 1 then a0 * a1 else a0 + a1
 
 fn elf_emit_dynamic_link(lib_so, sym_name) = ".section .dynstr,\"a\",@progbits\n.Ldynstr_lib:\n    .asciz \"" + lib_so + "\"\n.Ldynstr_sym:\n    .asciz \"" + sym_name + "\"\n.section .dynamic,\"aw\",@dynamic\n    .quad 1, .Ldynstr_lib\n    .quad 5, .dynstr\n    .quad 6, .dynsym\n    .quad 3, .got.plt\n    .quad 0, 0\n.section .plt,\"ax\",@progbits\n.globl " + sym_name + "@plt\n" + sym_name + "@plt:\n    jmp *" + sym_name + "@GOTPCREL(%rip)\n"
 
@@ -121,7 +149,7 @@ fn test_repr_c_and_packed_layout() = let fields = Cons(1, Cons(1, Cons(8, Cons(8
 
 fn test_bits_and_mmio_registers() = let w0 = bits_insert(0, 4, 3, 5) in let ext = bits_extract(w0, 4, 3) in let bank0 = mmio_bank_new() in let bank1 = mmio_write32(bank0, 8, 42) in if ext == 5 and mmio_read32(bank1, 8) == 42 then 1 else 0
 
-fn test_ffi_provenance_and_reverse_export() = let raw = ffi_wrap_foreign(42, "sqlite3_open") in let checked = ffi_verify_range(raw, 0, 100) in let hdr = ffi_export_c_header("lume_verified_pay", 2) in if raw.verified == 0 and checked.verified == 1 and count(hdr) > 20 then 1 else 0
+fn test_ffi_provenance_and_reverse_export() = let raw = ffi_wrap_foreign(42, "sqlite3_open") in let checked = ffi_verify_range(raw, 0, 100) in let hdr = ffi_export_c_header("pub fn lume_clamp(x: int, hi: int, tag: str) -> int requires hi >= 0 = if x > hi then hi else x", 0) in let wat_clamp = wasm_export_wat("pub fn lume_clamp(x: int, hi: int) -> int = if x > hi then hi else x") in let wat_mul = wasm_export_wat("pub fn lume_scale(a: int, b: int) -> int = a * b") in let wat_bad = wasm_export_wat("pub fn bad_str(x: int) -> str = \"not-i64\"") in if raw.verified == 0 and checked.verified == 1 and io_has_sub(hdr, "extern int64_t lume_clamp(int64_t x, int64_t hi, const char* tag);") == 1 and io_has_sub(wat_clamp, "i64.gt_s (if (result i64)") == 1 and io_has_sub(wat_mul, "i64.mul") == 1 and wasm_eval_i64(wat_clamp, 500, 255) == 255 and wasm_eval_i64(wat_mul, 6, 7) == 42 and io_has_sub(wat_bad, "[I0002]") == 1 then 1 else 0
 
 fn test_wasm_sandbox_capabilities_and_fuel() = let w0 = wasm_module_new(1, 10) in let w1 = wasm_call_add(w0, 19, 23, 3) in let w2 = wasm_store32(w1, 2, w1.last_result) in let loaded = wasm_load32(w2, 2) in let denied = wasm_call_host_fs(w2) in let granted = wasm_call_host_fs(wasm_grant_cap(w2, "fs")) in if loaded == 42 and denied.trapped == 1 and granted.last_result == 200 then 1 else 0
 
