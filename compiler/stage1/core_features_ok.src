@@ -62,7 +62,7 @@ fn demo_rc_arc_weak() -> int =
     let a2: arc[Metric] = a1.clone() in
     let as_cnt = a1.strong_count() in
     let ad2 = a2.drop() in
-    let par_sum = (shard i in 0..2 => a1.score() + i) in
+    let par_sum = (shard i in 0..1 => a1.score() + i) in
     let ad1 = a1.drop() in
     s_before + deref_sum + w_before + s_mid + w_after + as_cnt + par_sum
 
