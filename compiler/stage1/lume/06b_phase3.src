@@ -1983,7 +1983,7 @@ fn t4_trait_lookup(tnm, traits) = match traits
 
 fn t4_has_mth(opnm, ar, mths) = match mths
     Nil        => 0
-    Cons(m, r) => if m.nm == opnm and len(m.ps) == ar then 1 else t4_has_mth(opnm, ar, r)
+    Cons(m, r) => if m.op == opnm and m.ar == ar then 1 else t4_has_mth(opnm, ar, r)
 
 fn t4_chk_impl_ops(tnm, tty, ops, mths) = match ops
     Nil         => 1

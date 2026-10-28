@@ -15,7 +15,7 @@
 fn parseparams(ts) = if headtext(ts) == ")" then {items: Nil, tys: Nil, plist: Nil, rest: droponce(ts)} else parseparamk(ts)
 fn parseparamk(ts) = if headtext(ts) == "comptime" then parseparam(headtext(droponce(ts)), 1, droponce(droponce(ts))) else if headtext(ts) == "own" then parseparam(headtext(droponce(ts)), 2, droponce(droponce(ts))) else if headtext(ts) == "mut" then parseparam(headtext(droponce(ts)), 3, droponce(droponce(ts))) else parseparam(headtext(ts), 0, droponce(ts))
 fn parseparam(nm, ct, ts) = if headtext(ts) == ":" then parseparamt(nm, ct, parsetype1(droponce(ts))) else parammore(nm, TyAny, ct, ts)
-fn parseparamt(nm, ct, r) = if headtext(r.rest) == "where" then (let pr = expr(droponce(r.rest)) in parammore(nm, TyRefine(r.node, nm, pr.node), ct, pr.rest)) else parammore(nm, r.node, ct, r.rest)
+fn parseparamt(nm, ct, r) = if headtext(r.rest) == "where" then (let pr = expr(droponce(r.rest)) in parammore(nm, TyRefine(r.node, pr.node), ct, pr.rest)) else parammore(nm, r.node, ct, r.rest)
 fn parammore(nm, ty, ct, ts) = if headtext(ts) == "," then parammcons(nm, ty, ct, parseparams(droponce(ts))) else parammend(nm, ty, ct, skiprp(ts))
 fn parammcons(nm, ty, ct, rr) = {items: gaddrt(nm, ct, rr.items), tys: Cons(ty, rr.tys), plist: Cons({cf: ct, pn: nm, pt: ty}, rr.plist), rest: rr.rest}
 fn parammend(nm, ty, ct, rest) = {items: gaddrt(nm, ct, Nil), tys: Cons(ty, Nil), plist: Cons({cf: ct, pn: nm, pt: ty}, Nil), rest: rest}

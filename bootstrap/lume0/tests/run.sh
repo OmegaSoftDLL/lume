@@ -1246,11 +1246,11 @@ EOF
     if [ -s "$ntmp/cf_ok.s" ]; then "$ntmp/lasm" <"$ntmp/cf_ok.s" >"$ntmp/cf_ok.elf" 2>/dev/null; chmod +x "$ntmp/cf_ok.elf"; fi
     awk '/^double_pos:/{p=1} p{print} p&&/^    ret$/{exit}' "$ntmp/cf_ok.s" >"$ntmp/cf_dpos.s"
     awk '/^shift_pos:/{p=1} p{print} p&&/^    ret$/{exit}' "$ntmp/cf_ok.s" >"$ntmp/cf_spos.s"
-    printf 'type NonZeroSq = int where self > 0\nfn sq_pos(x: int) -> NonZeroSq = x * x\nprint sq_pos(0)\n' >"$ntmp/cf_rt_trap.src"
+    printf 'type Non49 = int where self != 49\nfn sq_non49(x: int) -> Non49 = x * x\nprint sq_non49(7)\n' >"$ntmp/cf_rt_trap.src"
     "$ntmp/lc" <"$ntmp/cf_rt_trap.src" >"$ntmp/cf_rt_trap.s" 2>/dev/null
     if [ -s "$ntmp/cf_rt_trap.s" ]; then "$ntmp/lasm" <"$ntmp/cf_rt_trap.s" >"$ntmp/cf_rt_trap.elf" 2>/dev/null; chmod +x "$ntmp/cf_rt_trap.elf"; fi
     _cf_trap_rc=0
-    "$ntmp/cf_rt_trap.elf" >/dev/null 2>"$ntmp/cf_rt_trap.err" || _cf_trap_rc=$?
+    if [ -x "$ntmp/cf_rt_trap.elf" ]; then "$ntmp/cf_rt_trap.elf" >/dev/null 2>"$ntmp/cf_rt_trap.err" || _cf_trap_rc=$?; fi
     printf 'type Metric = record base: int, weight: int\ntrait Summary { fn score(m: Metric) -> int\n fn scaled(m: Metric, factor: int) -> int }\nimpl Summary for Metric { fn score(m: Metric) -> int = m.base }\nprint 0\n' >"$ntmp/cf_b_t400.src"
     "$ntmp/lc" <"$ntmp/cf_b_t400.src" >"$ntmp/cf_b_t400.s" 2>"$ntmp/cf_b_t400.err"; cfb400=$?
     printf 'type Metric = record base: int\ntype Other = record v: int\ntrait Summary { fn score(m: Metric) -> int }\nimpl Summary for Metric { fn score(m: Metric) -> int = m.base }\nfn bad(o: Other) -> int = o.score()\nprint 0\n' >"$ntmp/cf_b_t401.src"
@@ -1280,7 +1280,7 @@ if [ -z "${LUME0_ASAN:-}" ]; then
     _p35_json=$(../../lume agent check "$_p35_tmp" 2>/dev/null || true)
     _p35_unit_ok=1
     if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ]; then
-        _p35_tests=$(../../lume test ../../compiler/stage1/p35_ok.src 2>&1 || true)
+        _p35_tests=$(LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/p35_ok.src 2>&1 || true)
         if ! printf '%s' "$_p35_tests" | grep -q "2 passed, 0 failed"; then _p35_unit_ok=0; fi
     fi
     if [ "$_p35_unit_ok" = 1 ] && printf '%s' "$_p35_json" | grep -q '"ok":true' && printf '%s' "$_p35_json" | grep -q '"code":"P35","severity":"warning"'; then ok "P35 (#208): public API without matching test emits a non-blocking structured warning"; else bad "P35 (#208): missing public API test diagnostic"; printf '%s\n' "${_p35_tests:-}" "$_p35_json"; fi
