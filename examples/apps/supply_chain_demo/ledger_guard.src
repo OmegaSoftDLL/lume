@@ -8,9 +8,9 @@ pub fn authorize_payout(vault: int, payout: int, reserve_min: int) -> int requir
 @bound(cycles: 24)
 pub fn clamp_fee(raw_fee: int, cap: int) -> int requires raw_fee >= 0 and cap >= 0 ensures result >= 0 and result <= cap = if raw_fee > cap then cap else raw_fee
 
-law vault_never_below_reserve(vault: int, payout: int, reserve_min: int) = if vault >= payout + reserve_min and payout > 0 and reserve_min >= 0 then authorize_payout(vault, payout, reserve_min) >= reserve_min else 1 == 1
+law vault_never_below_reserve(vault: int, payout: int, reserve_min: int) = if vault >= payout + reserve_min then authorize_payout(vault, payout, reserve_min) >= reserve_min else 1 == 1
 
-law conservation_of_escrow(vault: int, payout: int, reserve_min: int) = if vault >= payout + reserve_min and payout > 0 and reserve_min >= 0 then authorize_payout(vault, payout, reserve_min) + payout == vault else 1 == 1
+law conservation_of_escrow(vault: int, payout: int, reserve_min: int) = authorize_payout(vault, payout, reserve_min) + payout == vault
 
 fn test_authorize_payout() = authorize_payout(5000, 1200, 1000) == 3800
 fn test_clamp_fee() = clamp_fee(45, 25) == 25

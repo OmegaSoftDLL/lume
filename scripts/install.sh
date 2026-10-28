@@ -11,6 +11,7 @@ set -eu
 
 PREFIX="${LUME_INSTALL_PREFIX:-$HOME/.lume}"
 FROM_LOCAL=""
+FROM_DIR=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -32,8 +33,17 @@ while [ $# -gt 0 ]; do
             FROM_LOCAL=${1#--from-local=}
             shift
             ;;
+        --from-dir)
+            [ $# -ge 2 ] || { echo "install.sh: --from-dir requires a binary directory" >&2; exit 64; }
+            FROM_DIR=$2
+            shift 2
+            ;;
+        --from-dir=*)
+            FROM_DIR=${1#--from-dir=}
+            shift
+            ;;
         *)
-            echo "usage: install.sh [--prefix <dir>] [--from-local <repo_dir>]" >&2
+            echo "usage: install.sh [--prefix <dir>] [--from-local <repo_dir>] [--from-dir <bin_dir>]" >&2
             exit 64
             ;;
     esac
@@ -76,7 +86,7 @@ if [ -f "$FROM_LOCAL/evolve/maintainers.pub" ]; then
     cp "$FROM_LOCAL/evolve/maintainers.pub" "$PREFIX/evolve/maintainers.pub"
 fi
 
-SRC_BIN="${LUME_BIN_DIR:-$FROM_LOCAL/build/bin}"
+SRC_BIN="${FROM_DIR:-${LUME_BIN_DIR:-$FROM_LOCAL/build/bin}}"
 if [ -d "$SRC_BIN" ]; then
     for _b in "$SRC_BIN"/*; do
         if [ -f "$_b" ] && [ -x "$_b" ]; then
@@ -84,6 +94,10 @@ if [ -d "$SRC_BIN" ]; then
             chmod +x "$PREFIX/build/bin/$(basename -- "$_b")"
         fi
     done
+    if [ -f "$PREFIX/build/bin/lc" ] && [ ! -f "$PREFIX/build/bin/lumec" ]; then
+        cp "$PREFIX/build/bin/lc" "$PREFIX/build/bin/lumec"
+        chmod +x "$PREFIX/build/bin/lumec"
+    fi
 fi
 
 if [ -x "$FROM_LOCAL/bootstrap/lume0/lume0" ]; then

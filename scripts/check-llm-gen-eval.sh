@@ -167,10 +167,10 @@ done
 REPAIR_JSON=$("$LUME" agent repair "$T4_A1" 2>/dev/null || true)
 REPAIR_OK=0
 case "$REPAIR_JSON" in
-    *'"code":"V0001"'*'"fixit":'*) REPAIR_OK=1 ;;
+    *'"code":"V0001"'*'"patch":'*) REPAIR_OK=1 ;;
 esac
 if [ "$REPAIR_OK" -ne 1 ]; then
-    echo "check-llm-gen-eval: lume agent repair did not emit V0001 counterexample + fixit on $T4_A1" >&2
+    echo "check-llm-gen-eval: lume agent repair did not emit V0001 counterexample + patch on $T4_A1" >&2
     exit 1
 fi
 

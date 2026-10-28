@@ -47,45 +47,53 @@ async fn pipeline_async(x: int) -> int =
 fn demo_async() -> int =
     block_on(pipeline_async(3))
 
+fn obs(v: int) -> int =
+    let z = printval(v) in v
+
 fn demo_rc_arc_weak() -> int =
     let r1: rc[Metric] = rc(Metric{base: 14, weight: 3}) in
     let r2: rc[Metric] = r1.clone() in
     let w: weak[Metric] = r1.downgrade() in
-    let s_before = r1.strong_count() in
-    let deref_sum = r1.base + r2.weight + r1.score() in
-    let w_before = (w.upgrade(Metric{base: 0, weight: 0})).score() in
+    let s_before = obs(r1.strong_count()) in
+    let deref_sum = obs(r1.base + r2.weight + r1.score()) in
+    let w_before = obs((w.upgrade(Metric{base: 0, weight: 0})).score()) in
     let d2 = r2.drop() in
-    let s_mid = r1.strong_count() in
+    let s_mid = obs(r1.strong_count()) in
     let d1 = r1.drop() in
-    let w_after = (w.upgrade(Metric{base: 15, weight: 2})).score() in
+    let w_after = obs((w.upgrade(Metric{base: 15, weight: 2})).score()) in
     let a1: arc[Metric] = arc(Metric{base: 5, weight: 2}) in
     let a2: arc[Metric] = a1.clone() in
-    let as_cnt = a1.strong_count() in
+    let as_cnt = obs(a1.strong_count()) in
     let ad2 = a2.drop() in
     let par_sum = (shard i in 0..2 => a1.score() + i) in
     let ad1 = a1.drop() in
-    s_before + deref_sum + w_before + s_mid + w_after + as_cnt + par_sum
+    par_sum
 
 fn shard_work(x: int) -> int / pure = x * 3
 
 fn demo_shard() -> int =
     let sr = shard(shard_work, 4, 6) in
+    let sr_v = obs(sr.sum) in
     let sl = shard i in 10..20 => i * 2 in
-    sr.sum + sl
+    sl
 
 fn poly_top(x) = x
 
 fn demo_let_polymorphism() -> int / {async} =
     let id = fn(x) => x in
-    let n1 = id(25) in
+    let n1 = obs(id(25)) in
     let s1 = id("ok") in
-    let n2 = poly_top(10) in
+    let c1 = obs(count(s1)) in
+    let n2 = obs(poly_top(10)) in
     let s2 = poly_top("lume") in
+    let c2 = obs(count(s2)) in
     let p: promise[int] = promise(0) in
     let pr = p.resolve(17) in
+    let pv = obs(p.await) in
     let sig: signal[int] = signal(5) in
     let sr = sig.set(8) in
-    n1 + count(s1) + n2 + count(s2) + p.await + sig.get() + sig.version()
+    let sv = obs(sig.get()) in
+    sig.version()
 
 print demo_traits()
 print demo_closures(5)
