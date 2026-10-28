@@ -34,6 +34,9 @@ dataflow language with JSON source, Zenodo 2025), **DSPy** (38.8k★, not a lang
 5. **Effect handlers for `sample`/`observe`/async** (Koka) and **content-addressed definitions** (Unison). → roadmap Stage 3 (handlers) and Stage 2 (content-addressed store already planned; extend to per-definition hashing).
 6. **A machine-checked core** — already planned (Lean, Stage 5); the scan reinforces doing a small one early.
 7. **Cross-platform incl. Windows** — add to the target matrix explicitly (Stage 1/5).
+8. **LLM-generation eval as a CI gate** (rjreeves/lume): measure tokens/attempts for a model to
+   emit Lume that compiles *and* proves, as a regression gate on surface/syntax changes —
+   extends the warning below (a clean grammar is not enough). → tracked in #230.
 
 ## Validation from the scan
 
@@ -46,6 +49,33 @@ dataflow language with JSON source, Zenodo 2025), **DSPy** (38.8k★, not a lang
 - **"Designed for LLMs" is not enough.** Simon Willison's one-shot NanoLang test produced code that did not compile (simonwillison.net/2026/Jan/19/nanolang/). A model has not seen Lume, so the AI-author loop needs docs-in-context, an example corpus, and the JSON-diagnostic repair loop — not just a clean grammar. → reinforces the `lume agent` priority in Stage 1.
 - **Stars precede openness/usability.** Mojo was closed for years; many high-star languages have no release. Lume should keep shipping runnable increments (as it is doing) rather than marketing ahead of substance.
 - **Scope your security claims.** NanoLang is candid that its sandbox is not a security boundary. Lume's anti-reverse-engineering (P33) and capability-OS claims must stay precisely scoped.
+
+## Name-homonym scan on GitHub (2026-10-27)
+
+A scan of GitHub projects that share our name ("Lume"/"Lumi"/"Lumen"/"Luma") found **no feature Lume
+lacks**: on the language-design axis Lume is ahead of every homonym (none has a sound decision
+procedure, self-hosting with native-ELF emission, or provenance tracking). Kept here as naming and
+competitive intelligence.
+
+| Project | What it is | Verdict for Lume |
+|---|---|---|
+| **lumeland/lume** — github.com/lumeland/lume (2.3k★, active) | Static-site generator for Deno; executable `_config.js`; ordered `process`/`preprocess` passes by extension | Not a language. **Dominates search for "lume"/"lume lang"** — the main discoverability risk. Passes/config-as-code are generic; nothing to take. |
+| **lume/lume** — github.com/lume/lume (1.5k★) | 3D/AR/VR toolkit; reactive web-component "behaviors" | Different domain (web UI). Nothing transfers. |
+| **Lumen** — github.com/alliecatowo/lumen (0★, active, Rust) | Self-styled "AI-native language" for LLM agents; effects in signatures, `@deterministic`, `.lm.md` markdown source | Same slogan as us. Effects-in-signature is a **subset of our effect rows (`[E0200]`)**; `@deterministic` is **subsumed** (our `/ pure` already forbids clock/rand/uuid). Uses `.lm`. |
+| **rjreeves/lume** — github.com/rjreeves/lume (0★) | Small statically-checked script language "optimised for AI generation"; `ai-eval.ps1`, `lume-api.json`, versioned system prompt | Exact homonym, same niche. **One genuinely new idea** → the LLM-generation eval gate (gap §8 above). |
+| **Lumi** — github.com/meircif/lumi-lang (16★) | Compiles via C; tiered references; per-type integer-overflow policy; built-in tests/mocking; `.lm` | Overflow-per-type **already covered** by our `+%`/`+|`/`@overflow`; tiered refs weaker than our linear ownership (`[O0001]`). |
+| **Luma** — github.com/Luma-Programming-Language/Luma (89★, self-hosted→C) | `#takes_ownership`/`#returns_ownership` annotations instead of lifetimes | Our linear ownership is stronger; annotation-ownership is a lighter subset. Nothing to take. |
+| **Lumina** — github.com/luminalang/lumina (126★, Rust) | Functional; reflection via const-folding after monomorphisation (a macro alternative) | Same idea as our **comptime**; already have it. |
+| Others — Lumen/Firefly (BEAM→native, **archived** 3.6k★), laravel/lumen (PHP, **archived**), rxi/lume (Lua lib), AAsteria/Lumi (λ-calculus) | — | Domain-irrelevant or dead; only naming noise. |
+
+No Spanish-language "Lumi/Lumen" project was found. Lume uses the **`.lume`** source extension, so there
+is **no extension collision** with the `.lm` homonyms.
+
+### Positioning (decision 2026-10-27)
+"AI-first" alone is contested: two 0★ homonyms (`alliecatowo/lumen`, `rjreeves/lume`) use the same
+slogan, and `lumeland/lume` owns the search term. Lume therefore leads with what is **unique and
+verifiable** — a **sound `QF_LIA` proof layer**, **self-hosting with zero C and native-ELF emission**,
+and **provenance tracking** — not the slogan. README, GitHub topics and taglines state these first.
 
 Sources: the GitHub repos above, modular.com/blog/mojo-open-source, simonwillison.net/2026/Jan/19/nanolang/
 and /2026/Aug/18/mojo-is-now-open-source/, zenodo.org/records/17826541.
