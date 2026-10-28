@@ -20,7 +20,7 @@ the worklist is the companion tracking issue. It composes with `docs/26` (univer
 The no-theater rule applies throughout: a systems brick is **not "done" until it runs on real
 hardware or a faithful emulator (QEMU)** — not when it emits plausible bytes or a model.
 
-## Today (verified — K0–K9 shipped in `#227` & `#193`)
+## Today (verified — real freestanding boot; K0–K5 + serial real, K6–K9 partly modelled)
 Lume now compiles both **Linux user-space x86-64 ELFs** and **bare-metal `@freestanding` x86-64 bootable kernel images** (`lume_os.img`, `examples/apps/lume_os/kernel_qemu.src`):
 - **K0 (`@freestanding` codegen) & K1 (syscall-free runtime):** When a compilation unit declares `@freestanding`, `06b_phase3.src` preserves the `OSig` (`freef == 1`) and `05_codegen.src` emits `.kernel`, initializes a physical frame arena at `0x200000..0x3F0000`, emits `runtime_krn_tail` (zero `syscall` instructions in the entire `.s` output), writes serial output to COM1 (`0x3F8`), and exits cleanly via `isa-debug-exit` (`0xF4`) + `cli; hlt`.
 - **K2 (Privileged/system ISA in `lasm.src`):** `lasm.src` encodes `cli`, `sti`, `hlt`, `iretq`, `rdmsr`, `wrmsr`, `pause`, `mfence`, `outb`, `inb`, `int $imm8`, `lgdt`, `lidt`, `invlpg`, `movq %crN, %reg` / `movq %reg, %crN` (`%cr0`, `%cr2`, `%cr3`, `%cr4`, `%cr8`), `lock xaddq`, `lock cmpxchgq`, and `xchgq`.
@@ -29,6 +29,18 @@ Lume now compiles both **Linux user-space x86-64 ELFs** and **bare-metal `@frees
 - **K5 (Bootable x86-64 disk image in `lasm.src`) & K6 (4-level x86-64 page tables + `cap[Page]`):** When `.kernel` is present, `lasm.src` (`asmkernel`) emits a raw bootable x86-64 disk image with a 512-byte MBR bootloader (`0x7C00`) that reads 64 sectors via BIOS `INT 0x13 AH=0x42` into `0x8000`, zeroes and populates 4-level x86-64 page tables (`PML4` at `0x1000`, `PDPT` at `0x2000`, `PD` at `0x3000` identity-mapping `0..4 MiB`), enables PAE + `IA32_EFER.LME` + 64-bit GDT + `CR0.PG|PE`, transitions to 64-bit Long Mode, and jumps to `_start` at `0x8000` with `CR3 = 0x1000` (`4096`) and `cpu_invlpg`.
 - **K7 & `#193` (Hardware atomics, spinlocks & real OS multi-process parallelism):** `atomic_xadd64` (`lock xaddq`), `spinlock_acquire` (`lock cmpxchgq` + `pause`), `spinlock_release` (`mfence` + store `0`), and `par_fork_scale2` / `par_map_scale_os` (`sys_fork` + `sys_pipe` + `sys_wait4` running concurrent worker processes with distinct kernel PIDs in `compiler/stage1/concurrency.src`).
 - **K8 (Drivers) & K9 (`lume-os` booting on QEMU):** 16550A UART COM1 (`0x3F8`) serial driver and `examples/apps/lume_os/kernel_qemu.src` booted in `qemu-system-x86_64` in CI, verifying `CR3=4096`, hardware `int $32` + `iretq`, volatile MMIO, `lock xaddq`, and `QF_LIA`-verified kernel allocator/scheduler/IPC services.
+
+**Still modelled — not yet hardware-real (tracked in `#227` / `#193`).** Genuinely real above: the
+freestanding boot (K0/K1), privileged ISA (K2), volatile MMIO (K3), IDT + timer ISR + `iretq` (K4),
+the bootable MBR image with boot-time 4-level identity page tables + long-mode transition (K5), the
+COM1 serial driver (K8-serial), real atomics/spinlocks, and real OS multi-process parallelism
+(`#193`, `fork`/`pipe`/`wait4`, user-space) — all exercised by the QEMU boot in CI. **Not yet real:**
+`cap[Page]` as an MMU-enforced, proven no-double-map invariant at runtime (today a record + static
+check, not a live MMU remap); **kernel SMP** — secondary-core bring-up (INIT–SIPI–SIPI) and a
+scheduler switching 2+ real tasks across real cores on the metal (today the kernel scheduler returns
+computed values); **kernel IPC** (`ipc_send_checked` is a record); and **hardware-IRQ drivers** —
+APIC/timer (today the ISR is driven by a software `int $32`, not a hardware timer IRQ). So the track
+is a real freestanding boot, not yet the full K0–K9.
 
 ## Sequencing & entry point (decided 2026-10-28)
 This track is **in the roadmap, not parked** — it enters in the sequence below. Its only hard
