@@ -931,7 +931,7 @@ PY
     LUME_BIN_DIR="$ntmp" ../../lume agent kernel ../../compiler/stage1/phase4_ai_ok.src >"$ntmp/p4_kern.json" 2>/dev/null || true
     printf 'kernel fn horner_quad(x: int, a: int, b: int, c: int) -> int / gpu = let u = (a * x) + b in (u * x) - c\nprint 0\n' >"$ntmp/p4_kern2.src"
     LUME_BIN_DIR="$ntmp" ../../lume agent kernel "$ntmp/p4_kern2.src" >"$ntmp/p4_kern2.json" 2>/dev/null || true
-    printf 'kernel fn piecewise_mod_clamp(x: int, lo: int, hi: int) -> int / gpu = let m = (x * x) % 10 in if m < lo then lo else if m > hi then hi else m\nprint 0\n' >"$ntmp/p4_kern3.src"
+    printf '%s\n' 'kernel fn piecewise_mod_clamp(x: int, lo: int, hi: int) -> int / gpu = let m = (x * x) % 10 in if m < lo then lo else if m > hi then hi else m' 'print 0' >"$ntmp/p4_kern3.src"
     LUME_BIN_DIR="$ntmp" ../../lume agent kernel "$ntmp/p4_kern3.src" >"$ntmp/p4_kern3.json" 2>/dev/null || true
     printf 'kernel fn bad_k_rec(x: int) -> int / gpu = let r = {a: x} in x\nprint 0\n' >"$ntmp/p4_bad_krec.src"
     LUME_BIN_DIR="$ntmp" ../../lume agent kernel "$ntmp/p4_bad_krec.src" >"$ntmp/p4_bad_krec.json" 2>/dev/null || true
