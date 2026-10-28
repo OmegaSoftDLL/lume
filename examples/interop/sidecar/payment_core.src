@@ -1,0 +1,13 @@
+## payment_core.src — Verified Lume Sidecar Core (docs/22-adoption.md G2, #196).
+## Exposes QF_LIA-proven C-ABI and WebAssembly entry points for zero-migration host integration.
+
+@bound(cycles: 32)
+pub extern "c" fn settle_transfer(balance: int, amount: int, fee: int) -> int requires balance >= amount + fee and amount > 0 and fee >= 0 ensures result >= 0 and result == balance - amount - fee = balance - amount - fee
+
+@bound(cycles: 24)
+pub extern "c" fn batch_checksum(settled: int, reserve: int) -> int requires settled >= 0 and reserve >= 0 ensures result >= settled and result >= reserve = settled + reserve
+
+law settlement_conserves_value(balance: int, amount: int, fee: int) = if balance >= amount + fee and amount > 0 and fee >= 0 then settle_transfer(balance, amount, fee) + amount + fee == balance else 1 == 1
+
+print settle_transfer(1000, 250, 15)
+print batch_checksum(735, 265)
