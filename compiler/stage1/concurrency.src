@@ -57,6 +57,36 @@ fn par_count_above(xs, thresh) = match xs
     Nil        => 0
     Cons(h, t) => (if h > thresh then 1 else 0) + par_count_above(t, thresh)
 
+## --- Track S / #193 & K7: Real OS Multi-Process Parallelism (`fork` + `pipe` + `waitpid`) & Hardware Atomics ---
+## Executes worker partitions in separate kernel processes on native x86-64 Linux and joins results over
+## OS pipes (`sys_pipe`, `sys_fork`, `sys_wait4`) while returning real child kernel PIDs (`child_pid != parent_pid`).
+
+fn chan_os_new() = let pk = os_pipe_new() in {rfd: pk / 10000, wfd: pk % 10000, sent: 0, recvd: 0}
+
+fn chan_os_send(ch, val) = let ok = os_pipe_write_int(ch.wfd, val) in {rfd: ch.rfd, wfd: ch.wfd, sent: ch.sent + ok, recvd: ch.recvd}
+
+fn chan_os_recv(ch) = let v = os_pipe_read_int(ch.rfd) in {val: v, ch: {rfd: ch.rfd, wfd: ch.wfd, sent: ch.sent, recvd: ch.recvd + 1}}
+
+fn par_fork_worker_scale(x, factor) = let ch = chan_os_new() in let pid = os_fork() in if pid == 0 then (let cpid = os_getpid() in let s1 = chan_os_send(ch, cpid) in let s2 = chan_os_send(s1, x * factor) in os_exit(0)) else {pid: pid, ch: ch}
+
+fn par_join_worker(w) = let r_pid = chan_os_recv(w.ch) in let r_val = chan_os_recv(r_pid.ch) in let st = os_waitpid(w.pid) in {worker_pid: r_pid.val, val: r_val.val, exit_status: st}
+
+## Spawns 2 concurrent OS child worker processes in parallel BEFORE joining either, proving multi-core / multi-process concurrency.
+fn par_fork_scale2(a, b, factor) = let parent_pid = os_getpid() in let w1 = par_fork_worker_scale(a, factor) in let w2 = par_fork_worker_scale(b, factor) in let j1 = par_join_worker(w1) in let j2 = par_join_worker(w2) in {parent_pid: parent_pid, worker1_pid: j1.worker_pid, worker2_pid: j2.worker_pid, val1: j1.val, val2: j2.val, sum: j1.val + j2.val}
+
+fn par_spawn_list_scale(xs, factor) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons(par_fork_worker_scale(h, factor), par_spawn_list_scale(t, factor))
+
+fn par_join_list_vals(ws) = match ws
+    Nil        => Nil
+    Cons(w, t) => let j = par_join_worker(w) in Cons(j.val, par_join_list_vals(t))
+
+fn par_map_scale_os(xs, factor) = let ws = par_spawn_list_scale(xs, factor) in par_join_list_vals(ws)
+
+## Hardware atomic fetch-and-add (`lock xaddq`) and ticket/TTS spinlock critical section (`K7` + `#193`)
+fn par_atomic_inc_under_spinlock(lock_addr, counter_addr, delta) = let acq = spinlock_acquire(lock_addr) in let prev = atomic_xadd64(counter_addr, delta) in let rel = spinlock_release(lock_addr) in prev + delta
+
 ## --- unit tests (`lume test compiler/stage1/concurrency.src`) ---
 fn test_chan_fifo_send_and_recv() = let c0 = chan_new(4) in let c1 = chan_send(c0, 10) in let c2 = chan_send(c1, 25) in let r1 = chan_recv(c2, 0) in let r2 = chan_recv(r1.ch, 0) in let r3 = chan_recv(r2.ch, 99) in r1.ok == 1 and r1.val == 10 and r2.ok == 1 and r2.val == 25 and r3.ok == 0 and r3.val == 99 and chan_len(r2.ch) == 0
 

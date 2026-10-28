@@ -17,11 +17,7 @@ rule (`docs/28`): no brick is "done" until the real thing runs, with its guarant
 1. **`#191` — real interop (FFI linking + C-ABI / WASM export).** *(Done — System V AMD64 `extern "c" fn` unboxing/boxing trampolines and `@export("C")` / `pub extern "c" fn` C-ABI entrypoints in `05_codegen.src`, dynamic ELF64 `PT_INTERP`/`PT_DYNAMIC`/`DT_NEEDED`/PLT/GOT emission in `lasm.src`, `[ffi] libs` + `[E0200]` capability check in `lmod.src`, `lume build --link <lib.so|lib.a>` and `-o <out.a|out.so|out.wat|out.wasm>` + `--emit-c-header`, and `[I0002]` WASM fragment diagnostics in `lcaas.src`/`interop.src`.)*
    `#191` is **not [HARD] for the kernel** — a from-scratch kernel uses no C FFI.
 
-2. **`#227` — systems & kernels, K0→K9 on x86-64** (`docs/27`). **[PRIORITY]** — the flagship
-   proof-carrying kernel, the pitch no one else can make. Its only **[HARD]** prerequisite is the
-   x86-64 native backend, **which already ships**, so it enters **right after `#191`**. Internal order
-   is fixed by `docs/27` (K0 freestanding → … → K9 boots on QEMU). Note: **K7 closes `#193`** (real
-   parallel runtime) and **K0 is the freestanding codegen** that `#206`'s bare-metal target then uses.
+2. **`#227` — systems & kernels, K0→K9 on x86-64** (`docs/27`). *(Done — `@freestanding` zero-syscall codegen & physical frame allocator at `0x200000` (K0/K1), system ISA `cli`/`sti`/`hlt`/`iretq`/`lgdt`/`lidt`/`invlpg`/`movq %crN`/`outb`/`inb`/`int $imm8`/`lock xaddq`/`lock cmpxchgq` and `.kernel` MBR + 4-level x86-64 page-table Long Mode bootloader in `lasm.src` (K2/K5/K6), volatile MMIO & hardware 64-bit IDT + `@interrupt` ISR lowering in `05_codegen.src` (K3/K4), real OS multi-process parallelism (`sys_fork` + `sys_pipe` + `sys_wait4`) & hardware atomics/spinlocks in `concurrency.src` (K7, closing `#193`), COM1 16550A UART driver (K8), and `examples/apps/lume_os/kernel_qemu.src` booting in `qemu-system-x86_64` in CI (K9).)*
 
 3. **`#206` — universal targets** (ARM64/Apple Silicon, Windows/PE, RISC-V, bare-metal). Split by
    dependency:

@@ -126,11 +126,14 @@ Every Phase 3 brick obeys the project's non-negotiable rules:
 - **S2 — Typed channels (`chan[T]`), `select`, and `par for` / `par map` ✅**
   - Bounded and unbounded `chan[T]` channels (`chan_new`, `chan_unbounded`, `chan_send`, `chan_recv`,
     `chan_close` in `compiler/stage1/concurrency.src`) transferring messages FIFO with capacity and
-    close-state enforcement.
+    close-state enforcement, plus real OS pipe-backed channels (`chan_os_new`, `chan_os_send`,
+    `chan_os_recv` via `sys_pipe`).
   - Deterministic `select` (`chan_select2`, `chan_select_timeout`) over channel receives and deadlines
     driven by a logical-time schedule seed.
-  - Data-parallel `par_for_sum_range`, `par_map_scale`, `par_map_add`, `par_sum`, and `par_count_above`
-    combinators in `compiler/stage1/concurrency.src`.
+  - Data-parallel `par_for_sum_range`, `par_map_scale`, `par_map_add`, `par_sum`, `par_count_above`,
+    and real OS multi-process parallel execution (`par_fork_scale2`, `par_map_scale_os` via
+    `sys_fork` + `sys_pipe` + `sys_wait4` running workers in separate kernel processes with distinct
+    PIDs, plus hardware `lock xaddq` `atomic_xadd64` and `spinlock_acquire`/`spinlock_release`, `#193`).
   - *Ref: Go channels/`select`, Rayon data parallelism.*
 
 - **S3 — `std.actor`, Erlang-style `supervisor`, and `std.time.logical` ✅**

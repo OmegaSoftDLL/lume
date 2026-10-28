@@ -1,0 +1,19 @@
+## Stage 5 Capstone (`lume-os` K0-K9): Real Bare-Metal x86-64 Kernel Image for QEMU (`#227`)
+## Compiled with `lume build examples/apps/lume_os/kernel_qemu.src -o lume_os.img`.
+## Executes in 64-bit Long Mode at physical `0x8000` with 4-level page tables (`CR3=0x1000`),
+## zero Linux syscalls (`grep -c syscall == 0`), physical frame allocator at `0x200000`,
+## real hardware IDT + `int $32` + `@interrupt` + `iretq`, volatile MMIO, `lock xaddq` + spinlocks,
+## COM1 16550A UART (`0x3F8`), and QF_LIA-verified kernel memory/scheduler/IPC services.
+
+use interop
+use ai_runtime
+use caps
+use scheduler
+use ipc
+
+@freestanding
+fn kernel_boot_entry() -> int = 1
+
+fn lume_os_qemu_main() = let entry_ok = kernel_boot_entry() in let cr3 = cpu_read_cr3() in let pfn1 = kernel_alloc_pfn(0, 64) in let pfn2 = kernel_alloc_pfn(pfn1, 64) in let rem_pages = kernel_region_remaining(64, pfn2) in let u_cap = cap_page_new(pfn2, 7) in let mapped = cap_page_map(u_cap, 16384) in let tlb_ok = cpu_invlpg(16384) in let idt_ok = cpu_idt_init() in let irq_a = cpu_trigger_irq32() in let irq_b = cpu_trigger_irq32() in let hw_ticks = cpu_irq32_count() in let scratch = hw_scratch_addr() in let w_mmio = mmio_volatile_write64(scratch, 42) in let r_mmio = mmio_volatile_read64(scratch) in let lock_addr = scratch + 8 in let cnt_addr = scratch + 16 in let z_lock = mmio_volatile_write64(lock_addr, 0) in let z_cnt = mmio_volatile_write64(cnt_addr, 10) in let l_acq = spinlock_acquire(lock_addr) in let old_cnt = atomic_xadd64(cnt_addr, 5) in let l_rel = spinlock_release(lock_addr) in let new_cnt = mmio_volatile_read64(cnt_addr) in let next_pid = kernel_schedule_next(0, 3) in let q_left = kernel_deduct_quantum(20, 5) in let ch0 = ipc_channel_new(1, 9001) in let ch1 = user_agent_task_step(ch0, 9001, 180, 130) in "lume_os_qemu_boot=ok cr3=" + str(cr3) + " free_pages=" + str(rem_pages) + " pte=" + str(mapped.pte) + " irq32=" + str(hw_ticks) + " mmio=" + str(r_mmio) + " atomic=" + str(new_cnt) + " next_pid=" + str(next_pid) + " quantum=" + str(q_left) + " agent_ipc=" + str(ch1.msg_tag)
+
+print lume_os_qemu_main()

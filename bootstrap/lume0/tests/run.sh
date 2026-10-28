@@ -1159,6 +1159,31 @@ EOF
     # 5. LLM-generatability CI regression gate (#230):
     LUME_BIN_DIR="$ntmp" sh ../../scripts/check-llm-gen-eval.sh >"$ntmp/llm_gen_eval.json" 2>/dev/null || true
     if grep -q '"mode":"hashes"' "$ntmp/sub_hashes.json" && grep -Eq '"ast_hash":"sha256:[0-9a-f]{64}"' "$ntmp/sub_hashes.json" && grep -q '"proof_status":"proven"' "$ntmp/sub_hashes.json" && grep -q '"mode":"grammar"' "$ntmp/sub_grammar.json" && grep -q '"format":"lume-constrained-grammar-v1"' "$ntmp/sub_grammar.json" && grep -q '"mode":"project"' "$ntmp/sub_project.json" && grep -q '"roundtrip_ast_equal":true' "$ntmp/sub_project.json" && grep -q '"code":"V0001"' "$ntmp/lsp_session.out" && grep -q '"diagnostics":\[\],"proofs":\[{"name":"step_up","kind":"contract","status":"proven"' "$ntmp/lsp_session.out" && grep -q 'Proof status: `proven`' "$ntmp/lsp_session.out" && grep -q "Content-Length:" "$ntmp/lsp_framed.out" && grep -q '"command":"stepBack","body":{"step":2,"replay":true}' "$ntmp/dap_session.out" && grep -q '"traceHistory":"1,2,3,2"' "$ntmp/dap_session.out" && grep -q '"command":"evaluate","body":{"result":"42"' "$ntmp/dap_session.out" && grep -q '"event":"terminated"' "$ntmp/dap_session.out" && grep -q "\[1\] defined" "$ntmp/repl_interactive.out" && grep -q "^42$" "$ntmp/repl_interactive.out" && grep -q "^error:" "$ntmp/repl_interactive.out" && grep -q "^17$" "$ntmp/repl_interactive.out" && grep -q '"msg_type":"kernel_info_reply"' "$ntmp/repl_kernel.out" && grep -q '"msg_type":"execute_reply","execution_count":2' "$ntmp/repl_kernel.out" && grep -q '"text/plain":"42"' "$ntmp/repl_kernel.out" && grep -q '"msg_type":"execute_reply","execution_count":3' "$ntmp/repl_kernel.out" && grep -q '"mime":"application/vnd.lume.table+json"' "$ntmp/repl_kernel.out" && grep -q '"msg_type":"shutdown_reply"' "$ntmp/repl_kernel.out" && grep -q '"gate":"llm-gen-eval"' "$ntmp/llm_gen_eval.json" && grep -q '"pass_at_1":3,"pass_at_2":4' "$ntmp/llm_gen_eval.json" && grep -q '"compiles_alone_rejected":true' "$ntmp/llm_gen_eval.json"; then ok "tooling, live stdio servers & LLM eval (#209, #210, #211, #230): live lume lsp/dap stdio servers, interactive lume repl & Jupyter kernel, and LLM-gen eval gate"; else bad "tooling, live stdio servers & LLM eval (#209, #210, #211, #230)"; cat "$ntmp/lsp_session.out" "$ntmp/lsp_framed.out" "$ntmp/dap_session.out" "$ntmp/repl_interactive.out" "$ntmp/repl_kernel.out" "$ntmp/llm_gen_eval.json" 2>/dev/null; fi
+
+    # 6. Phase 3 Track S (#193) + K7: Real OS Multi-Process Parallelism (`sys_fork` + `sys_pipe` + `sys_wait4`) & Hardware Atomics (`lock xaddq`, spinlocks):
+    cat >"$ntmp/par_os_ok.src" <<'EOF'
+use concurrency
+
+fn run_parallel_proof() = let r = par_fork_scale2(7, 14, 3) in let xs = Cons(2, Cons(4, Cons(6, Nil))) in let ys = par_map_scale_os(xs, 5) in let psum = par_sum(ys) in let s = hw_scratch_addr() in let z0 = mmio_volatile_write64(s, 0) in let z1 = mmio_volatile_write64(s + 8, 100) in let a1 = par_atomic_inc_under_spinlock(s, s + 8, 25) in let a2 = par_atomic_inc_under_spinlock(s, s + 8, 17) in let distinct_pids = (if r.parent_pid > 0 and r.worker1_pid > 0 and r.worker2_pid > 0 and r.worker1_pid != r.parent_pid and r.worker2_pid != r.parent_pid and r.worker1_pid != r.worker2_pid then 1 else 0) in "par_os=ok distinct_pids=" + str(distinct_pids) + " val1=" + str(r.val1) + " val2=" + str(r.val2) + " sum=" + str(r.sum) + " map_sum=" + str(psum) + " atomic=" + str(a2)
+
+print run_parallel_proof()
+EOF
+    LUME_BIN_DIR="$ntmp" ../../lume build "$ntmp/par_os_ok.src" -o "$ntmp/par_os_ok.elf" 2>"$ntmp/par_os.err"
+    "$ntmp/par_os_ok.elf" >"$ntmp/par_os.out" 2>>"$ntmp/par_os.err"
+    if [ "$(cat "$ntmp/par_os.out")" = "par_os=ok distinct_pids=1 val1=21 val2=42 sum=63 map_sum=60 atomic=142" ]; then ok "phase-3 Track S (#193) & K7: real OS multi-process parallelism (fork+pipe+waitpid with distinct kernel PIDs) & hardware atomics (lock xaddq + spinlocks)"; else bad "phase-3 Track S (#193) & K7: real OS multi-process parallelism & hardware atomics"; cat "$ntmp/par_os.err" "$ntmp/par_os.out" 2>/dev/null; fi
+
+    # 7. Stage 5 Systems & Kernels (#227 K0-K9): Real Bare-Metal x86-64 `lume-os` Kernel Image Booting in QEMU:
+    LUME_BIN_DIR="$ntmp" ../../lume compile ../../examples/apps/lume_os/kernel_qemu.src >"$ntmp/kernel_qemu.s" 2>"$ntmp/kernel_qemu.err"
+    _krn_syscalls=$(grep -c '^[[:space:]]*syscall$' "$ntmp/kernel_qemu.s" || true)
+    "$ntmp/lasm" <"$ntmp/kernel_qemu.s" >"$ntmp/lume_os.img" 2>>"$ntmp/kernel_qemu.err"
+    _qemu_ok=0
+    if command -v qemu-system-x86_64 >/dev/null 2>&1; then
+        qemu-system-x86_64 -drive format=raw,file="$ntmp/lume_os.img" -serial stdio -display none -no-reboot -device isa-debug-exit,iobase=0xf4,iosize=0x04 >"$ntmp/qemu_serial.out" 2>"$ntmp/qemu_serial.err" || true
+        if grep -q "lume_os_qemu_boot=ok cr3=4096 free_pages=62 pte=8199 irq32=2 mmio=42 atomic=15 next_pid=1 quantum=15 agent_ipc=200" "$ntmp/qemu_serial.out"; then
+            _qemu_ok=1
+        fi
+    fi
+    if [ "$_krn_syscalls" = "0" ] && grep -q '^\.kernel$' "$ntmp/kernel_qemu.s" && grep -q 'iretq' "$ntmp/kernel_qemu.s" && grep -q 'lidt ' "$ntmp/kernel_qemu.s" && [ "$_qemu_ok" = "1" ]; then ok "phase-5 K0-K9 (#227): @freestanding zero-syscall x86-64 kernel image (lume_os.img) boots in QEMU with 4-level page tables (CR3=4096), hardware IDT + int 32 + iretq, volatile MMIO, lock xaddq & COM1 serial"; else bad "phase-5 K0-K9 (#227): bare-metal x86-64 kernel image in QEMU (syscalls=$_krn_syscalls, qemu_ok=$_qemu_ok)"; cat "$ntmp/kernel_qemu.err" "$ntmp/qemu_serial.out" "$ntmp/qemu_serial.err" 2>/dev/null; fi
     export LUME_BIN_DIR="$ntmp"
 else
     ok "no-toolchain ELF pipeline (skipped: not linux/x86_64, or under ASan)"

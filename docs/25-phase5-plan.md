@@ -1,6 +1,6 @@
 # Phase 5 Plan — Machine Level, Interop (Track I), Realtime/WCET, `lume-os` Microkernel & Proof Certificates
 
-**Status:** Implemented & Active, with the honest limits flagged inline below (Track I1/I2/I3/I5 real FFI linking & C-ABI/WASM export shipped in `#191`; `std.wasm` and `lume-os` are reference models; `@bound` is a structural AST cycle-budget checker; certificates are independently verified by `lcert.src` over FIPS 180-4 SHA-256 and `QF_LIA` S-expressions, and unsigned) (Stage 5 of `docs/04-roadmap.md`, `docs/20-interop.md`, `docs/22-adoption.md` G1/G3, `docs/23-horizon.md` H1–H5)
+**Status:** Implemented & Active, with the honest limits flagged inline below (Track I1/I2/I3/I5 real FFI linking & C-ABI/WASM export shipped in `#191`; Track K0–K9 bare-metal x86-64 `lume-os` kernel image booting in QEMU shipped in `#227`; `std.wasm` is a reference model; `@bound` is a structural AST cycle-budget checker; certificates are independently verified by `lcert.src` over FIPS 180-4 SHA-256 and `QF_LIA` S-expressions, and unsigned) (Stage 5 of `docs/04-roadmap.md`, `docs/20-interop.md`, `docs/22-adoption.md` G1/G3, `docs/23-horizon.md` H1–H5)
 **Prerequisite:** Phase 4 (Tensors, Autodiff, GPU Kernels, Probabilistic/Rules/LLM/Neuro, PR #181)
 
 ---
@@ -25,8 +25,8 @@ Phase 5 completes the Lume language roadmap (`docs/04-roadmap.md` §Stage 5), th
      - `lume certify <file.src>` (`lcaas.src`) emits a certificate artifact JSON containing cryptographic 256-bit SHA-256 digests (`source_hash` and `certificate_hash`), S-expression `QF_LIA` proof terms `(implies (and ...) <goal>)`, and `wcet_budget(est <= bound)` terms.
      - `lume verify-cert <cert.json | file.src>` invokes `compiler/stage1/lcert.src` — a standalone, zero-dependency verifier with **no compiler imports (`use lcaas` is not used)** that independently verifies the FIPS 180-4 SHA-256 tamper-evidence hash, parses each S-expression proof term, re-runs its own Fourier–Motzkin `QF_LIA` solver over $\mathbb{Z}$ on `not(term)` without trusting the stored `"status"`, and checks `"kind":"wcet"` `"status":"budget_checked"` bounds (`"badge":"Lume Verified ✓"`, #183). **Honest limit:** certificates carry a SHA-256 tamper digest, not an asymmetric cryptographic signature.
      - `lume mcp <file.src>`: JSON-RPC 2.0 MCP server exposing `lume_check`, `lume_prove`, `lume_fill`, `lume_bind`, and `lume_certify`.
-   - **Stage 5 Exit-Criterion Capstone (`examples/apps/lume_os/`):**
-     - A deterministic user-space *model* of capability-based microkernel services (`caps.src`, `scheduler.src`, `ipc.src`, `main.src`) — no boot, QEMU, hardware or real isolation (#12) — with `QF_LIA`-proven page-table and scheduler contracts (0 runtime `ctfail` guards), a `@bound(cycles: 64)` budget-checked scheduler, a `@interrupt(irq: 32)` timer ISR, and a simulated user-space run of the Stage 4 neuro-symbolic agent.
+   - **Stage 5 Exit-Criterion Capstone (`examples/apps/lume_os/`, `shipped` on x86-64 QEMU in `#227`):**
+     - Includes both the cross-platform user-space harness (`main.src`) and the real `@freestanding` bare-metal x86-64 kernel image (`kernel_qemu.src` -> `lume_os.img`) that boots in `qemu-system-x86_64` with zero Linux syscalls (`grep -c syscall == 0`), 4-level page tables (`CR3=0x1000`), physical frame allocator at `0x200000`, hardware 64-bit IDT + `int $32` + `@interrupt` + `iretq`, volatile MMIO, `lock xaddq` + spinlocks, COM1 (`0x3F8`) serial UART, and `QF_LIA`-proven allocator/scheduler/IPC services (`call ctfail == 0`).
 
 ---
 
