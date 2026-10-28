@@ -1183,7 +1183,7 @@ EOF
             _qemu_ok=1
         fi
     fi
-    if [ "$_krn_syscalls" = "0" ] && grep -q '^\.kernel$' "$ntmp/kernel_qemu.s" && grep -q 'iretq' "$ntmp/kernel_qemu.s" && grep -q 'lidt ' "$ntmp/kernel_qemu.s" && [ "$_qemu_ok" = "1" ]; then ok "phase-5 K0-K9 (#227): @freestanding zero-syscall x86-64 kernel image (lume_os.img) boots in QEMU with 4-level page tables (CR3=4096), hardware IDT + int 32 + iretq, volatile MMIO, lock xaddq & COM1 serial"; else bad "phase-5 K0-K9 (#227): bare-metal x86-64 kernel image in QEMU (syscalls=$_krn_syscalls, qemu_ok=$_qemu_ok)"; cat "$ntmp/kernel_qemu.err" "$ntmp/qemu_serial.out" "$ntmp/qemu_serial.err" 2>/dev/null; fi
+    if [ "$_krn_syscalls" = "0" ] && grep -q '^[[:space:]]*\.kernel$' "$ntmp/kernel_qemu.s" && grep -q 'iretq' "$ntmp/kernel_qemu.s" && grep -q 'lidt ' "$ntmp/kernel_qemu.s" && [ "$_qemu_ok" = "1" ]; then ok "phase-5 K0-K9 (#227): @freestanding zero-syscall x86-64 kernel image (lume_os.img) boots in QEMU with 4-level page tables (CR3=4096), hardware IDT + int 32 + iretq, volatile MMIO, lock xaddq & COM1 serial"; else bad "phase-5 K0-K9 (#227): bare-metal x86-64 kernel image in QEMU (syscalls=$_krn_syscalls, qemu_ok=$_qemu_ok)"; cat "$ntmp/kernel_qemu.err" "$ntmp/qemu_serial.out" "$ntmp/qemu_serial.err" 2>/dev/null; fi
     export LUME_BIN_DIR="$ntmp"
 else
     ok "no-toolchain ELF pipeline (skipped: not linux/x86_64, or under ASan)"
