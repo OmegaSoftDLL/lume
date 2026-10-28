@@ -39,11 +39,10 @@ rule (`docs/28`): no brick is "done" until the real thing runs, with its guarant
 
 ## Parallel tracks (no gating either way — pick up by priority, any time)
 
-- **`#230` — LLM-generation eval as a CI gate.** Do **early**: it guards against syntax/surface
-  regressions that make Lume harder for a model to generate, and it serves the AI-first north star.
-- **`#214` — data track** (persist table / versioned / `money[CCY]` / `@soa`). Feature track; independent.
-- **`#210` — `lume lsp` + `lume dap`.** Developer/agent experience; independent.
-- **`#211` — `lume repl` + notebook/Jupyter kernel.** DX; independent.
+- **`#230` — LLM-generation eval as a CI gate.** *(Done — `scripts/check-llm-gen-eval.sh` + `tests/llm_gen_eval/`, wired into CI.)*
+- **`#214` — data track** (persist table / versioned / `money[CCY]` / `@soa`). *(Done — real on-disk WAL via `open`+`flock`+`write`+`fsync`+`close`, cross-process crash recovery, concurrent multi-process locking, `money[CCY]`, `versioned`/`@soa`.)*
+- **`#210` — `lume lsp` + `lume dap`.** *(Done — live multi-turn JSON-RPC-over-stdio `lume lsp` and `lume dap` servers.)*
+- **`#211` — `lume repl` + notebook/Jupyter kernel.** *(Done — interactive `lume repl` read-eval-print loop & stateful multi-message Jupyter `lume repl --kernel` protocol server.)*
 - **`#196` — adoption & distribution** (installer, registry, playground, certificates). Needed for
   real-world use; the playground also helps the AI-authoring loop.
 - **`#215` — untracked planned items** (`signal[T]`/`promise[T]`, `lumb` bytecode, Linguist). **Triage
