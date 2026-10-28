@@ -1802,7 +1802,7 @@ fn olowerprog(prog, ufns, osigs, vctx) = match prog
     Cons(h, t) => olowerstmt(h, olowerprog(t, ufns, osigs, vctx), ufns, osigs, vctx)
 
 fn olowerstmt(st, rest, ufns, osigs, vctx) = match st
-    OSig(nm, pubf, freef, pl, rty, fromp) => if ois_ffi(freef) == 1 or ois_free(freef) == 1 or ois_isr(freef) == 1 then Cons(st, rest) else rest
+    OSig(nm, pubf, freef, pl, rty, fromp) => if ois_ffi(freef) == 1 or ois_free(freef) == 1 or ois_interrupt(freef) == 1 then Cons(st, rest) else rest
     OType(nm, k)                          => rest
     KEffSig(nm, effs)                     => rest
     KEffectDecl(enm, ops)                 => klower_eff_ops(ops, ufns, rest)
