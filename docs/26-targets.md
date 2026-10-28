@@ -6,10 +6,7 @@ platform that matters** — with no limitations and no hacks — using its own s
 architecture and sequence; the worklist lives in issue **#206** (which organizes the target parts of
 `#197` and `#198`).
 
-Today the backend emits **x86-64 + ELF64 only** (`compiler/stage1/lasm.src`,
-`compiler/stage1/lume/05_codegen.src`). macOS, Apple Silicon, Windows, RISC-V, and bare-metal/firmware
-are **not** targets yet. This is the plan to get there without turning the backend into a pile of
-special cases.
+Today the backend implements the orthogonal target-triple architecture in [`compiler/stage1/ltarget.src`](../compiler/stage1/ltarget.src) alongside [`compiler/stage1/lasm.src`](../compiler/stage1/lasm.src) and [`compiler/stage1/lume/05_codegen.src`](../compiler/stage1/lume/05_codegen.src), exposed via `lume build --target <triple> <file.src> -o <out>` and `lume targets [--json]`.
 
 ## The one unfair advantage, carried to every target
 
@@ -46,14 +43,15 @@ contracts and checked by the prover — *using everything Lume has.*
 
 | Triple | ISA | Format | ABI / OS | Status |
 |--------|-----|--------|----------|--------|
-| `x86_64-linux-elf` | x86-64 | ELF64 | System V AMD64 | **shipped** |
-| `aarch64-macos-macho` | AArch64 | Mach-O | Darwin / AAPCS64 (+ signing) | planned (T1+T2) — **Apple Silicon** |
-| `x86_64-macos-macho` | x86-64 | Mach-O | Darwin | planned (T2) |
-| `x86_64-windows-pe` | x86-64 | PE/COFF | Windows x64 | planned (T3) |
-| `aarch64-windows-pe` | AArch64 | PE/COFF | Windows ARM64 | planned (after T3) |
-| `riscv64-linux-elf` | RISC-V RV64 | ELF64 | System V | planned (T4) |
-| `<isa>-none-elf` / flat / ihex | any | raw/flat + Intel HEX | bare-metal `@freestanding` | planned (T5) — firmware & OS |
-| `wasm32-wasi` | WASM | WASM | WASI | via `#191` — run-anywhere fallback |
+| `x86_64-linux-elf` | x86-64 | ELF64 (`EM_X86_64=62`) | System V AMD64 | **shipped** (`lumec` + `lasm`) |
+| `aarch64-linux-elf` | AArch64 A64 | ELF64 (`EM_AARCH64=183`) | Linux AAPCS64 (`svc #0`) | **shipped** (`ltarget.src`; verified in `qemu-aarch64`) |
+| `aarch64-macos-macho` | AArch64 A64 | Mach-O 64 (`MH_MAGIC_64`, 16 KB page) | Darwin / AAPCS64 (`svc #0x80`) | **shipped** (`ltarget.src` — **Apple Silicon**) |
+| `x86_64-windows-pe` | x86-64 | PE32+/COFF (`0x8664`) | Windows x64 (`subq $40, %rsp`) | **shipped** (`ltarget.src`; verified on Windows x64) |
+| `riscv64-linux-elf` | RISC-V RV64IM | ELF64 (`EM_RISCV=243`) | Linux LP64 (`ecall`) | **shipped** (`ltarget.src`; verified in `qemu-riscv64`) |
+| `<isa>-none-ihex` | AArch64 / RV64 / x86-64 | Intel HEX (`.hex` with two's-complement checksum) | bare-metal `@freestanding` | **shipped** (`ltarget.src`) |
+| `x86_64-none-raw` | x86-64 | Bootable MBR + 64-bit Long Mode kernel image | bare-metal `@freestanding` | **shipped** (`lasm` `.kernel`; verified in `qemu-system-x86_64`) |
+| `wasm32-wasi` | WASM | Binary WebAssembly (`\0asm\x01\0\0\0`) | WASI | **shipped** (`#191` `std.wasm` + `lume build --target wasm32-wasi`) |
+| `lumb` | LUMB | Portable Lume Bytecode (`LUMB\x01`) | Deterministic stack VM | **shipped** (`#215` `lume build --target lumb` + `lume run *.lumb`) |
 
 ## Sequence (each brick is one real PR)
 

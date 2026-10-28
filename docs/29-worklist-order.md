@@ -19,12 +19,7 @@ rule (`docs/28`): no brick is "done" until the real thing runs, with its guarant
 
 2. **`#227` — systems & kernels, K0→K9 on x86-64** (`docs/27`). *(Done — `@freestanding` zero-syscall codegen & physical frame allocator at `0x200000` (K0/K1), system ISA `cli`/`sti`/`hlt`/`iretq`/`lgdt`/`lidt`/`invlpg`/`movq %crN`/`outb`/`inb`/`int $imm8`/`lock xaddq`/`lock cmpxchgq` and `.kernel` MBR + 4-level x86-64 page-table Long Mode bootloader in `lasm.src` (K2/K5/K6), volatile MMIO & hardware 64-bit IDT + `@interrupt` ISR lowering in `05_codegen.src` (K3/K4), real OS multi-process parallelism (`sys_fork` + `sys_pipe` + `sys_wait4`) & hardware atomics/spinlocks in `concurrency.src` (K7, closing `#193`), COM1 16550A UART driver (K8), and `examples/apps/lume_os/kernel_qemu.src` booting in `qemu-system-x86_64` in CI (K9).)*
 
-3. **`#206` — universal targets** (ARM64/Apple Silicon, Windows/PE, RISC-V, bare-metal). Split by
-   dependency:
-   - **`#206a` hosted targets (ARM64 macOS, Windows/PE):** independent of the kernel — **[PRIORITY]**,
-     may run in parallel with the spine whenever there is bandwidth.
-   - **`#206b` bare-metal / RISC-V embedded:** **[HARD]** on `#227`-K0 (freestanding codegen) and on the
-     per-ISA K2/K3/K4 work — so it is the kernel's **second-target** phase, after x86-64 K9.
+3. **`#206` — universal targets** (ARM64/Apple Silicon, Windows/PE, RISC-V, bare-metal). *(Done — orthogonal target-triple architecture `(ISA encoder) ⊥ (container writer) ⊥ (OS/ABI layer)` in `compiler/stage1/ltarget.src`: `T0` triple selector & `lume targets [--json]`, `T1` 2-pass AArch64 A64 32-bit instruction encoder verified in `qemu-aarch64`, `T2` 16 KB page-aligned Mach-O 64 container writer + Darwin AAPCS64 ABI (`aarch64-macos-macho`), `T3` PE32+/COFF container writer + Windows x64 ABI (`x86_64-windows-pe`), `T4` 2-pass RISC-V RV64IM 32-bit instruction encoder verified in `qemu-riscv64` (`riscv64-linux-elf`), `T5` bare-metal Intel HEX (`.hex`) firmware writer with verified checksum (`<isa>-none-ihex`) + bootable raw kernel (`x86_64-none-raw`), and `LUMB\x01` portable bytecode container + VM (`lumb`, closing the `lumb` brick of `#215`), with `QF_LIA` `proven` guard elision and native target-ISA exit-3 runtime contract traps.)*
 
 4. **`#197` — specified-but-unimplemented core features** (traits, closures, refinement types,
    async/await, rc/arc, shard, let-polymorphism; the AArch64/RISC-V/WASM backend items belong with

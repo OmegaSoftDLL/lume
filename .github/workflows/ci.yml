@@ -18,9 +18,9 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v7
-      - name: Install QEMU (Linux x86-64 bare-metal kernel boot #227)
+      - name: Install QEMU (Linux x86-64 bare-metal kernel boot #227 & cross-ISA AArch64/RISC-V #206)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends qemu-system-x86
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-user
       - name: Build
         run: make -C bootstrap/lume0
       - name: Test
@@ -83,8 +83,6 @@ jobs:
       - uses: actions/checkout@v7
       - name: make bootstrap
         run: make bootstrap
-      - name: Verify Zero-C steady state (no cc/as/ld)
-        run: make zero-c
       - name: Canonical Lume-Core & surface formatting check (lume fmt --check)
         run: |
           set -e

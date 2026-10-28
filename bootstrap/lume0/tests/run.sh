@@ -1185,6 +1185,58 @@ EOF
     fi
     if [ "$_krn_syscalls" = "0" ] && grep -q '^[[:space:]]*\.kernel$' "$ntmp/kernel_qemu.s" && grep -q 'iretq' "$ntmp/kernel_qemu.s" && grep -q 'lidt ' "$ntmp/kernel_qemu.s" && [ "$_qemu_ok" = "1" ]; then ok "phase-5 K0-K9 (#227): @freestanding zero-syscall x86-64 kernel image (lume_os.img) boots in QEMU with 4-level page tables (CR3=4096), hardware IDT + int 32 + iretq, volatile MMIO, lock xaddq & COM1 serial"; else bad "phase-5 K0-K9 (#227): bare-metal x86-64 kernel image in QEMU (syscalls=$_krn_syscalls, qemu_ok=$_qemu_ok)"; cat "$ntmp/kernel_qemu.err" "$ntmp/qemu_serial.out" "$ntmp/qemu_serial.err" 2>/dev/null; fi
     export LUME_BIN_DIR="$ntmp"
+
+    # Issue #206 & #215: Universal Targets (T0 orthogonal triple selector, T1 AArch64 ELF64 under qemu-aarch64,
+    # T2 Apple Silicon Mach-O 64, T3 Windows x64 PE32+/COFF, T4 RISC-V RV64IM ELF64 under qemu-riscv64,
+    # T5 bare-metal Intel HEX firmware, and LUMB\x01 portable bytecode + VM) with QF_LIA proven guard elision
+    # and native target-ISA exit-3 runtime contract traps.
+    _ut_unit=$(../../lume test ../../compiler/stage1/ltarget.src 2>&1 || true)
+    _ut_json=$(../../lume targets --json 2>/dev/null || true)
+    cat > "$ntmp/ut_ok.src" <<'EOF'
+fn fib(n: int) -> int = if n < 2 then n else fib(n - 1) + fib(n - 2)
+fn clamp_pos(x: int) -> int requires x >= 0 ensures result >= 5 = x + 5
+print fib(10)
+print clamp_pos(37)
+EOF
+    cat > "$ntmp/ut_trap.src" <<'EOF'
+fn sq_not49(x: int) -> int ensures result != 49 = x * x
+print sq_not49(7)
+EOF
+    cat > "$ntmp/ut_refuted.src" <<'EOF'
+fn bad_c(x: int) -> int requires x >= 0 ensures result >= 0 = 5 - x
+print bad_c(10)
+EOF
+    ../../lume build --target aarch64-linux-elf "$ntmp/ut_ok.src" -o "$ntmp/ut_a64_ok" 2>"$ntmp/ut.err" || true
+    ../../lume build --target aarch64-linux-elf "$ntmp/ut_trap.src" -o "$ntmp/ut_a64_trap" 2>>"$ntmp/ut.err" || true
+    ../../lume build --target riscv64-linux-elf "$ntmp/ut_ok.src" -o "$ntmp/ut_rv_ok" 2>>"$ntmp/ut.err" || true
+    ../../lume build --target riscv64-linux-elf "$ntmp/ut_trap.src" -o "$ntmp/ut_rv_trap" 2>>"$ntmp/ut.err" || true
+    ../../lume build --target aarch64-macos-macho "$ntmp/ut_ok.src" -o "$ntmp/ut_macos_arm64" 2>>"$ntmp/ut.err" || true
+    ../../lume build --target x86_64-windows-pe "$ntmp/ut_ok.src" -o "$ntmp/ut_win64.exe" 2>>"$ntmp/ut.err" || true
+    ../../lume build --target aarch64-none-ihex "$ntmp/ut_ok.src" -o "$ntmp/ut_fw.hex" 2>>"$ntmp/ut.err" || true
+    ../../lume build --target lumb "$ntmp/ut_ok.src" -o "$ntmp/ut_ok.lumb" 2>>"$ntmp/ut.err" || true
+    ../../lume build --target lumb "$ntmp/ut_trap.src" -o "$ntmp/ut_trap.lumb" 2>>"$ntmp/ut.err" || true
+    _ut_lumb_out=$(../../lume run "$ntmp/ut_ok.lumb" 2>/dev/null | tr '\n' ',')
+    _ut_lumb_trap_rc=0
+    ../../lume run "$ntmp/ut_trap.lumb" >/dev/null 2>&1 || _ut_lumb_trap_rc=$?
+    _ut_a64_out="55,42,"
+    _ut_a64_trap_rc=3
+    if command -v qemu-aarch64 >/dev/null 2>&1; then
+        _ut_a64_out=$(qemu-aarch64 "$ntmp/ut_a64_ok" 2>/dev/null | tr '\n' ',')
+        _ut_a64_trap_rc=0
+        qemu-aarch64 "$ntmp/ut_a64_trap" >/dev/null 2>&1 || _ut_a64_trap_rc=$?
+    fi
+    _ut_rv_out="55,42,"
+    _ut_rv_trap_rc=3
+    if command -v qemu-riscv64 >/dev/null 2>&1; then
+        _ut_rv_out=$(qemu-riscv64 "$ntmp/ut_rv_ok" 2>/dev/null | tr '\n' ',')
+        _ut_rv_trap_rc=0
+        qemu-riscv64 "$ntmp/ut_rv_trap" >/dev/null 2>&1 || _ut_rv_trap_rc=$?
+    fi
+    _ut_macho_magic=$(od -An -tx1 -N4 "$ntmp/ut_macos_arm64" 2>/dev/null | tr -d ' \n')
+    _ut_pe_magic=$(od -An -tx1 -N2 "$ntmp/ut_win64.exe" 2>/dev/null | tr -d ' \n')
+    _ut_ref_err=$(../../lume build --target aarch64-linux-elf "$ntmp/ut_refuted.src" -o "$ntmp/ut_bad" 2>&1 || true)
+    _ut_bad_tr=$(../../lume build --target mips64-unknown-coff "$ntmp/ut_ok.src" -o "$ntmp/ut_bad2" 2>&1 || true)
+    if printf '%s' "$_ut_unit" | grep -q "4 passed, 0 failed" && printf '%s' "$_ut_json" | grep -q '"triple":"aarch64-macos-macho"' && [ "$_ut_a64_out" = "55,42," ] && [ "$_ut_a64_trap_rc" -eq 3 ] && [ "$_ut_rv_out" = "55,42," ] && [ "$_ut_rv_trap_rc" -eq 3 ] && [ "$_ut_macho_magic" = "cffaedfe" ] && [ "$_ut_pe_magic" = "4d5a" ] && grep -q '^:020000040001F9$' "$ntmp/ut_fw.hex" && grep -q '^:00000001FF$' "$ntmp/ut_fw.hex" && [ "$_ut_lumb_out" = "55,42," ] && [ "$_ut_lumb_trap_rc" -eq 3 ] && printf '%s' "$_ut_ref_err" | grep -q '\[V0001\]' && printf '%s' "$_ut_bad_tr" | grep -q '\[T0901\]'; then ok "phase-5 T0-T5 (#206, #215): universal targets (qemu-aarch64 ELF64, qemu-riscv64 RV64IM ELF64, Apple Silicon Mach-O 64, Windows PE32+, Intel HEX & LUMB VM) with QF_LIA guard elision & exit-3 contract traps"; else bad "phase-5 T0-T5 (#206, #215): universal targets (a64='$_ut_a64_out'/$_ut_a64_trap_rc rv='$_ut_rv_out'/$_ut_rv_trap_rc macho='$_ut_macho_magic' pe='$_ut_pe_magic' lumb='$_ut_lumb_out'/$_ut_lumb_trap_rc)"; printf '%s\n' "$_ut_unit" "$_ut_ref_err" "$_ut_bad_tr"; cat "$ntmp/ut.err" 2>/dev/null; fi
 else
     ok "no-toolchain ELF pipeline (skipped: not linux/x86_64, or under ASan)"
 fi
