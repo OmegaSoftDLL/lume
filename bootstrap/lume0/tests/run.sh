@@ -998,15 +998,52 @@ PY
     LUME_BIN_DIR="$ntmp" ../../lume build --protect hardened --lsym "$ntmp/p33.lsym" "$ntmp/p33_app.src" -o "$ntmp/p33_hard.elf" 2>>"$ntmp/p33_build.err"
     LUME_BIN_DIR="$ntmp" ../../lume build --protect max "$ntmp/p33_app.src" -o "$ntmp/p33_max.elf" 2>>"$ntmp/p33_build.err"
     if [ "$p33bsec" = 3 ] && [ ! -s "$ntmp/p33_bad_sec.s" ] && grep -q "\[W0001\]" "$ntmp/p33_bad_sec.err" && grep -q '"code":"W0001"' "$ntmp/p33_bad_sec.json" && [ -x "$ntmp/p33_plain.elf" ] && [ -x "$ntmp/p33_hard.elf" ] && [ -x "$ntmp/p33_max.elf" ] && [ "$("$ntmp/p33_plain.elf")" = "PROPRIETARY_FORMULA_SECRET:50" ] && [ "$("$ntmp/p33_hard.elf")" = "PROPRIETARY_FORMULA_SECRET:50" ] && [ "$("$ntmp/p33_max.elf")" = "PROPRIETARY_FORMULA_SECRET:50" ] && grep -a -q "PROPRIETARY_FORMULA_SECRET:" "$ntmp/p33_plain.elf" && ! grep -a -q "PROPRIETARY_FORMULA_SECRET:" "$ntmp/p33_hard.elf" && ! grep -a -q "lume: runtime contract violation" "$ntmp/p33_hard.elf" && grep -q '"format":"lume-lsym-v1"' "$ntmp/p33.lsym" && grep -q '"symbol":"compute_license"' "$ntmp/p33.lsym" && grep -q '"code":"E#1"' "$ntmp/p33.lsym" && LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/protect.src 2>/dev/null | grep -q "5 passed, 0 failed"; then ok "phase-5 P33 (#188, docs/06): software protection W1-W5 ([W0001], std.secret, .lsym sidecar, .rodata string encryption, MBA/CFF/VM/seal/whitebox)"; else bad "phase-5 P33 (#188, docs/06): software protection W1-W5"; cat "$ntmp/p33_bad_sec.err" "$ntmp/p33_bad_sec.json" "$ntmp/p33_build.err" "$ntmp/p33.lsym" 2>/dev/null; fi
-    # Track D4 (#214): persist table WAL crash-safety, versioned time-travel, money[CCY] unit-typed currency, and @soa columnar layout:
+    # Track D4 (#214): durable on-disk WAL persistence (open+flock+write+fsync+close, cross-process crash recovery,
+    # mid-write truncation rejection, concurrent multi-process access, negative tamper detection), versioned time-travel,
+    # money[CCY] unit-typed currency, and @soa columnar layout:
     LUME_BIN_DIR="$ntmp" ../../lume run ../../compiler/stage1/data_d4_ok.src >"$ntmp/d4_run.out" 2>"$ntmp/d4_run.err"
+    rm -f lume_d4_ledger.wal
     LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/data_d4_ok.src >"$ntmp/d4_test.out" 2>&1 || true
+    rm -f lume_d4_ledger.wal
     printf 'type Dummy = enum A\nfn take_brl(x: money[BRL]) -> int = 1\nprint take_brl(money_parse("USD", "10.00"))\n' >"$ntmp/d4_bad_ccy.src"
     "$ntmp/lc" <"$ntmp/d4_bad_ccy.src" >"$ntmp/d4_bad_ccy.s" 2>"$ntmp/d4_bad_ccy.err"; d4bccy=$?
     LUME_BIN_DIR="$ntmp" ../../lume agent check "$ntmp/d4_bad_ccy.src" >"$ntmp/d4_bad_ccy.json" 2>/dev/null || true
-    if diff -u ../../tests/conformance/stage1/data_d4_ok_asm.expected "$ntmp/d4_run.out" >/dev/null && grep -q "20 passed, 0 failed" "$ntmp/d4_test.out" && grep -q "test_persist_wal_crash_recovery" "$ntmp/d4_test.out" && grep -q "test_soa_columnar_vectorised_ops" "$ntmp/d4_test.out" && [ "$d4bccy" = 3 ] && [ ! -s "$ntmp/d4_bad_ccy.s" ] && grep -q "type error: argument 1 of 'take_brl' has type money\[USD\] but parameter 'x' expects money\[BRL\]" "$ntmp/d4_bad_ccy.err" && grep -q '"code":"T2001"' "$ntmp/d4_bad_ccy.json"; then ok "phase-2 D4 (#214): persist WAL crash recovery, versioned time-travel, money[CCY] unit-typed currency & @soa columnar ops"; else bad "phase-2 D4 (#214): data_d4_ok.src & money[CCY] mismatch check"; cat "$ntmp/d4_run.err" "$ntmp/d4_run.out" "$ntmp/d4_test.out" "$ntmp/d4_bad_ccy.err" "$ntmp/d4_bad_ccy.json" 2>/dev/null; fi
-    # Stage 1/2 Tooling & AI-Author Substrate (#209, #210, #211):
-    # `lume agent hashes|grammar|project`, `lume lsp`, `lume dap`, and `lume repl --kernel`:
+    # Cross-process durable on-disk WAL crash-recovery + concurrent flock+fsync test:
+    # Process 1 (d4_writer.elf) writes committed v1 & v2 + uncommitted v3 to lume_crossproc_crash.wal and exits;
+    # we then append a mid-line truncated write (simulating SIGKILL/power loss mid-syscall);
+    # Process 2 (d4_reader.elf) is a separate native ELF binary that receives ONLY the file path lume_crossproc_crash.wal
+    # and recovers the committed table from disk via persist_recover_path.
+    rm -f lume_crossproc_crash.wal
+    mkdir -p "$ntmp/d4_procs"
+    sed '/^print /d' ../../compiler/stage1/data_d4_ok.src >"$ntmp/d4_procs/d4_base.src"
+    cp "$ntmp/d4_procs/d4_base.src" "$ntmp/d4_procs/d4_writer.src"
+    printf 'fn run_writer() -> int = let p = "lume_crossproc_crash.wal" in let t1 = initial_ledger() in let s1 = persist_open(p, ledger_schema(), t1) in let t2 = table_insert_row(t1, new_row_v2()) in let s2 = persist_commit(s1, t2) in let crashed = persist_append_torn(s2, "id,account,amount,units\\n99,Corrupt,\\"unterminated") in s2.ok == 1 and s2.version == 2\nprint run_writer()\n' >>"$ntmp/d4_procs/d4_writer.src"
+    cp "$ntmp/d4_procs/d4_base.src" "$ntmp/d4_procs/d4_tx_worker.src"
+    printf 'fn run_tx() -> int = let s = persist_tx_insert_row("lume_crossproc_crash.wal", ledger_schema(), new_row_v3()) in s.ok\nprint run_tx()\n' >>"$ntmp/d4_procs/d4_tx_worker.src"
+    cp "$ntmp/d4_procs/d4_base.src" "$ntmp/d4_procs/d4_reader.src"
+    printf 'fn run_reader() -> int = let rec = persist_recover_path("lume_crossproc_crash.wal", ledger_schema()) in if rec.ok == 1 and table_cell(rec.current, 2, 1).value.value == "Tax" then rec.version * 10 + table_row_count(rec.current) else 0\nprint run_reader()\n' >>"$ntmp/d4_procs/d4_reader.src"
+    LUME_BIN_DIR="$ntmp" ../../lume build "$ntmp/d4_procs/d4_writer.src" -o "$ntmp/d4_procs/d4_writer.elf" 2>"$ntmp/d4_build.err"
+    LUME_BIN_DIR="$ntmp" ../../lume build "$ntmp/d4_procs/d4_tx_worker.src" -o "$ntmp/d4_procs/d4_tx_worker.elf" 2>>"$ntmp/d4_build.err"
+    LUME_BIN_DIR="$ntmp" ../../lume build "$ntmp/d4_procs/d4_reader.src" -o "$ntmp/d4_procs/d4_reader.elf" 2>>"$ntmp/d4_build.err"
+    "$ntmp/d4_procs/d4_writer.elf" >"$ntmp/d4_w.out"
+    # Simulate a mid-syscall process kill by appending an unterminated, un-checksummed partial WAL record:
+    printf '@tx|99|1|99999|id,account,amount,units~n999,PartialKill\n' >>lume_crossproc_crash.wal
+    "$ntmp/d4_procs/d4_reader.elf" >"$ntmp/d4_r1.out"
+    # Run two concurrent OS processes appending under flock(LOCK_EX) + fsync:
+    "$ntmp/d4_procs/d4_tx_worker.elf" >"$ntmp/d4_tx1.out" &
+    _pid1=$!
+    "$ntmp/d4_procs/d4_tx_worker.elf" >"$ntmp/d4_tx2.out" &
+    _pid2=$!
+    wait "$_pid1" "$_pid2"
+    "$ntmp/d4_procs/d4_reader.elf" >"$ntmp/d4_r2.out"
+    # Negative test: corrupt all committed records on disk and verify persist_recover_path rejects the tampered WAL:
+    sed 's/Cash/HACK/g' lume_crossproc_crash.wal >"$ntmp/crash_tampered.wal"
+    mv "$ntmp/crash_tampered.wal" lume_crossproc_crash.wal
+    "$ntmp/d4_procs/d4_reader.elf" >"$ntmp/d4_r_neg.out"
+    rm -f lume_crossproc_crash.wal
+    if diff -u ../../tests/conformance/stage1/data_d4_ok_asm.expected "$ntmp/d4_run.out" >/dev/null && grep -q "20 passed, 0 failed" "$ntmp/d4_test.out" && grep -q "test_persist_wal_crash_recovery" "$ntmp/d4_test.out" && grep -q "test_soa_columnar_vectorised_ops" "$ntmp/d4_test.out" && [ "$d4bccy" = 3 ] && [ ! -s "$ntmp/d4_bad_ccy.s" ] && grep -q "type error: argument 1 of 'take_brl' has type money\[USD\] but parameter 'x' expects money\[BRL\]" "$ntmp/d4_bad_ccy.err" && grep -q '"code":"T2001"' "$ntmp/d4_bad_ccy.json" && [ "$(cat "$ntmp/d4_w.out")" = "1" ] && [ "$(cat "$ntmp/d4_r1.out")" = "23" ] && [ "$(cat "$ntmp/d4_tx1.out")" = "1" ] && [ "$(cat "$ntmp/d4_tx2.out")" = "1" ] && grep -Eq "^(34|45)$" "$ntmp/d4_r2.out" && [ "$(cat "$ntmp/d4_r_neg.out")" = "0" ]; then ok "phase-2 D4 (#214): durable on-disk WAL (open+flock+write+fsync+close, cross-process crash recovery, concurrent tx & tamper rejection), versioned, money[CCY] & @soa"; else bad "phase-2 D4 (#214): durable on-disk WAL & money[CCY] check"; cat "$ntmp/d4_build.err" "$ntmp/d4_run.err" "$ntmp/d4_run.out" "$ntmp/d4_test.out" "$ntmp/d4_w.out" "$ntmp/d4_r1.out" "$ntmp/d4_r2.out" "$ntmp/d4_r_neg.out" 2>/dev/null; fi
+    # Stage 1/2 Tooling & AI-Author Substrate (#209, #210, #211, #230):
+    # 1. One-shot & substrate checks (`lume agent hashes|grammar|project`, `lume lsp --json`, `lume dap --json`, `lume repl --kernel <file>`):
     printf 'fn clamp_pos(x: int) -> int requires x >= 0 ensures result >= 0 = x + 1\nlaw id_law(x: int) = clamp_pos(x) > x\nprint clamp_pos(5)\n' >"$ntmp/sub_ok.src"
     LUME_BIN_DIR="$ntmp" ../../lume agent hashes "$ntmp/sub_ok.src" >"$ntmp/sub_hashes.json" 2>/dev/null || true
     LUME_BIN_DIR="$ntmp" ../../lume agent grammar "$ntmp/sub_ok.src" >"$ntmp/sub_grammar.json" 2>/dev/null || true
@@ -1014,7 +1051,56 @@ PY
     LUME_BIN_DIR="$ntmp" ../../lume lsp --json "$ntmp/sub_ok.src" >"$ntmp/sub_lsp.json" 2>/dev/null || true
     LUME_BIN_DIR="$ntmp" ../../lume dap --json "$ntmp/sub_ok.src" >"$ntmp/sub_dap.json" 2>/dev/null || true
     LUME_BIN_DIR="$ntmp" ../../lume repl --kernel ../../compiler/stage1/data_d4_ok.src >"$ntmp/sub_repl.json" 2>/dev/null || true
-    if grep -q '"mode":"hashes"' "$ntmp/sub_hashes.json" && grep -Eq '"ast_hash":"sha256:[0-9a-f]{64}"' "$ntmp/sub_hashes.json" && grep -q '"proof_status":"proven"' "$ntmp/sub_hashes.json" && grep -q '"mode":"grammar"' "$ntmp/sub_grammar.json" && grep -q '"format":"lume-constrained-grammar-v1"' "$ntmp/sub_grammar.json" && grep -q '"mode":"project"' "$ntmp/sub_project.json" && grep -q '"roundtrip_ast_equal":true' "$ntmp/sub_project.json" && grep -q '"protocol":"lsp/3.17"' "$ntmp/sub_lsp.json" && grep -q '"server":"lume-lsp"' "$ntmp/sub_lsp.json" && grep -q '"protocol":"dap/1.65"' "$ntmp/sub_dap.json" && grep -q '"adapter":"lume-dap"' "$ntmp/sub_dap.json" && grep -q '"protocol":"lume-repl/1.0"' "$ntmp/sub_repl.json" && grep -q '"mime":"application/vnd.lume.table+json"' "$ntmp/sub_repl.json" && grep -q '"has_first_class_table":true' "$ntmp/sub_repl.json"; then ok "tooling & AI substrate (#209, #210, #211): content-addressed AST hashes, constrained grammar, projectional round-trip, lume lsp, lume dap & lume repl --kernel"; else bad "tooling & AI substrate (#209, #210, #211): hashes/grammar/project/lsp/dap/repl"; cat "$ntmp/sub_hashes.json" "$ntmp/sub_grammar.json" "$ntmp/sub_project.json" "$ntmp/sub_lsp.json" "$ntmp/sub_dap.json" "$ntmp/sub_repl.json" 2>/dev/null; fi
+    rm -f lume_d4_ledger.wal
+    # 2. Live multi-turn JSON-RPC-over-stdio `lume lsp --stdio` session (#210):
+    #    initialize -> didOpen (with [V0001] refuted contract) -> didChange (repaired contract -> proven) -> hover -> shutdown -> exit
+    cat >"$ntmp/lsp_session.in" <<'EOF'
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"rootUri":"file:///workspace"}}
+{"jsonrpc":"2.0","method":"initialized","params":{}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///workspace/live.src","languageId":"lume","version":1,"text":"fn step_up(x: int) -> int ensures result > x = x\nprint step_up(4)\n"}}}
+{"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":"file:///workspace/live.src","version":2},"contentChanges":[{"text":"fn step_up(x: int) -> int ensures result > x = x + 1\nprint step_up(4)\n"}]}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///workspace/live.src"},"position":{"line":0,"character":3}}}
+{"jsonrpc":"2.0","id":3,"method":"shutdown","params":null}
+{"jsonrpc":"2.0","method":"exit","params":null}
+EOF
+    LUME_BIN_DIR="$ntmp" ../../lume lsp --stdio <"$ntmp/lsp_session.in" >"$ntmp/lsp_session.out" 2>/dev/null
+    # Also verify Content-Length framed LSP request/response:
+    _cl_msg='{"jsonrpc":"2.0","id":10,"method":"initialize","params":{}}'
+    _cl_exit='{"jsonrpc":"2.0","id":11,"method":"shutdown"}\n{"jsonrpc":"2.0","method":"exit"}'
+    _cl_len=$(printf '%s' "$_cl_msg" | wc -c | tr -d ' ')
+    printf 'Content-Length: %s\r\n\r\n%s\n{"jsonrpc":"2.0","id":11,"method":"shutdown"}\n{"jsonrpc":"2.0","method":"exit"}\n' "$_cl_len" "$_cl_msg" | LUME_BIN_DIR="$ntmp" ../../lume lsp --stdio >"$ntmp/lsp_framed.out" 2>/dev/null
+    # 3. Live multi-turn JSON-RPC-over-stdio `lume dap --stdio` session with stepBack record-replay (#210):
+    cat >"$ntmp/dap_session.in" <<EOF
+{"seq":1,"type":"request","command":"initialize"}
+{"seq":2,"type":"request","command":"launch","arguments":{"program":"$ntmp/sub_ok.src"}}
+{"seq":3,"type":"request","command":"next"}
+{"seq":4,"type":"request","command":"stepIn"}
+{"seq":5,"type":"request","command":"stepBack"}
+{"seq":6,"type":"request","command":"stackTrace"}
+{"seq":7,"type":"request","command":"evaluate","arguments":{"expression":"clamp_pos(41)"}}
+{"seq":8,"type":"request","command":"disconnect"}
+EOF
+    LUME_BIN_DIR="$ntmp" ../../lume dap --stdio <"$ntmp/dap_session.in" >"$ntmp/dap_session.out" 2>/dev/null
+    # 4. Live interactive `lume repl` read-eval-print loop & multi-message `lume repl --kernel` Jupyter session (#211):
+    cat >"$ntmp/repl_interactive.in" <<'EOF'
+fn add_tax(x: int) -> int requires x >= 0 ensures result >= x = x + 7
+add_tax(35)
+add_tax("bad_arg_type")
+add_tax(10)
+:quit
+EOF
+    LUME_BIN_DIR="$ntmp" ../../lume repl <"$ntmp/repl_interactive.in" >"$ntmp/repl_interactive.out" 2>/dev/null
+    cat >"$ntmp/repl_kernel.in" <<'EOF'
+{"msg_type":"kernel_info_request"}
+{"msg_type":"execute_request","code":"fn triple(x: int) -> int ensures result == x + x + x = x * 3\nprint triple(4)"}
+{"msg_type":"execute_request","code":"print triple(14)"}
+{"msg_type":"execute_request","code":"use decimal\nuse table\nfn s() = Cons({name: \"id\", type: \"int\"}, Nil)\nprint table_row_count(read_csv(\"id\\n1\\n2\", s()))"}
+{"msg_type":"shutdown_request"}
+EOF
+    LUME_BIN_DIR="$ntmp" ../../lume repl --kernel <"$ntmp/repl_kernel.in" >"$ntmp/repl_kernel.out" 2>/dev/null
+    # 5. LLM-generatability CI regression gate (#230):
+    LUME_BIN_DIR="$ntmp" sh ../../scripts/check-llm-gen-eval.sh >"$ntmp/llm_gen_eval.json" 2>/dev/null || true
+    if grep -q '"mode":"hashes"' "$ntmp/sub_hashes.json" && grep -Eq '"ast_hash":"sha256:[0-9a-f]{64}"' "$ntmp/sub_hashes.json" && grep -q '"proof_status":"proven"' "$ntmp/sub_hashes.json" && grep -q '"mode":"grammar"' "$ntmp/sub_grammar.json" && grep -q '"format":"lume-constrained-grammar-v1"' "$ntmp/sub_grammar.json" && grep -q '"mode":"project"' "$ntmp/sub_project.json" && grep -q '"roundtrip_ast_equal":true' "$ntmp/sub_project.json" && grep -q '"code":"V0001"' "$ntmp/lsp_session.out" && grep -q '"diagnostics":\[\],"proofs":\[{"name":"step_up","kind":"contract","status":"proven"' "$ntmp/lsp_session.out" && grep -q 'Proof status: `proven`' "$ntmp/lsp_session.out" && grep -q "Content-Length:" "$ntmp/lsp_framed.out" && grep -q '"command":"stepBack","body":{"step":2,"replay":true}' "$ntmp/dap_session.out" && grep -q '"traceHistory":"1,2,3,2"' "$ntmp/dap_session.out" && grep -q '"command":"evaluate","body":{"result":"42"' "$ntmp/dap_session.out" && grep -q '"event":"terminated"' "$ntmp/dap_session.out" && grep -q "\[1\] defined" "$ntmp/repl_interactive.out" && grep -q "^42$" "$ntmp/repl_interactive.out" && grep -q "^error:" "$ntmp/repl_interactive.out" && grep -q "^17$" "$ntmp/repl_interactive.out" && grep -q '"msg_type":"kernel_info_reply"' "$ntmp/repl_kernel.out" && grep -q '"msg_type":"execute_reply","execution_count":2' "$ntmp/repl_kernel.out" && grep -q '"text/plain":"42"' "$ntmp/repl_kernel.out" && grep -q '"msg_type":"execute_reply","execution_count":3' "$ntmp/repl_kernel.out" && grep -q '"mime":"application/vnd.lume.table+json"' "$ntmp/repl_kernel.out" && grep -q '"msg_type":"shutdown_reply"' "$ntmp/repl_kernel.out" && grep -q '"gate":"llm-gen-eval"' "$ntmp/llm_gen_eval.json" && grep -q '"pass_at_1":3,"pass_at_2":4' "$ntmp/llm_gen_eval.json" && grep -q '"compiles_alone_rejected":true' "$ntmp/llm_gen_eval.json"; then ok "tooling, live stdio servers & LLM eval (#209, #210, #211, #230): live lume lsp/dap stdio servers, interactive lume repl & Jupyter kernel, and LLM-gen eval gate"; else bad "tooling, live stdio servers & LLM eval (#209, #210, #211, #230)"; cat "$ntmp/lsp_session.out" "$ntmp/lsp_framed.out" "$ntmp/dap_session.out" "$ntmp/repl_interactive.out" "$ntmp/repl_kernel.out" "$ntmp/llm_gen_eval.json" 2>/dev/null; fi
     export LUME_BIN_DIR="$ntmp"
 else
     ok "no-toolchain ELF pipeline (skipped: not linux/x86_64, or under ASan)"

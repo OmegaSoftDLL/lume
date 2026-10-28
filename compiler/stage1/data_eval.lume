@@ -167,6 +167,20 @@ fn deval(e: DExpr, env: map[str, RV], fns: map[str, DStmt]) -> RV
             if not found and name == "readall"
                 let rpath = rv_str(env.get("$in") ?? VStr(s: "/dev/stdin"))
                 result = VStr(s: io.read_file(rpath))
+            if not found and name == "fs_write_sync"
+                let fpath = rv_str(deval(args[0], env, fns))
+                let fdata = rv_str(deval(args[1], env, fns))
+                let fok = io.write_file(fpath, fdata)
+                result = VInt(n: if fok then 1 else 0)
+            if not found and name == "fs_append_sync"
+                let fpath = rv_str(deval(args[0], env, fns))
+                let fdata = rv_str(deval(args[1], env, fns))
+                let fprev = io.read_file(fpath)
+                let fok = io.write_file(fpath, fprev + fdata)
+                result = VInt(n: if fok then 1 else 0)
+            if not found and name == "fs_read_file"
+                let fpath = rv_str(deval(args[0], env, fns))
+                result = VStr(s: io.read_file(fpath))
             if not found and name == "ctfail"
                 panic rv_str(deval(args[0], env, fns))
             if not found and name == "nl"

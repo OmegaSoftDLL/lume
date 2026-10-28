@@ -1,0 +1,3 @@
+## Task 04 (attempt 2): add_fee repaired after [V0001] counterexample (`fee = -1`) — compiles and proves
+fn add_fee(amount: int, fee: int) -> int requires amount >= 0 requires fee >= 0 ensures result >= amount = amount + fee
+print add_fee(50, 5)

@@ -37,7 +37,8 @@ jobs:
                    docs/00-catalog.md docs/01-survey.md docs/02-principles.md \
                    docs/03-specification.md docs/04-roadmap.md docs/05-vision.md \
                    grammar/lume.ebnf examples/README.md \
-                   formal/lean/LumeCore.lean formal/lean/README.md; do
+                   formal/lean/LumeCore.lean formal/lean/README.md \
+                   tests/llm_gen_eval/system_prompt.md scripts/check-llm-gen-eval.sh; do
             test -f "$f" || { echo "missing $f"; exit 1; }
           done
       - name: Mechanised Lume-Core proofs in Lean 4 (#213 — zero sorry/axiom)

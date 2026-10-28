@@ -264,7 +264,35 @@ fn lstmtprint(pr, t, mlocals) = let rest = lstmts(t, mlocals, pr) in {funcs: res
 fn lstmtexpr(er, t, mlocals) = let rest = lstmts(t, mlocals, er) in {funcs: rest.funcs, mains: Cons(er.code + "    popq %rax\n", rest.mains), nl: rest.nl, ns: rest.ns, dt: rest.dt}
 
 ## --- the program: bss + rodata (oom_msg + string chunks) + text(funcs, runtime, _start, main) ---
-fn lgen(prog) = let mlocals = app(lmlocals(prog), lsds(0, lmdprog(prog))) in let gs = lstmts(prog, mlocals, {nl: 0, ns: 0, dt: Nil}) in let dt_l = rev(gs.dt) in let funcs_l = gs.funcs in let mains_l = gs.mains in let dt_s = joinall(own dt_l) in let funcs_s = joinall(own funcs_l) in let mains_s = joinall(own mains_l) in let mframe = lframe(len(mlocals)) in let mprol = "    movq %rsp, %rbp\n" + (if mframe > 0 then "    subq $" + str(mframe) + ", %rsp\n" else "") in let bss = "    .section .bss\n    .lcomm pbuf, 32\n    .lcomm heap_cur, 8\n    .lcomm heap_end, 8\n    .lcomm emit_buf, 8\n    .lcomm emit_len, 8\n    .lcomm emit_cap, 8\n" in let rodata = "    .section .rodata\noom_msg:\n    .asciz \"lume: out of memory (heap exhausted, brk failed)\\n\"\n" in let heapinit = "    movq $12, %rax\n    xorq %rdi, %rdi\n    syscall\n    movq %rax, heap_cur(%rip)\n    leaq 67108864(%rax), %rdi\n    movq %rdi, %rsi\n    movq $12, %rax\n    syscall\n    cmpq %rsi, %rax\n    jne alloc_oom\n    movq %rsi, heap_end(%rip)\n" in joinall(own Cons(bss, Cons(rodata, Cons(dt_s, Cons("    .section .text\n", Cons(funcs_s, Cons(runtime_tail(), Cons("    .globl _start\n_start:\n", Cons(heapinit, Cons(mprol, Cons(mains_s, Cons("    movq $60, %rax\n    xorq %rdi, %rdi\n    syscall\n", Nil))))))))))))
+fn luses_fs_expr(e) = match e
+    Call(nm, args)  => if nm == "fs_write_sync" or nm == "fs_append_sync" or nm == "fs_read_file" then 1 else luses_fs_args(args)
+    LetIn(nm, v, b) => if luses_fs_expr(v) == 1 then 1 else luses_fs_expr(b)
+    Bin(op, l, r)   => if luses_fs_expr(l) == 1 then 1 else luses_fs_expr(r)
+    If(c, t, e2)    => if luses_fs_expr(c) == 1 or luses_fs_expr(t) == 1 then 1 else luses_fs_expr(e2)
+    Field(o, nm)    => luses_fs_expr(o)
+    Rec(items)      => luses_fs_rec(items)
+    RecT(tn, items) => luses_fs_rec(items)
+    Match(sc, arms) => if luses_fs_expr(sc) == 1 then 1 else luses_fs_arms(arms)
+    _               => 0
+fn luses_fs_args(xs) = match xs
+    Nil        => 0
+    Cons(h, t) => if luses_fs_expr(h) == 1 then 1 else luses_fs_args(t)
+fn luses_fs_rec(xs) = match xs
+    Nil        => 0
+    Cons(h, t) => if luses_fs_expr(h.val) == 1 then 1 else luses_fs_rec(t)
+fn luses_fs_arms(xs) = match xs
+    Nil        => 0
+    Cons(h, t) => if luses_fs_expr(h.body) == 1 then 1 else luses_fs_arms(t)
+fn luses_fs_stmt(s0) = match s0
+    Fn(nm, ps, body) => luses_fs_expr(body)
+    Print(v)         => luses_fs_expr(v)
+    ExprS(v)         => luses_fs_expr(v)
+    _                => 0
+fn luses_fs_prog(prog) = match prog
+    Nil        => 0
+    Cons(h, t) => if luses_fs_stmt(h) == 1 then 1 else luses_fs_prog(t)
+fn runtime_fs_tail() = "fs_write_sync:\n    pushq %r12\n    pushq %r13\n    pushq %r14\n    movq 16(%rdi), %r12\n    movq 16(%rsi), %r13\n    movq %r12, %rdi\n    movq $577, %rsi\n    movq $420, %rdx\n    movq $2, %rax\n    syscall\n    testq %rax, %rax\n    js fsw_err\n    movq %rax, %r14\n    movq %r14, %rdi\n    movq $2, %rsi\n    movq $73, %rax\n    syscall\n    movq %r13, %rdi\n    call strlen\n    movq %rax, %rdx\n    movq %r14, %rdi\n    movq %r13, %rsi\n    movq $1, %rax\n    syscall\n    movq %r14, %rdi\n    movq $74, %rax\n    syscall\n    movq %r14, %rdi\n    movq $8, %rsi\n    movq $73, %rax\n    syscall\n    movq %r14, %rdi\n    movq $3, %rax\n    syscall\n    movq $1, %rdi\n    call mkint\n    popq %r14\n    popq %r13\n    popq %r12\n    ret\nfs_append_sync:\n    pushq %r12\n    pushq %r13\n    pushq %r14\n    movq 16(%rdi), %r12\n    movq 16(%rsi), %r13\n    movq %r12, %rdi\n    movq $1089, %rsi\n    movq $420, %rdx\n    movq $2, %rax\n    syscall\n    testq %rax, %rax\n    js fsw_err\n    movq %rax, %r14\n    movq %r14, %rdi\n    movq $2, %rsi\n    movq $73, %rax\n    syscall\n    movq %r13, %rdi\n    call strlen\n    movq %rax, %rdx\n    movq %r14, %rdi\n    movq %r13, %rsi\n    movq $1, %rax\n    syscall\n    movq %r14, %rdi\n    movq $74, %rax\n    syscall\n    movq %r14, %rdi\n    movq $8, %rsi\n    movq $73, %rax\n    syscall\n    movq %r14, %rdi\n    movq $3, %rax\n    syscall\n    movq $1, %rdi\n    call mkint\n    popq %r14\n    popq %r13\n    popq %r12\n    ret\nfsw_err:\n    xorq %rdi, %rdi\n    call mkint\n    popq %r14\n    popq %r13\n    popq %r12\n    ret\nfs_read_file:\n    pushq %r12\n    pushq %r13\n    pushq %r14\n    movq 16(%rdi), %rdi\n    xorq %rsi, %rsi\n    xorq %rdx, %rdx\n    movq $2, %rax\n    syscall\n    testq %rax, %rax\n    js fsr_err\n    movq %rax, %r14\n    movq %r14, %rdi\n    movq $1, %rsi\n    movq $73, %rax\n    syscall\n    movq $262144, %rdi\n    call alloc\n    movq %rax, %r12\n    xorq %r13, %r13\nfsr_lp:\n    movq $262143, %rdx\n    subq %r13, %rdx\n    jle fsr_eof\n    movq %r14, %rdi\n    movq %r12, %rsi\n    addq %r13, %rsi\n    xorq %rax, %rax\n    syscall\n    testq %rax, %rax\n    jle fsr_eof\n    addq %rax, %r13\n    jmp fsr_lp\nfsr_eof:\n    movb $0, (%r12,%r13)\n    movq %r14, %rdi\n    movq $8, %rsi\n    movq $73, %rax\n    syscall\n    movq %r14, %rdi\n    movq $3, %rax\n    syscall\n    movq %r12, %rdi\n    call mkstr\n    popq %r14\n    popq %r13\n    popq %r12\n    ret\nfsr_err:\n    movq $1, %rdi\n    call alloc\n    movb $0, (%rax)\n    movq %rax, %rdi\n    call mkstr\n    popq %r14\n    popq %r13\n    popq %r12\n    ret\n"
+fn lgen(prog) = let mlocals = app(lmlocals(prog), lsds(0, lmdprog(prog))) in let gs = lstmts(prog, mlocals, {nl: 0, ns: 0, dt: Nil}) in let dt_l = rev(gs.dt) in let funcs_l = gs.funcs in let mains_l = gs.mains in let dt_s = joinall(own dt_l) in let funcs_s = joinall(own funcs_l) in let mains_s = joinall(own mains_l) in let mframe = lframe(len(mlocals)) in let mprol = "    movq %rsp, %rbp\n" + (if mframe > 0 then "    subq $" + str(mframe) + ", %rsp\n" else "") in let bss = "    .section .bss\n    .lcomm pbuf, 32\n    .lcomm heap_cur, 8\n    .lcomm heap_end, 8\n    .lcomm emit_buf, 8\n    .lcomm emit_len, 8\n    .lcomm emit_cap, 8\n" in let rodata = "    .section .rodata\noom_msg:\n    .asciz \"lume: out of memory (heap exhausted, brk failed)\\n\"\n" in let heapinit = "    movq $12, %rax\n    xorq %rdi, %rdi\n    syscall\n    movq %rax, heap_cur(%rip)\n    leaq 67108864(%rax), %rdi\n    movq %rdi, %rsi\n    movq $12, %rax\n    syscall\n    cmpq %rsi, %rax\n    jne alloc_oom\n    movq %rsi, heap_end(%rip)\n" in let rtail = if luses_fs_prog(prog) == 1 then runtime_tail() + runtime_fs_tail() else runtime_tail() in joinall(own Cons(bss, Cons(rodata, Cons(dt_s, Cons("    .section .text\n", Cons(funcs_s, Cons(rtail, Cons("    .globl _start\n_start:\n", Cons(heapinit, Cons(mprol, Cons(mains_s, Cons("    movq $60, %rax\n    xorq %rdi, %rdi\n    syscall\n", Nil))))))))))))
 
 
 ## --- runtime (copied verbatim from data_asmgen.lume) ---
