@@ -382,7 +382,9 @@ int elf_assemble(const char *src, const char *outpath) {
 
         FILE *o=fopen(outpath,"wb"); if(!o){snprintf(err,sizeof(err),"cannot write %s",outpath);free(code.d);free(payload.d);free(f.d);goto fail;}
         fwrite(f.d,1,f.n,o);
+#ifndef _WIN32
         fchmod(fileno(o), 0755); /* on the open fd, before close: no shell (CodeQL #2) and no path TOCTOU race */
+#endif
         fclose(o);
         free(code.d); free(payload.d); free(f.d);
     }
