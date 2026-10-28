@@ -1014,51 +1014,34 @@ PY
     # Process 2 (d4_reader.elf) is a separate native ELF binary that receives ONLY the file path lume_crossproc_crash.wal
     # and recovers the committed table from disk via persist_recover_path.
     rm -f lume_crossproc_crash.wal
-    cat >"$ntmp/d4_writer.src" <<'EOF'
-use decimal
-use table
-@soa type LedgerEntry = record id: int, account: str, amount: decimal(10, 2), units: int
-fn ledger_schema() = Cons({name: "id", type: "int"}, Cons({name: "account", type: "str"}, Cons({name: "amount", type: "decimal"}, Cons({name: "units", type: "int"}, Nil))))
-fn initial_ledger() -> table[LedgerEntry] = read_csv("id,account,amount,units\n1,Cash,120.50,10\n2,Revenue,340.00,25", ledger_schema())
-fn new_row_v2() = Cons({kind: "int", value: 3}, Cons({kind: "str", value: "Tax"}, Cons({kind: "decimal", value: decimal_parse("39.50")}, Cons({kind: "int", value: 5}, Nil))))
-fn run_writer() -> int = let p = "lume_crossproc_crash.wal" in let t1 = initial_ledger() in let s1 = persist_open(p, ledger_schema(), t1) in let s2 = persist_commit(s1, table_insert_row(t1, new_row_v2())) in let s3 = persist_append_torn(s2, "id,account,amount,units\n99,Corrupt,\"unterminated") in s2.ok == 1 and s2.version == 2
-print run_writer()
-EOF
-    cat >"$ntmp/d4_tx_worker.src" <<'EOF'
-use decimal
-use table
-fn ledger_schema() = Cons({name: "id", type: "int"}, Cons({name: "account", type: "str"}, Cons({name: "amount", type: "decimal"}, Cons({name: "units", type: "int"}, Nil))))
-fn new_row_v3() = Cons({kind: "int", value: 4}, Cons({kind: "str", value: "Reserve"}, Cons({kind: "decimal", value: decimal_parse("100.00")}, Cons({kind: "int", value: 15}, Nil))))
-fn run_tx() -> int = let s = persist_tx_insert_row("lume_crossproc_crash.wal", ledger_schema(), new_row_v3()) in s.ok
-print run_tx()
-EOF
-    cat >"$ntmp/d4_reader.src" <<'EOF'
-use decimal
-use table
-fn ledger_schema() = Cons({name: "id", type: "int"}, Cons({name: "account", type: "str"}, Cons({name: "amount", type: "decimal"}, Cons({name: "units", type: "int"}, Nil))))
-fn run_reader() -> str = let rec = persist_recover_path("lume_crossproc_crash.wal", ledger_schema()) in if rec.ok == 1 then str(rec.version) + ":" + str(table_row_count(rec.current)) + ":" + table_cell(rec.current, 2, 1).value.value else "ERR"
-print run_reader()
-EOF
-    LUME_BIN_DIR="$ntmp" ../../lume build "$ntmp/d4_writer.src" -o "$ntmp/d4_writer.elf" 2>"$ntmp/d4_build.err"
-    LUME_BIN_DIR="$ntmp" ../../lume build "$ntmp/d4_tx_worker.src" -o "$ntmp/d4_tx_worker.elf" 2>>"$ntmp/d4_build.err"
-    LUME_BIN_DIR="$ntmp" ../../lume build "$ntmp/d4_reader.src" -o "$ntmp/d4_reader.elf" 2>>"$ntmp/d4_build.err"
-    "$ntmp/d4_writer.elf" >"$ntmp/d4_w.out"
+    mkdir -p "$ntmp/d4_procs"
+    sed '/^print /d' ../../compiler/stage1/data_d4_ok.src >"$ntmp/d4_procs/d4_base.src"
+    cp "$ntmp/d4_procs/d4_base.src" "$ntmp/d4_procs/d4_writer.src"
+    printf 'fn run_writer() -> int = let p = "lume_crossproc_crash.wal" in let t1 = initial_ledger() in let s1 = persist_open(p, ledger_schema(), t1) in let t2 = table_insert_row(t1, new_row_v2()) in let s2 = persist_commit(s1, t2) in let crashed = persist_append_torn(s2, "id,account,amount,units\\n99,Corrupt,\\"unterminated") in s2.ok == 1 and s2.version == 2\nprint run_writer()\n' >>"$ntmp/d4_procs/d4_writer.src"
+    cp "$ntmp/d4_procs/d4_base.src" "$ntmp/d4_procs/d4_tx_worker.src"
+    printf 'fn run_tx() -> int = let s = persist_tx_insert_row("lume_crossproc_crash.wal", ledger_schema(), new_row_v3()) in s.ok\nprint run_tx()\n' >>"$ntmp/d4_procs/d4_tx_worker.src"
+    cp "$ntmp/d4_procs/d4_base.src" "$ntmp/d4_procs/d4_reader.src"
+    printf 'fn run_reader() -> int = let rec = persist_recover_path("lume_crossproc_crash.wal", ledger_schema()) in if rec.ok == 1 and table_cell(rec.current, 2, 1).value.value == "Tax" then rec.version * 10 + table_row_count(rec.current) else 0\nprint run_reader()\n' >>"$ntmp/d4_procs/d4_reader.src"
+    LUME_BIN_DIR="$ntmp" ../../lume build "$ntmp/d4_procs/d4_writer.src" -o "$ntmp/d4_procs/d4_writer.elf" 2>"$ntmp/d4_build.err"
+    LUME_BIN_DIR="$ntmp" ../../lume build "$ntmp/d4_procs/d4_tx_worker.src" -o "$ntmp/d4_procs/d4_tx_worker.elf" 2>>"$ntmp/d4_build.err"
+    LUME_BIN_DIR="$ntmp" ../../lume build "$ntmp/d4_procs/d4_reader.src" -o "$ntmp/d4_procs/d4_reader.elf" 2>>"$ntmp/d4_build.err"
+    "$ntmp/d4_procs/d4_writer.elf" >"$ntmp/d4_w.out"
     # Simulate a mid-syscall process kill by appending an unterminated, un-checksummed partial WAL record:
-    printf '@tx|99|1|99999|id,account,amount,units~n999,PartialKill' >>lume_crossproc_crash.wal
-    "$ntmp/d4_reader.elf" >"$ntmp/d4_r1.out"
+    printf '@tx|99|1|99999|id,account,amount,units~n999,PartialKill\n' >>lume_crossproc_crash.wal
+    "$ntmp/d4_procs/d4_reader.elf" >"$ntmp/d4_r1.out"
     # Run two concurrent OS processes appending under flock(LOCK_EX) + fsync:
-    "$ntmp/d4_tx_worker.elf" >"$ntmp/d4_tx1.out" &
+    "$ntmp/d4_procs/d4_tx_worker.elf" >"$ntmp/d4_tx1.out" &
     _pid1=$!
-    "$ntmp/d4_tx_worker.elf" >"$ntmp/d4_tx2.out" &
+    "$ntmp/d4_procs/d4_tx_worker.elf" >"$ntmp/d4_tx2.out" &
     _pid2=$!
     wait "$_pid1" "$_pid2"
-    "$ntmp/d4_reader.elf" >"$ntmp/d4_r2.out"
+    "$ntmp/d4_procs/d4_reader.elf" >"$ntmp/d4_r2.out"
     # Negative test: corrupt all committed records on disk and verify persist_recover_path rejects the tampered WAL:
     sed 's/Cash/HACK/g' lume_crossproc_crash.wal >"$ntmp/crash_tampered.wal"
     mv "$ntmp/crash_tampered.wal" lume_crossproc_crash.wal
-    "$ntmp/d4_reader.elf" >"$ntmp/d4_r_neg.out"
+    "$ntmp/d4_procs/d4_reader.elf" >"$ntmp/d4_r_neg.out"
     rm -f lume_crossproc_crash.wal
-    if diff -u ../../tests/conformance/stage1/data_d4_ok_asm.expected "$ntmp/d4_run.out" >/dev/null && grep -q "20 passed, 0 failed" "$ntmp/d4_test.out" && grep -q "test_persist_wal_crash_recovery" "$ntmp/d4_test.out" && grep -q "test_soa_columnar_vectorised_ops" "$ntmp/d4_test.out" && [ "$d4bccy" = 3 ] && [ ! -s "$ntmp/d4_bad_ccy.s" ] && grep -q "type error: argument 1 of 'take_brl' has type money\[USD\] but parameter 'x' expects money\[BRL\]" "$ntmp/d4_bad_ccy.err" && grep -q '"code":"T2001"' "$ntmp/d4_bad_ccy.json" && [ "$(cat "$ntmp/d4_w.out")" = "1" ] && [ "$(cat "$ntmp/d4_r1.out")" = "2:3:Tax" ] && [ "$(cat "$ntmp/d4_tx1.out")" = "1" ] && [ "$(cat "$ntmp/d4_tx2.out")" = "1" ] && grep -Eq "^[34]:[45]:Tax$" "$ntmp/d4_r2.out" && [ "$(cat "$ntmp/d4_r_neg.out")" = "ERR" ]; then ok "phase-2 D4 (#214): durable on-disk WAL (open+flock+write+fsync+close, cross-process crash recovery, concurrent tx & tamper rejection), versioned, money[CCY] & @soa"; else bad "phase-2 D4 (#214): durable on-disk WAL & money[CCY] check"; cat "$ntmp/d4_build.err" "$ntmp/d4_run.err" "$ntmp/d4_run.out" "$ntmp/d4_test.out" "$ntmp/d4_w.out" "$ntmp/d4_r1.out" "$ntmp/d4_r2.out" "$ntmp/d4_r_neg.out" 2>/dev/null; fi
+    if diff -u ../../tests/conformance/stage1/data_d4_ok_asm.expected "$ntmp/d4_run.out" >/dev/null && grep -q "20 passed, 0 failed" "$ntmp/d4_test.out" && grep -q "test_persist_wal_crash_recovery" "$ntmp/d4_test.out" && grep -q "test_soa_columnar_vectorised_ops" "$ntmp/d4_test.out" && [ "$d4bccy" = 3 ] && [ ! -s "$ntmp/d4_bad_ccy.s" ] && grep -q "type error: argument 1 of 'take_brl' has type money\[USD\] but parameter 'x' expects money\[BRL\]" "$ntmp/d4_bad_ccy.err" && grep -q '"code":"T2001"' "$ntmp/d4_bad_ccy.json" && [ "$(cat "$ntmp/d4_w.out")" = "1" ] && [ "$(cat "$ntmp/d4_r1.out")" = "23" ] && [ "$(cat "$ntmp/d4_tx1.out")" = "1" ] && [ "$(cat "$ntmp/d4_tx2.out")" = "1" ] && grep -Eq "^(34|45)$" "$ntmp/d4_r2.out" && [ "$(cat "$ntmp/d4_r_neg.out")" = "0" ]; then ok "phase-2 D4 (#214): durable on-disk WAL (open+flock+write+fsync+close, cross-process crash recovery, concurrent tx & tamper rejection), versioned, money[CCY] & @soa"; else bad "phase-2 D4 (#214): durable on-disk WAL & money[CCY] check"; cat "$ntmp/d4_build.err" "$ntmp/d4_run.err" "$ntmp/d4_run.out" "$ntmp/d4_test.out" "$ntmp/d4_w.out" "$ntmp/d4_r1.out" "$ntmp/d4_r2.out" "$ntmp/d4_r_neg.out" 2>/dev/null; fi
     # Stage 1/2 Tooling & AI-Author Substrate (#209, #210, #211, #230):
     # 1. One-shot & substrate checks (`lume agent hashes|grammar|project`, `lume lsp --json`, `lume dap --json`, `lume repl --kernel <file>`):
     printf 'fn clamp_pos(x: int) -> int requires x >= 0 ensures result >= 0 = x + 1\nlaw id_law(x: int) = clamp_pos(x) > x\nprint clamp_pos(5)\n' >"$ntmp/sub_ok.src"
