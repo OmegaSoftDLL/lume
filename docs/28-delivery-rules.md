@@ -72,6 +72,27 @@ backends are written in **Lume** (`.src`), not new C in the frozen seed (`#205`)
 regression test. If a shortcut is genuinely unavoidable, it ships **labelled `model`/`planned`** and
 is tracked as an issue — it never ships as a guarantee. **Zero theater inside Lume.**
 
+### 6. Deliver the real construct, not a mock of it
+A feature is done only when the **real language construct** exists in the compiler — not when a
+hand-written function or library imitates its behaviour well enough to pass one test. This is the most
+seductive form of theater: it runs, it prints the right numbers, and it is still fake.
+- **A typed feature is the type, not a library that imitates it.** `rc[T]` means the compiler has the
+  `rc[T]` ownership tier (literal `rc(value)`, automatic deref, ownership analysis) — **not** a set of
+  user functions `rc_new`/`rc_drop` poking memory and returning `{tier:"rc", …}` records. If the real
+  construct is not there, the feature is `planned`; its issue **stays open**.
+- **Diagnostics come from the real analysis, never faked.** A `[CODE]` error must be emitted by the
+  compiler's own check. Printing it yourself — `ctfail("…[O0001]…")` with a hardcoded string, or
+  hand-returning the JSON a diagnostic would produce — is theater: it fires whether or not the analysis
+  exists, so it proves nothing.
+- **The test exercises the real feature, not a stand-in.** A negative test for `rc[T]` must use `rc[T]`;
+  `fn rc_drop(x: int) -> int = x` standing in for it, passing via generic move semantics, tests nothing
+  about the feature. If the only program that exercises the "feature" is its own conformance test, and
+  no real program or agent would ever call it, it is a mock with no purpose — it must not ship, and it
+  must **not** close the feature's issue.
+- **Build exactly what the issue asks.** Delivering an adjacent, easier thing (a model, a stub, a
+  look-alike library) and closing the issue as done is a false completion (§1). Deliver the real thing,
+  or label it honestly and leave the issue open.
+
 ## In one line
 Build the real thing or label it honestly; prove it with a test that would fail if it were fake; and
 never let a word in the docs, the CLI, or a status line promise more than the code does.
