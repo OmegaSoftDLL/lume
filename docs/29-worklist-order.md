@@ -14,8 +14,7 @@ rule (`docs/28`): no brick is "done" until the real thing runs, with its guarant
 
 ## The spine (do roughly in this order)
 
-1. **`#191` — real interop (FFI linking + C-ABI / WASM export).** *In progress now.* Finishes first
-   because it is the current work and it unblocks the "compatible with C/C++/Rust/Go/WASM" goal.
+1. **`#191` — real interop (FFI linking + C-ABI / WASM export).** *(Done — System V AMD64 `extern "c" fn` unboxing/boxing trampolines and `@export("C")` / `pub extern "c" fn` C-ABI entrypoints in `05_codegen.src`, dynamic ELF64 `PT_INTERP`/`PT_DYNAMIC`/`DT_NEEDED`/PLT/GOT emission in `lasm.src`, `[ffi] libs` + `[E0200]` capability check in `lmod.src`, `lume build --link <lib.so|lib.a>` and `-o <out.a|out.so|out.wat|out.wasm>` + `--emit-c-header`, and `[I0002]` WASM fragment diagnostics in `lcaas.src`/`interop.src`.)*
    `#191` is **not [HARD] for the kernel** — a from-scratch kernel uses no C FFI.
 
 2. **`#227` — systems & kernels, K0→K9 on x86-64** (`docs/27`). **[PRIORITY]** — the flagship

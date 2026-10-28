@@ -95,15 +95,16 @@ fn parselcomm2(rest, c) = BS(trim(slice(rest, 0, c)), toint(trim(slice(rest, c +
 fn escbyte(c) = if c == "n" then 10 else if c == "t" then 9 else if c == "r" then 13 else if c == "0" then 0 else ord(c)
 fn ascbytes(s, i) = if i >= count(s) then Cons(0, Nil) else if at(s, i) == "\"" then Cons(0, Nil) else if at(s, i) == "\\" then Cons(escbyte(at(s, i + 1)), ascbytes(s, i + 2)) else Cons(ord(at(s, i)), ascbytes(s, i + 1))
 fn parseasciz(s) = ascbytes(s, findc(s, "\"", 0) + 1)
+fn parsestr(s) = let a = findc(s, "\"", 0) + 1 in slice(s, a, findc(s, "\"", a))
 
-## --- items: TL/RL text/rodata labels, Ins instruction, RO rodata bytes, BS bss reservation, Skip ---
+## --- items: TL/RL text/rodata labels, Ins instruction, RO rodata bytes, BS bss reservation, ND/EX dynamic link, Skip ---
 fn parseitems(lines, sec) = match lines
     Nil        => Nil
     Cons(h, t) => parseline(trim(h), t, sec)
 fn parseline(s, t, sec) = if count(s) == 0 then Cons(Skip, parseitems(t, sec)) else if at(s, 0) == "#" then Cons(Skip, parseitems(t, sec)) else if endscolon(s) then parselabel(slice(s, 0, count(s) - 1), t, sec) else if at(s, 0) == "." then parsedir(s, t, sec) else Cons(Ins(parseins(s)), parseitems(t, sec))
 fn parselabel(nm, t, sec) = if sec == 1 then Cons(RL(nm), parseitems(t, sec)) else Cons(TL(nm), parseitems(t, sec))
 fn parsebytes(s, i, n) = if i >= n then Nil else let a = skipws(s, i) in if a >= n then Nil else let c = findc(s, ",", a) in let tok = trim(slice(s, a, c)) in Cons(lowbyte(parseint(tok)), parsebytes(s, c + 1, n))
-fn parsedir(s, t, sec) = if startswith(s, ".section .rodata") then Cons(Skip, parseitems(t, 1)) else if startswith(s, ".section .text") then Cons(Skip, parseitems(t, 0)) else if startswith(s, ".section .bss") then Cons(Skip, parseitems(t, 2)) else if startswith(s, ".globl") then Cons(Skip, parseitems(t, sec)) else if startswith(s, ".lcomm") then Cons(parselcomm(s), parseitems(t, sec)) else if startswith(s, ".asciz") then Cons(RO(parseasciz(s)), parseitems(t, sec)) else if startswith(s, ".byte") then Cons(RO(parsebytes(s, 5, count(s))), parseitems(t, sec)) else Cons(Skip, parseitems(t, sec))
+fn parsedir(s, t, sec) = if startswith(s, ".section .rodata") then Cons(Skip, parseitems(t, 1)) else if startswith(s, ".section .text") then Cons(Skip, parseitems(t, 0)) else if startswith(s, ".section .bss") then Cons(Skip, parseitems(t, 2)) else if startswith(s, ".globl") then Cons(Skip, parseitems(t, sec)) else if startswith(s, ".lcomm") then Cons(parselcomm(s), parseitems(t, sec)) else if startswith(s, ".asciz") then Cons(RO(parseasciz(s)), parseitems(t, sec)) else if startswith(s, ".byte") then Cons(RO(parsebytes(s, 5, count(s))), parseitems(t, sec)) else if startswith(s, ".need") then Cons(ND(parsestr(s)), parseitems(t, sec)) else if startswith(s, ".extern") then Cons(EX(trim(slice(s, 7, count(s)))), parseitems(t, sec)) else Cons(Skip, parseitems(t, sec))
 
 ## --- GAS numeric local labels (`N:` defines, `Nf` = nearest N: AHEAD, `Nb` = nearest N: BEHIND) ---
 ## A number may be (re)defined many times. Items are in source order, so a left-to-right fold with a
@@ -214,18 +215,56 @@ fn layoutins(r, t, co, roff, boff) = let eb = enc(r, 0, Nil) in let ln = len(eb)
 ## --- pass 2: emit code bytes with the full symbol table. Verbatim bytes for the
 ## address-independent instructions; re-encode only the reloc ones (jumps/calls/jcc/%rip) now
 ## that symaddr can resolve. No second length computation -- pass 1 recorded off and ln. ---
-fn emitcode2(encs, syms) = match encs
+fn emitcode2b(encs, syms, tbase) = match encs
     Nil        => Nil
-    Cons(e, t) => app(if e.reloc == 1 then enc(e.ins, 4194424 + e.off + e.ln, syms) else e.bytes, emitcode2(t, syms))
+    Cons(e, t) => app(if e.reloc == 1 then enc(e.ins, tbase + e.off + e.ln, syms) else e.bytes, emitcode2b(t, syms, tbase))
+fn emitcode2(encs, syms) = emitcode2b(encs, syms, 4194424)
 
-## --- ELF64 container (VBASE 0x400000, 120-byte headers, one RWX PT_LOAD) ---
+## --- ELF64 container (VBASE 0x400000, 120-byte headers, one RWX PT_LOAD; or 232-byte dynamic ELF64 with PT_INTERP/PT_DYNAMIC/DT_NEEDED/PLT/GOT) ---
 fn identbytes() = Cons(127, Cons(69, Cons(76, Cons(70, Cons(2, Cons(1, Cons(1, Cons(0, Cons(0, Cons(0, Cons(0, Cons(0, Cons(0, Cons(0, Cons(0, Cons(0, Nil))))))))))))))))
 fn ehdr(entry) = app(identbytes(), app(b2(2), app(b2(62), app(b4(1), app(b8(entry), app(b8(64), app(b8(0), app(b4(0), app(b2(64), app(b2(56), app(b2(1), app(b2(0), app(b2(0), b2(0))))))))))))))
 fn phdr(filesz, memsz) = app(b4(1), app(b4(7), app(b8(0), app(b8(4194304), app(b8(4194304), app(b8(filesz), app(b8(memsz), b8(4096))))))))
 
+fn has_str(xs, s) = match xs
+    Nil        => 0
+    Cons(h, t) => if h == s then 1 else has_str(t, s)
+fn collect_needs(items) = match items
+    Nil        => Nil
+    Cons(h, t) => collect_need1(h, collect_needs(t))
+fn collect_need1(h, rest) = match h
+    ND(s) => if has_str(rest, s) == 1 then rest else Cons(s, rest)
+    _     => rest
+fn collect_exts(items) = match items
+    Nil        => Nil
+    Cons(h, t) => collect_ext1(h, collect_exts(t))
+fn collect_ext1(h, rest) = match h
+    EX(s) => if has_str(rest, s) == 1 then rest else Cons(s, rest)
+    _     => rest
+fn zeros(n) = if n <= 0 then Nil else Cons(0, zeros(n - 1))
+fn str_nul_bytes(s, i, n) = if i >= n then Cons(0, Nil) else Cons(ord(at(s, i)), str_nul_bytes(s, i + 1, n))
+fn dynstr_pack(xs, off) = match xs
+    Nil        => {bytes: Nil, offs: Nil, end: off}
+    Cons(h, t) => let bs = str_nul_bytes(h, 0, count(h)) in let r = dynstr_pack(t, off + count(h) + 1) in {bytes: app(bs, r.bytes), offs: Cons(off, r.offs), end: r.end}
+fn mk_plt_tls(exts, cs0, i) = match exts
+    Nil        => Nil
+    Cons(s, t) => Cons({nm: s + "@plt", o: cs0 + i * 6}, Cons({nm: s, o: cs0 + i * 6}, mk_plt_tls(t, cs0, i + 1)))
+fn mk_plt_code(n, i, cs0, got_off) = if i >= n then Nil else let plt_end = 4194536 + cs0 + i * 6 + 6 in let got_v = 4194304 + got_off + 24 + i * 8 in app(Cons(255, Cons(37, b4(got_v - plt_end))), mk_plt_code(n, i + 1, cs0, got_off))
+fn mk_dynsym(soffs) = match soffs
+    Nil        => Nil
+    Cons(o, t) => app(b4(o), app(Cons(18, Cons(0, b2(0))), app(b8(0), app(b8(0), mk_dynsym(t)))))
+fn mk_rela(n, i, got_off) = if i >= n then Nil else let got_v = 4194304 + got_off + 24 + i * 8 in app(b8(got_v), app(b4(6), app(b4(i + 1), app(b8(0), mk_rela(n, i + 1, got_off)))))
+fn mk_dt_needed(noffs) = match noffs
+    Nil        => Nil
+    Cons(o, t) => app(b8(1), app(b8(o), mk_dt_needed(t)))
+fn ehdr_dyn(entry) = app(identbytes(), app(b2(2), app(b2(62), app(b4(1), app(b8(entry), app(b8(64), app(b8(0), app(b4(0), app(b2(64), app(b2(56), app(b2(3), app(b2(0), app(b2(0), b2(0))))))))))))))
+fn phdr_interp(ioff) = app(b4(3), app(b4(4), app(b8(ioff), app(b8(4194304 + ioff), app(b8(4194304 + ioff), app(b8(28), app(b8(28), b8(1))))))))
+fn phdr_dynamic(doff, dsz) = app(b4(2), app(b4(6), app(b8(doff), app(b8(4194304 + doff), app(b8(4194304 + doff), app(b8(dsz), app(b8(dsz), b8(8))))))))
+fn interp_bytes() = app(str_nul_bytes("/lib64/ld-linux-x86-64.so.2", 0, 27), zeros(4))
+fn asmdyn(lay, needs, exts) = let nexts = len(exts) in let cs0 = lay.co in let cs = cs0 + nexts * 6 in let rs0 = len(lay.robytes) in let pad0 = (8 - ((232 + cs + rs0) % 8)) % 8 in let interp_off = 232 + cs + rs0 + pad0 in let hash_off = interp_off + 32 in let hwords = 3 + nexts in let hash_sz = (hwords + (hwords % 2)) * 4 in let dynsym_off = hash_off + hash_sz in let dynsym_sz = (1 + nexts) * 24 in let dynstr_off = dynsym_off + dynsym_sz in let pn = dynstr_pack(needs, 1) in let pe = dynstr_pack(exts, pn.end) in let dpad = (8 - (pe.end % 8)) % 8 in let dynstr_sz = pe.end + dpad in let got_off = dynstr_off + dynstr_sz in let got_sz = (3 + nexts) * 8 in let rela_off = got_off + got_sz in let rela_sz = nexts * 24 in let dyn_off = rela_off + rela_sz in let dyn_sz = (len(needs) + 10) * 16 in let filesz = dyn_off + dyn_sz in let memsz = filesz + lay.boff in let tls_all = app(mk_plt_tls(exts, cs0, 0), lay.tls) in let syms = app(mapsym(tls_all, 4194536), app(mapsym(lay.rls, 4194536 + cs), mapsym(lay.bls, 4194304 + filesz))) in let code = app(emitcode2b(lay.encs, syms, 4194536), mk_plt_code(nexts, 0, cs0, got_off)) in let hash_bs = app(b4(1), app(b4(1 + nexts), zeros((1 + nexts + (hwords % 2)) * 4))) in let dynsym_bs = app(zeros(24), mk_dynsym(pe.offs)) in let dynstr_bs = app(Cons(0, app(pn.bytes, pe.bytes)), zeros(dpad)) in let got_bs = zeros(got_sz) in let rela_bs = mk_rela(nexts, 0, got_off) in let dyn_bs = app(mk_dt_needed(pn.offs), app(b8(4), app(b8(4194304 + hash_off), app(b8(5), app(b8(4194304 + dynstr_off), app(b8(6), app(b8(4194304 + dynsym_off), app(b8(10), app(b8(pe.end), app(b8(11), app(b8(24), app(b8(3), app(b8(4194304 + got_off), app(b8(7), app(b8(4194304 + rela_off), app(b8(8), app(b8(rela_sz), app(b8(9), app(b8(24), app(b8(0), b8(0))))))))))))))))))))) in let hdrs = app(ehdr_dyn(symaddr(syms, "_start")), app(phdr_interp(interp_off), app(phdr(filesz, memsz), phdr_dynamic(dyn_off, dyn_sz)))) in let tail = app(lay.robytes, app(zeros(pad0), app(interp_bytes(), app(hash_bs, app(dynsym_bs, app(dynstr_bs, app(got_bs, app(rela_bs, dyn_bs)))))))) in emitall(app(hdrs, app(code, tail)))
+
 ## --- the assembler: read stdin, two passes, emit the ELF to stdout ---
 fn buildsyms(lay, cs, rs) = app(mapsym(lay.tls, 4194424), app(mapsym(lay.rls, 4194424 + cs), mapsym(lay.bls, 4194424 + cs + rs)))
-fn assemble(src) = asm2(layout(reslocals(parseitems(splitlines(src, 0), 0), Nil), 0, 0, 0))
+fn assemble(src) = let items = reslocals(parseitems(splitlines(src, 0), 0), Nil) in let needs = collect_needs(items) in let exts = collect_exts(items) in if isnil(needs) == 1 and isnil(exts) == 1 then asm2(layout(items, 0, 0, 0)) else asmdyn(layout(items, 0, 0, 0), needs, exts)
 fn asm2(lay) = asm3(lay, lay.co, len(lay.robytes))
 fn asm3(lay, cs, rs) = asm4(lay, cs, rs, buildsyms(lay, cs, rs))
 fn asm4(lay, cs, rs, syms) = asm6(lay, syms, symaddr(syms, "_start"), 120 + cs + rs, 120 + cs + rs + lay.boff, emitcode2(lay.encs, syms))
