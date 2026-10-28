@@ -26,6 +26,9 @@ can be `proven` and their runtime guards elided, and treats correctness as somet
 - [24 — Phase 4 plan](24-phase4-plan.md) (tensors, autodiff, prob, rules, llm) · [25 — Phase 5 plan](25-phase5-plan.md) (systems, interop, realtime, lume-os)
 - [06 — Software protection](06-software-protection.md) (P33 anti-reverse-engineering)
 
+## Build order
+- [29 — Worklist execution order](29-worklist-order.md) — the ordered open backlog (agy's sequence).
+
 ## The north star
 - [19 — Intent as source / the compiler as an oracle](19-intent-as-source.md)
 - [20 — Interop](20-interop.md) · [22 — Adoption](22-adoption.md) · [23 — Horizon](23-horizon.md) · [26 — Universal targets](26-targets.md)
