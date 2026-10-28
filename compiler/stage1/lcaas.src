@@ -2287,7 +2287,7 @@ fn cs_spirv_lower_e(e, id) = match e
     VarIn(nm, v, b) => let rv = cs_spirv_lower_e(v, id) in let rb = cs_spirv_lower_e(b, rv.next) in {code: rv.code + "    %" + nm + " = OpCopyObject %long " + rv.dst + "\n" + rb.code, dst: rb.dst, next: rb.next}
     _               => {code: "<invalid-kernel-expr>", dst: "%v_invalid", next: id}
 
-fn cs_kvm_is_sep(c) = if c == " " or c == "\t" or c == "," or c == ";" or c == "\r" then 1 else 0
+fn cs_kvm_is_sep(c) = if c == " " or c == "\t" or c == "," or c == ";" or c == "\r" or c == "\n" then 1 else 0
 
 fn cs_kvm_tokens_loop(s, i, n, start, in_tok) = if i >= n then (if in_tok == 1 then Cons(slice(s, start, n), Nil) else Nil) else let sep = cs_kvm_is_sep(at(s, i)) in if in_tok == 0 then (if sep == 1 then cs_kvm_tokens_loop(s, i + 1, n, 0, 0) else cs_kvm_tokens_loop(s, i + 1, n, i, 1)) else (if sep == 1 then Cons(slice(s, start, i), cs_kvm_tokens_loop(s, i + 1, n, 0, 0)) else cs_kvm_tokens_loop(s, i + 1, n, start, 1))
 
@@ -2301,9 +2301,17 @@ fn cs_kvm_lookup(k, regs) = match regs
     Nil        => 0
     Cons(h, t) => if h.k == k then h.v else cs_kvm_lookup(k, t)
 
-fn cs_kvm_parse_int(s) = if count(s) > 1 and at(s, 0) == "-" then 0 - toint(slice(s, 1, count(s))) else toint(s)
+fn cs_kvm_parse_int(s) = if count(s) > 1 then (if at(s, 0) == "-" then 0 - toint(slice(s, 1, count(s))) else toint(s)) else toint(s)
 
-fn cs_kvm_val(tok, regs) = if count(tok) > 0 and (at(tok, 0) == "%" or at(tok, 0) == "[") then cs_kvm_lookup(tok, regs) else cs_kvm_parse_int(tok)
+fn cs_kvm_val(tok, regs) = if count(tok) > 0 then (if at(tok, 0) == "%" or at(tok, 0) == "[" then cs_kvm_lookup(tok, regs) else cs_kvm_parse_int(tok)) else 0
+
+fn cs_int_hd(xs) = match xs
+    Nil        => 0
+    Cons(h, t) => h
+
+fn cs_int_tl(xs) = match xs
+    Nil        => Nil
+    Cons(h, t) => t
 
 fn cs_ptx_vm_step(toks, regs, env) = let n = cs_len(toks) in if n == 0 then regs else let op = cs_kvm_tok_at(toks, 0) in if op == "ld.param.s64" and n >= 3 then (let dst = cs_kvm_tok_at(toks, 1) in let pref = cs_kvm_tok_at(toks, 2) in let pnm = slice(pref, 3, count(pref) - 1) in Cons({k: dst, v: cs_kvm_lookup(pnm, env)}, regs)) else if op == "mov.s64" and n >= 3 then Cons({k: cs_kvm_tok_at(toks, 1), v: cs_kvm_val(cs_kvm_tok_at(toks, 2), regs)}, regs) else if op == "mul.lo.s64" and n >= 4 then Cons({k: cs_kvm_tok_at(toks, 1), v: cs_kvm_val(cs_kvm_tok_at(toks, 2), regs) * cs_kvm_val(cs_kvm_tok_at(toks, 3), regs)}, regs) else if op == "add.s64" and n >= 4 then Cons({k: cs_kvm_tok_at(toks, 1), v: cs_kvm_val(cs_kvm_tok_at(toks, 2), regs) + cs_kvm_val(cs_kvm_tok_at(toks, 3), regs)}, regs) else if op == "sub.s64" and n >= 4 then Cons({k: cs_kvm_tok_at(toks, 1), v: cs_kvm_val(cs_kvm_tok_at(toks, 2), regs) - cs_kvm_val(cs_kvm_tok_at(toks, 3), regs)}, regs) else if op == "div.s64" and n >= 4 then Cons({k: cs_kvm_tok_at(toks, 1), v: cs_kvm_val(cs_kvm_tok_at(toks, 2), regs) / cs_kvm_val(cs_kvm_tok_at(toks, 3), regs)}, regs) else if op == "rem.s64" and n >= 4 then Cons({k: cs_kvm_tok_at(toks, 1), v: cs_kvm_val(cs_kvm_tok_at(toks, 2), regs) % cs_kvm_val(cs_kvm_tok_at(toks, 3), regs)}, regs) else if op == "and.b64" and n >= 4 then Cons({k: cs_kvm_tok_at(toks, 1), v: if cs_kvm_val(cs_kvm_tok_at(toks, 2), regs) != 0 and cs_kvm_val(cs_kvm_tok_at(toks, 3), regs) != 0 then 1 else 0}, regs) else if op == "or.b64" and n >= 4 then Cons({k: cs_kvm_tok_at(toks, 1), v: if cs_kvm_val(cs_kvm_tok_at(toks, 2), regs) != 0 or cs_kvm_val(cs_kvm_tok_at(toks, 3), regs) != 0 then 1 else 0}, regs) else if op == "setp.gt.s64" and n >= 4 then Cons({k: cs_kvm_tok_at(toks, 1), v: if cs_kvm_val(cs_kvm_tok_at(toks, 2), regs) > cs_kvm_val(cs_kvm_tok_at(toks, 3), regs) then 1 else 0}, regs) else if op == "setp.ge.s64" and n >= 4 then Cons({k: cs_kvm_tok_at(toks, 1), v: if cs_kvm_val(cs_kvm_tok_at(toks, 2), regs) >= cs_kvm_val(cs_kvm_tok_at(toks, 3), regs) then 1 else 0}, regs) else if op == "setp.lt.s64" and n >= 4 then Cons({k: cs_kvm_tok_at(toks, 1), v: if cs_kvm_val(cs_kvm_tok_at(toks, 2), regs) < cs_kvm_val(cs_kvm_tok_at(toks, 3), regs) then 1 else 0}, regs) else if op == "setp.le.s64" and n >= 4 then Cons({k: cs_kvm_tok_at(toks, 1), v: if cs_kvm_val(cs_kvm_tok_at(toks, 2), regs) <= cs_kvm_val(cs_kvm_tok_at(toks, 3), regs) then 1 else 0}, regs) else if op == "setp.eq.s64" and n >= 4 then Cons({k: cs_kvm_tok_at(toks, 1), v: if cs_kvm_val(cs_kvm_tok_at(toks, 2), regs) == cs_kvm_val(cs_kvm_tok_at(toks, 3), regs) then 1 else 0}, regs) else if op == "setp.ne.s64" and n >= 4 then Cons({k: cs_kvm_tok_at(toks, 1), v: if cs_kvm_val(cs_kvm_tok_at(toks, 2), regs) != cs_kvm_val(cs_kvm_tok_at(toks, 3), regs) then 1 else 0}, regs) else if op == "selp.s64" and n >= 5 then Cons({k: cs_kvm_tok_at(toks, 1), v: if cs_kvm_val(cs_kvm_tok_at(toks, 4), regs) != 0 then cs_kvm_val(cs_kvm_tok_at(toks, 2), regs) else cs_kvm_val(cs_kvm_tok_at(toks, 3), regs)}, regs) else if op == "st.global.s64" and n >= 3 then Cons({k: cs_kvm_tok_at(toks, 1), v: cs_kvm_val(cs_kvm_tok_at(toks, 2), regs)}, regs) else regs
 
