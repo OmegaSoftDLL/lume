@@ -760,6 +760,8 @@ cmd_agent() {
             hashes) _amode="hashes" ;;
             grammar) _amode="grammar" ;;
             project) _amode="project" ;;
+            c-export) _amode="c-export" ;;
+            kernel) _amode="kernel" ;;
             lsp) _amode="lsp" ;;
             dap) _amode="dap" ;;
             repl) _amode="repl" ;;

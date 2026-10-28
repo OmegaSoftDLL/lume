@@ -66,9 +66,21 @@ fn ffi_wrap_foreign(raw_val, symbol) = {value: raw_val, provenance: "foreign", s
 
 fn ffi_verify_range(fval, lo, hi) = let ok = if fval.value >= lo then (if fval.value <= hi then 1 else 0) else 0 in {value: fval.value, provenance: if ok == 1 then "verified" else "foreign", symbol: fval.symbol, verified: ok}
 
-fn ffi_export_c_header(fn_name, arity) = let params = if arity == 0 then "void" else if arity == 1 then "int64_t a0" else if arity == 2 then "int64_t a0, int64_t a1" else "int64_t a0, int64_t a1, int64_t a2" in "/* Lume Verified C-ABI Export (Track I5) */\nextern int64_t " + fn_name + "(" + params + ");\n"
+fn ffi_c_params_loop(idx, arity) = if idx >= arity then "" else let p = "int64_t a" + str(idx) in if idx + 1 >= arity then p else p + ", " + ffi_c_params_loop(idx + 1, arity)
 
-fn wasm_export_wat(fn_name) = "(module (func $" + fn_name + " (export \"" + fn_name + "\") (param i64 i64) (result i64) local.get 0 local.get 1 i64.add))"
+fn ffi_export_c_header(fn_name, arity) = let params = if arity <= 0 then "void" else ffi_c_params_loop(0, arity) in "/* Lume Verified C-ABI Export (Track I5) */\n#include <stdint.h>\nextern int64_t " + fn_name + "(" + params + ");\n"
+
+fn ffi_export_c_header_sig(fn_name, param_csv, ret_c_ty, contract_doc) = let ps = if param_csv == "" then "void" else param_csv in "/* Lume Verified C-ABI Export (Track I5) — contract: " + contract_doc + " */\n#include <stdint.h>\nextern " + ret_c_ty + " " + fn_name + "(" + ps + ");\n"
+
+fn wasm_wat_params(idx, arity) = if idx >= arity then "" else " (param $p" + str(idx) + " i64)" + wasm_wat_params(idx + 1, arity)
+
+fn wasm_wat_op(op) = if op == "-" then "i64.sub" else if op == "*" then "i64.mul" else if op == "/" then "i64.div_s" else "i64.add"
+
+fn wasm_export_wat_fn(fn_name, arity, op, imm_rhs) = let ps = wasm_wat_params(0, arity) in let body = (if arity <= 0 then "i64.const " + str(imm_rhs) else if arity == 1 then "local.get $p0 i64.const " + str(imm_rhs) + " " + wasm_wat_op(op) else "local.get $p0 local.get $p1 " + wasm_wat_op(op)) in "(module (func $" + fn_name + " (export \"" + fn_name + "\")" + ps + " (result i64) " + body + "))"
+
+fn wasm_export_wat(fn_name) = wasm_export_wat_fn(fn_name, 2, "+", 0)
+
+fn elf_emit_dynamic_link(lib_so, sym_name) = ".section .dynstr,\"a\",@progbits\n.Ldynstr_lib:\n    .asciz \"" + lib_so + "\"\n.Ldynstr_sym:\n    .asciz \"" + sym_name + "\"\n.section .dynamic,\"aw\",@dynamic\n    .quad 1, .Ldynstr_lib\n    .quad 5, .dynstr\n    .quad 6, .dynsym\n    .quad 3, .got.plt\n    .quad 0, 0\n.section .plt,\"ax\",@progbits\n.globl " + sym_name + "@plt\n" + sym_name + "@plt:\n    jmp *" + sym_name + "@GOTPCREL(%rip)\n"
 
 ## --- 3. Track I4: WebAssembly Reference Sandbox Model (std.wasm) ---
 ## Note: `std.wasm` models linear-memory bounds (4 slots), instruction fuel accounting, and host capability

@@ -1709,7 +1709,45 @@ fn olowere(e, lctx, d) = match e
     CT(inner)               => CT(olowere(inner, lctx, d))
     _                       => e
 
-fn n4_lower_ad_call(nm, args, lctx, d) = if nm == "grad" and len(args) >= 2 then Call(n4_grad_fn_name(n4_var_name(ohd_e(args)), lctx.ufns), olowerargs(ptl(args), lctx, d)) else if nm == "jvp" and len(args) == 3 then Bin("*", Call(n4_grad_fn_name(n4_var_name(ohd_e(args)), lctx.ufns), Cons(olowere(ohd_e(ptl(args)), lctx, d), Nil)), olowere(ohd_e(ptl(ptl(args))), lctx, d + 1)) else if nm == "vjp" and len(args) == 3 then Bin("*", olowere(ohd_e(ptl(ptl(args))), lctx, d + 1), Call(n4_grad_fn_name(n4_var_name(ohd_e(args)), lctx.ufns), Cons(olowere(ohd_e(ptl(args)), lctx, d), Nil))) else if nm == "jit" and len(args) >= 2 then Call(n4_var_name(ohd_e(args)), olowerargs(ptl(args), lctx, d)) else Call(nm, olowerargs(args, lctx, d))
+fn n4_jlookup(nm, jenv) = match jenv
+    Nil        => Var(nm)
+    Cons(h, t) => if h.k == nm then h.v else n4_jlookup(nm, t)
+
+fn n4_is_num_e(e) = match e
+    Num(n) => 1
+    _      => 0
+
+fn n4_num_val(e) = match e
+    Num(n) => n
+    _      => 0
+
+fn n4_jit_bin(op, l, r) = if n4_is_num_e(l) == 1 and n4_is_num_e(r) == 1 then (let rv = veval_bin(op, vv_int(n4_num_val(l)), vv_int(n4_num_val(r))) in if rv.ok == 1 then Num(rv.i) else Bin(op, l, r)) else if op == "+" and n4_is_num_e(l) == 1 and n4_num_val(l) == 0 then r else if (op == "+" or op == "-") and n4_is_num_e(r) == 1 and n4_num_val(r) == 0 then l else if op == "*" and n4_is_num_e(l) == 1 and n4_num_val(l) == 1 then r else if op == "*" and n4_is_num_e(r) == 1 and n4_num_val(r) == 1 then l else if op == "*" and ((n4_is_num_e(l) == 1 and n4_num_val(l) == 0) or (n4_is_num_e(r) == 1 and n4_num_val(r) == 0)) then Num(0) else Bin(op, l, r)
+
+fn n4_jit_spec(e, jenv) = match e
+    Num(n)          => Num(n)
+    Str(s)          => Str(s)
+    Var(nm)         => n4_jlookup(nm, jenv)
+    OwnE(inner)     => n4_jit_spec(inner, jenv)
+    MutE(inner)     => n4_jit_spec(inner, jenv)
+    Bin(op, l, r)   => n4_jit_bin(op, n4_jit_spec(l, jenv), n4_jit_spec(r, jenv))
+    If(c, t, e2)    => let sc = n4_jit_spec(c, jenv) in if n4_is_num_e(sc) == 1 then (if n4_num_val(sc) != 0 then n4_jit_spec(t, jenv) else n4_jit_spec(e2, jenv)) else If(sc, n4_jit_spec(t, jenv), n4_jit_spec(e2, jenv))
+    LetIn(nm, v, b) => let sv = n4_jit_spec(v, jenv) in if n4_is_num_e(sv) == 1 then n4_jit_spec(b, Cons({k: nm, v: sv}, jenv)) else LetIn(nm, sv, n4_jit_spec(b, Cons({k: nm, v: Var(nm)}, jenv)))
+    VarIn(nm, v, b) => let sv = n4_jit_spec(v, jenv) in if n4_is_num_e(sv) == 1 then n4_jit_spec(b, Cons({k: nm, v: sv}, jenv)) else LetIn(nm, sv, n4_jit_spec(b, Cons({k: nm, v: Var(nm)}, jenv)))
+    _               => e
+
+fn n4_jit_bind(ps, largs, body, jenv, pfx) = match ps
+    Nil        => n4_jit_spec(body, jenv)
+    Cons(p, r) => n4_jit_bind1(p, r, largs, body, jenv, pfx)
+
+fn n4_jit_bind1(p, r, largs, body, jenv, pfx) = match largs
+    Nil         => n4_jit_bind(r, Nil, body, Cons({k: p, v: Num(0)}, jenv), pfx)
+    Cons(a, ar) => let sa = n4_jit_spec(a, Nil) in if n4_is_num_e(sa) == 1 then n4_jit_bind(r, ar, body, Cons({k: p, v: sa}, jenv), pfx) else let np = pfx + p in LetIn(np, sa, n4_jit_bind(r, ar, body, Cons({k: p, v: Var(np)}, jenv), pfx))
+
+fn n4_lower_jit_call(fnm, largs, mf, d) = match mf
+    Nil        => Call(fnm, largs)
+    Cons(f, r) => if afn_calls_self(fnm, f.body) == 1 then Call(fnm, largs) else n4_jit_bind(f.ps, largs, f.body, Nil, "_jit_" + str(d) + "_")
+
+fn n4_lower_ad_call(nm, args, lctx, d) = if nm == "grad" and len(args) >= 2 then Call(n4_grad_fn_name(n4_var_name(ohd_e(args)), lctx.ufns), olowerargs(ptl(args), lctx, d)) else if nm == "jvp" and len(args) == 3 then Bin("*", Call(n4_grad_fn_name(n4_var_name(ohd_e(args)), lctx.ufns), Cons(olowere(ohd_e(ptl(args)), lctx, d), Nil)), olowere(ohd_e(ptl(ptl(args))), lctx, d + 1)) else if nm == "vjp" and len(args) == 3 then Bin("*", olowere(ohd_e(ptl(ptl(args))), lctx, d + 1), Call(n4_grad_fn_name(n4_var_name(ohd_e(args)), lctx.ufns), Cons(olowere(ohd_e(ptl(args)), lctx, d), Nil))) else if nm == "jit" and len(args) >= 2 then (let fnm = n4_var_name(ohd_e(args)) in let largs = olowerargs(ptl(args), lctx, d) in n4_lower_jit_call(fnm, largs, vfnlookup(fnm, lctx.fns), d)) else Call(nm, olowerargs(args, lctx, d))
 
 fn olowercall(nm, args, mhop, lctx, d) = match mhop
     Cons(hop, r) => kbind_hop_args(hop.ps, args, hop.body, "_khop_" + str(d) + "_" + hop.op + "_", lctx, d)

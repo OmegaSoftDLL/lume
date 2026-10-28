@@ -2057,6 +2057,92 @@ fn cs_has_substr(s, pat) = let n = count(s) in let m = count(pat) in if m == 0 t
 
 fn caas_repl_json(src) = let r = caas_compile(src) in let has_tbl = (if cs_has_substr(src, "read_csv") == 1 or cs_has_substr(src, "table_success") == 1 or cs_has_substr(src, "query_where") == 1 or cs_has_substr(src, "query_group") == 1 or cs_has_substr(src, "query_join") == 1 or cs_has_substr(src, "table[") == 1 then 1 else 0) in let mime = (if has_tbl == 1 then "application/vnd.lume.table+json" else "text/plain") in "{\"protocol\":\"lume-repl/1.0\",\"jupyter_kernel\":\"lume-kernel-v1\",\"ok\":" + (if r.ok == 1 then "true" else "false") + ",\"execution_count\":1,\"status\":\"" + (if r.ok == 1 then "ok" else "error") + "\",\"data\":{\"mime\":\"" + mime + "\",\"text/plain\":\"" + cs_jesc(r.result) + "\",\"has_first_class_table\":" + (if has_tbl == 1 then "true" else "false") + ",\"symbols\":[" + cs_syms_json(r.symbols) + "],\"proofs\":[" + cs_proofs_json(r.proofs) + "],\"diagnostics\":[" + cs_diags_json(r.diagnostics) + "]}}"
 
-fn caas_entry_dispatch(input) = if cs_startswith(input, "@mode certify\n") == 1 then lcert_certify(slice(input, 14, count(input))) else if cs_startswith(input, "@mode bind\n") == 1 then lcert_bind(slice(input, 11, count(input))) else if cs_startswith(input, "@mode witness\n") == 1 then caas_witness_json(slice(input, 14, count(input))) else if cs_startswith(input, "@mode repair\n") == 1 then caas_repair_json(slice(input, 13, count(input))) else if cs_startswith(input, "@mode impact\n") == 1 then caas_impact_json(slice(input, 13, count(input))) else if cs_startswith(input, "@mode hashes\n") == 1 then caas_hashes_json(slice(input, 13, count(input))) else if cs_startswith(input, "@mode grammar\n") == 1 then caas_grammar_json(slice(input, 14, count(input))) else if cs_startswith(input, "@mode project\n") == 1 then caas_project_json(slice(input, 14, count(input))) else if cs_startswith(input, "@mode lsp\n") == 1 then caas_lsp_json(slice(input, 10, count(input))) else if cs_startswith(input, "@mode dap\n") == 1 then caas_dap_json(slice(input, 10, count(input))) else if cs_startswith(input, "@mode repl\n") == 1 then caas_repl_json(slice(input, 11, count(input))) else if cs_startswith(input, "@mode mcp\n") == 1 then lcert_mcp(slice(input, 10, count(input))) else caas_json(caas_compile(input))
+fn cs_c_param_list(ps) = match ps
+    Nil        => ""
+    Cons(p, r) => let s = "int64_t " + p in if cs_isnil(r) == 1 then s else s + ", " + cs_c_param_list(r)
+
+fn cs_wat_params(ps) = match ps
+    Nil        => ""
+    Cons(p, r) => " (param $" + p + " i64)" + cs_wat_params(r)
+
+fn cs_wat_binop(op) = if op == "-" then "i64.sub" else if op == "*" then "i64.mul" else if op == "/" then "i64.div_s" else if op == "%" then "i64.rem_s" else if op == "==" then "i64.eq" else if op == "!=" then "i64.ne" else if op == "<" then "i64.lt_s" else if op == ">" then "i64.gt_s" else if op == "<=" then "i64.le_s" else if op == ">=" then "i64.ge_s" else "i64.add"
+
+fn cs_wat_locals(e) = match e
+    LetIn(nm, v, b) => " (local $" + nm + " i64)" + cs_wat_locals(v) + cs_wat_locals(b)
+    VarIn(nm, v, b) => " (local $" + nm + " i64)" + cs_wat_locals(v) + cs_wat_locals(b)
+    Bin(op, l, r)   => cs_wat_locals(l) + cs_wat_locals(r)
+    If(c, t, e2)    => cs_wat_locals(c) + cs_wat_locals(t) + cs_wat_locals(e2)
+    _               => ""
+
+fn cs_wat_expr(e) = match e
+    Num(n)          => "i64.const " + str(n)
+    Var(nm)         => "local.get $" + nm
+    Bin(op, l, r)   => cs_wat_expr(l) + " " + cs_wat_expr(r) + " " + cs_wat_binop(op)
+    If(c, t, e2)    => cs_wat_expr(c) + " (if (result i64) (then " + cs_wat_expr(t) + ") (else " + cs_wat_expr(e2) + "))"
+    LetIn(nm, v, b) => cs_wat_expr(v) + " local.set $" + nm + " " + cs_wat_expr(b)
+    VarIn(nm, v, b) => cs_wat_expr(v) + " local.set $" + nm + " " + cs_wat_expr(b)
+    Call(cnm, args) => cs_wat_args(args) + "call $" + cnm
+    _               => "i64.const 0"
+
+fn cs_wat_args(xs) = match xs
+    Nil        => ""
+    Cons(h, t) => cs_wat_expr(h) + " " + cs_wat_args(t)
+
+fn cs_cexport_stmt(st, rest, proofs) = match st
+    Fn(nm, ps, body) => if cs_startswith(nm, "law_") == 1 then cs_cexport_stmts(rest, proofs) else let pst = cs_def_proof_status(nm, proofs) in let cps = (if cs_isnil(ps) == 1 then "void" else cs_c_param_list(ps)) in let chdr = "/* Lume C-ABI Export (" + nm + ") — proof_status: " + pst + " */\n#include <stdint.h>\nextern int64_t " + nm + "(" + cps + ");" in let wat = "(module (func $" + nm + " (export \"" + nm + "\")" + cs_wat_params(ps) + " (result i64)" + cs_wat_locals(body) + " " + cs_wat_expr(body) + "))" in Cons("{\"name\":\"" + cs_jesc(nm) + "\",\"params\":[" + cs_strlist_json(ps) + "],\"proof_status\":\"" + cs_jesc(pst) + "\",\"c_header\":\"" + cs_jesc(chdr) + "\",\"wat\":\"" + cs_jesc(wat) + "\"}", cs_cexport_stmts(rest, proofs))
+    _                => cs_cexport_stmts(rest, proofs)
+
+fn cs_cexport_stmts(prog, proofs) = match prog
+    Nil        => Nil
+    Cons(h, t) => cs_cexport_stmt(h, t, proofs)
+
+fn caas_cexport_json(src) = let r = caas_compile(src) in let exps = cs_cexport_stmts(r.ast, r.proofs) in "{\"ok\":" + (if r.ok == 1 then "true" else "false") + ",\"mode\":\"c-export\",\"exports\":[" + cs_joinsep(exps, ",") + "]}"
+
+fn cs_ptx_op(op) = if op == "*" then "mul.lo.s64" else if op == "-" then "sub.s64" else "add.s64"
+
+fn cs_ptx_expr(e, dst) = match e
+    Num(n)          => "    mov.s64 " + dst + ", " + str(n) + ";\n"
+    Var(nm)         => "    mov.s64 " + dst + ", %r_" + nm + ";\n"
+    Bin(op, l, r)   => cs_ptx_expr(l, "%r_lhs") + cs_ptx_expr(r, "%r_rhs") + "    " + cs_ptx_op(op) + " " + dst + ", %r_lhs, %r_rhs;\n"
+    If(c, t, e2)    => cs_ptx_expr(t, "%r_then") + cs_ptx_expr(e2, "%r_else") + "    max.s64 " + dst + ", %r_then, %r_else;\n"
+    LetIn(nm, v, b) => cs_ptx_expr(v, "%r_" + nm) + cs_ptx_expr(b, dst)
+    VarIn(nm, v, b) => cs_ptx_expr(v, "%r_" + nm) + cs_ptx_expr(b, dst)
+    _               => "    mov.s64 " + dst + ", 0;\n"
+
+fn cs_spirv_op(op) = if op == "*" then "OpIMul" else if op == "-" then "OpISub" else "OpIAdd"
+
+fn cs_spirv_expr(e, dst) = match e
+    Num(n)          => "    " + dst + " = OpConstant %long " + str(n) + "\n"
+    Var(nm)         => "    " + dst + " = OpCopyObject %long %" + nm + "\n"
+    Bin(op, l, r)   => cs_spirv_expr(l, "%spv_l") + cs_spirv_expr(r, "%spv_r") + "    " + dst + " = " + cs_spirv_op(op) + " %long %spv_l %spv_r\n"
+    If(c, t, e2)    => cs_spirv_expr(t, "%spv_t") + cs_spirv_expr(e2, "%spv_e") + "    " + dst + " = OpExtInst %long %glsl SMax %spv_t %spv_e\n"
+    LetIn(nm, v, b) => cs_spirv_expr(v, "%" + nm) + cs_spirv_expr(b, dst)
+    VarIn(nm, v, b) => cs_spirv_expr(v, "%" + nm) + cs_spirv_expr(b, dst)
+    _               => "    " + dst + " = OpConstant %long 0\n"
+
+fn cs_kern_ok_e(e) = match e
+    Num(n)          => 1
+    Var(nm)         => 1
+    Bin(op, l, r)   => if cs_kern_ok_e(l) == 1 then cs_kern_ok_e(r) else 0
+    If(c, t, e2)    => if cs_kern_ok_e(c) == 1 and cs_kern_ok_e(t) == 1 then cs_kern_ok_e(e2) else 0
+    LetIn(nm, v, b) => if cs_kern_ok_e(v) == 1 then cs_kern_ok_e(b) else 0
+    VarIn(nm, v, b) => if cs_kern_ok_e(v) == 1 then cs_kern_ok_e(b) else 0
+    _               => 0
+
+fn cs_is_kfn(nm, osigs) = match cs_osiglookup(nm, osigs)
+    Nil         => 0
+    Cons(sg, r) => cs_ois_kernel(sg.freef)
+
+fn cs_kernel_stmt(st, rest, osigs) = match st
+    Fn(nm, ps, body) => let rr = cs_kernel_stmts(rest, osigs) in if cs_is_kfn(nm, osigs) == 0 then rr else if cs_kern_ok_e(body) == 0 then {ok: 0, diags: Cons(cs_mkdiag("K0400", "kernel", "kernel error: kernel fn '" + nm + "' uses construct outside PTX/SPIR-V scalar fragment", "restrict kernel fn body to scalar arithmetic, let, and if expressions"), rr.diags), items: rr.items} else let ptx = ".version 8.0\n.target sm_80\n.visible .entry " + nm + "()\n{\n" + cs_ptx_expr(body, "%r_ret") + "    ret;\n}" in let spv = "; SPIR-V\n; Version: 1.6\nOpCapability Shader\nOpEntryPoint GLCompute %" + nm + " \"" + nm + "\"\n" + cs_spirv_expr(body, "%spv_ret") + "    OpReturn\nOpFunctionEnd" in {ok: rr.ok, diags: rr.diags, items: Cons("{\"name\":\"" + cs_jesc(nm) + "\",\"params\":[" + cs_strlist_json(ps) + "],\"ptx\":\"" + cs_jesc(ptx) + "\",\"spirv\":\"" + cs_jesc(spv) + "\"}", rr.items)}
+    _                => cs_kernel_stmts(rest, osigs)
+
+fn cs_kernel_stmts(prog, osigs) = match prog
+    Nil        => {ok: 1, diags: Nil, items: Nil}
+    Cons(h, t) => cs_kernel_stmt(h, t, osigs)
+
+fn caas_kernel_json(src) = let r = caas_compile(src) in let osigs = cs_ocollects(r.ast) in let ks = cs_kernel_stmts(r.ast, osigs) in let ok_all = (if r.ok == 1 and ks.ok == 1 then 1 else 0) in let all_diags = cs_app(r.diagnostics, ks.diags) in "{\"ok\":" + (if ok_all == 1 then "true" else "false") + ",\"mode\":\"kernel\",\"diagnostics\":[" + cs_diags_json(all_diags) + "],\"kernels\":[" + cs_joinsep(ks.items, ",") + "]}"
+
+fn caas_entry_dispatch(input) = if cs_startswith(input, "@mode certify\n") == 1 then lcert_certify(slice(input, 14, count(input))) else if cs_startswith(input, "@mode bind\n") == 1 then lcert_bind(slice(input, 11, count(input))) else if cs_startswith(input, "@mode witness\n") == 1 then caas_witness_json(slice(input, 14, count(input))) else if cs_startswith(input, "@mode repair\n") == 1 then caas_repair_json(slice(input, 13, count(input))) else if cs_startswith(input, "@mode impact\n") == 1 then caas_impact_json(slice(input, 13, count(input))) else if cs_startswith(input, "@mode hashes\n") == 1 then caas_hashes_json(slice(input, 13, count(input))) else if cs_startswith(input, "@mode grammar\n") == 1 then caas_grammar_json(slice(input, 14, count(input))) else if cs_startswith(input, "@mode project\n") == 1 then caas_project_json(slice(input, 14, count(input))) else if cs_startswith(input, "@mode c-export\n") == 1 then caas_cexport_json(slice(input, 15, count(input))) else if cs_startswith(input, "@mode kernel\n") == 1 then caas_kernel_json(slice(input, 13, count(input))) else if cs_startswith(input, "@mode lsp\n") == 1 then caas_lsp_json(slice(input, 10, count(input))) else if cs_startswith(input, "@mode dap\n") == 1 then caas_dap_json(slice(input, 10, count(input))) else if cs_startswith(input, "@mode repl\n") == 1 then caas_repl_json(slice(input, 11, count(input))) else if cs_startswith(input, "@mode mcp\n") == 1 then lcert_mcp(slice(input, 10, count(input))) else caas_json(caas_compile(input))
 
 print caas_entry_dispatch(readall())
