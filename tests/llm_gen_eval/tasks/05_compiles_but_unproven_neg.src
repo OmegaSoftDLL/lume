@@ -1,0 +1,3 @@
+## Negative fixture: compiles cleanly, but has NO formal contract/law proof ("compiles alone is not the bar")
+fn double_unproven(x: int) -> int = x + x
+print double_unproven(21)

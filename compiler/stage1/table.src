@@ -114,19 +114,37 @@ fn table_append_rows(a, b) = match a
     Cons(h, t) => Cons(h, table_append_rows(t, b))
 fn table_insert_row(table, row) = if table.ok == 0 then table else if list_len(row) != list_len(table.schema) then table_error("inserted row width does not match schema") else table_success(table.schema, table_append_rows(table.rows, Cons(row, Nil)))
 
-## Crash-safe embedded WAL persistence (`persist table[T] ... at "path"`):
-## Each committed snapshot carries a deterministic checksum over `<path>|<version>|<csv>` so torn/corrupted
-## writes are rejected on recovery and the store rolls back to the last valid committed snapshot.
+## Crash-safe durable on-disk WAL persistence (`persist table[T] ... at "path"`):
+## Each committed snapshot carries a deterministic checksum over `<path>|<version>|<csv>` and is framed as
+## `@tx|<version>|<committed>|<checksum>|<escaped_csv>|@endtx\n`, written to disk with `open` + `flock(LOCK_EX)`
+## + `write` + `fsync` + `close` (`fs_write_sync` / `fs_append_sync`), and recovered from disk via `fs_read_file`.
+## Torn, truncated, or corrupted writes are rejected on recovery and the store rolls back to the newest valid snapshot.
 fn persist_checksum_i(s, i, n, acc) = if i >= n then acc else let next = (acc * 131 + ord(at(s, i)) + i + 17) % 1000000007 in persist_checksum_i(s, i + 1, n, if next < 0 then 0 - next else next)
 fn persist_checksum(s) = str(persist_checksum_i(s, 0, count(s), 5381))
 fn persist_payload(path, ver, csv) = path + "|" + str(ver) + "|" + csv
-fn persist_open(path, schema, table) = if table.ok == 0 then {ok: 0, error: table.error, path: path, schema: schema, version: 0, wal: Nil, current: table} else let csv = write_csv(table) in let chk = persist_checksum(persist_payload(path, 1, csv)) in let snap = {version: 1, csv: csv, checksum: chk, committed: 1} in {ok: 1, error: "", path: path, schema: schema, version: 1, wal: Cons(snap, Nil), current: table}
-fn persist_commit(store, next_table) = if store.ok == 0 then store else if next_table.ok == 0 then {ok: 0, error: next_table.error, path: store.path, schema: store.schema, version: store.version, wal: store.wal, current: store.current} else let v2 = store.version + 1 in let csv = write_csv(next_table) in let chk = persist_checksum(persist_payload(store.path, v2, csv)) in let snap = {version: v2, csv: csv, checksum: chk, committed: 1} in {ok: 1, error: "", path: store.path, schema: store.schema, version: v2, wal: Cons(snap, store.wal), current: next_table}
-fn persist_append_torn(store, bad_csv) = let v2 = store.version + 1 in let snap = {version: v2, csv: bad_csv, checksum: "torn_uncommitted_write", committed: 0} in {ok: store.ok, error: store.error, path: store.path, schema: store.schema, version: v2, wal: Cons(snap, store.wal), current: store.current}
+fn persist_is_disk_path(path) = if count(path) == 0 then 0 else if count(path) >= 9 and slice(path, 0, 9) == "memory://" then 0 else 1
+fn persist_esc_i(s, i, n) = if i >= n then "" else let c = at(s, i) in let ec = (if c == "\n" then "~n" else if c == "\r" then "~r" else if c == "|" then "~p" else if c == "~" then "~t" else c) in ec + persist_esc_i(s, i + 1, n)
+fn persist_esc_csv(s) = persist_esc_i(s, 0, count(s))
+fn persist_unesc_i(s, i, n) = if i >= n then "" else let c = at(s, i) in if c == "~" and i + 1 < n then (let nx = at(s, i + 1) in let dc = (if nx == "n" then "\n" else if nx == "r" then "\r" else if nx == "p" then "|" else "~") in dc + persist_unesc_i(s, i + 2, n)) else c + persist_unesc_i(s, i + 1, n)
+fn persist_unesc_csv(s) = persist_unesc_i(s, 0, count(s))
+fn persist_format_snap(snap) = "@tx|" + str(snap.version) + "|" + str(snap.committed) + "|" + snap.checksum + "|" + persist_esc_csv(snap.csv) + "|@endtx\n"
+fn persist_find_ch(s, ch, i, n) = if i >= n then n else if at(s, i) == ch then i else persist_find_ch(s, ch, i + 1, n)
+fn persist_split_ch_i(s, ch, i, n) = if i >= n then Nil else let e = persist_find_ch(s, ch, i, n) in Cons(slice(s, i, e), persist_split_ch_i(s, ch, if e >= n then n else e + 1, n))
+fn persist_split_ch(s, ch) = persist_split_ch_i(s, ch, 0, count(s))
+fn persist_parse_line(line) = let parts = persist_split_ch(line, "|") in if list_len(parts) != 6 then {ok: 0, snap: {version: 0, csv: "", checksum: "", committed: 0}} else let p0 = list_nth(parts, 0) in let p1 = list_nth(parts, 1) in let p2 = list_nth(parts, 2) in let p3 = list_nth(parts, 3) in let p4 = list_nth(parts, 4) in let p5 = list_nth(parts, 5) in if p0 != "@tx" or p5 != "@endtx" then {ok: 0, snap: {version: 0, csv: "", checksum: "", committed: 0}} else {ok: 1, snap: {version: toint(p1), csv: persist_unesc_csv(p4), checksum: p3, committed: toint(p2)}}
+fn persist_parse_lines(lines, acc) = match lines
+    Nil        => acc
+    Cons(l, r) => if count(l) == 0 then persist_parse_lines(r, acc) else let pl = persist_parse_line(l) in persist_parse_lines(r, if pl.ok == 1 then Cons(pl.snap, acc) else Cons({version: 0, csv: l, checksum: "torn_frame", committed: 0}, acc))
+fn persist_parse_wal_text(raw) = if count(raw) == 0 then Nil else persist_parse_lines(persist_split_ch(raw, "\n"), Nil)
+fn persist_open(path, schema, table) = if table.ok == 0 then {ok: 0, error: table.error, path: path, schema: schema, version: 0, wal: Nil, current: table} else let csv = write_csv(table) in let chk = persist_checksum(persist_payload(path, 1, csv)) in let snap = {version: 1, csv: csv, checksum: chk, committed: 1} in let w = (if persist_is_disk_path(path) == 1 then fs_write_sync(path, persist_format_snap(snap)) else 1) in {ok: w, error: if w == 1 then "" else "failed to write WAL file: " + path, path: path, schema: schema, version: 1, wal: Cons(snap, Nil), current: table}
+fn persist_commit(store, next_table) = if store.ok == 0 then store else if next_table.ok == 0 then {ok: 0, error: next_table.error, path: store.path, schema: store.schema, version: store.version, wal: store.wal, current: store.current} else let v2 = store.version + 1 in let csv = write_csv(next_table) in let chk = persist_checksum(persist_payload(store.path, v2, csv)) in let snap = {version: v2, csv: csv, checksum: chk, committed: 1} in let w = (if persist_is_disk_path(store.path) == 1 then fs_append_sync(store.path, persist_format_snap(snap)) else 1) in {ok: w, error: if w == 1 then "" else "failed to append WAL file: " + store.path, path: store.path, schema: store.schema, version: v2, wal: Cons(snap, store.wal), current: next_table}
+fn persist_append_torn(store, bad_csv) = let v2 = store.version + 1 in let snap = {version: v2, csv: bad_csv, checksum: "torn_uncommitted_write", committed: 0} in let w = (if persist_is_disk_path(store.path) == 1 then fs_append_sync(store.path, persist_format_snap(snap)) else 1) in {ok: store.ok, error: store.error, path: store.path, schema: store.schema, version: v2, wal: Cons(snap, store.wal), current: store.current}
 fn persist_recover_wal(path, schema, wal) = match wal
     Nil        => {ok: 0, error: "no valid committed WAL snapshot found", path: path, schema: schema, version: 0, wal: Nil, current: table_error("unrecovered")}
     Cons(s, r) => let exp_chk = persist_checksum(persist_payload(path, s.version, s.csv)) in if s.committed == 1 and s.checksum == exp_chk then (let tbl = read_csv(s.csv, schema) in if tbl.ok == 1 then {ok: 1, error: "", path: path, schema: schema, version: s.version, wal: Cons(s, r), current: tbl} else persist_recover_wal(path, schema, r)) else persist_recover_wal(path, schema, r)
-fn persist_recover(store) = persist_recover_wal(store.path, store.schema, store.wal)
+fn persist_recover_path(path, schema) = let raw = fs_read_file(path) in persist_recover_wal(path, schema, persist_parse_wal_text(raw))
+fn persist_recover(store) = if persist_is_disk_path(store.path) == 1 then (let raw = fs_read_file(store.path) in if count(raw) > 0 then persist_recover_wal(store.path, store.schema, persist_parse_wal_text(raw)) else persist_recover_wal(store.path, store.schema, store.wal)) else persist_recover_wal(store.path, store.schema, store.wal)
+fn persist_tx_insert_row(path, schema, row) = let rec = persist_recover_path(path, schema) in if rec.ok == 0 then rec else let next_tbl = table_insert_row(rec.current, row) in persist_commit(rec, next_tbl)
 
 ## Versioned tables (`versioned table[T]`): append-only log + snapshots & time-travel (`version_at`).
 fn versioned_new(table) = persist_open("memory://versioned", table.schema, table)
