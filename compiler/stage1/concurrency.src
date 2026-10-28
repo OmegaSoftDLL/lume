@@ -87,7 +87,9 @@ fn par_map_scale_os(xs, factor) = let ws = par_spawn_list_scale(xs, factor) in p
 ## Hardware atomic fetch-and-add (`lock xaddq`) and ticket/TTS spinlock critical section (`K7` + `#193`)
 fn par_atomic_inc_under_spinlock(lock_addr, counter_addr, delta) = let acq = spinlock_acquire(lock_addr) in let prev = atomic_xadd64(counter_addr, delta) in let rel = spinlock_release(lock_addr) in prev + delta
 
-## One-shot `promise[T]` and reactive `signal[T]` (`#215` — standard library model built on channels/state)
+## One-shot `promise[T]` and reactive `signal[T]` — ⚠️ MODEL / placeholder, NOT the typed compiler
+## feature (`#215` is OPEN). These are plain functions returning records (`{__future_state, __future_val}`,
+## `{val, version}`); the real typed `promise[T]`/`signal[T]` primitives are not implemented. Tracked in `#215`.
 fn promise_new() = {__future_state: 0, __future_val: 0}
 fn promise_resolve(p, v) = if p.__future_state == 1 then ctfail("lume: concurrency error: promise[T] resolved more than once\n") else {__future_state: 1, __future_val: v}
 fn promise_is_ready(p) = p.__future_state
