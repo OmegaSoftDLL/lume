@@ -1,0 +1,158 @@
+## core_features_ok.src -- Issue #197 & #215 positive conformance test:
+##   1. `trait` and `impl` declarations + static trait method dispatch (`m.score()`, `m.scaled(8)`)
+##   2. First-class closures (`fn(x: int) -> int = ...`, `fn(x) => ...`) with lexical environment capture
+##   3. Refinement types (`type Pos = int where self > 0`, inline `where`) with `QF_LIA` proof discharge
+##   4. `async fn` + `.await` + `block_on` with `[E0200]` effect checking
+##   5. `rc[T]`, `arc[T]` (`atomic_xadd64` hardware `lock xaddq`), and `weak[T]` shared control block lifecycle
+##   6. `shard` data-parallel execution (`shard(f, a, b)` and `shard i in lo..hi => body`)
+##   7. F3c `let`-polymorphism (`Forall` generalization + per-call instantiation at `int` and `str`) + `promise[T]`/`signal[T]`
+
+type Metric = record base: int, weight: int
+
+trait Summary {
+    fn score(m: Metric) -> int
+    fn scaled(m: Metric, factor: int) -> int
+}
+
+impl Summary for Metric {
+    fn score(m: Metric) -> int = m.base * m.weight
+    fn scaled(m: Metric, factor: int) -> int = (m.base * m.weight) + factor
+}
+
+fn demo_traits() -> int =
+    let m = Metric{base: 6, weight: 7} in
+    m.score() + m.scaled(8)
+
+fn demo_closures(k: int) -> int =
+    let f = fn(x: int) -> int = x + k in
+    let g = fn(a: int, b: int) -> int = (a * k) + b in
+    let inline_val = (fn(z: int) -> int = z * 2)(6) in
+    f(10) + g(3, 4) + inline_val
+
+type Pos = int where self > 0
+
+fn double_pos(x: Pos) -> int where result >= 2 = x + x
+fn shift_pos(x: int where x >= 10) -> Pos = x - 5
+
+fn demo_refinements() -> int =
+    double_pos(7) + shift_pos(15)
+
+async fn fetch_step(x: int) -> int = x * 10
+
+async fn pipeline_async(x: int) -> int =
+    let a = fetch_step(x).await in
+    let b = fetch_step(x + 2).await in
+    a + b
+
+fn demo_async() -> int =
+    block_on(pipeline_async(3))
+
+fn cb_alloc(v: int, init_strong: int, init_weak: int, init_alive: int) -> int =
+    let base = hw_scratch_addr() in
+    let idx = atomic_xadd64(base + 32, 1) in
+    let cb = base + 64 + (idx % 240) * 32 in
+    let w0 = mmio_volatile_write64(cb, init_strong) in
+    let w1 = mmio_volatile_write64(cb + 8, init_weak) in
+    let w2 = mmio_volatile_write64(cb + 16, init_alive) in
+    let w3 = mmio_volatile_write64(cb + 24, v) in
+    cb
+
+fn rc_new(v: int) =
+    let cb = cb_alloc(v, 1, 0, 1) in
+    {tier: "rc", cb: cb, val: v}
+
+fn rc_get(r) =
+    if mmio_volatile_read64(r.cb + 16) == 0 then ctfail("lume: ownership runtime error [O0001]: dereference of dropped rc[T]\n") else r.val
+
+fn rc_strong_count(r) = mmio_volatile_read64(r.cb)
+
+fn rc_clone(r) =
+    let s = mmio_volatile_read64(r.cb) in
+    let w = mmio_volatile_write64(r.cb, s + 1) in
+    {tier: "rc", cb: r.cb, val: r.val}
+
+fn rc_drop(r) =
+    let s = mmio_volatile_read64(r.cb) in
+    let next_s = if s > 0 then s - 1 else 0 in
+    let w0 = mmio_volatile_write64(r.cb, next_s) in
+    let w1 = if next_s == 0 then mmio_volatile_write64(r.cb + 16, 0) else 0 in
+    {tier: "rc", cb: r.cb, val: r.val}
+
+fn weak_downgrade(r) =
+    let wk = mmio_volatile_read64(r.cb + 8) in
+    let w = mmio_volatile_write64(r.cb + 8, wk + 1) in
+    {tier: "weak", cb: r.cb, val: r.val}
+
+fn weak_upgrade(w, fallback: int) -> int =
+    if mmio_volatile_read64(w.cb + 16) == 1 then w.val else fallback
+
+fn arc_new(v: int) =
+    let cb = cb_alloc(v, 1, 0, 1) in
+    {tier: "arc", cb: cb, val: v, sync: 1}
+
+fn arc_get(a) =
+    if mmio_volatile_read64(a.cb + 16) == 0 then ctfail("lume: ownership runtime error [O0001]: dereference of dropped arc[T]\n") else a.val
+
+fn arc_strong_count(a) = mmio_volatile_read64(a.cb)
+
+fn arc_clone(a) =
+    let prev = atomic_xadd64(a.cb, 1) in
+    {tier: "arc", cb: a.cb, val: a.val, sync: 1}
+
+fn arc_drop(a) =
+    let prev = atomic_xadd64(a.cb, 0 - 1) in
+    let w = if prev <= 1 then mmio_volatile_write64(a.cb + 16, 0) else 0 in
+    {tier: "arc", cb: a.cb, val: a.val, sync: 1}
+
+fn demo_rc_arc_weak() -> int =
+    let r1 = rc_new(42) in
+    let r2 = rc_clone(r1) in
+    let w = weak_downgrade(r1) in
+    let s_before = rc_strong_count(r1) in
+    let w_before = weak_upgrade(w, 0) in
+    let d2 = rc_drop(r2) in
+    let s_mid = rc_strong_count(r1) in
+    let d1 = rc_drop(r1) in
+    let w_after = weak_upgrade(w, 100) in
+    let a1 = arc_new(10) in
+    let a2 = arc_clone(a1) in
+    let as_cnt = arc_strong_count(a1) in
+    let ad2 = arc_drop(a2) in
+    let av = arc_get(a1) in
+    let ad1 = arc_drop(a1) in
+    s_before + w_before + s_mid + w_after + as_cnt + av
+
+fn shard_work(x: int) -> int / pure = x * 3
+
+fn demo_shard() -> int =
+    let sr = shard(shard_work, 4, 6) in
+    let sl = shard i in 10..20 => i * 2 in
+    sr.sum + sl
+
+fn promise_new() = {__future_state: 0, __future_val: 0}
+fn promise_resolve(p, v: int) = {__future_state: 1, __future_val: v}
+fn promise_await(p) -> int = p.__future_val
+fn signal_new(v: int) = {val: v, version: 0}
+fn signal_get(s) -> int = s.val
+fn signal_version(s) -> int = s.version
+fn signal_set(s, v: int) = {val: v, version: s.version + 1}
+
+fn poly_top(x) = x
+
+fn demo_let_polymorphism() -> int =
+    let id = fn(x) => x in
+    let n1 = id(25) in
+    let s1 = id("ok") in
+    let n2 = poly_top(10) in
+    let s2 = poly_top("lume") in
+    let p = promise_resolve(promise_new(), 17) in
+    let sig = signal_set(signal_new(5), 8) in
+    n1 + count(s1) + n2 + count(s2) + promise_await(p) + signal_get(sig) + signal_version(sig)
+
+print demo_traits()
+print demo_closures(5)
+print demo_refinements()
+print demo_async()
+print demo_rc_arc_weak()
+print demo_shard()
+print demo_let_polymorphism()

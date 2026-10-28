@@ -63,8 +63,11 @@ fn parsewith(t) = if headtext(t) == "alloc" then let ra = expr(dropkw(droponce(t
 fn parsescope(t) = if headtext(droponce(t)) == "in" or headtext(droponce(t)) == ";" or headtext(droponce(t)) == "{" then (let snm = headtext(t) in let t1 = droponce(t) in let hb = if headtext(t1) == "{" then 1 else 0 in let rb = expr(if hb == 1 then droponce(t1) else dropin(t1)) in {node: ScopeE(snm, rb.node), rest: if hb == 1 then skiprb(rb.rest) else rb.rest}) else let hb = if headtext(t) == "{" then 1 else 0 in let rb = expr(if hb == 1 then droponce(t) else dropin(t)) in {node: ScopeE("_scope", rb.node), rest: if hb == 1 then skiprb(rb.rest) else rb.rest}
 fn parsespawn(t) = if headtext(t) == "(" then let a = arglist(droponce(t)) in {node: SpawnE(ohd_e(a.items)), rest: a.rest} else let r = expr(t) in {node: SpawnE(r.node), rest: r.rest}
 fn postdotcall(nd, mnm, a) = match nd
-    Var(enm) => {node: Call(mnm, a.items), rest: a.rest}
+    Var(enm) => if isctor(enm) == 1 then {node: Call(mnm, a.items), rest: a.rest} else {node: Call(mnm, Cons(nd, a.items)), rest: a.rest}
     _        => {node: Call(mnm, Cons(nd, a.items)), rest: a.rest}
-fn postloop(r) = if headtext(r.rest) == "." then (let t1 = droponce(r.rest) in let mnm = headtext(t1) in let t2 = droponce(t1) in if headtext(t2) == "(" then postloop(postdotcall(r.node, mnm, arglist(droponce(t2)))) else postloop({node: Field(r.node, mnm), rest: t2})) else r
+fn is_lambda_nd(nd) = match nd
+    LambdaE(ps, tys, rt, b) => 1
+    _                       => 0
+fn postloop(r) = if headtext(r.rest) == "." and headtext(droponce(r.rest)) != "." then (let t1 = droponce(r.rest) in let mnm = headtext(t1) in let t2 = droponce(t1) in if headtext(t2) == "(" then postloop(postdotcall(r.node, mnm, arglist(droponce(t2)))) else if mnm == "await" then postloop({node: AwaitE(r.node), rest: t2}) else postloop({node: Field(r.node, mnm), rest: t2})) else if headtext(r.rest) == "(" and is_lambda_nd(r.node) == 1 then (let a = arglist(droponce(r.rest)) in postloop({node: Call("_call", Cons(r.node, a.items)), rest: a.rest})) else r
 fn post(ts) = postloop(prim(ts))
 

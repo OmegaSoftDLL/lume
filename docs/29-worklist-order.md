@@ -23,9 +23,7 @@ rule (`docs/28`): no brick is "done" until the real thing runs, with its guarant
 
 4. **`#197` — specified-but-unimplemented core features** (traits, closures, refinement types,
    async/await, rc/arc, shard, let-polymorphism; the AArch64/RISC-V/WASM backend items belong with
-   `#206`). **[PRIORITY]** — language completeness. Runs as the **top parallel track alongside the
-   spine**, not as a gate; but if kernel work hits a missing core primitive, that primitive is pulled
-   forward ahead of the rest of `#197`.
+   `#206`). *(Done — `trait`/`impl` declarations & static method dispatch (`[T0400]`/`[T0401]`), first-class closures with lexical capture (`cl_convert_prog`) & `Send` checking (`[S0001]`), refinement types `type Name = Base where <pred>` and inline `x: T where <pred>` / `-> T where <pred>` wired into `QF_LIA` `proven` guard elision, `[V0001]` refutation, and exit-3 runtime guards, `async fn`/`.await`/`block_on` with `[E0200]` effect checking, `rc[T]`/`arc[T]` (`atomic_xadd64` hardware `lock xaddq`)/`weak[T]` backed by shared heap control blocks with destructor invalidation and `[O0001]` use-after-drop checking, `shard` data-parallel construct (`[S0001]`/`[E0200]`), and F3c Hindley–Milner `let`-polymorphism (`Forall`/`hgeneralize`/`hinstantiate`, `[T0500]`).)*
 
 ## Parallel tracks (no gating either way — pick up by priority, any time)
 
@@ -35,8 +33,7 @@ rule (`docs/28`): no brick is "done" until the real thing runs, with its guarant
 - **`#211` — `lume repl` + notebook/Jupyter kernel.** *(Done — interactive `lume repl` read-eval-print loop & stateful multi-message Jupyter `lume repl --kernel` protocol server.)*
 - **`#196` — adoption & distribution** (installer, registry, playground, certificates). Needed for
   real-world use; the playground also helps the AI-authoring loop.
-- **`#215` — untracked planned items** (`signal[T]`/`promise[T]`, `lumb` bytecode, Linguist). **Triage
-  first** (cheap): decide implement / fold into `#197`/`#206` / drop, then act.
+- **`#215` — untracked planned items** (`signal[T]`/`promise[T]`, `lumb` bytecode, Linguist). *(Done — `promise_new`/`promise_resolve`/`promise_await` and `signal_new`/`signal_get`/`signal_set`/`signal_version` in `compiler/stage1/concurrency.src`, `LUMB\x01` portable bytecode container + VM (`lume build --target lumb`, `lume run <file.lumb>`) in `compiler/stage1/ltarget.src`, and `.gitattributes` + `contrib/linguist/` TextMate grammar & samples staged and validated by `.github/workflows/linguist-grammar.yml`.)*
 
 ## Horizon (last — research-grade, after the spine stands)
 

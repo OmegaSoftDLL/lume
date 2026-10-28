@@ -25,6 +25,7 @@ fn ois_kernel(mflags) = (mflags / 8) % 2
 fn ois_interrupt(mflags) = (mflags / 16) % 2
 fn ois_ffi(mflags) = (mflags / 32) % 2
 fn ois_protect(mflags) = (mflags / 64) % 2
+fn ois_async(mflags) = (mflags / 128) % 2
 
 fn w33_is_cred_lit(s) = if count(s) < 6 then 0 else if ostarts(s, "sk-") == 1 or ostarts(s, "ghp_") == 1 or ostarts(s, "AKIA") == 1 or ostarts(s, "-----BEGIN ") == 1 then 1 else 0
 
@@ -59,6 +60,14 @@ fn ohas_tensor_tys(tys) = match tys
     Nil        => 0
     Cons(h, t) => if ois_tensor_ty(h) == 1 then 1 else ohas_tensor_tys(t)
 
+fn ois_refine_ty(ty) = match ty
+    TyRefine(bty, pr) => 1
+    _                 => 0
+
+fn ohas_refine_tys(tys) = match tys
+    Nil        => 0
+    Cons(h, t) => if ois_refine_ty(h) == 1 then 1 else ohas_refine_tys(t)
+
 fn oany(prog) = match prog
     Nil        => 0
     Cons(h, t) => if oanystmt(h) == 1 then 1 else oany(t)
@@ -73,27 +82,33 @@ fn oanystmt(st) = match st
     VTypeInvariant(nm, fs, inv)           => 1
     VLawDecl(nm, ps, body)                => 1
     WcetSig(nm, bound)                    => 1
-    Sig(nm, ps, ts, rt)                   => if ohas_unverified_tys(ts) == 1 or ois_unverified_ty(rt) == 1 or ohas_tensor_tys(ts) == 1 or ois_tensor_ty(rt) == 1 then 1 else 0
+    TypeRefineS(nm, bty, pr)              => 1
+    TraitDecl(tnm, ops)                   => 1
+    ImplDecl(tnm, tty, mths)              => 1
+    Sig(nm, ps, ts, rt)                   => if ohas_unverified_tys(ts) == 1 or ois_unverified_ty(rt) == 1 or ohas_tensor_tys(ts) == 1 or ois_tensor_ty(rt) == 1 or ohas_refine_tys(ts) == 1 or ois_refine_ty(rt) == 1 then 1 else 0
     Fn(nm, ps, body)                      => oanye(body)
     Print(v)                              => oanye(v)
     ExprS(v)                              => oanye(v)
     _                                     => 0
 
 fn oanye(e) = match e
-    Var(nm)                 => ais_hole_name(nm)
-    VarIn(nm, v, b)         => 1
-    OwnE(inner)             => 1
-    MutE(inner)             => 1
-    DeferE(c, b)            => 1
-    ErrDeferE(c, b)         => 1
-    WithAllocE(a, b)        => 1
-    WithHandlerE(en, hs, b) => 1
-    ScopeE(snm, b)          => 1
-    SpawnE(inner)           => 1
-    LetIn(nm, v, b)         => if oanye(v) == 1 then 1 else oanye(b)
-    If(c, t, e2)            => if oanye(c) == 1 then 1 else if oanye(t) == 1 then 1 else oanye(e2)
-    Bin(op, l, r)           => if oanye(l) == 1 then 1 else oanye(r)
-    Call(nm, args)          => if nm == "borrow" or nm == "borrow_mut" or nm == "move" or nm == "clone" or nm == "verify" or nm == "law_check" or nm == "evolve_approve" or nm == "llm_complete" or nm == "prob_sample" or nm == "sample_dist" or nm == "observe_lik" or nm == "old" or nm == "grad" or nm == "jvp" or nm == "vjp" or nm == "vmap" or nm == "jit" or nm == "matmul" or nm == "tensor_matmul" or nm == "tensor_add" or nm == "tensor_sub" or nm == "tensor_mul" or nm == "tensor_add_bias" or nm == "cap_page_map" then 1 else oanyargs(args)
+    Var(nm)                    => ais_hole_name(nm)
+    VarIn(nm, v, b)            => 1
+    OwnE(inner)                => 1
+    MutE(inner)                => 1
+    DeferE(c, b)               => 1
+    ErrDeferE(c, b)            => 1
+    WithAllocE(a, b)           => 1
+    WithHandlerE(en, hs, b)    => 1
+    ScopeE(snm, b)             => 1
+    SpawnE(inner)              => 1
+    LambdaE(ps, tys, rt, body) => 1
+    AwaitE(inner)              => 1
+    ShardE(vnm, lo, hi, body)  => 1
+    LetIn(nm, v, b)            => if oanye(v) == 1 then 1 else oanye(b)
+    If(c, t, e2)               => if oanye(c) == 1 then 1 else if oanye(t) == 1 then 1 else oanye(e2)
+    Bin(op, l, r)              => if oanye(l) == 1 then 1 else oanye(r)
+    Call(nm, args)             => if nm == "borrow" or nm == "borrow_mut" or nm == "move" or nm == "clone" or nm == "verify" or nm == "law_check" or nm == "evolve_approve" or nm == "llm_complete" or nm == "prob_sample" or nm == "sample_dist" or nm == "observe_lik" or nm == "old" or nm == "grad" or nm == "jvp" or nm == "vjp" or nm == "vmap" or nm == "jit" or nm == "matmul" or nm == "tensor_matmul" or nm == "tensor_add" or nm == "tensor_sub" or nm == "tensor_mul" or nm == "tensor_add_bias" or nm == "cap_page_map" or nm == "rc_drop" or nm == "arc_drop" or nm == "block_on" or nm == "shard" or nm == "_call" then 1 else oanyargs(args)
     Field(o, fld)           => oanye(o)
     Rec(items)              => oanyrec(items)
     RecT(tn, items)         => oanyrec(items)
@@ -221,7 +236,9 @@ fn kinfer_effs_e(e, ksigs, edecls, fns, d) = match e
     ErrDeferE(c, b)         => keff_union(kinfer_effs_e(c, ksigs, edecls, fns, d), kinfer_effs_e(b, ksigs, edecls, fns, d))
     WithAllocE(a, b)        => keff_union(kinfer_effs_e(a, ksigs, edecls, fns, d), orem("alloc", kinfer_effs_e(b, ksigs, edecls, fns, d)))
     WithHandlerE(en, hs, b) => keff_union(kinfer_hops(hs, ksigs, edecls, fns, d), orem(en, kinfer_effs_e(b, ksigs, edecls, fns, d)))
-    Call(cnm, args)         => keff_union(kinfer_call_effs(cnm, ksigs, edecls, fns, d), kinfer_args(args, ksigs, edecls, fns, d))
+    AwaitE(inner)           => keff_add("async", kinfer_effs_e(inner, ksigs, edecls, fns, d))
+    ShardE(vnm, lo, hi, b)  => keff_union(kinfer_effs_e(lo, ksigs, edecls, fns, d), keff_union(kinfer_effs_e(hi, ksigs, edecls, fns, d), kinfer_effs_e(b, ksigs, edecls, fns, d)))
+    Call(cnm, args)         => if cnm == "block_on" then orem("async", kinfer_args(args, ksigs, edecls, fns, d)) else keff_union(kinfer_call_effs(cnm, ksigs, edecls, fns, d), kinfer_args(args, ksigs, edecls, fns, d))
     Match(sc, arms)         => keff_union(kinfer_effs_e(sc, ksigs, edecls, fns, d), kinfer_arms(arms, ksigs, edecls, fns, d))
     Field(o, fld)           => kinfer_effs_e(o, ksigs, edecls, fns, d)
     Rec(items)              => kinfer_rec(items, ksigs, edecls, fns, d)
@@ -260,7 +277,37 @@ fn kuses_ffi_args(xs, osigs) = match xs
     Nil        => 0
     Cons(h, t) => if kuses_ffi_e(h, osigs) == 1 then 1 else kuses_ffi_args(t, osigs)
 
-fn kchk_fn_effs(nm, pubf, body, ot) = let mks = keffsig_lookup(nm, ot.ksigs) in if pubf == 0 and isnil(mks) == 1 and isnil(ot.caps) == 1 then 1 else let inf0 = kinfer_effs_e(body, ot.ksigs, ot.edecls, ot.fns, 4) in let inf = if kuses_ffi_e(body, ot.osigs) == 1 then keff_add("ffi", inf0) else inf0 in let dec = kget_dec_effs(mks) in let missing_pub = if pubf == 1 and isnil(mks) == 1 then inf else keff_diff(inf, dec) in if (pubf == 1 or isnil(mks) == 0) and isnil(missing_pub) == 0 then ctfail("lume: effect error [E0200]: function '" + nm + "' performs undeclared effect '{" + keff_join(missing_pub) + "}' (fix-it: add '/ {" + keff_join(keff_union(dec, inf)) + "}' to the signature of '" + nm + "' or handle it with 'with handler')\n") else if isnil(ot.caps) == 0 and isnil(keff_diff(inf, ot.caps)) == 0 then let uncap = keff_diff(inf, ot.caps) in ctfail("lume: capability error [E0200]: function '" + nm + "' requires capability '{" + keff_join(uncap) + "}' not granted to this module (fix-it: add '@capability " + ohd_s(uncap, "io") + "' or declare it in lume.toml)\n") else 1
+fn khas_await_e(e) = match e
+    AwaitE(inner)   => 1
+    Bin(op, l, r)   => if khas_await_e(l) == 1 then 1 else khas_await_e(r)
+    If(c, t, e2)    => if khas_await_e(c) == 1 then 1 else if khas_await_e(t) == 1 then 1 else khas_await_e(e2)
+    LetIn(nm, v, b) => if khas_await_e(v) == 1 then 1 else khas_await_e(b)
+    VarIn(nm, v, b) => if khas_await_e(v) == 1 then 1 else khas_await_e(b)
+    Call(cnm, args) => if cnm == "block_on" then 0 else khas_await_args(args)
+    _               => 0
+
+fn khas_await_args(xs) = match xs
+    Nil        => 0
+    Cons(h, t) => if khas_await_e(h) == 1 then 1 else khas_await_args(t)
+
+fn kchk_shard_e(e, fnm, ot) = match e
+    ShardE(vnm, lo, hi, b) => let inf = kinfer_effs_e(b, ot.ksigs, ot.edecls, ot.fns, 4) in if isnil(inf) == 0 then ctfail("lume: effect error [E0200]: data-parallel 'shard' in '" + fnm + "' cannot perform effect '{" + keff_join(inf) + "}' (fix-it: keep 'shard' body pure)\n") else kchk_shard_e(lo, fnm, ot) + kchk_shard_e(hi, fnm, ot)
+    Call(cnm, args)        => let z = kchk_shard_args(args, fnm, ot) in if cnm == "shard" and isnil(args) == 0 then kchk_shard_target(ohd_e(args), fnm, ot) else z
+    Bin(op, l, r)          => kchk_shard_e(l, fnm, ot) + kchk_shard_e(r, fnm, ot)
+    If(c, t, e2)           => kchk_shard_e(c, fnm, ot) + kchk_shard_e(t, fnm, ot) + kchk_shard_e(e2, fnm, ot)
+    LetIn(nm, v, b)        => kchk_shard_e(v, fnm, ot) + kchk_shard_e(b, fnm, ot)
+    VarIn(nm, v, b)        => kchk_shard_e(v, fnm, ot) + kchk_shard_e(b, fnm, ot)
+    _                      => 0
+
+fn kchk_shard_args(xs, fnm, ot) = match xs
+    Nil        => 0
+    Cons(h, t) => kchk_shard_e(h, fnm, ot) + kchk_shard_args(t, fnm, ot)
+
+fn kchk_shard_target(fe, fnm, ot) = match fe
+    Var(tnm) => let inf = kinfer_call_effs(tnm, ot.ksigs, ot.edecls, ot.fns, 4) in if isnil(inf) == 0 then ctfail("lume: effect error [E0200]: data-parallel 'shard' function '" + tnm + "' in '" + fnm + "' cannot perform effect '{" + keff_join(inf) + "}' (fix-it: pass a pure function to 'shard')\n") else 0
+    _        => 0
+
+fn kchk_fn_effs(nm, pubf, body, ot) = let zsh = kchk_shard_e(body, nm, ot) in let mks = keffsig_lookup(nm, ot.ksigs) in let dec = kget_dec_effs(mks) in if khas_await_e(body) == 1 and omem("async", dec) == 0 then ctfail("lume: effect error [E0200]: '.await' in synchronous function '" + nm + "' requires 'async fn' or effect '/ {async}' (fix-it: mark 'async fn " + nm + "' or wrap the future in 'block_on(...)')\n") else if pubf == 0 and isnil(mks) == 1 and isnil(ot.caps) == 1 then 1 else let inf0 = kinfer_effs_e(body, ot.ksigs, ot.edecls, ot.fns, 4) in let inf = if kuses_ffi_e(body, ot.osigs) == 1 then keff_add("ffi", inf0) else inf0 in let missing_pub = if pubf == 1 and isnil(mks) == 1 then inf else keff_diff(inf, dec) in if (pubf == 1 or isnil(mks) == 0) and isnil(missing_pub) == 0 then ctfail("lume: effect error [E0200]: function '" + nm + "' performs undeclared effect '{" + keff_join(missing_pub) + "}' (fix-it: add '/ {" + keff_join(keff_union(dec, inf)) + "}' to the signature of '" + nm + "' or handle it with 'with handler')\n") else if isnil(ot.caps) == 0 and isnil(keff_diff(inf, ot.caps)) == 0 then let uncap = keff_diff(inf, ot.caps) in ctfail("lume: capability error [E0200]: function '" + nm + "' requires capability '{" + keff_join(uncap) + "}' not granted to this module (fix-it: add '@capability " + ohd_s(uncap, "io") + "' or declare it in lume.toml)\n") else 1
 
 fn kget_dec_effs(mks) = match mks
     Nil         => Nil
@@ -464,6 +511,8 @@ fn ochke(e, ctx, moved) = match e
     RecT(tn, items) => {moved: ochkrec(items, ctx, moved), origin: ""}
     Match(sc, arms) => let rsc = ochke(sc, ctx, moved) in {moved: ochkarms(arms, ctx, rsc.moved), origin: ""}
     CT(inner) => ochke(inner, ctx, moved)
+    AwaitE(inner) => ochke(inner, ctx, moved)
+    ShardE(vnm, lo, hi, body) => let rlo = ochke(lo, ctx, moved) in let rhi = ochke(hi, ctx, rlo.moved) in let rb = ochke(body, octx_bind(ctx, vnm, 0, ""), orem(vnm, rhi.moved)) in {moved: rb.moved, origin: ""}
     Call(nm, args) => ochkcall(nm, args, ctx, moved)
     _ => {moved: moved, origin: ""}
 
@@ -483,7 +532,7 @@ fn ochkargs(args, ctx, moved) = match args
     Nil        => moved
     Cons(h, t) => let r = ochke(h, ctx, moved) in ochkargs(t, ctx, r.moved)
 
-fn ochkcall(fnm, args, ctx, moved) = if ois_free(ctx.freef) == 1 and ctx.halloc == 0 and ois_heap_alloc(fnm) == 1 then ctfail("lume: ownership error [O0030]: ambient heap allocation '" + fnm + "' in '@freestanding' function '" + ctx.fnm + "' (help: pass an explicit allocator via 'with alloc = <arena> in ...')\n") else if fnm == "move" and len(args) == 1 then ochk_own_target(ohd_e(args), ctx, moved) else if fnm == "cap_page_map" and len(args) >= 1 then let r0 = ochk_own_target(ohd_e(args), ctx, moved) in {moved: ochkargs(ptl(args), ctx, r0.moved), origin: ""} else if fnm == "borrow" and len(args) == 1 then let ra = ochke(ohd_e(args), ctx, moved) in {moved: ra.moved, origin: "borrow:" + ra.origin} else if fnm == "borrow_mut" and len(args) == 1 then ochk_mut_target(ohd_e(args), ctx, moved) else ochkcall_sig(fnm, args, osiglookup(fnm, ctx.osigs), ctx, moved)
+fn ochkcall(fnm, args, ctx, moved) = if ois_free(ctx.freef) == 1 and ctx.halloc == 0 and ois_heap_alloc(fnm) == 1 then ctfail("lume: ownership error [O0030]: ambient heap allocation '" + fnm + "' in '@freestanding' function '" + ctx.fnm + "' (help: pass an explicit allocator via 'with alloc = <arena> in ...')\n") else if (fnm == "move" or fnm == "rc_drop" or fnm == "arc_drop") and len(args) == 1 then ochk_own_target(ohd_e(args), ctx, moved) else if fnm == "cap_page_map" and len(args) >= 1 then let r0 = ochk_own_target(ohd_e(args), ctx, moved) in {moved: ochkargs(ptl(args), ctx, r0.moved), origin: ""} else if fnm == "borrow" and len(args) == 1 then let ra = ochke(ohd_e(args), ctx, moved) in {moved: ra.moved, origin: "borrow:" + ra.origin} else if fnm == "borrow_mut" and len(args) == 1 then ochk_mut_target(ohd_e(args), ctx, moved) else ochkcall_sig(fnm, args, osiglookup(fnm, ctx.osigs), ctx, moved)
 
 fn ochkcall_sig(fnm, args, msig, ctx, moved) = match msig
     Nil          => let z = ochk_conflicts(fnm, ocollect_mut_args(args, Nil), args) in {moved: ochkargs(args, ctx, moved), origin: ""}
@@ -842,10 +891,22 @@ fn sis_nonsend_ty(ty) = match ty
     TyList(e)     => sis_nonsend_ty(e)
     _             => 0
 
-fn sis_nonsend_init(e) = match e
-    Call(cnm, args) => if cnm == "rc_new" or cnm == "cell_new" or cnm == "borrow_mut" then 1 else 0
+fn sis_nonsend_init(e, nsvars, mvars) = match e
+    Call(cnm, args) => if cnm == "rc_new" or cnm == "cell_new" or cnm == "borrow_mut" then 1 else sis_nonsend_args(args, nsvars, mvars)
     MutE(inner)     => 1
+    Var(x)          => if omem(x, nsvars) == 1 or omem(x, mvars) == 1 then 1 else 0
+    Field(o, fld)   => sis_nonsend_init(o, nsvars, mvars)
+    Rec(items)      => sis_nonsend_rec(items, nsvars, mvars)
+    RecT(tn, items) => sis_nonsend_rec(items, nsvars, mvars)
     _               => 0
+
+fn sis_nonsend_args(xs, nsvars, mvars) = match xs
+    Nil        => 0
+    Cons(h, t) => if sis_nonsend_init(h, nsvars, mvars) == 1 then 1 else sis_nonsend_args(t, nsvars, mvars)
+
+fn sis_nonsend_rec(xs, nsvars, mvars) = match xs
+    Nil        => 0
+    Cons(h, t) => if sis_nonsend_init(h.val, nsvars, mvars) == 1 then 1 else sis_nonsend_rec(t, nsvars, mvars)
 
 fn sinit_nonsend(pns, pts) = match pns
     Nil         => Nil
@@ -865,9 +926,16 @@ fn schk_spawn_body(e, fnm, nsvars, mvars) = match e
     LetIn(nm, v, b)         => schk_spawn_body(v, fnm, nsvars, mvars) + schk_spawn_body(b, fnm, orem(nm, nsvars), orem(nm, mvars))
     VarIn(nm, v, b)         => schk_spawn_body(v, fnm, nsvars, mvars) + schk_spawn_body(b, fnm, orem(nm, nsvars), orem(nm, mvars))
     Call(cnm, args)         => if cnm == "borrow_mut" then ctfail("lume: concurrency error [S0001]: cannot capture mutable borrow 'borrow_mut' across 'spawn' in '" + fnm + "' (fix-it: transfer ownership with 'own' or synchronize via 'chan[T]')\n") else schk_spawn_args(args, fnm, nsvars, mvars)
+    Rec(items)              => schk_spawn_rec(items, fnm, nsvars, mvars)
+    RecT(tn, items)         => schk_spawn_rec(items, fnm, nsvars, mvars)
     ScopeE(snm, b)          => schk_spawn_body(b, fnm, nsvars, mvars)
     SpawnE(inner)           => schk_spawn_body(inner, fnm, nsvars, mvars)
+    ShardE(vnm, lo, hi, b)  => schk_spawn_body(lo, fnm, nsvars, mvars) + schk_spawn_body(hi, fnm, nsvars, mvars) + schk_spawn_body(b, fnm, orem(vnm, nsvars), orem(vnm, mvars))
     _                       => 0
+
+fn schk_spawn_rec(items, fnm, nsvars, mvars) = match items
+    Nil        => 0
+    Cons(h, t) => schk_spawn_body(h.val, fnm, nsvars, mvars) + schk_spawn_rec(t, fnm, nsvars, mvars)
 
 fn schk_spawn_own(inner, fnm, nsvars) = match inner
     Var(x) => if omem(x, nsvars) == 1 then ctfail("lume: concurrency error [S0001]: cannot transfer non-Send value '" + x + "' across 'spawn' in '" + fnm + "' (fix-it: convert 'rc[T]'/'cell[T]' to 'arc[T]')\n") else 0
@@ -880,15 +948,16 @@ fn schk_spawn_args(args, fnm, nsvars, mvars) = match args
 fn schk_conc_e(e, fnm, in_scope, nsvars, mvars) = match e
     ScopeE(snm, b)          => schk_conc_e(b, fnm, 1, nsvars, mvars)
     SpawnE(inner)           => if in_scope == 0 then ctfail("lume: concurrency error [S0001]: unstructured 'spawn' in '" + fnm + "' is forbidden outside a lexical 'scope' block (fix-it: wrap the task in 'scope s in spawn(...)')\n") else schk_spawn_body(inner, fnm, nsvars, mvars) + schk_conc_e(inner, fnm, in_scope, nsvars, mvars)
-    LetIn(nm, v, b)         => let z1 = schk_conc_e(v, fnm, in_scope, nsvars, mvars) in let ns2 = if sis_nonsend_init(v) == 1 then Cons(nm, orem(nm, nsvars)) else orem(nm, nsvars) in schk_conc_e(b, fnm, in_scope, ns2, orem(nm, mvars))
-    VarIn(nm, v, b)         => let z1 = schk_conc_e(v, fnm, in_scope, nsvars, mvars) in let ns2 = if sis_nonsend_init(v) == 1 then Cons(nm, orem(nm, nsvars)) else orem(nm, nsvars) in schk_conc_e(b, fnm, in_scope, ns2, Cons(nm, orem(nm, mvars)))
+    ShardE(vnm, lo, hi, b)  => schk_conc_e(lo, fnm, in_scope, nsvars, mvars) + schk_conc_e(hi, fnm, in_scope, nsvars, mvars) + schk_spawn_body(b, fnm, orem(vnm, nsvars), orem(vnm, mvars)) + schk_conc_e(b, fnm, in_scope, orem(vnm, nsvars), orem(vnm, mvars))
+    LetIn(nm, v, b)         => let z1 = schk_conc_e(v, fnm, in_scope, nsvars, mvars) in let ns2 = if sis_nonsend_init(v, nsvars, mvars) == 1 then Cons(nm, orem(nm, nsvars)) else orem(nm, nsvars) in schk_conc_e(b, fnm, in_scope, ns2, orem(nm, mvars))
+    VarIn(nm, v, b)         => let z1 = schk_conc_e(v, fnm, in_scope, nsvars, mvars) in let ns2 = if sis_nonsend_init(v, nsvars, mvars) == 1 then Cons(nm, orem(nm, nsvars)) else orem(nm, nsvars) in schk_conc_e(b, fnm, in_scope, ns2, Cons(nm, orem(nm, mvars)))
     Bin(op, l, r)           => schk_conc_e(l, fnm, in_scope, nsvars, mvars) + schk_conc_e(r, fnm, in_scope, nsvars, mvars)
     If(c, t, e2)            => schk_conc_e(c, fnm, in_scope, nsvars, mvars) + schk_conc_e(t, fnm, in_scope, nsvars, mvars) + schk_conc_e(e2, fnm, in_scope, nsvars, mvars)
     DeferE(c, b)            => schk_conc_e(c, fnm, in_scope, nsvars, mvars) + schk_conc_e(b, fnm, in_scope, nsvars, mvars)
     ErrDeferE(c, b)         => schk_conc_e(c, fnm, in_scope, nsvars, mvars) + schk_conc_e(b, fnm, in_scope, nsvars, mvars)
     WithAllocE(a, b)        => schk_conc_e(a, fnm, in_scope, nsvars, mvars) + schk_conc_e(b, fnm, in_scope, nsvars, mvars)
     WithHandlerE(en, hs, b) => schk_conc_e(b, fnm, in_scope, nsvars, mvars)
-    Call(cnm, args)         => if cnm == "spawn_task" and in_scope == 0 then ctfail("lume: concurrency error [S0001]: unstructured 'spawn_task' in '" + fnm + "' is forbidden outside a lexical 'scope' block (fix-it: wrap the task in 'scope s in ...')\n") else if cnm == "spawn_task" then schk_spawn_args(args, fnm, nsvars, mvars) else schk_conc_args(args, fnm, in_scope, nsvars, mvars)
+    Call(cnm, args)         => if cnm == "spawn_task" and in_scope == 0 then ctfail("lume: concurrency error [S0001]: unstructured 'spawn_task' in '" + fnm + "' is forbidden outside a lexical 'scope' block (fix-it: wrap the task in 'scope s in ...')\n") else if cnm == "spawn_task" or cnm == "shard" then schk_spawn_args(args, fnm, nsvars, mvars) else schk_conc_args(args, fnm, in_scope, nsvars, mvars)
     Match(sc, arms)         => schk_conc_e(sc, fnm, in_scope, nsvars, mvars) + schk_conc_arms(arms, fnm, in_scope, nsvars, mvars)
     _                       => 0
 
@@ -903,13 +972,71 @@ fn schk_conc_arms(arms, fnm, in_scope, nsvars, mvars) = match arms
 ## ============================================================================================================
 ## Track V: Contract Verification (`requires` / `ensures` / `invariant` / `old`), QF_LIA Prover & `law` (`[V0001]`)
 ## ============================================================================================================
-fn vcollect_vsigs(prog) = match prog
+fn vcollect_rtypes(prog) = match prog
     Nil        => Nil
-    Cons(h, t) => vcollect_vsig1(h, vcollect_vsigs(t))
+    Cons(h, t) => vcollect_rtype1(h, vcollect_rtypes(t))
+
+fn vcollect_rtype1(st, rest) = match st
+    TypeRefineS(nm, bty, pr) => Cons({nm: nm, bty: bty, pr: pr}, rest)
+    _                        => rest
+
+fn vrtype_lookup(nm, rtypes) = match rtypes
+    Nil        => Nil
+    Cons(h, t) => if h.nm == nm then Cons(h, Nil) else vrtype_lookup(nm, t)
+
+fn vsubst_self(e, vnm) = match e
+    Var(nm)         => if nm == "self" then Var(vnm) else e
+    Bin(op, l, r)   => Bin(op, vsubst_self(l, vnm), vsubst_self(r, vnm))
+    If(c, t, e2)    => If(vsubst_self(c, vnm), vsubst_self(t, vnm), vsubst_self(e2, vnm))
+    LetIn(nm, v, b) => LetIn(nm, vsubst_self(v, vnm), if nm == "self" then b else vsubst_self(b, vnm))
+    Call(cnm, args) => Call(cnm, vsubst_self_args(args, vnm))
+    Field(o, fld)   => Field(vsubst_self(o, vnm), fld)
+    _               => e
+
+fn vsubst_self_args(xs, vnm) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons(vsubst_self(h, vnm), vsubst_self_args(t, vnm))
+
+fn vrefine_preds(ty, vnm, rtypes) = match ty
+    TyRefine(bty, pr) => app(vrefine_preds(bty, vnm, rtypes), Cons(vsubst_self(pr, vnm), Nil))
+    TyName(tn)        => vrefine_preds_nm(tn, vnm, vrtype_lookup(tn, rtypes), rtypes)
+    _                 => Nil
+
+fn vrefine_preds_nm(tn, vnm, m, rtypes) = match m
+    Nil         => Nil
+    Cons(rt, r) => app(vrefine_preds(rt.bty, vnm, rtypes), Cons(vsubst_self(rt.pr, vnm), Nil))
+
+fn vrefine_param_reqs(ps, ts, rtypes) = match ps
+    Nil        => Nil
+    Cons(p, r) => vrefine_param_reqs2(p, r, ts, rtypes)
+
+fn vrefine_param_reqs2(p, r, ts, rtypes) = match ts
+    Nil         => Nil
+    Cons(ty, tr) => app(vrefine_preds(ty, p, rtypes), vrefine_param_reqs(r, tr, rtypes))
+
+fn vmerge_vsig(nm, ps, reqs, enss, vsigs) = if isnil(reqs) == 1 and isnil(enss) == 1 then vsigs else vmerge_vsig2(nm, ps, reqs, enss, vsigs)
+
+fn vmerge_vsig2(nm, ps, reqs, enss, vsigs) = match vsigs
+    Nil         => Cons({nm: nm, ps: ps, reqs: reqs, enss: enss}, Nil)
+    Cons(v, vr) => if v.nm == nm then Cons({nm: nm, ps: v.ps, reqs: app(reqs, v.reqs), enss: app(enss, v.enss)}, vr) else Cons(v, vmerge_vsig2(nm, ps, reqs, enss, vr))
+
+fn vcollect_vsigs(prog) = vcollect_vsigs_r(prog, vcollect_rtypes(prog), vcollect_vsigs_raw(prog))
+
+fn vcollect_vsigs_raw(prog) = match prog
+    Nil        => Nil
+    Cons(h, t) => vcollect_vsig1(h, vcollect_vsigs_raw(t))
 
 fn vcollect_vsig1(st, rest) = match st
     VContractSig(nm, ps, reqs, enss) => Cons({nm: nm, ps: ps, reqs: reqs, enss: enss}, rest)
     _                                => rest
+
+fn vcollect_vsigs_r(prog, rtypes, acc) = match prog
+    Nil        => acc
+    Cons(h, t) => vcollect_vsigs_r(t, rtypes, vcollect_vsig_sig(h, rtypes, acc))
+
+fn vcollect_vsig_sig(st, rtypes, acc) = match st
+    Sig(nm, ps, ts, rt) => vmerge_vsig(nm, ps, vrefine_param_reqs(ps, ts, rtypes), vrefine_preds(rt, "result", rtypes), acc)
+    _                   => acc
 
 fn vcollect_invs(prog) = match prog
     Nil        => Nil
@@ -981,6 +1108,7 @@ fn veval1(e, env, old_env, fns, d) = match e
     WithHandlerE(en, hs, b) => veval(b, env, old_env, vadd_hops_fns(hs, fns), d)
     ScopeE(snm, b)          => veval(b, Cons({k: snm, v: vv_int(1)}, env), old_env, fns, d)
     SpawnE(inner)           => veval(inner, env, old_env, fns, d)
+    AwaitE(inner)           => veval(inner, env, old_env, fns, d)
     Bin(op, l, r)           => veval_bin(op, veval(l, env, old_env, fns, d), veval(r, env, old_env, fns, d))
     If(c, t, e2)            => let rc = veval(c, env, old_env, fns, d) in if rc.ok == 0 then vv_err() else if rc.i != 0 then veval(t, env, old_env, fns, d) else veval(e2, env, old_env, fns, d)
     LetIn(nm, v, b)         => let rv = veval(v, env, old_env, fns, d) in if rv.ok == 0 then vv_err() else veval(b, Cons({k: nm, v: rv}, env), old_env, fns, d)
@@ -999,7 +1127,7 @@ fn veval_args(args, env, old_env, fns, d) = match args
     Nil        => {ok: 1, vals: Nil}
     Cons(h, t) => let rh = veval(h, env, old_env, fns, d) in if rh.ok == 0 then {ok: 0, vals: Nil} else let rt = veval_args(t, env, old_env, fns, d) in if rt.ok == 0 then {ok: 0, vals: Nil} else {ok: 1, vals: Cons(rh, rt.vals)}
 
-fn veval_call(cnm, args, env, old_env, fns, d) = if cnm == "old" and len(args) == 1 then veval(ohd_e(args), old_env, old_env, fns, d) else if (cnm == "verify" or cnm == "law_check" or cnm == "evolve_approve" or cnm == "borrow" or cnm == "borrow_mut" or cnm == "move" or cnm == "clone") and len(args) >= 1 then veval(ohd_e(args), env, old_env, fns, d) else if cnm == "grad" and len(args) >= 2 then veval_call("__ad_grad_" + n4_var_name(ohd_e(args)), ptl(args), env, old_env, fns, d) else if cnm == "jit" and len(args) >= 2 then veval_call(n4_var_name(ohd_e(args)), ptl(args), env, old_env, fns, d) else if cnm == "dec_add" and len(args) == 2 then veval_bin("+", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else if cnm == "dec_sub" and len(args) == 2 then veval_bin("-", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else if cnm == "dec_eq" and len(args) == 2 then veval_bin("==", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else if cnm == "dec_lt" and len(args) == 2 then veval_bin("<", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else if cnm == "dec_le" and len(args) == 2 then veval_bin("<=", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else if cnm == "dec_gt" and len(args) == 2 then veval_bin(">", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else if cnm == "dec_ge" and len(args) == 2 then veval_bin(">=", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else veval_ufn(vfnlookup(cnm, fns), veval_args(args, env, old_env, fns, d), fns, d)
+fn veval_call(cnm, args, env, old_env, fns, d) = if cnm == "old" and len(args) == 1 then veval(ohd_e(args), old_env, old_env, fns, d) else if (cnm == "verify" or cnm == "law_check" or cnm == "evolve_approve" or cnm == "borrow" or cnm == "borrow_mut" or cnm == "move" or cnm == "clone" or cnm == "block_on") and len(args) >= 1 then veval(ohd_e(args), env, old_env, fns, d) else if cnm == "grad" and len(args) >= 2 then veval_call("__ad_grad_" + n4_var_name(ohd_e(args)), ptl(args), env, old_env, fns, d) else if cnm == "jit" and len(args) >= 2 then veval_call(n4_var_name(ohd_e(args)), ptl(args), env, old_env, fns, d) else if cnm == "dec_add" and len(args) == 2 then veval_bin("+", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else if cnm == "dec_sub" and len(args) == 2 then veval_bin("-", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else if cnm == "dec_eq" and len(args) == 2 then veval_bin("==", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else if cnm == "dec_lt" and len(args) == 2 then veval_bin("<", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else if cnm == "dec_le" and len(args) == 2 then veval_bin("<=", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else if cnm == "dec_gt" and len(args) == 2 then veval_bin(">", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else if cnm == "dec_ge" and len(args) == 2 then veval_bin(">=", veval(ohd_e(args), env, old_env, fns, d), veval(ohd_e(ptl(args)), env, old_env, fns, d)) else veval_ufn(vfnlookup(cnm, fns), veval_args(args, env, old_env, fns, d), fns, d)
 
 fn veval_ufn(mf, ra, fns, d) = match mf
     Nil        => vv_err()
@@ -1132,6 +1260,7 @@ fn vlin_expr1(e, hyps, lenv, fns, d) = match e
     OwnE(inner)     => vlin_expr(inner, hyps, lenv, fns, d)
     MutE(inner)     => vlin_expr(inner, hyps, lenv, fns, d)
     CT(inner)       => vlin_expr(inner, hyps, lenv, fns, d)
+    AwaitE(inner)   => vlin_expr(inner, hyps, lenv, fns, d)
     DeferE(c, b)    => vlin_expr(b, hyps, lenv, fns, d)
     ErrDeferE(c, b) => vlin_expr(b, hyps, lenv, fns, d)
     LetIn(nm, v, b) => let gfn = n4_is_grad_let(v) in if gfn != "" then vlin_expr(n4_subst_call(b, nm, "__ad_grad_" + gfn), hyps, lenv, fns, d) else let lv = vlin_expr(v, hyps, lenv, fns, d) in if lv.ok == 0 then vlin_err() else vlin_expr(b, hyps, Cons({k: nm, v: lv}, lenv), fns, d)
@@ -1145,7 +1274,7 @@ fn vlin_args(args, hyps, lenv, fns, d) = match args
     Nil        => {ok: 1, vals: Nil}
     Cons(h, t) => let rh = vlin_expr(h, hyps, lenv, fns, d) in if rh.ok == 0 then {ok: 0, vals: Nil} else let rt = vlin_args(t, hyps, lenv, fns, d) in if rt.ok == 0 then {ok: 0, vals: Nil} else {ok: 1, vals: Cons(rh, rt.vals)}
 
-fn vlin_call(cnm, args, hyps, lenv, fns, d) = if cnm == "old" and len(args) == 1 then vlin_expr(ohd_e(args), hyps, lenv, fns, d) else if (cnm == "verify" or cnm == "law_check" or cnm == "evolve_approve" or cnm == "borrow" or cnm == "borrow_mut" or cnm == "move" or cnm == "clone") and len(args) >= 1 then vlin_expr(ohd_e(args), hyps, lenv, fns, d) else if cnm == "grad" and len(args) >= 2 then vlin_call("__ad_grad_" + n4_var_name(ohd_e(args)), ptl(args), hyps, lenv, fns, d) else if cnm == "jvp" and len(args) == 3 then vlin_mul(vlin_call("__ad_grad_" + n4_var_name(ohd_e(args)), Cons(ohd_e(ptl(args)), Nil), hyps, lenv, fns, d), vlin_expr(ohd_e(ptl(ptl(args))), hyps, lenv, fns, d)) else if cnm == "vjp" and len(args) == 3 then vlin_mul(vlin_expr(ohd_e(ptl(ptl(args))), hyps, lenv, fns, d), vlin_call("__ad_grad_" + n4_var_name(ohd_e(args)), Cons(ohd_e(ptl(args)), Nil), hyps, lenv, fns, d)) else if cnm == "jit" and len(args) >= 2 then vlin_call(n4_var_name(ohd_e(args)), ptl(args), hyps, lenv, fns, d) else if cnm == "dec_add" and len(args) == 2 then vlin_add(vlin_expr(ohd_e(args), hyps, lenv, fns, d), vlin_expr(ohd_e(ptl(args)), hyps, lenv, fns, d)) else if cnm == "dec_sub" and len(args) == 2 then vlin_sub(vlin_expr(ohd_e(args), hyps, lenv, fns, d), vlin_expr(ohd_e(ptl(args)), hyps, lenv, fns, d)) else vlin_ufn(vfnlookup(cnm, fns), vlin_args(args, hyps, lenv, fns, d), hyps, fns, d)
+fn vlin_call(cnm, args, hyps, lenv, fns, d) = if cnm == "old" and len(args) == 1 then vlin_expr(ohd_e(args), hyps, lenv, fns, d) else if (cnm == "verify" or cnm == "law_check" or cnm == "evolve_approve" or cnm == "borrow" or cnm == "borrow_mut" or cnm == "move" or cnm == "clone" or cnm == "block_on") and len(args) >= 1 then vlin_expr(ohd_e(args), hyps, lenv, fns, d) else if cnm == "grad" and len(args) >= 2 then vlin_call("__ad_grad_" + n4_var_name(ohd_e(args)), ptl(args), hyps, lenv, fns, d) else if cnm == "jvp" and len(args) == 3 then vlin_mul(vlin_call("__ad_grad_" + n4_var_name(ohd_e(args)), Cons(ohd_e(ptl(args)), Nil), hyps, lenv, fns, d), vlin_expr(ohd_e(ptl(ptl(args))), hyps, lenv, fns, d)) else if cnm == "vjp" and len(args) == 3 then vlin_mul(vlin_expr(ohd_e(ptl(ptl(args))), hyps, lenv, fns, d), vlin_call("__ad_grad_" + n4_var_name(ohd_e(args)), Cons(ohd_e(ptl(args)), Nil), hyps, lenv, fns, d)) else if cnm == "jit" and len(args) >= 2 then vlin_call(n4_var_name(ohd_e(args)), ptl(args), hyps, lenv, fns, d) else if cnm == "dec_add" and len(args) == 2 then vlin_add(vlin_expr(ohd_e(args), hyps, lenv, fns, d), vlin_expr(ohd_e(ptl(args)), hyps, lenv, fns, d)) else if cnm == "dec_sub" and len(args) == 2 then vlin_sub(vlin_expr(ohd_e(args), hyps, lenv, fns, d), vlin_expr(ohd_e(ptl(args)), hyps, lenv, fns, d)) else vlin_ufn(vfnlookup(cnm, fns), vlin_args(args, hyps, lenv, fns, d), hyps, fns, d)
 
 fn vlin_ufn(mf, ra, hyps, fns, d) = match mf
     Nil        => vlin_err()
@@ -1698,6 +1827,8 @@ fn olowere(e, lctx, d) = match e
     WithHandlerE(en, hs, b) => olowere(b, {ufns: lctx.ufns, hops: app(hs, lctx.hops), ownps: lctx.ownps, fns: lctx.fns}, d + 1)
     ScopeE(snm, b)          => LetIn(snm, Num(1), olowere(b, lctx, d + 1))
     SpawnE(inner)           => olowere(inner, lctx, d + 1)
+    AwaitE(inner)           => Field(olowere(inner, lctx, d + 1), "__future_val")
+    ShardE(vnm, lo, hi, b)  => let v_lo = "_sh_lo_" + str(d) in let v_hi = "_sh_hi_" + str(d) in LetIn(v_lo, olowere(lo, lctx, d + 1), LetIn(v_hi, olowere(hi, lctx, d + 2), Bin("+", LetIn(vnm, Var(v_lo), olowere(b, lctx, d + 3)), LetIn(vnm, Var(v_hi), olowere(b, lctx, d + 4)))))
     LetIn(nm, v, b)         => let gfn = n4_is_grad_let(v) in if gfn != "" then olowere(n4_subst_call(b, nm, n4_grad_fn_name(gfn, lctx.ufns)), {ufns: lctx.ufns, hops: lctx.hops, ownps: orem(nm, lctx.ownps), fns: lctx.fns}, d + 17) else LetIn(nm, olowere(v, lctx, d + 1), olowere(b, {ufns: lctx.ufns, hops: lctx.hops, ownps: orem(nm, lctx.ownps), fns: lctx.fns}, d + 17))
     If(c, t, e2)            => If(olowere(c, lctx, d + 1), olowere(t, lctx, d + 17), olowere(e2, lctx, d + 33))
     Bin(op, l, r)           => olowerbin(op, l, r, lctx, d)
@@ -1747,11 +1878,13 @@ fn n4_lower_jit_call(fnm, largs, mf, d) = match mf
     Nil        => Call(fnm, largs)
     Cons(f, r) => if afn_calls_self(fnm, f.body) == 1 then Call(fnm, largs) else n4_jit_bind(f.ps, largs, f.body, Nil, "_jit_" + str(d) + "_")
 
+fn olower_shard_call(fe, a, b, lctx, d) = let la = olowere(a, lctx, d + 1) in let lb = olowere(b, lctx, d + 2) in let fnm = n4_var_name(fe) in let c1 = if fnm != "" and omem(fnm, lctx.ufns) == 1 then Call(fnm, Cons(la, Nil)) else Call("__closure_call_1", Cons(olowere(fe, lctx, d), Cons(la, Nil))) in let c2 = if fnm != "" and omem(fnm, lctx.ufns) == 1 then Call(fnm, Cons(lb, Nil)) else Call("__closure_call_1", Cons(olowere(fe, lctx, d), Cons(lb, Nil))) in let v1 = "_sh_a_" + str(d) in let v2 = "_sh_b_" + str(d) in LetIn(v1, c1, LetIn(v2, c2, Rec(Cons({key: "fst", val: Var(v1)}, Cons({key: "snd", val: Var(v2)}, Cons({key: "sum", val: Bin("+", Var(v1), Var(v2))}, Nil))))))
+
 fn n4_lower_ad_call(nm, args, lctx, d) = if nm == "grad" and len(args) >= 2 then Call(n4_grad_fn_name(n4_var_name(ohd_e(args)), lctx.ufns), olowerargs(ptl(args), lctx, d)) else if nm == "jvp" and len(args) == 3 then Bin("*", Call(n4_grad_fn_name(n4_var_name(ohd_e(args)), lctx.ufns), Cons(olowere(ohd_e(ptl(args)), lctx, d), Nil)), olowere(ohd_e(ptl(ptl(args))), lctx, d + 1)) else if nm == "vjp" and len(args) == 3 then Bin("*", olowere(ohd_e(ptl(ptl(args))), lctx, d + 1), Call(n4_grad_fn_name(n4_var_name(ohd_e(args)), lctx.ufns), Cons(olowere(ohd_e(ptl(args)), lctx, d), Nil))) else if nm == "jit" and len(args) >= 2 then (let fnm = n4_var_name(ohd_e(args)) in let largs = olowerargs(ptl(args), lctx, d) in n4_lower_jit_call(fnm, largs, vfnlookup(fnm, lctx.fns), d)) else Call(nm, olowerargs(args, lctx, d))
 
 fn olowercall(nm, args, mhop, lctx, d) = match mhop
     Cons(hop, r) => kbind_hop_args(hop.ps, args, hop.body, "_khop_" + str(d) + "_" + hop.op + "_", lctx, d)
-    Nil          => if ois_intrinsic(nm, lctx.ufns) == 1 and len(args) == 1 then olowere(ohd_e(args), lctx, d) else if ois_verify_call(nm, lctx.ufns) == 1 then olower_verify(args, lctx, d) else if (nm == "grad" or nm == "jvp" or nm == "vjp" or nm == "jit") and omem(nm, lctx.ufns) == 0 then n4_lower_ad_call(nm, args, lctx, d) else if isnil(lctx.hops) == 0 and d < 200 then olowercall_fn(nm, args, vfnlookup(nm, lctx.fns), lctx, d) else Call(nm, olowerargs(args, lctx, d))
+    Nil          => if ois_intrinsic(nm, lctx.ufns) == 1 and len(args) == 1 then olowere(ohd_e(args), lctx, d) else if nm == "block_on" and len(args) == 1 and omem(nm, lctx.ufns) == 0 then Field(olowere(ohd_e(args), lctx, d), "__future_val") else if (nm == "shard" or nm == "vmap") and len(args) == 3 and omem(nm, lctx.ufns) == 0 then olower_shard_call(ohd_e(args), ohd_e(ptl(args)), ohd_e(ptl(ptl(args))), lctx, d) else if ois_verify_call(nm, lctx.ufns) == 1 then olower_verify(args, lctx, d) else if (nm == "grad" or nm == "jvp" or nm == "vjp" or nm == "jit") and omem(nm, lctx.ufns) == 0 then n4_lower_ad_call(nm, args, lctx, d) else if isnil(lctx.hops) == 0 and d < 200 then olowercall_fn(nm, args, vfnlookup(nm, lctx.fns), lctx, d) else Call(nm, olowerargs(args, lctx, d))
 
 fn olowercall_fn(nm, args, mf, lctx, d) = match mf
     Nil        => Call(nm, olowerargs(args, lctx, d))
@@ -1797,6 +1930,12 @@ fn klower_eff_ops(ops, ufns, rest) = match ops
     Nil         => rest
     Cons(op, r) => if omem(op.op, ufns) == 1 then klower_eff_ops(r, ufns, rest) else Cons(Fn(op.op, op.ps, Num(0)), klower_eff_ops(r, Cons(op.op, ufns), rest))
 
+fn ois_async_fn(nm, osigs) = match osiglookup(nm, osigs)
+    Nil          => 0
+    Cons(osg, r) => ois_async(osg.freef)
+
+fn owrap_async_body(nm, wb, osigs) = if ois_async_fn(nm, osigs) == 1 then Rec(Cons({key: "__future_state", val: Num(1)}, Cons({key: "__future_val", val: wb}, Nil))) else wb
+
 fn olowerprog(prog, ufns, osigs, vctx) = match prog
     Nil        => Nil
     Cons(h, t) => olowerstmt(h, olowerprog(t, ufns, osigs, vctx), ufns, osigs, vctx)
@@ -1811,10 +1950,328 @@ fn olowerstmt(st, rest, ufns, osigs, vctx) = match st
     VTypeInvariant(nm, fs, inv)           => rest
     VLawDecl(nm, ps, body)                => rest
     WcetSig(nm, bound)                    => rest
-    Fn(nm, ps, body)                      => let lctx = {ufns: ufns, hops: Nil, ownps: kfn_ownps(nm, osigs), fns: vctx.fns} in let lb = if oanye(body) == 0 and isnil(lctx.ownps) == 1 then body else olowere(body, lctx, 0) in let wb = vwrap_fn_contract(nm, ps, body, lb, lctx, vctx) in Cons(Fn(nm, ps, wb), rest)
+    TypeRefineS(nm, bty, pr)              => Cons(st, rest)
+    TraitDecl(tnm, ops)                   => Cons(st, rest)
+    ImplDecl(tnm, tty, mths)              => rest
+    Fn(nm, ps, body)                      => let lctx = {ufns: ufns, hops: Nil, ownps: kfn_ownps(nm, osigs), fns: vctx.fns} in let lb = if oanye(body) == 0 and isnil(lctx.ownps) == 1 then body else olowere(body, lctx, 0) in let wb = vwrap_fn_contract(nm, ps, body, lb, lctx, vctx) in Cons(Fn(nm, ps, owrap_async_body(nm, wb, osigs)), rest)
     Print(v)                              => Cons(Print(olowere(v, {ufns: ufns, hops: Nil, ownps: Nil, fns: vctx.fns}, 0)), rest)
     ExprS(v)                              => Cons(ExprS(olowere(v, {ufns: ufns, hops: Nil, ownps: Nil, fns: vctx.fns}, 0)), rest)
     _                                     => Cons(st, rest)
 
+## ============================================================================================================
+## Issue #197: Trait / Impl Checking (`[T0400]`, `[T0401]`) & Static Method Dispatch Lowering
+## ============================================================================================================
+fn t4_collect_traits(prog) = match prog
+    Nil        => Nil
+    Cons(h, t) => t4_collect_trait1(h, t4_collect_traits(t))
+
+fn t4_collect_trait1(st, rest) = match st
+    TraitDecl(tnm, ops) => Cons({tnm: tnm, ops: ops}, rest)
+    _                   => rest
+
+fn t4_collect_impls(prog) = match prog
+    Nil        => Nil
+    Cons(h, t) => t4_collect_impl1(h, t4_collect_impls(t))
+
+fn t4_collect_impl1(st, rest) = match st
+    ImplDecl(tnm, tty, mths) => Cons({tnm: tnm, tty: tty, mths: mths}, rest)
+    _                        => rest
+
+fn t4_trait_lookup(tnm, traits) = match traits
+    Nil        => Nil
+    Cons(h, t) => if h.tnm == tnm then Cons(h, Nil) else t4_trait_lookup(tnm, t)
+
+fn t4_has_mth(opnm, ar, mths) = match mths
+    Nil        => 0
+    Cons(m, r) => if m.op == opnm and m.ar == ar then 1 else t4_has_mth(opnm, ar, r)
+
+fn t4_chk_impl_ops(tnm, tty, ops, mths) = match ops
+    Nil         => 1
+    Cons(op, r) => if t4_has_mth(op.op, len(op.ps), mths) == 0 then ctfail("lume: trait error [T0400]: 'impl " + tnm + " for " + tty + "' is missing required trait method '" + op.op + "' (fix-it: implement 'fn " + op.op + "(...)' in 'impl " + tnm + " for " + tty + "')\n") else t4_chk_impl_ops(tnm, tty, r, mths)
+
+fn t4_chk_impl1(im, traits) = match t4_trait_lookup(im.tnm, traits)
+    Nil         => ctfail("lume: trait error [T0400]: cannot implement undeclared trait '" + im.tnm + "' for '" + im.tty + "'\n")
+    Cons(tr, r) => t4_chk_impl_ops(im.tnm, im.tty, tr.ops, im.mths)
+
+fn t4_chk_impls(impls, traits) = match impls
+    Nil         => 1
+    Cons(im, r) => t4_chk_impl1(im, traits) + t4_chk_impls(r, traits)
+
+fn t4_has_op(opnm, ops) = match ops
+    Nil         => 0
+    Cons(op, r) => if op.op == opnm then 1 else t4_has_op(opnm, r)
+
+fn t4_find_trait_op(opnm, traits) = match traits
+    Nil         => ""
+    Cons(tr, r) => if t4_has_op(opnm, tr.ops) == 1 then tr.tnm else t4_find_trait_op(opnm, r)
+
+fn t4_has_impl(tnm, tty, impls) = match impls
+    Nil         => 0
+    Cons(im, r) => if im.tnm == tnm and im.tty == tty then 1 else t4_has_impl(tnm, tty, r)
+
+fn t4_ty_name(ty) = match ty
+    TyName(n)         => n
+    TyRefine(bty, pr) => t4_ty_name(bty)
+    _                 => ""
+
+fn t4_env_lookup(nm, tenv) = match tenv
+    Nil        => ""
+    Cons(h, t) => if h.k == nm then h.v else t4_env_lookup(nm, t)
+
+fn t4_init_tenv_ps(pns, pts) = match pns
+    Nil         => Nil
+    Cons(pn, r) => let tnm = t4_ty_name(ohd_ty(pts)) in if tnm != "" then Cons({k: pn, v: tnm}, t4_init_tenv_ps(r, ptl(pts))) else t4_init_tenv_ps(r, ptl(pts))
+
+fn t4_init_tenv_sig(msig) = match msig
+    Nil        => Nil
+    Cons(sg, r) => t4_init_tenv_ps(sg.pn, sg.pt)
+
+fn t4_expr_tyname(e, tenv, tctx) = match e
+    Num(n)          => "int"
+    Str(s)          => "str"
+    Var(nm)         => let lt = t4_env_lookup(nm, tenv) in if lt != "" then lt else t4_ctor_tyname(nm, tctx.ctors)
+    RecT(tn, items) => tn
+    Call(cnm, args) => let ct = t4_ctor_tyname(cnm, tctx.ctors) in if ct != "" then ct else t4_sig_ret_tyname(tsiglookup(cnm, tctx.sigs))
+    _               => ""
+
+fn t4_ctor_tyname(nm, ctors) = if isctor(nm) == 0 then "" else t4_ctor_tyname2(tctorlookup(nm, ctors))
+
+fn t4_ctor_tyname2(m) = match m
+    Nil        => ""
+    Cons(v, r) => v.en
+
+fn t4_sig_ret_tyname(msig) = match msig
+    Nil        => ""
+    Cons(sg, r) => t4_ty_name(sg.rt)
+
+fn t4_resolve_args(xs, tenv, tctx) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons(t4_resolve_e(h, tenv, tctx), t4_resolve_args(t, tenv, tctx))
+
+fn t4_resolve_rec(xs, tenv, tctx) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons({key: h.key, val: t4_resolve_e(h.val, tenv, tctx)}, t4_resolve_rec(t, tenv, tctx))
+
+fn t4_resolve_arms(xs, tenv, tctx) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons({pat: h.pat, body: t4_resolve_e(h.body, tenv, tctx)}, t4_resolve_arms(t, tenv, tctx))
+
+fn t4_resolve_call(cnm, args, tenv, tctx) = let rargs = t4_resolve_args(args, tenv, tctx) in let tnm = t4_find_trait_op(cnm, tctx.traits) in if tnm == "" or isnil(rargs) == 1 then Call(cnm, rargs) else let rty = t4_expr_tyname(ohd_e(args), tenv, tctx) in if rty == "" then Call(cnm, rargs) else if t4_has_impl(tnm, rty, tctx.impls) == 0 then ctfail("lume: trait error [T0401]: type '" + rty + "' does not implement trait '" + tnm + "' required by method '" + cnm + "' (fix-it: add 'impl " + tnm + " for " + rty + " { fn " + cnm + "(...) = ... }')\n") else Call("__impl_" + rty + "_" + cnm, rargs)
+
+fn t4_resolve_e(e, tenv, tctx) = match e
+    Bin(op, l, r)              => Bin(op, t4_resolve_e(l, tenv, tctx), t4_resolve_e(r, tenv, tctx))
+    If(c, t, e2)               => If(t4_resolve_e(c, tenv, tctx), t4_resolve_e(t, tenv, tctx), t4_resolve_e(e2, tenv, tctx))
+    LetIn(nm, v, b)            => let rv = t4_resolve_e(v, tenv, tctx) in let vt = t4_expr_tyname(v, tenv, tctx) in let tenv2 = if vt != "" then Cons({k: nm, v: vt}, tenv) else tenv in LetIn(nm, rv, t4_resolve_e(b, tenv2, tctx))
+    VarIn(nm, v, b)            => let rv = t4_resolve_e(v, tenv, tctx) in let vt = t4_expr_tyname(v, tenv, tctx) in let tenv2 = if vt != "" then Cons({k: nm, v: vt}, tenv) else tenv in VarIn(nm, rv, t4_resolve_e(b, tenv2, tctx))
+    OwnE(inner)                => OwnE(t4_resolve_e(inner, tenv, tctx))
+    MutE(inner)                => MutE(t4_resolve_e(inner, tenv, tctx))
+    DeferE(c, b)               => DeferE(t4_resolve_e(c, tenv, tctx), t4_resolve_e(b, tenv, tctx))
+    ErrDeferE(c, b)            => ErrDeferE(t4_resolve_e(c, tenv, tctx), t4_resolve_e(b, tenv, tctx))
+    WithAllocE(a, b)           => WithAllocE(t4_resolve_e(a, tenv, tctx), t4_resolve_e(b, tenv, tctx))
+    WithHandlerE(en, hs, b)    => WithHandlerE(en, hs, t4_resolve_e(b, tenv, tctx))
+    ScopeE(snm, b)             => ScopeE(snm, t4_resolve_e(b, tenv, tctx))
+    SpawnE(inner)              => SpawnE(t4_resolve_e(inner, tenv, tctx))
+    AwaitE(inner)              => AwaitE(t4_resolve_e(inner, tenv, tctx))
+    ShardE(vnm, lo, hi, b)     => ShardE(vnm, t4_resolve_e(lo, tenv, tctx), t4_resolve_e(hi, tenv, tctx), t4_resolve_e(b, Cons({k: vnm, v: "int"}, tenv), tctx))
+    LambdaE(ps, tys, rt, body) => LambdaE(ps, tys, rt, t4_resolve_e(body, app(t4_init_tenv_ps(ps, tys), tenv), tctx))
+    Call(cnm, args)            => t4_resolve_call(cnm, args, tenv, tctx)
+    Field(o, fld)              => Field(t4_resolve_e(o, tenv, tctx), fld)
+    Rec(items)                 => Rec(t4_resolve_rec(items, tenv, tctx))
+    RecT(tn, items)            => RecT(tn, t4_resolve_rec(items, tenv, tctx))
+    Match(sc, arms)            => Match(t4_resolve_e(sc, tenv, tctx), t4_resolve_arms(arms, tenv, tctx))
+    CT(inner)                  => CT(t4_resolve_e(inner, tenv, tctx))
+    _                          => e
+
+fn t4_resolve_stmt(st, tctx) = match st
+    Fn(nm, ps, body)                 => Fn(nm, ps, t4_resolve_e(body, t4_init_tenv_sig(tsiglookup(nm, tctx.sigs)), tctx))
+    VContractSig(nm, ps, reqs, enss) => let tenv = t4_init_tenv_sig(tsiglookup(nm, tctx.sigs)) in VContractSig(nm, ps, t4_resolve_args(reqs, tenv, tctx), t4_resolve_args(enss, tenv, tctx))
+    VLawDecl(nm, ps, body)           => VLawDecl(nm, ps, t4_resolve_e(body, Nil, tctx))
+    Print(v)                         => Print(t4_resolve_e(v, Nil, tctx))
+    ExprS(v)                         => ExprS(t4_resolve_e(v, Nil, tctx))
+    _                                => st
+
+fn t4_resolve_prog(prog, traits, impls, sigs, ctors) = t4_resolve_stmts(prog, {traits: traits, impls: impls, sigs: sigs, ctors: ctors})
+
+fn t4_resolve_stmts(prog, tctx) = match prog
+    Nil        => Nil
+    Cons(h, t) => Cons(t4_resolve_stmt(h, tctx), t4_resolve_stmts(t, tctx))
+
+## ============================================================================================================
+## Issue #197: First-Class Closures with Lexical Environment Capture (`cl_convert_prog`)
+## ============================================================================================================
+fn cl_has_lambda_e(e) = match e
+    LambdaE(ps, tys, rt, body) => 1
+    Bin(op, l, r)              => if cl_has_lambda_e(l) == 1 then 1 else cl_has_lambda_e(r)
+    If(c, t, e2)               => if cl_has_lambda_e(c) == 1 then 1 else if cl_has_lambda_e(t) == 1 then 1 else cl_has_lambda_e(e2)
+    LetIn(nm, v, b)            => if cl_has_lambda_e(v) == 1 then 1 else cl_has_lambda_e(b)
+    VarIn(nm, v, b)            => if cl_has_lambda_e(v) == 1 then 1 else cl_has_lambda_e(b)
+    OwnE(inner)                => cl_has_lambda_e(inner)
+    MutE(inner)                => cl_has_lambda_e(inner)
+    DeferE(c, b)               => if cl_has_lambda_e(c) == 1 then 1 else cl_has_lambda_e(b)
+    ErrDeferE(c, b)            => if cl_has_lambda_e(c) == 1 then 1 else cl_has_lambda_e(b)
+    WithAllocE(a, b)           => if cl_has_lambda_e(a) == 1 then 1 else cl_has_lambda_e(b)
+    WithHandlerE(en, hs, b)    => cl_has_lambda_e(b)
+    ScopeE(snm, b)             => cl_has_lambda_e(b)
+    SpawnE(inner)              => cl_has_lambda_e(inner)
+    AwaitE(inner)              => cl_has_lambda_e(inner)
+    ShardE(vnm, lo, hi, b)     => if cl_has_lambda_e(lo) == 1 then 1 else if cl_has_lambda_e(hi) == 1 then 1 else cl_has_lambda_e(b)
+    Call(cnm, args)            => if cnm == "_call" then 1 else cl_has_lambda_args(args)
+    Field(o, fld)              => cl_has_lambda_e(o)
+    Rec(items)                 => cl_has_lambda_rec(items)
+    RecT(tn, items)            => cl_has_lambda_rec(items)
+    Match(sc, arms)            => if cl_has_lambda_e(sc) == 1 then 1 else cl_has_lambda_arms(arms)
+    _                          => 0
+
+fn cl_has_lambda_args(xs) = match xs
+    Nil        => 0
+    Cons(h, t) => if cl_has_lambda_e(h) == 1 then 1 else cl_has_lambda_args(t)
+
+fn cl_has_lambda_rec(xs) = match xs
+    Nil        => 0
+    Cons(h, t) => if cl_has_lambda_e(h.val) == 1 then 1 else cl_has_lambda_rec(t)
+
+fn cl_has_lambda_arms(xs) = match xs
+    Nil        => 0
+    Cons(h, t) => if cl_has_lambda_e(h.body) == 1 then 1 else cl_has_lambda_arms(t)
+
+fn cl_has_lambda_prog(prog) = match prog
+    Nil        => 0
+    Cons(h, t) => if cl_has_lambda_stmt(h) == 1 then 1 else cl_has_lambda_prog(t)
+
+fn cl_has_lambda_stmt(st) = match st
+    Fn(nm, ps, body) => cl_has_lambda_e(body)
+    Print(v)         => cl_has_lambda_e(v)
+    ExprS(v)         => cl_has_lambda_e(v)
+    _                => 0
+
+fn cl_free_vars(e, bound, env_vars, acc) = match e
+    Var(nm)                    => if omem(nm, bound) == 0 and omem(nm, env_vars) == 1 and omem(nm, acc) == 0 then Cons(nm, acc) else acc
+    Bin(op, l, r)              => cl_free_vars(r, bound, env_vars, cl_free_vars(l, bound, env_vars, acc))
+    If(c, t, e2)               => cl_free_vars(e2, bound, env_vars, cl_free_vars(t, bound, env_vars, cl_free_vars(c, bound, env_vars, acc)))
+    LetIn(nm, v, b)            => cl_free_vars(b, Cons(nm, bound), env_vars, cl_free_vars(v, bound, env_vars, acc))
+    VarIn(nm, v, b)            => cl_free_vars(b, Cons(nm, bound), env_vars, cl_free_vars(v, bound, env_vars, acc))
+    LambdaE(ps, tys, rt, body) => cl_free_vars(body, app(ps, bound), env_vars, acc)
+    OwnE(inner)                => cl_free_vars(inner, bound, env_vars, acc)
+    MutE(inner)                => cl_free_vars(inner, bound, env_vars, acc)
+    DeferE(c, b)               => cl_free_vars(b, bound, env_vars, cl_free_vars(c, bound, env_vars, acc))
+    ErrDeferE(c, b)            => cl_free_vars(b, bound, env_vars, cl_free_vars(c, bound, env_vars, acc))
+    WithAllocE(a, b)           => cl_free_vars(b, bound, env_vars, cl_free_vars(a, bound, env_vars, acc))
+    ScopeE(snm, b)             => cl_free_vars(b, Cons(snm, bound), env_vars, acc)
+    SpawnE(inner)              => cl_free_vars(inner, bound, env_vars, acc)
+    AwaitE(inner)              => cl_free_vars(inner, bound, env_vars, acc)
+    ShardE(vnm, lo, hi, b)     => cl_free_vars(b, Cons(vnm, bound), env_vars, cl_free_vars(hi, bound, env_vars, cl_free_vars(lo, bound, env_vars, acc)))
+    Call(cnm, args)            => let acc0 = if omem(cnm, bound) == 0 and omem(cnm, env_vars) == 1 and omem(cnm, acc) == 0 then Cons(cnm, acc) else acc in cl_free_vars_args(args, bound, env_vars, acc0)
+    Field(o, fld)              => cl_free_vars(o, bound, env_vars, acc)
+    Rec(items)                 => cl_free_vars_rec(items, bound, env_vars, acc)
+    RecT(tn, items)            => cl_free_vars_rec(items, bound, env_vars, acc)
+    Match(sc, arms)            => cl_free_vars_arms(arms, bound, env_vars, cl_free_vars(sc, bound, env_vars, acc))
+    _                          => acc
+
+fn cl_free_vars_args(xs, bound, env_vars, acc) = match xs
+    Nil        => acc
+    Cons(h, t) => cl_free_vars_args(t, bound, env_vars, cl_free_vars(h, bound, env_vars, acc))
+
+fn cl_free_vars_rec(xs, bound, env_vars, acc) = match xs
+    Nil        => acc
+    Cons(h, t) => cl_free_vars_rec(t, bound, env_vars, cl_free_vars(h.val, bound, env_vars, acc))
+
+fn cl_free_vars_arms(xs, bound, env_vars, acc) = match xs
+    Nil        => acc
+    Cons(h, t) => cl_free_vars_arms(t, bound, env_vars, cl_free_vars(h.body, app(apat_binds(h.pat), bound), env_vars, acc))
+
+fn cl_subst_caps(e, caps) = match e
+    Var(nm)         => if omem(nm, caps) == 1 then Field(Var("__env"), nm) else e
+    Bin(op, l, r)   => Bin(op, cl_subst_caps(l, caps), cl_subst_caps(r, caps))
+    If(c, t, e2)    => If(cl_subst_caps(c, caps), cl_subst_caps(t, caps), cl_subst_caps(e2, caps))
+    LetIn(nm, v, b) => LetIn(nm, cl_subst_caps(v, caps), cl_subst_caps(b, orem(nm, caps)))
+    VarIn(nm, v, b) => VarIn(nm, cl_subst_caps(v, caps), cl_subst_caps(b, orem(nm, caps)))
+    OwnE(inner)     => OwnE(cl_subst_caps(inner, caps))
+    MutE(inner)     => MutE(cl_subst_caps(inner, caps))
+    DeferE(c, b)    => DeferE(cl_subst_caps(c, caps), cl_subst_caps(b, caps))
+    ErrDeferE(c, b) => ErrDeferE(cl_subst_caps(c, caps), cl_subst_caps(b, caps))
+    ScopeE(snm, b)  => ScopeE(snm, cl_subst_caps(b, orem(snm, caps)))
+    SpawnE(inner)   => SpawnE(cl_subst_caps(inner, caps))
+    AwaitE(inner)   => AwaitE(cl_subst_caps(inner, caps))
+    ShardE(v, l, h, b) => ShardE(v, cl_subst_caps(l, caps), cl_subst_caps(h, caps), cl_subst_caps(b, orem(v, caps)))
+    Call(cnm, args) => let args2 = cl_subst_caps_args(args, caps) in if omem(cnm, caps) == 1 then (if len(args2) == 1 then Call("__closure_call_1", Cons(Field(Var("__env"), cnm), args2)) else Call("__closure_call_2", Cons(Field(Var("__env"), cnm), args2))) else Call(cnm, args2)
+    Field(o, fld)   => Field(cl_subst_caps(o, caps), fld)
+    Rec(items)      => Rec(cl_subst_caps_rec(items, caps))
+    RecT(tn, items) => RecT(tn, cl_subst_caps_rec(items, caps))
+    Match(sc, arms) => Match(cl_subst_caps(sc, caps), cl_subst_caps_arms(arms, caps))
+    _               => e
+
+fn cl_subst_caps_args(xs, caps) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons(cl_subst_caps(h, caps), cl_subst_caps_args(t, caps))
+
+fn cl_subst_caps_rec(xs, caps) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons({key: h.key, val: cl_subst_caps(h.val, caps)}, cl_subst_caps_rec(t, caps))
+
+fn cl_subst_caps_arms(xs, caps) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons({pat: h.pat, body: cl_subst_caps(h.body, caps)}, cl_subst_caps_arms(t, caps))
+
+fn cl_env_rec_items(caps) = match caps
+    Nil        => Nil
+    Cons(c, r) => Cons({key: c, val: Var(c)}, cl_env_rec_items(r))
+
+fn cl_conv_e(e, env_vars, top_fns, lid) = match e
+    LambdaE(ps, tys, rt, body) => let rb = cl_conv_e(body, app(ps, env_vars), top_fns, lid) in let my_id = rb.lid in let caps = cl_free_vars(rb.e, ps, env_vars, Nil) in let lbody = cl_subst_caps(rb.e, caps) in let lfn = {id: my_id, ar: len(ps), fstmt: Fn("__lambda_" + str(my_id), Cons("__env", ps), lbody)} in let crec = Rec(Cons({key: "__fn_id", val: Num(my_id)}, Cons({key: "__env", val: Rec(cl_env_rec_items(caps))}, Nil))) in {e: crec, lifted: app(rb.lifted, Cons(lfn, Nil)), lid: my_id + 1}
+    Bin(op, l, r)              => let rl = cl_conv_e(l, env_vars, top_fns, lid) in let rr = cl_conv_e(r, env_vars, top_fns, rl.lid) in {e: Bin(op, rl.e, rr.e), lifted: app(rl.lifted, rr.lifted), lid: rr.lid}
+    If(c, t, e2)               => let rc = cl_conv_e(c, env_vars, top_fns, lid) in let rt = cl_conv_e(t, env_vars, top_fns, rc.lid) in let re = cl_conv_e(e2, env_vars, top_fns, rt.lid) in {e: If(rc.e, rt.e, re.e), lifted: app(rc.lifted, app(rt.lifted, re.lifted)), lid: re.lid}
+    LetIn(nm, v, b)            => let rv = cl_conv_e(v, env_vars, top_fns, lid) in let rb = cl_conv_e(b, Cons(nm, env_vars), top_fns, rv.lid) in {e: LetIn(nm, rv.e, rb.e), lifted: app(rv.lifted, rb.lifted), lid: rb.lid}
+    VarIn(nm, v, b)            => let rv = cl_conv_e(v, env_vars, top_fns, lid) in let rb = cl_conv_e(b, Cons(nm, env_vars), top_fns, rv.lid) in {e: VarIn(nm, rv.e, rb.e), lifted: app(rv.lifted, rb.lifted), lid: rb.lid}
+    OwnE(inner)                => let r = cl_conv_e(inner, env_vars, top_fns, lid) in {e: OwnE(r.e), lifted: r.lifted, lid: r.lid}
+    MutE(inner)                => let r = cl_conv_e(inner, env_vars, top_fns, lid) in {e: MutE(r.e), lifted: r.lifted, lid: r.lid}
+    DeferE(c, b)               => let rc = cl_conv_e(c, env_vars, top_fns, lid) in let rb = cl_conv_e(b, env_vars, top_fns, rc.lid) in {e: DeferE(rc.e, rb.e), lifted: app(rc.lifted, rb.lifted), lid: rb.lid}
+    ErrDeferE(c, b)            => let rc = cl_conv_e(c, env_vars, top_fns, lid) in let rb = cl_conv_e(b, env_vars, top_fns, rc.lid) in {e: ErrDeferE(rc.e, rb.e), lifted: app(rc.lifted, rb.lifted), lid: rb.lid}
+    ScopeE(snm, b)             => let rb = cl_conv_e(b, Cons(snm, env_vars), top_fns, lid) in {e: ScopeE(snm, rb.e), lifted: rb.lifted, lid: rb.lid}
+    SpawnE(inner)              => let r = cl_conv_e(inner, env_vars, top_fns, lid) in {e: SpawnE(r.e), lifted: r.lifted, lid: r.lid}
+    AwaitE(inner)              => let r = cl_conv_e(inner, env_vars, top_fns, lid) in {e: AwaitE(r.e), lifted: r.lifted, lid: r.lid}
+    ShardE(vnm, lo, hi, b)     => let rlo = cl_conv_e(lo, env_vars, top_fns, lid) in let rhi = cl_conv_e(hi, env_vars, top_fns, rlo.lid) in let rb = cl_conv_e(b, Cons(vnm, env_vars), top_fns, rhi.lid) in {e: ShardE(vnm, rlo.e, rhi.e, rb.e), lifted: app(rlo.lifted, app(rhi.lifted, rb.lifted)), lid: rb.lid}
+    Call(cnm, args)            => let ra = cl_conv_args(args, env_vars, top_fns, lid) in if cnm == "_call" and len(ra.es) >= 2 then (let fexpr = ohd_e(ra.es) in let cargs = ptl(ra.es) in let dnm = if len(cargs) == 2 then "__closure_call_2" else "__closure_call_1" in {e: Call(dnm, Cons(fexpr, cargs)), lifted: ra.lifted, lid: ra.lid}) else if omem(cnm, env_vars) == 1 and omem(cnm, top_fns) == 0 then (let dnm = if len(ra.es) == 2 then "__closure_call_2" else "__closure_call_1" in {e: Call(dnm, Cons(Var(cnm), ra.es)), lifted: ra.lifted, lid: ra.lid}) else {e: Call(cnm, ra.es), lifted: ra.lifted, lid: ra.lid}
+    Field(o, fld)              => let ro = cl_conv_e(o, env_vars, top_fns, lid) in {e: Field(ro.e, fld), lifted: ro.lifted, lid: ro.lid}
+    Rec(items)                 => let rr = cl_conv_rec(items, env_vars, top_fns, lid) in {e: Rec(rr.items), lifted: rr.lifted, lid: rr.lid}
+    RecT(tn, items)            => let rr = cl_conv_rec(items, env_vars, top_fns, lid) in {e: RecT(tn, rr.items), lifted: rr.lifted, lid: rr.lid}
+    Match(sc, arms)            => let rsc = cl_conv_e(sc, env_vars, top_fns, lid) in let rarms = cl_conv_arms(arms, env_vars, top_fns, rsc.lid) in {e: Match(rsc.e, rarms.arms), lifted: app(rsc.lifted, rarms.lifted), lid: rarms.lid}
+    _                          => {e: e, lifted: Nil, lid: lid}
+
+fn cl_conv_args(xs, env_vars, top_fns, lid) = match xs
+    Nil        => {es: Nil, lifted: Nil, lid: lid}
+    Cons(h, t) => let rh = cl_conv_e(h, env_vars, top_fns, lid) in let rt = cl_conv_args(t, env_vars, top_fns, rh.lid) in {es: Cons(rh.e, rt.es), lifted: app(rh.lifted, rt.lifted), lid: rt.lid}
+
+fn cl_conv_rec(xs, env_vars, top_fns, lid) = match xs
+    Nil        => {items: Nil, lifted: Nil, lid: lid}
+    Cons(h, t) => let rh = cl_conv_e(h.val, env_vars, top_fns, lid) in let rt = cl_conv_rec(t, env_vars, top_fns, rh.lid) in {items: Cons({key: h.key, val: rh.e}, rt.items), lifted: app(rh.lifted, rt.lifted), lid: rt.lid}
+
+fn cl_conv_arms(xs, env_vars, top_fns, lid) = match xs
+    Nil        => {arms: Nil, lifted: Nil, lid: lid}
+    Cons(h, t) => let rh = cl_conv_e(h.body, app(apat_binds(h.pat), env_vars), top_fns, lid) in let rt = cl_conv_arms(t, env_vars, top_fns, rh.lid) in {arms: Cons({pat: h.pat, body: rh.e}, rt.arms), lifted: app(rh.lifted, rt.lifted), lid: rt.lid}
+
+fn cl_conv_stmt(st, top_fns, lid) = match st
+    Fn(nm, ps, body) => let r = cl_conv_e(body, ps, top_fns, lid) in {st: Fn(nm, ps, r.e), lifted: r.lifted, lid: r.lid}
+    Print(v)         => let r = cl_conv_e(v, Nil, top_fns, lid) in {st: Print(r.e), lifted: r.lifted, lid: r.lid}
+    ExprS(v)         => let r = cl_conv_e(v, Nil, top_fns, lid) in {st: ExprS(r.e), lifted: r.lifted, lid: r.lid}
+    _                => {st: st, lifted: Nil, lid: lid}
+
+fn cl_conv_stmts(prog, top_fns, lid) = match prog
+    Nil        => {stmts: Nil, lifted: Nil, lid: lid}
+    Cons(h, t) => let rh = cl_conv_stmt(h, top_fns, lid) in let rt = cl_conv_stmts(t, top_fns, rh.lid) in {stmts: Cons(rh.st, rt.stmts), lifted: app(rh.lifted, rt.lifted), lid: rt.lid}
+
+fn cl_lifted_stmts(lifted) = match lifted
+    Nil        => Nil
+    Cons(h, t) => Cons(h.fstmt, cl_lifted_stmts(t))
+
+fn cl_dispatch_1(lifted) = match lifted
+    Nil        => Num(0)
+    Cons(h, t) => if h.ar == 1 then If(Bin("==", Field(Var("__cl"), "__fn_id"), Num(h.id)), Call("__lambda_" + str(h.id), Cons(Field(Var("__cl"), "__env"), Cons(Var("__a0"), Nil))), cl_dispatch_1(t)) else cl_dispatch_1(t)
+
+fn cl_dispatch_2(lifted) = match lifted
+    Nil        => Num(0)
+    Cons(h, t) => if h.ar == 2 then If(Bin("==", Field(Var("__cl"), "__fn_id"), Num(h.id)), Call("__lambda_" + str(h.id), Cons(Field(Var("__cl"), "__env"), Cons(Var("__a0"), Cons(Var("__a1"), Nil)))), cl_dispatch_2(t)) else cl_dispatch_2(t)
+
+fn cl_convert_prog(prog) = if cl_has_lambda_prog(prog) == 0 then prog else let top_fns = ocollectfnms(prog) in let r = cl_conv_stmts(prog, top_fns, 1) in if isnil(r.lifted) == 1 then r.stmts else let disp1 = Fn("__closure_call_1", Cons("__cl", Cons("__a0", Nil)), cl_dispatch_1(r.lifted)) in let disp2 = Fn("__closure_call_2", Cons("__cl", Cons("__a0", Cons("__a1", Nil))), cl_dispatch_2(r.lifted)) in app(cl_lifted_stmts(r.lifted), Cons(disp1, Cons(disp2, r.stmts)))
+
 fn ocheck(prog) = if oany(prog) == 0 then prog else ocheckforce(prog)
-fn ocheckforce(prog) = let raw_osigs = ocollects(prog) in let raw_fns0 = ocollectf(prog) in let grad_fns = n4_synth_grad_fns(n4_collect_grads_prog(prog, Nil), raw_fns0) in let prog1 = app(grad_fns, prog) in let raw_fns = ocollectf(prog1) in let osigs = oinfer_priv_osigs(raw_fns, raw_osigs) in let otypes = ocollectt(prog1) in let recs = tcollectr(prog1) in let sigs = tcollects(prog1) in let ksigs = kcollect_effsigs(prog1) in let edecls = kcollect_effdecls(prog1) in let caps = kcollect_caps(prog1) in let vsigs = vcollect_vsigs(prog1) in let invs = vcollect_invs(prog1) in let laws = vcollect_laws(prog1) in let wcets = vcollect_wcets(prog1) in let prog2 = afill_prog_holes(prog1, sigs, osigs, vsigs, laws, raw_fns) in let fns = ocollectf(prog2) in let ufns = ocollectfnms(prog2) in let z = ochkstmts(prog2, {osigs: osigs, otypes: otypes, recs: recs, sigs: sigs, fns: fns, ksigs: ksigs, edecls: edecls, caps: caps, vsigs: vsigs, invs: invs, laws: laws, wcets: wcets}, Nil) in olowerprog(prog2, ufns, osigs, {vsigs: vsigs, fns: fns})
+fn ocheckforce(prog0) = let traits = t4_collect_traits(prog0) in let impls = t4_collect_impls(prog0) in let ztr = t4_chk_impls(impls, traits) in let prog_tr = if isnil(traits) == 1 then prog0 else t4_resolve_prog(prog0, traits, impls, tcollects(prog0), tcollectc(prog0)) in let zhm = if cl_has_lambda_prog(prog_tr) == 1 then (let p_hm = tcheck(prog_tr) in 1) else 0 in let prog = cl_convert_prog(prog_tr) in let raw_osigs = ocollects(prog) in let raw_fns0 = ocollectf(prog) in let grad_fns = n4_synth_grad_fns(n4_collect_grads_prog(prog, Nil), raw_fns0) in let prog1 = app(grad_fns, prog) in let raw_fns = ocollectf(prog1) in let osigs = oinfer_priv_osigs(raw_fns, raw_osigs) in let otypes = ocollectt(prog1) in let recs = tcollectr(prog1) in let sigs = tcollects(prog1) in let ksigs = kcollect_effsigs(prog1) in let edecls = kcollect_effdecls(prog1) in let caps = kcollect_caps(prog1) in let vsigs = vcollect_vsigs(prog1) in let invs = vcollect_invs(prog1) in let laws = vcollect_laws(prog1) in let wcets = vcollect_wcets(prog1) in let prog2 = afill_prog_holes(prog1, sigs, osigs, vsigs, laws, raw_fns) in let fns = ocollectf(prog2) in let ufns = ocollectfnms(prog2) in let z = ochkstmts(prog2, {osigs: osigs, otypes: otypes, recs: recs, sigs: sigs, fns: fns, ksigs: ksigs, edecls: edecls, caps: caps, vsigs: vsigs, invs: invs, laws: laws, wcets: wcets}, Nil) in olowerprog(prog2, ufns, osigs, {vsigs: vsigs, fns: fns})
