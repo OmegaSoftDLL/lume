@@ -18,6 +18,9 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v7
+      - name: Install QEMU (Linux x86-64 bare-metal kernel boot #227)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends qemu-system-x86
       - name: Build
         run: make -C bootstrap/lume0
       - name: Test
@@ -45,7 +48,9 @@ jobs:
         run: |
           set -e
           ! grep -En '\bsorry\b|\baxiom\b' formal/lean/LumeCore.lean || { echo "sorry/axiom found in formal/lean/LumeCore.lean"; exit 1; }
-          curl https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -sSf | sh -s -- -y --default-toolchain leanprover/lean4:v4.14.0
+          for i in 1 2 3; do
+            curl --retry 3 --retry-all-errors https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -sSf | sh -s -- -y --default-toolchain leanprover/lean4:v4.14.0 && break || sleep 5
+          done
           "$HOME/.elan/bin/lean" formal/lean/LumeCore.lean
       - name: Every example is listed in examples/README.md
         run: |

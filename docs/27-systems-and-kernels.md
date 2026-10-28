@@ -20,12 +20,15 @@ the worklist is the companion tracking issue. It composes with `docs/26` (univer
 The no-theater rule applies throughout: a systems brick is **not "done" until it runs on real
 hardware or a faithful emulator (QEMU)** — not when it emits plausible bytes or a model.
 
-## Today (verified)
-Lume emits a **Linux user-space x86-64 ELF** (`PT_LOAD` at `0x400000`, `exit` via syscall); its
-runtime allocates via `brk` and does I/O through Linux syscalls; `lasm` emits a user-space
-instruction subset; `@freestanding`/`@interrupt`/`std.os.cap` and `lume-os` exist only as **checks
-and in-language models**, not real hardware codegen. So none of (A) is possible yet. The bricks below
-close that.
+## Today (verified — K0–K9 shipped in `#227` & `#193`)
+Lume now compiles both **Linux user-space x86-64 ELFs** and **bare-metal `@freestanding` x86-64 bootable kernel images** (`lume_os.img`, `examples/apps/lume_os/kernel_qemu.src`):
+- **K0 (`@freestanding` codegen) & K1 (syscall-free runtime):** When a compilation unit declares `@freestanding`, `06b_phase3.src` preserves the `OSig` (`freef == 1`) and `05_codegen.src` emits `.kernel`, initializes a physical frame arena at `0x200000..0x3F0000`, emits `runtime_krn_tail` (zero `syscall` instructions in the entire `.s` output), writes serial output to COM1 (`0x3F8`), and exits cleanly via `isa-debug-exit` (`0xF4`) + `cli; hlt`.
+- **K2 (Privileged/system ISA in `lasm.src`):** `lasm.src` encodes `cli`, `sti`, `hlt`, `iretq`, `rdmsr`, `wrmsr`, `pause`, `mfence`, `outb`, `inb`, `int $imm8`, `lgdt`, `lidt`, `invlpg`, `movq %crN, %reg` / `movq %reg, %crN` (`%cr0`, `%cr2`, `%cr3`, `%cr4`, `%cr8`), `lock xaddq`, `lock cmpxchgq`, and `xchgq`.
+- **K3 (Volatile MMIO):** `mmio_volatile_write64`, `mmio_volatile_read64`, `mmio_volatile_write32`, and `mmio_volatile_read32` emit direct hardware memory loads/stores + `mfence` barriers in `05_codegen.src`.
+- **K4 (Real interrupts & `@interrupt` ISR):** `cpu_idt_init` populates 64-bit Interrupt Gate 32 at physical `0x5200` and executes `lidt idt_ptr(%rip)`; `__isr_hw_32` saves registers, invokes the WCET-checked `@interrupt(irq: 32) fn kernel_timer_isr` Lume handler, increments the hardware tick counter, and returns via `iretq`.
+- **K5 (Bootable x86-64 disk image in `lasm.src`) & K6 (4-level x86-64 page tables + `cap[Page]`):** When `.kernel` is present, `lasm.src` (`asmkernel`) emits a raw bootable x86-64 disk image with a 512-byte MBR bootloader (`0x7C00`) that reads 64 sectors via BIOS `INT 0x13 AH=0x42` into `0x8000`, zeroes and populates 4-level x86-64 page tables (`PML4` at `0x1000`, `PDPT` at `0x2000`, `PD` at `0x3000` identity-mapping `0..4 MiB`), enables PAE + `IA32_EFER.LME` + 64-bit GDT + `CR0.PG|PE`, transitions to 64-bit Long Mode, and jumps to `_start` at `0x8000` with `CR3 = 0x1000` (`4096`) and `cpu_invlpg`.
+- **K7 & `#193` (Hardware atomics, spinlocks & real OS multi-process parallelism):** `atomic_xadd64` (`lock xaddq`), `spinlock_acquire` (`lock cmpxchgq` + `pause`), `spinlock_release` (`mfence` + store `0`), and `par_fork_scale2` / `par_map_scale_os` (`sys_fork` + `sys_pipe` + `sys_wait4` running concurrent worker processes with distinct kernel PIDs in `compiler/stage1/concurrency.src`).
+- **K8 (Drivers) & K9 (`lume-os` booting on QEMU):** 16550A UART COM1 (`0x3F8`) serial driver and `examples/apps/lume_os/kernel_qemu.src` booted in `qemu-system-x86_64` in CI, verifying `CR3=4096`, hardware `int $32` + `iretq`, volatile MMIO, `lock xaddq`, and `QF_LIA`-verified kernel allocator/scheduler/IPC services.
 
 ## Sequencing & entry point (decided 2026-10-28)
 This track is **in the roadmap, not parked** — it enters in the sequence below. Its only hard
