@@ -26,6 +26,9 @@ can be `proven` and their runtime guards elided, and treats correctness as somet
 - [24 — Phase 4 plan](24-phase4-plan.md) (tensors, autodiff, prob, rules, llm) · [25 — Phase 5 plan](25-phase5-plan.md) (systems, interop, realtime, lume-os)
 - [06 — Software protection](06-software-protection.md) (P33 anti-reverse-engineering)
 
+## For AI authors
+- [32 — Build real software in Lume (onboarding for any AI)](32-ai-authoring.md) · [30 — The Lume Book](30-lume-book.md) · [08 — AI-first](08-ai-first.md)
+
 ## Build order
 - [29 — Worklist execution order](29-worklist-order.md) — the ordered open backlog (agy's sequence).
 
