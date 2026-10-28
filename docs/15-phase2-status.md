@@ -2,7 +2,7 @@
 
 Phase 2 grows Lume from the self-hosted Lume-Core into the AI-first language the pillars
 (`docs/02-principles.md`) promise. This note is the honest capstone: every pillar that is
-**done and proven in CI**, and the one remaining extension that is genuinely **not implemented** (let-polymorphism; F4 has since shipped) — stated
+**done and proven in CI**, and the extensions that have since **shipped** (F4, and let-polymorphism in #239) — stated
 plainly, because the project's golden rule forbids claiming a milestone that is not real.
 
 ## Done and proven (one green PR + a regression test each; the self-host fixpoint stays bit-identical)
