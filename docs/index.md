@@ -37,3 +37,7 @@ can be `proven` and their runtime guards elided, and treats correctness as somet
 - [00 — Catalog of ~260 languages](00-catalog.md) · [01 — Survey](01-survey.md) · [07 — Competitive scan](07-competitive.md)
 
 *Dual-licensed MIT OR Apache-2.0. Contributions: see [`AGENTS.md`](https://github.com/OmegaSoftDLL/lume/blob/main/AGENTS.md) and [`CONTRIBUTING.md`](https://github.com/OmegaSoftDLL/lume/blob/main/CONTRIBUTING.md).*
+
+## The plan to build anything
+- [33 — Frontiers, multipliers & order to build anything with AI](33-build-anything-plan.md)
+
