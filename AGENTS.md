@@ -58,6 +58,9 @@ detail: `docs/28-delivery-rules.md`.
    a stand-in (`fn rc_drop(x: int) = x`). A mock that only works inside its own test and imitates a
    feature the compiler lacks does not ship and must **not** close the feature's issue — label it
    `planned` and keep the issue open. Build what the issue asks, not an easier look-alike.
+   **Regenerate expected output from a real run and verify it against a trace — never tune the
+   program/inputs to match a stale expected, and assert each behaviour on its own rather than hiding
+   many in one opaque sum (a bug in one term must not be maskable by fitting another).**
 
 ## Workflow
 

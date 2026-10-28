@@ -89,6 +89,15 @@ seductive form of theater: it runs, it prints the right numbers, and it is still
   about the feature. If the only program that exercises the "feature" is its own conformance test, and
   no real program or agent would ever call it, it is a mock with no purpose — it must not ship, and it
   must **not** close the feature's issue.
+- **Regenerate the expected from the real output — never tune the program to the expected.** A
+  conformance number must be the *natural* output of the real code, regenerated and then checked
+  against a hand trace so each value is known-correct. Changing demo inputs (e.g. a `shard 0..2` →
+  `0..1` range) so a rewritten program's total matches a **stale/old** expected is fitting code to a
+  dead target — the opposite of correct, and it can mask a real bug.
+- **Assert each behaviour independently; don't hide many behaviours in one opaque sum.** A test that
+  collapses N features into a single integer (`a + b + c + …`) lets a bug in one term be cancelled by
+  tuning another. Print/assert each observable on its own (e.g. each ref-count, each upgrade result,
+  each promise/signal value), so no term can be fitted to rescue the total.
 - **Build exactly what the issue asks.** Delivering an adjacent, easier thing (a model, a stub, a
   look-alike library) and closing the issue as done is a false completion (§1). Deliver the real thing,
   or label it honestly and leave the issue open.
