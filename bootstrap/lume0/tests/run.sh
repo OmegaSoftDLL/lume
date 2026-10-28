@@ -1314,7 +1314,7 @@ EOF
     "$ntmp/lc" <"$ntmp/cf_b_sh2.src" >"$ntmp/cf_b_sh2.s" 2>"$ntmp/cf_b_sh2.err"; cfbsh2=$?
     printf 'fn need_int(x: int) -> int = x + 1\nfn bad_poly() -> int = let id = fn(x) => x in let n = id(10) in let s = id("hello") in need_int(s)\nprint bad_poly()\n' >"$ntmp/cf_b_hm.src"
     "$ntmp/lc" <"$ntmp/cf_b_hm.src" >"$ntmp/cf_b_hm.s" 2>"$ntmp/cf_b_hm.err"; cfbhm=$?
-    printf 'fn bad_pr() -> int = let p: promise[int] = promise(10) in let r = p.resolve("wrong") in p.await\nprint bad_pr()\n' >"$ntmp/cf_b_pr.src"
+    printf 'async fn bad_pr() -> int = let p: promise[int] = promise(10) in let r = p.resolve("wrong") in p.await\nprint block_on(bad_pr())\n' >"$ntmp/cf_b_pr.src"
     "$ntmp/lc" <"$ntmp/cf_b_pr.src" >"$ntmp/cf_b_pr.s" 2>"$ntmp/cf_b_pr.err"; cfbpr=$?
     printf 'fn bad_sig() -> int = let s: signal[int] = signal(10) in let r = s.set("wrong") in s.get()\nprint bad_sig()\n' >"$ntmp/cf_b_sig.src"
     "$ntmp/lc" <"$ntmp/cf_b_sig.src" >"$ntmp/cf_b_sig.s" 2>"$ntmp/cf_b_sig.err"; cfbsig=$?

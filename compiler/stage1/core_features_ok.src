@@ -75,7 +75,7 @@ fn demo_shard() -> int =
 
 fn poly_top(x) = x
 
-fn demo_let_polymorphism() -> int =
+fn demo_let_polymorphism() -> int / {async} =
     let id = fn(x) => x in
     let n1 = id(25) in
     let s1 = id("ok") in
