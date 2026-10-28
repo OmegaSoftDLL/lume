@@ -61,6 +61,16 @@ detail: `docs/28-delivery-rules.md`.
    **Regenerate expected output from a real run and verify it against a trace — never tune the
    program/inputs to match a stale expected, and assert each behaviour on its own rather than hiding
    many in one opaque sum (a bug in one term must not be maskable by fitting another).**
+7. **Zero placeholders — everything documented must run, exhaustively tested.** No placeholder/
+   stub/mock/fixed-output/one-shot ships in a claimed feature's path, even labelled — if it isn't
+   real it's an open issue, referenced as working nowhere (not in docs, CLI, status, tests, or a
+   closed issue). Every docs/spec/README/CLI claim is a promise CI must prove on a real target;
+   docs match reality **both ways** (fix stale "not implemented" too). Tests are exhaustive and
+   generalising — surface + adversarial + negatives, regenerate expected from a real run (never tune
+   inputs to a target), run on **every** claimed platform — and the full suite is re-run on every
+   change. **Closing an issue needs the real, run-verified, exhaustively-tested deliverable, never a
+   partial — premature close is a defect** (#192/#197/#206/#227 had to be reopened). Large items ship
+   incrementally, each increment real. When unsure, it is `planned`, not done.
 
 ## Workflow
 
