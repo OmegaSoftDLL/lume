@@ -996,12 +996,18 @@ PY
     LUME_BIN_DIR="$ntmp" ../../lume certify --json ../../compiler/stage1/phase5_sys_ok.src >"$ntmp/p5_cert.json" 2>/dev/null || true
     if LUME_BIN_DIR="$ntmp" ../../lume run ../../compiler/stage1/certificate_hash_producer_ok.src >"$ntmp/p5_hash_prod.out" 2>"$ntmp/p5_hash_prod.err" && diff -u ../../tests/conformance/stage1/certificate_hash_producer_ok_asm.expected "$ntmp/p5_hash_prod.out" >/dev/null; then ok "certificate producer (#340): full-content SHA-256 passes NIST 56-byte and long-input vectors"; else bad "certificate producer (#340): full-content SHA-256 vectors"; cat "$ntmp/p5_hash_prod.err" "$ntmp/p5_hash_prod.out"; fi
     if LUME_BIN_DIR="$ntmp" ../../lume run ../../compiler/stage1/certificate_hash_verifier_ok.src >"$ntmp/p5_hash_ver.out" 2>"$ntmp/p5_hash_ver.err" && diff -u ../../tests/conformance/stage1/certificate_hash_verifier_ok_asm.expected "$ntmp/p5_hash_ver.out" >/dev/null; then ok "certificate verifier (#340): full-content SHA-256 passes NIST 56-byte and long-input vectors"; else bad "certificate verifier (#340): full-content SHA-256 vectors"; cat "$ntmp/p5_hash_ver.err" "$ntmp/p5_hash_ver.out"; fi
-    if command -v sha256sum >/dev/null 2>&1; then
-        exp_src_sha="sha256:$(sha256sum ../../compiler/stage1/phase5_sys_ok.src | awk '{print $1}')"
-    else
-        exp_src_sha="sha256:$(shasum -a 256 ../../compiler/stage1/phase5_sys_ok.src | awk '{print $1}')"
-    fi
-    if grep -q "\"source_hash\":\"$exp_src_sha\"" "$ntmp/p5_cert.json" && grep -q '"certificate_hash":"sha256:ab5a528e3965cf9fe5514ef66a9549f6481ca208b7d89b65bd32b18c80e5f1ff"' "$ntmp/p5_cert.json"; then ok "certificate identity (#340): long-source and certificate hashes agree with independent SHA-256 computation"; else bad "certificate identity (#340): independent full-content hash verification"; cat "$ntmp/p5_cert.json"; fi
+    if python3 - ../../compiler/stage1/phase5_sys_ok.src "$ntmp/p5_cert.json" <<'PY' >/dev/null 2>&1
+import hashlib, json, pathlib, sys
+raw = pathlib.Path(sys.argv[1]).read_bytes()
+cert = json.loads(pathlib.Path(sys.argv[2]).read_text())
+expected_source = "sha256:" + hashlib.sha256(raw).hexdigest()
+terms = json.dumps(cert["proof_terms"], ensure_ascii=False, separators=(",", ":"))[1:-1]
+obligations = json.dumps(cert["obligations"], ensure_ascii=False, separators=(",", ":"))[1:-1]
+expected_cert = "sha256:" + hashlib.sha256((expected_source + "|" + terms + "|" + obligations).encode()).hexdigest()
+assert cert["source_hash"] == expected_source
+assert cert["certificate_hash"] == expected_cert
+PY
+    then ok "certificate identity (#340): long-source and certificate hashes agree with independent hashlib computation"; else bad "certificate identity (#340): independent full-content hash verification"; cat "$ntmp/p5_cert.json"; fi
     # Consume the certificate artifact directly (`p5_cert.json`), proving `lcert.src` verifies artifacts without compiling `.src`:
     LUME_BIN_DIR="$ntmp" ../../lume verify-cert --json "$ntmp/p5_cert.json" >"$ntmp/p5_vcert.json" 2>/dev/null || true
     # Negative certificate tests (#183):
