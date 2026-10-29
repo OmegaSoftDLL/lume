@@ -73,6 +73,12 @@ Each track: goal · foothold (what already exists to build on) · acceptance.
   marketing asset (Go's single-binary story, but with a *provable* bootstrap).
 - **Acceptance.** Fresh machine → working `lume` in one command, no C toolchain, reproducible hash.
 
+The version-pinned Homebrew formula in `Formula/lume.rb` can be installed from a checkout with
+`brew install --formula ./Formula/lume.rb`. It uses the v0.2.0 release archives for Linux x86-64
+and macOS arm64/x86-64. A public tap and automatic formula updates are not configured. CI installs
+and exercises the released toolchain on those platforms. Archive hashes check integrity, not
+publisher identity.
+
 ### G1 — Oracle-as-a-service + MCP tool *(Pillar B; the priority)*
 - **Goal.** Ship `lume` as an **MCP server** exposing `prove`, `fill`, `compile --json`, and the
   oracle queries (`witness`, `repair`, `impact`). Any agent (Claude Code, codex, …) calls it as a
