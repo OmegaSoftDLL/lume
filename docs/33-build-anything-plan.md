@@ -42,3 +42,6 @@ it isn't real it's an open issue referenced as working nowhere. Everything docum
 tested exhaustively and re-tested every change; closing an issue needs the real, run-verified
 deliverable; large tracks ship incrementally, each increment real. "Build anything" is earned one
 proven brick at a time — never claimed.
+
+The product-level SaaS, Web, polyglot-interoperability, evidence, and OS tracks are registered and
+ordered in `docs/34-product-maturity-program.md`.

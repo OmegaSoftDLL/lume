@@ -41,7 +41,36 @@ rule (`docs/28`): no brick is "done" until the real thing runs, with its guarant
   learned⊕proven, metal targets). Depends on a solid proven core + a real kernel; it is the frontier,
   not near-term.
 
+## Open product maturity program (`docs/34`)
+
+1. **`#337` — P0 machine-native inflection.** Start the semantic intent protocol immediately, then
+   universal verified adapters (#334), portable renewable evidence (#330/#335), the content-addressed
+   component network, public economic benchmarks, and independent SaaS/Web + kernel/driver capstones.
+   This is the primary track, not post-product adoption work.
+2. **`#330` — versioned evolve evidence.** Candidate-bound, derived gate/obligation results; already
+   in flight and directly feeds the P0 evidence protocol.
+3. **`#335` — material-change invalidation.** Extend the shipped #259 spec-change regeneration to
+   dependencies, toolchain, target, environment, and dependency-graph revalidation. **[HARD]** Builds
+   on the evidence identities and result model from `#330`.
+4. **`#336` — machine-readable acceptance matrix.** Start with the reopened `#257` claims, then cover
+   every product track. **[HARD for claim promotion]** Missing runnable evidence remains `UNKNOWN`.
+5. **`#257` + `#334` — real domains and universal adapters.** TLS/TCP, HTTP, async, storage, FFI,
+   generated bindings, and real WASM hosting proceed in focused parallel PRs under the P0 protocol.
+6. **`#332` — production SaaS capstone.** **[HARD]** Requires the applicable secure-networking,
+   concurrent-runtime, data, and interop increments from `#257`/`#334`.
+7. **`#333` — real Web applications.** Real browsers, DOM/events/fetch, application architecture, and
+   a complete capstone. It integrates with `#332` when the backend capstone is available; basic
+   browser/DOM increments need not wait for SaaS completion.
+8. **`#259` — shipped intent baseline.** Preserve its spec-change regeneration and tamper rejection
+   while #337 generalizes the protocol and #335 broadens freshness.
+9. **`#241` — general-purpose OS.** Grow independently from the shipped microkernel into
+   VFS/storage, userspace/syscalls, networking, userland, and drivers; the P0 kernel/driver capstone
+   uses the applicable real increments.
+
+Every partial PR uses `Refs` for these umbrella issues. Documentation and matrix rows do not close
+implementation issues.
+
 ## One-line dependency summary
-`#191` (now) → `#227` K0..K9 on x86-64 [flagship] → `#206b` bare-metal/other-ISA kernel ports.
-`#193` folds into K7; `#206a` hosted targets and `#197` core features run in parallel as top priority;
-`#230`/`#214`/`#210`/`#211`/`#196`/`#215` are independent parallel tracks; `#198` is the horizon.
+`#337` is P0: semantic intent + universal adapters + renewable evidence + verified components +
+economic benchmarks + killer capstones. `#330`/`#335`/`#336` supply trust; `#257`/`#334` supply real
+domains and bridges; `#332`/`#333` and `#241` supply product proof; shipped #259 is the intent baseline.
