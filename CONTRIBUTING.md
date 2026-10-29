@@ -10,11 +10,12 @@ and hard-won pitfalls. This file is the summary.
   PRs and docs. (Project discussion with the maintainer may be in Portuguese; the repo is not.)
 - **Golden rule: no bugs in Lume's own toolchain.** Every fix ships with a regression test.
 - **Do not use Rust** to implement Lume.
-- **C is the disposable bootstrap seed only.** It will be removed once Lume self-hosts; move
-  work toward the native path (`emit-asm` / `lume0 asm`), never toward adding more C.
+- **C is the frozen bootstrap seed only.** It is not on the steady-state path; implement new
+  language capabilities in Lume and do not expand the seed.
 - If you borrow an idea from another language, make Lume's version **genuinely superior**,
   not a shallow clone.
-- Do not claim the triple self-build (Phase 1 exit) — it is not done.
+- The triple self-build (Phase 1 exit) is complete. Preserve the `stage 2 == stage 3`
+  fixpoint and the Zero-C gate; do not claim milestones beyond what the tests demonstrate.
 
 ## Workflow
 

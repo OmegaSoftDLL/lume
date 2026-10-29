@@ -12,5 +12,6 @@ Include a minimal reproduction and the affected commit.
 
 - The `lume0` seed interpreter and the `lume0 asm` ELF writer execute and emit native code.
   Treat any `.lume`/`.src`/`.s` input you did not write as untrusted.
-- Anti-reverse-engineering (REA) protection is a designed goal and is **not yet implemented**;
-  do not rely on it.
+- P33 software-protection profiles are implemented, but obfuscation and tamper resistance do
+  not prevent reverse engineering by a determined attacker. Do not treat them as a security
+  boundary or as a substitute for protecting credentials and other secrets.
