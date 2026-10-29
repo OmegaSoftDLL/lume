@@ -96,6 +96,8 @@ close only after complete product acceptance.
    dependencies. Missing freshness or graph evidence fails closed to `UNKNOWN`.
 3. **A (#336):** introduce the acceptance matrix, initially covering #257. CI must reject `PASS` rows
    without runnable evidence and valid tracking links, then expand the matrix to every track here.
+   The initial Track L slice lives in [`acceptance/matrix.json`](../acceptance/matrix.json), with a
+   [generated human-readable view](acceptance-matrix.md).
 
 These tracks make later product claims inspectable by agents and humans. They do not replace the
 implementations or tests they reference.

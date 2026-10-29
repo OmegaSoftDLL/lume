@@ -56,6 +56,8 @@ rule (`docs/28`): no brick is "done" until the real thing runs, with its guarant
    on the evidence identities and result model from `#330`.
 4. **`#336` — machine-readable acceptance matrix.** Start with the reopened `#257` claims, then cover
    every product track. **[HARD for claim promotion]** Missing runnable evidence remains `UNKNOWN`.
+   The initial slice is [`acceptance/matrix.json`](../acceptance/matrix.json), rendered in
+   [`acceptance-matrix.md`](acceptance-matrix.md).
 5. **`#257` + `#334` — real domains and universal adapters.** TLS/TCP, HTTP, async, storage, FFI,
    generated bindings, and real WASM hosting proceed in focused parallel PRs under the P0 protocol.
    The shipped binding subset is limited to `int64_t` scalars and borrowed `const char *` parameters,

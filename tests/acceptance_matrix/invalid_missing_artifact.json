@@ -1,0 +1,26 @@
+{
+  "schema": "lume-acceptance-matrix/0.1",
+  "repository": "OmegaSoftDLL/lume",
+  "scope": {
+    "track": "L",
+    "issue": 257,
+    "source": "docs/33-build-anything-plan.md",
+    "boundary": "Negative fixture."
+  },
+  "claims": [{
+    "id": "L.NET.DELETED_TEST",
+    "claim": "A deleted test cannot support a passing claim.",
+    "implementation_state": "partial",
+    "result": "PASS",
+    "issues": [{"number": 257, "expected_state": "OPEN"}],
+    "pull_requests": [{"number": 318, "expected_state": "MERGED"}],
+    "source": ["compiler/stage1/net.src"],
+    "evidence": [{
+      "id": "deleted-test",
+      "command": "make -C bootstrap/lume0 test",
+      "artifacts": ["tests/acceptance_matrix/does-not-exist.expected"],
+      "expected": "This artifact is deliberately absent."
+    }],
+    "notes": "Must be rejected."
+  }]
+}

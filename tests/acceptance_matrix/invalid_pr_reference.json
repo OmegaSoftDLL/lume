@@ -1,0 +1,21 @@
+{
+  "schema": "lume-acceptance-matrix/0.1",
+  "repository": "OmegaSoftDLL/lume",
+  "scope": {
+    "track": "L",
+    "issue": 257,
+    "source": "docs/33-build-anything-plan.md",
+    "boundary": "Negative fixture."
+  },
+  "claims": [{
+    "id": "L.NET.INVALID_PR",
+    "claim": "An invalid pull request number must fail validation.",
+    "implementation_state": "partial",
+    "result": "UNKNOWN",
+    "issues": [{"number": 257, "expected_state": "OPEN"}],
+    "pull_requests": [{"number": -1, "expected_state": "MERGED"}],
+    "source": ["compiler/stage1/net.src"],
+    "evidence": [],
+    "notes": "Must be rejected."
+  }]
+}

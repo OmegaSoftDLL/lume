@@ -86,6 +86,22 @@ jobs:
             grep -q "\*\*$p " docs/02-principles.md || { echo "spec cites $p but principles.md lacks it"; exit 1; }
           done
 
+  acceptance-matrix:
+    name: Acceptance matrix and negative fixtures
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate artifacts, evidence, negative fixtures, and generated view
+        run: python3 scripts/check-acceptance-matrix.py --self-test --check-doc
+      - name: Validate issue and pull request references
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/check-acceptance-matrix.py --online
+
   bootstrap:
     name: Self-host bootstrap (stage2 == stage3)
     runs-on: ubuntu-latest
