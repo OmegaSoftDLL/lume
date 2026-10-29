@@ -121,8 +121,10 @@ see the Phase 1–5 entries in §5 for the current state.
 
 ## 6. What is NOT done (promises, not code — be honest about these)
 
-- No lexical scoping in the checker yet (resolution is flat per module: use-before-def and
-  out-of-scope are not caught).
+- The frozen seed checker deliberately retains flat per-module name resolution: it does not diagnose
+  use-before-definition or out-of-scope references. This limitation is specific to
+  `bootstrap/lume0/resolve.c` and is not evidence about the self-hosted checker. Lexical-scope work
+  remains tracked by #299; it must be implemented in Lume rather than by expanding the frozen C seed (#205).
 - No real type system: inference, call arity, match exhaustiveness, operator types. **(Phase 2 F1 ✅)** the
   self-hosted `lumec.src` now parses named `type`/`enum`/`record` declarations (inline, layout-free) and runs a
   **gradual** checker: a program with no `type` is unchecked (constructors free — backward-compatible, fixpoint
