@@ -406,6 +406,15 @@ cmd_build() {
     if [ -z "$_target" ]; then
         case "$_out" in
             *.lumb) _target="lumb" ;;
+            *.ptx) _target="nvptx64-nvidia-cuda" ;;
+            *.spvasm) _target="spirv64-vulkan-compute" ;;
+            *.v) _target="verilog-rtl" ;;
+            *.vhd) _target="vhdl-rtl" ;;
+            *.cortexm) _target="arm-none-cortexm" ;;
+            *.avr.elf) _target="avr-none-elf" ;;
+            *.xtensa.elf) _target="xtensa-esp32-elf" ;;
+            *.avr.hex|*.avr.ihex) _target="avr-none-ihex" ;;
+            *.xtensa.hex|*.xtensa.ihex) _target="xtensa-none-ihex" ;;
             *.hex|*.ihex) _target="aarch64-none-ihex" ;;
         esac
     fi
@@ -626,9 +635,66 @@ cmd_run() {
                 return $?
             fi
             ;;
+        *.ptx|*.spvasm|*.v|*.vhd|*.avr.hex|*.avr.ihex|*.xtensa.hex|*.xtensa.ihex)
+            _rt_in=$(mktemp)
+            case "$_file" in
+                *.ptx)               printf '@run-ptx\n' > "$_rt_in" ;;
+                *.spvasm)            printf '@run-spirv\n' > "$_rt_in" ;;
+                *.v|*.vhd)           printf '@run-hdl\n' > "$_rt_in" ;;
+                *.avr.hex|*.avr.ihex)       printf '@run-mcu-ihex avr\n' > "$_rt_in" ;;
+                *.xtensa.hex|*.xtensa.ihex) printf '@run-mcu-ihex xtensa\n' > "$_rt_in" ;;
+            esac
+            cat "$_file" >> "$_rt_in"
+            _rt_res=$(run_core_tool ltarget "$_rt_in" | tr -d '\r')
+            rm -f "$_rt_in"
+            case "$_rt_res" in
+                TRAP:3*)
+                    exit 3
+                    ;;
+                ERR:*)
+                    printf '%s\n' "${_rt_res#ERR:}" >&2
+                    exit 1
+                    ;;
+                OK:*)
+                    printf '%s\n' "$_rt_res" | sed '1d'
+                    return 0
+                    ;;
+                *)
+                    exit 1
+                    ;;
+            esac
+            ;;
+        *.cortexm|*.avr.elf|*.xtensa.elf)
+            _rt_in=$(mktemp)
+            case "$_file" in
+                *.cortexm)    printf '@run-mcu-hex cortexm\n' > "$_rt_in" ;;
+                *.avr.elf)    printf '@run-mcu-hex avr\n' > "$_rt_in" ;;
+                *.xtensa.elf) printf '@run-mcu-hex xtensa\n' > "$_rt_in" ;;
+            esac
+            od -An -tx1 "$_file" | tr -d ' \n\r' >> "$_rt_in"
+            printf '\n' >> "$_rt_in"
+            _rt_res=$(run_core_tool ltarget "$_rt_in" | tr -d '\r')
+            rm -f "$_rt_in"
+            case "$_rt_res" in
+                TRAP:3*)
+                    exit 3
+                    ;;
+                ERR:*)
+                    printf '%s\n' "${_rt_res#ERR:}" >&2
+                    exit 1
+                    ;;
+                OK:*)
+                    printf '%s\n' "$_rt_res" | sed '1d'
+                    return 0
+                    ;;
+                *)
+                    exit 1
+                    ;;
+            esac
+            ;;
         *.wasm)
             if command -v node >/dev/null 2>&1; then
-                node --no-warnings -e 'const fs=require("fs"),{WASI}=require("wasi");const wasi=new WASI({version:"preview1"});const m=new WebAssembly.Module(fs.readFileSync(process.argv[1]));const i=new WebAssembly.Instance(m,wasi.getImportObject());process.exit(wasi.start(i)||0);' "$_file"
+                node --no-warnings -e 'const fs=require("fs"),{WASI}=require("wasi");const wasi=new WASI({version:"preview1"});const m=new WebAssembly.Module(fs.readFileSync(process.argv[1]));const imp=Object.assign({},wasi.getImportObject(),{env:{dom_append_int:(v)=>console.log(v),dom_set_attr:(k,v)=>{},web_trap:(c)=>process.exit(c)}});const i=new WebAssembly.Instance(m,imp);if(typeof i.exports.lume_web_main==="function"){i.exports.lume_web_main();process.exit(0);}process.exit(wasi.start(i)||0);' "$_file"
                 return $?
             fi
             ;;
