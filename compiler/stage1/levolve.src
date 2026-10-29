@@ -221,15 +221,23 @@ fn ev_proofs_ok(ps) = match ps
 
 fn ev_combine_evidence(a, b) = if a == "FAIL" or b == "FAIL" then "FAIL" else if a == "PASS" and b == "PASS" then "PASS" else "UNKNOWN"
 
+fn ev_gate_result_nonempty(gs) = match gs
+    Nil        => "PASS"
+    Cons(h, t) => ev_combine_evidence(if h.ok == 1 then "PASS" else "FAIL", ev_gate_result_nonempty(t))
+
 fn ev_gate_result(gs) = match gs
     Nil        => "UNKNOWN"
-    Cons(h, t) => ev_combine_evidence(if h.ok == 1 then "PASS" else "FAIL", ev_gate_result(t))
+    Cons(h, t) => ev_gate_result_nonempty(Cons(h, t))
 
 fn ev_obligation_result(status) = if status == "refuted" then "FAIL" else if status == "proven" or status == "budget_checked" then "PASS" else "UNKNOWN"
 
+fn ev_proof_result_nonempty(ps) = match ps
+    Nil        => "PASS"
+    Cons(p, r) => ev_combine_evidence(ev_obligation_result(p.status), ev_proof_result_nonempty(r))
+
 fn ev_proof_result(ps) = match ps
     Nil        => "UNKNOWN"
-    Cons(p, r) => ev_combine_evidence(ev_obligation_result(p.status), ev_proof_result(r))
+    Cons(p, r) => ev_proof_result_nonempty(Cons(p, r))
 
 fn ev_proof_count(ps, status) = match ps
     Nil        => 0
