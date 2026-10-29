@@ -1,0 +1,6 @@
+## Full-content SHA-256 producer regression (#340): NIST 56-byte vector and long distinct inputs.
+
+use lcaas
+
+print lc_sha256("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq")
+print lc_sha256("0123456789abcdefAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAsuffix-one")

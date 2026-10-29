@@ -70,6 +70,12 @@ rule (`docs/28`): no brick is "done" until the real thing runs, with its guarant
 Every partial PR uses `Refs` for these umbrella issues. Documentation and matrix rows do not close
 implementation issues.
 
+## Open integrity corrections
+
+- **`#340` — full-content certificate and AST identities.** Remove summarized/truncated input from
+  producer/verifier SHA-256, with NIST 56-byte vectors and independent long-source `hashlib` checks.
+  This feeds the evidence and verified-component architecture tracked in `#337`.
+
 ## One-line dependency summary
 `#337` is P0: semantic intent + universal adapters + renewable evidence + verified components +
 economic benchmarks + killer capstones. `#330`/`#335`/`#336` supply trust; `#257`/`#334` supply real
