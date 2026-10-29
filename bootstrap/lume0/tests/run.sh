@@ -428,6 +428,20 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_
     LUME_BIN_DIR="$ntmp" ../../lume build "$ntmp/pkgdemo/main.src" -o "$ntmp/pkgdemo/main.elf" 2>"$ntmp/pkgdemo/cap.err" && pkg_ok=0
     grep -q "capability error: module 'sneaky' uses I/O capability 'read' not granted by lume.toml" "$ntmp/pkgdemo/cap.err" || pkg_ok=0
     if [ "$pkg_ok" = 1 ]; then ok "phase-2 T3: lume pkg (lume.toml, SHA-256 lume.lock drift detection & P26 capability audit)"; else bad "phase-2 T3: lume pkg lockfile & capability audit"; fi
+    _space_pkg="$ntmp/pkg space"
+    LUME_BIN_DIR="$ntmp" ../../lume pkg init "$_space_pkg" >/dev/null 2>&1
+    printf 'fn f(x) = x + 1   \n\n\nprint f(41)  \n' >"$_space_pkg/space file.src"
+    _space_fmt_before=0
+    LUME_BIN_DIR="$ntmp" ../../lume fmt --check "$_space_pkg/space file.src" >/dev/null 2>&1 || _space_fmt_before=$?
+    _space_ok=1
+    LUME_BIN_DIR="$ntmp" ../../lume fmt "$_space_pkg/space file.src" >/dev/null 2>&1 || _space_ok=0
+    LUME_BIN_DIR="$ntmp" ../../lume fmt --check "$_space_pkg/space file.src" >/dev/null 2>&1 || _space_ok=0
+    LUME_BIN_DIR="$ntmp" ../../lume pkg lock "$_space_pkg" >/dev/null 2>&1 || _space_ok=0
+    LUME_BIN_DIR="$ntmp" ../../lume pkg verify "$_space_pkg" >/dev/null 2>&1 || _space_ok=0
+    LUME_BIN_DIR="$ntmp" ../../lume pkg tree "$_space_pkg" >"$ntmp/space-tree.out" 2>/dev/null || _space_ok=0
+    grep -q 'module "space file.src"' "$_space_pkg/lume.lock" || _space_ok=0
+    grep -q 'space file.src' "$ntmp/space-tree.out" || _space_ok=0
+    if [ "$_space_fmt_before" -ne 0 ] && [ "$_space_ok" -eq 1 ]; then ok "phase-2 T (#316): fmt and pkg preserve paths containing whitespace"; else bad "phase-2 T (#316): whitespace path handling"; fi
     # phase-2 capstone (Stage 2 official exit criterion, docs/04-roadmap.md line 106): multi-module inventory,
     # invoicing & reports app in examples/apps/inventory/ combining lume.toml + lume.lock, diamond `use`, exact
     # decimal(10, 2), typed table[T] CSV ingestion, compile-time checked query (where/order/join/group), comptime
@@ -1462,9 +1476,9 @@ EOF
     "$ntmp/lc" <../../examples/apps/supply_chain_demo/ledger_guard.src >"$ntmp/scd.s" 2>/dev/null
     "$ntmp/lasm" <"$ntmp/scd.s" >"$ntmp/scd.elf" 2>/dev/null; chmod +x "$ntmp/scd.elf"
     _g7_out=$("$ntmp/scd.elf" 2>/dev/null | tr '\n' ',' || true)
-    cp -r ../../examples/apps/supply_chain_demo "$ntmp/scd_pkg"
-    LUME_BIN_DIR="$ntmp" ../../lume pkg lock "$ntmp/scd_pkg" >/dev/null 2>&1 || true
-    _g4_pub_ok=$(LUME_BIN_DIR="$ntmp" ../../lume pkg publish "$ntmp/scd_pkg" --store "$ntmp/reg" 2>/dev/null || true)
+    cp -r ../../examples/apps/supply_chain_demo "$ntmp/scd pkg"
+    LUME_BIN_DIR="$ntmp" ../../lume pkg lock "$ntmp/scd pkg" >/dev/null 2>&1 || true
+    _g4_pub_ok=$(LUME_BIN_DIR="$ntmp" ../../lume pkg publish "$ntmp/scd pkg" --store "$ntmp/reg" 2>/dev/null || true)
     _g4_aud_ok=$(LUME_BIN_DIR="$ntmp" ../../lume pkg audit "$ntmp/reg/supply_chain_demo" 2>/dev/null || true)
     mkdir -p "$ntmp/bad_pkg"
     printf '[package]\nname = "bad_pkg"\nversion = "0.1.0"\nedition = "2026"\n[capabilities]\nallow = ["pure"]\n' >"$ntmp/bad_pkg/lume.toml"

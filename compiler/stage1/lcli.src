@@ -89,7 +89,7 @@ fn cli_collect_end(ls) = match ls
 
 fn cli_collect_block(ls) = let r = cli_collect_end(ls) in {body: if cli_isnil(r.lines) == 1 then "" else cli_joinsep(r.lines, "\n") + "\n", rest: r.rest}
 
-fn cli_parse_mod_line(s, mods) = let sp = cli_find_sp(s, 0, count(s)) in if sp >= count(s) then mods else let rel = cli_trim(slice(s, 0, sp)) in let sha = cli_trim(slice(s, sp + 1, count(s))) in Cons({rel: rel, sha: sha}, mods)
+fn cli_parse_mod_line(s, mods) = let sp = cli_find_sp(s, 0, count(s)) in if sp >= count(s) then mods else let sha = cli_trim(slice(s, 0, sp)) in let rel = cli_trim(slice(s, sp + 1, count(s))) in Cons({rel: rel, sha: sha}, mods)
 
 fn cli_parse(ls, st) = match ls
     Nil        => st
