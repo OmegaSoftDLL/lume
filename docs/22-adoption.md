@@ -7,7 +7,7 @@ changes nature: from building a compiler to building **distribution**. This docu
 to execute once Phases 1–5 and the correctness protection (provenance A3 + contracts V + sound
 `QF_LIA` proof) have landed.
 
-> **Status note (`#196` — All Tracks G0–G9 Shipped).**
+> **Status note (`#196`, expanded acceptance tracked by `#281` — shipped footholds, not full G0–G9 completion).** The bullets below describe implemented footholds. Homebrew/apt/Scoop packages, signed certificates with reproducible-build attestation, the GitHub review app, public registry, and web playground remain planned; the acceptance sections below are not all satisfied.
 > - **G0 (Zero-C installer & self-update):** `scripts/install.sh` installs the self-hosted zero-C toolchain (`lume`, `lumec`, `lasm`, `lcli`, `lcaas`, `lcert`, `ltarget`, `levolve`) with `MANIFEST.sha256`; `lume self status|verify|update` verifies SHA-256 digests and updates installations offline without a C compiler.
 > - **G1 (Oracle-as-a-service, MCP & Leaderboard):** `lume mcp` exposes 15 tools (`lume_check`, `lume_prove`, `lume_fill`, `lume_witness`, `lume_repair`, `lume_impact`, `lume_bind`, `lume_certify`, `lume_proof_diff`, `lume_check_rot`, `lume_share`, `lume_patch`, `lume_replay`, `lume_lineage`, `lume_compose`); `scripts/check-llm-gen-eval.sh --leaderboard` emits the machine-readable verified-correctness leaderboard (`proof_coverage_pct: 100`, `compiles_alone_rejected: true`).
 > - **G2 (Verified Sidecar Interop):** `examples/interop/sidecar/` (`payment_core.src`, `host_c.c`, `host_python.py`, `host_node.mjs`) exports proven C-ABI / WASM functions alongside their independently verified proof certificate.
