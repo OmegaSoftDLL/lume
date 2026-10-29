@@ -1037,8 +1037,65 @@ PY
     sed '/^print /d' ../../compiler/stage1/lcert.src | cat - "$ntmp/p5_forged_tail.src" >"$ntmp/p5_forged_test.src"
     LUME_BIN_DIR="$ntmp" ../../lume run "$ntmp/p5_forged_test.src" >"$ntmp/p5_forged.out" 2>/dev/null || true
     LUME_BIN_DIR="$ntmp" ../../lume mcp ../../compiler/stage1/phase5_sys_ok.src >"$ntmp/p5_mcp.json" 2>/dev/null || true
-    printf 'int sqlite3_open(const char *filename, int flags);\nvoid hw_ack_irq(int irq);\n' >"$ntmp/p5_hdr.h"
+    printf 'int64_t db_open(const char *filename, int64_t flags);\nextern int64_t c_weighted_sum(int64_t a, int64_t b, int64_t w);\n' >"$ntmp/p5_hdr.h"
     LUME_BIN_DIR="$ntmp" ../../lume agent bind "$ntmp/p5_hdr.h" >"$ntmp/p5_bind.json" 2>/dev/null || true
+    cat >"$ntmp/p5_bad_hdr.h" <<'EOF'
+int64_t supported_but_incomplete(int64_t value);
+typedef void (*progress_cb)(int64_t value);
+int64_t register_progress(progress_cb cb);
+void *db_open(const char *filename);
+int64_t db_exec(void *db, const char *sql);
+char *db_errmsg(void *db);
+int64_t copy(char *dst, const char *src);
+int64_t apply(int64_t (*callback)(int64_t), int64_t value);
+int64_t printf_like(const char *fmt, ...);
+int32_t narrow(int32_t value);
+int64_t loop(int64_t value);
+int64_t broken(
+EOF
+    LUME_BIN_DIR="$ntmp" ../../lume agent bind "$ntmp/p5_bad_hdr.h" >"$ntmp/p5_bad_bind.json" 2>/dev/null || true
+    printf '/* no declarations */\n' >"$ntmp/p5_empty_hdr.h"
+    LUME_BIN_DIR="$ntmp" ../../lume agent bind "$ntmp/p5_empty_hdr.h" >"$ntmp/p5_empty_bind.json" 2>/dev/null || true
+    python3 - "$ntmp/p5_bind.json" "$ntmp/p5_bad_bind.json" "$ntmp/p5_empty_bind.json" "$ntmp/p5_bind_generated.src" <<'PY' >/dev/null 2>&1
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as f:
+    good = json.load(f)
+with open(sys.argv[2], encoding="utf-8") as f:
+    bad = json.load(f)
+with open(sys.argv[3], encoding="utf-8") as f:
+    empty = json.load(f)
+assert good["ok"] is True
+assert good["adapter_contract"] == "c_abi_foreign_v1"
+assert good["ownership"] == "borrowed_const_cstr_parameters_only"
+assert good["return_provenance"] == "unverified"
+assert good["diagnostics"] == []
+assert len(good["extern_decls"]) == 2
+assert len(good["foreign_wrappers"]) == 2
+assert "extern \"c\" fn db_open(c_filename: str, c_flags: int) -> int" in good["extern_decls"]
+assert "pub fn foreign_db_open(c_filename: str, c_flags: int) -> unverified[int] / {ffi} = db_open(c_filename, c_flags)" in good["foreign_wrappers"]
+assert "verify(" not in good["generated_lume"]
+assert "ensures" not in good["generated_lume"]
+assert "safe_" not in good["generated_lume"]
+assert bad["ok"] is False
+assert bad["generated_lume"] == ""
+assert len(bad["extern_decls"]) == 1
+assert len(bad["foreign_wrappers"]) == 1
+assert len(bad["diagnostics"]) == 11
+assert all(d["code"] == "I0003" and d["severity"] == "error" for d in bad["diagnostics"])
+assert any("callback" in d["message"] for d in bad["diagnostics"])
+assert any("ownership" in d["message"] for d in bad["diagnostics"])
+assert empty["ok"] is False
+assert empty["generated_lume"] == ""
+assert len(empty["diagnostics"]) == 1
+assert empty["diagnostics"][0]["code"] == "I0003"
+with open(sys.argv[4], "w", encoding="utf-8") as f:
+    f.write(good["generated_lume"] + "\n")
+PY
+    p5_bind_contract=$?
+    LUME_BIN_DIR="$ntmp" ../../lume agent check "$ntmp/p5_bind_generated.src" >"$ntmp/p5_bind_check.json" 2>/dev/null || true
+    if [ "$p5_bind_contract" = 0 ] && grep -q '"ok":true' "$ntmp/p5_bind_check.json"; then ok "phase-5 I3 adapter boundary (#334/#337): provenance-preserving generated bindings compile; pointers, buffers, callbacks, varargs, unknown ABI types, and empty headers fail closed with [I0003]"; else bad "phase-5 I3 adapter boundary (#334/#337): fail-closed ownership/provenance binding generation"; cat "$ntmp/p5_bind.json" "$ntmp/p5_bad_bind.json" "$ntmp/p5_empty_bind.json" "$ntmp/p5_bind_check.json" 2>/dev/null; fi
     LUME_BIN_DIR="$ntmp" ../../lume agent c-export ../../compiler/stage1/phase5_sys_ok.src >"$ntmp/p5_cexp.json" 2>/dev/null || true
     printf '@manifest\n[package]\nname = "ffi_app"\nversion = "0.1.0"\n[capabilities]\nallow = ["ffi"]\n[ffi]\nlibs = ["c","m"]\n' | "$ntmp/lmod" >"$ntmp/p5_ffiman.json" 2>/dev/null || true
     # Phase 5 negative checks: [V0002] WCET bound exceeded, [E0200] ISR heap/blocking, [A0003] unverified FFI, [O0001] double cap_page_map,
@@ -1053,7 +1110,7 @@ PY
     "$ntmp/lc" <"$ntmp/p5_bad_cap.src" >"$ntmp/p5_bad_cap.s" 2>"$ntmp/p5_bad_cap.err"; p5bc=$?
     printf '@capability(allow: ["wasm"])\nfn wasm_call_host_fs(inst: int) -> int = inst\nfn bad_wasm_fs(inst: int) -> int / {wasm} = wasm_call_host_fs(inst)\nprint bad_wasm_fs(0)\n' >"$ntmp/p5_bad_wfs.src"
     "$ntmp/lc" <"$ntmp/p5_bad_wfs.src" >"$ntmp/p5_bad_wfs.s" 2>"$ntmp/p5_bad_wfs.err"; p5bwfs=$?
-    if [ -x "$ntmp/p5_ok.elf" ] && "$ntmp/p5_ok.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/phase5_sys_ok_asm.expected - >/dev/null && [ -s "$ntmp/p5_isr.s" ] && ! grep -q "call ctfail" "$ntmp/p5_isr.s" && [ -s "$ntmp/p5_sched.s" ] && ! grep -q "call ctfail" "$ntmp/p5_sched.s" && [ -s "$ntmp/p5_clamp.s" ] && ! grep -q "call ctfail" "$ntmp/p5_clamp.s" && grep -q '"kind":"wcet","status":"budget_checked"' "$ntmp/p5_prove.json" && ! grep -q '"kind":"wcet","status":"proven"' "$ntmp/p5_prove.json" && grep -q '"kernel_verified":true' "$ntmp/p5_cert.json" && grep -Eq '"source_hash":"sha256:[0-9a-f]{64}"' "$ntmp/p5_cert.json" && grep -Eq '"certificate_hash":"sha256:[0-9a-f]{64}"' "$ntmp/p5_cert.json" && grep -q '"kernel_verified":true' "$ntmp/p5_vcert.json" && grep -q '"hash_verified":true' "$ntmp/p5_vcert.json" && grep -q '"badge":"Lume Verified' "$ntmp/p5_vcert.json" && [ "$p5vbh" != 0 ] && grep -q '"kernel_verified":false' "$ntmp/p5_vbad_hash.json" && grep -q "independent QF_LIA kernel rejected proof term for 'bad_fn'" "$ntmp/p5_forged.out" && grep -q "independent QF_LIA kernel rejected proof term for 'sq'" "$ntmp/p5_forged.out" && ! grep -q '"kernel_verified":true' "$ntmp/p5_forged.out" && grep -q '"server":"lume-oracle-mcp"' "$ntmp/p5_mcp.json" && grep -q '"mode":"bind"' "$ntmp/p5_bind.json" && grep -q 'safe_sqlite3_open' "$ntmp/p5_bind.json" && grep -q '"mode":"c-export"' "$ntmp/p5_cexp.json" && grep -q 'int64_t lume_verified_clamp(int64_t x, int64_t hi);' "$ntmp/p5_cexp.json" && grep -q '(export \\"lume_verified_clamp\\"' "$ntmp/p5_cexp.json" && grep -q '"ffi_libs":\["c","m"\]' "$ntmp/p5_ffiman.json" && [ "$p5bw" = 3 ] && [ ! -s "$ntmp/p5_bad_wcet.s" ] && grep -q "\[V0002\]" "$ntmp/p5_bad_wcet.err" && [ "$p5bi" = 3 ] && [ ! -s "$ntmp/p5_bad_isr.s" ] && grep -q "\[E0200\]" "$ntmp/p5_bad_isr.err" && [ "$p5bf" = 3 ] && [ ! -s "$ntmp/p5_bad_ffi.s" ] && grep -q "\[A0003\]" "$ntmp/p5_bad_ffi.err" && [ "$p5bc" = 3 ] && [ ! -s "$ntmp/p5_bad_cap.s" ] && grep -q "\[O0001\]" "$ntmp/p5_bad_cap.err" && [ "$p5bwfs" = 3 ] && [ ! -s "$ntmp/p5_bad_wfs.s" ] && grep -q "\[E0200\]" "$ntmp/p5_bad_wfs.err" && LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/interop.src 2>/dev/null | grep -q "5 passed, 0 failed"; then ok "phase-5 M5/K5/G1/G3/H3 (#183/#185/#186/#191): interop ([A0003], c-export AST->C/WAT, [ffi] libs), @interrupt & wasm host fs ([E0200]), @bound budget_checked ([V0002]), cap[Page] ([O0001]), independent lcert QF_LIA + 64-hex SHA-256 verification"; else bad "phase-5 M5/K5/G1/G3/H3 (#183/#185/#186/#191): phase5_sys_ok.src & negative/certificate checks"; cat "$ntmp/p5_ok.err" "$ntmp/p5_prove.json" "$ntmp/p5_cert.json" "$ntmp/p5_vcert.json" "$ntmp/p5_vbad_hash.json" "$ntmp/p5_forged.out" "$ntmp/p5_bind.json" "$ntmp/p5_cexp.json" "$ntmp/p5_ffiman.json" "$ntmp/p5_bad_wcet.err" "$ntmp/p5_bad_isr.err" "$ntmp/p5_bad_ffi.err" "$ntmp/p5_bad_cap.err" "$ntmp/p5_bad_wfs.err" 2>/dev/null; fi
+    if [ -x "$ntmp/p5_ok.elf" ] && "$ntmp/p5_ok.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/phase5_sys_ok_asm.expected - >/dev/null && [ -s "$ntmp/p5_isr.s" ] && ! grep -q "call ctfail" "$ntmp/p5_isr.s" && [ -s "$ntmp/p5_sched.s" ] && ! grep -q "call ctfail" "$ntmp/p5_sched.s" && [ -s "$ntmp/p5_clamp.s" ] && ! grep -q "call ctfail" "$ntmp/p5_clamp.s" && grep -q '"kind":"wcet","status":"budget_checked"' "$ntmp/p5_prove.json" && ! grep -q '"kind":"wcet","status":"proven"' "$ntmp/p5_prove.json" && grep -q '"kernel_verified":true' "$ntmp/p5_cert.json" && grep -Eq '"source_hash":"sha256:[0-9a-f]{64}"' "$ntmp/p5_cert.json" && grep -Eq '"certificate_hash":"sha256:[0-9a-f]{64}"' "$ntmp/p5_cert.json" && grep -q '"kernel_verified":true' "$ntmp/p5_vcert.json" && grep -q '"hash_verified":true' "$ntmp/p5_vcert.json" && grep -q '"badge":"Lume Verified' "$ntmp/p5_vcert.json" && [ "$p5vbh" != 0 ] && grep -q '"kernel_verified":false' "$ntmp/p5_vbad_hash.json" && grep -q "independent QF_LIA kernel rejected proof term for 'bad_fn'" "$ntmp/p5_forged.out" && grep -q "independent QF_LIA kernel rejected proof term for 'sq'" "$ntmp/p5_forged.out" && ! grep -q '"kernel_verified":true' "$ntmp/p5_forged.out" && grep -q '"server":"lume-oracle-mcp"' "$ntmp/p5_mcp.json" && grep -q '"mode":"bind"' "$ntmp/p5_bind.json" && grep -q 'foreign_db_open' "$ntmp/p5_bind.json" && grep -q '"mode":"c-export"' "$ntmp/p5_cexp.json" && grep -q 'int64_t lume_verified_clamp(int64_t x, int64_t hi);' "$ntmp/p5_cexp.json" && grep -q '(export \\"lume_verified_clamp\\"' "$ntmp/p5_cexp.json" && grep -q '"ffi_libs":\["c","m"\]' "$ntmp/p5_ffiman.json" && [ "$p5bw" = 3 ] && [ ! -s "$ntmp/p5_bad_wcet.s" ] && grep -q "\[V0002\]" "$ntmp/p5_bad_wcet.err" && [ "$p5bi" = 3 ] && [ ! -s "$ntmp/p5_bad_isr.s" ] && grep -q "\[E0200\]" "$ntmp/p5_bad_isr.err" && [ "$p5bf" = 3 ] && [ ! -s "$ntmp/p5_bad_ffi.s" ] && grep -q "\[A0003\]" "$ntmp/p5_bad_ffi.err" && [ "$p5bc" = 3 ] && [ ! -s "$ntmp/p5_bad_cap.s" ] && grep -q "\[O0001\]" "$ntmp/p5_bad_cap.err" && [ "$p5bwfs" = 3 ] && [ ! -s "$ntmp/p5_bad_wfs.s" ] && grep -q "\[E0200\]" "$ntmp/p5_bad_wfs.err" && LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/interop.src 2>/dev/null | grep -q "5 passed, 0 failed"; then ok "phase-5 M5/K5/G1/G3/H3 (#183/#185/#186/#191): interop ([A0003], c-export AST->C/WAT, [ffi] libs), @interrupt & wasm host fs ([E0200]), @bound budget_checked ([V0002]), cap[Page] ([O0001]), independent lcert QF_LIA + 64-hex SHA-256 verification"; else bad "phase-5 M5/K5/G1/G3/H3 (#183/#185/#186/#191): phase5_sys_ok.src & negative/certificate checks"; cat "$ntmp/p5_ok.err" "$ntmp/p5_prove.json" "$ntmp/p5_cert.json" "$ntmp/p5_vcert.json" "$ntmp/p5_vbad_hash.json" "$ntmp/p5_forged.out" "$ntmp/p5_bind.json" "$ntmp/p5_cexp.json" "$ntmp/p5_ffiman.json" "$ntmp/p5_bad_wcet.err" "$ntmp/p5_bad_isr.err" "$ntmp/p5_bad_ffi.err" "$ntmp/p5_bad_cap.err" "$ntmp/p5_bad_wfs.err" 2>/dev/null; fi
     # Track I (#191): Real C FFI dynamic (.so via lasm DT_NEEDED/PLT/GOT) & static (.a) linking + reverse C-ABI (.h/.a/.so callable from C) & WASM (.wat/.wasm + [I0002]) export:
     mkdir -p "$ntmp/ffi_91"
     cat >"$ntmp/ffi_91/cmathext.c" <<'EOF'
@@ -1065,6 +1122,29 @@ EOF
     ${CC:-cc} -shared -fPIC "$ntmp/ffi_91/cmathext.c" -o "$ntmp/ffi_91/libcmathext.so"
     ${CC:-cc} -c -fPIC "$ntmp/ffi_91/cmathext.c" -o "$ntmp/ffi_91/cmathext.o"
     ${AR:-ar} rcs "$ntmp/ffi_91/libcmathext.a" "$ntmp/ffi_91/cmathext.o"
+    cat >"$ntmp/ffi_91/cmathext.h" <<'EOF'
+int64_t c_weighted_sum(int64_t a, int64_t b, int64_t w);
+int64_t c_str_checksum(const char *s);
+EOF
+    LUME_BIN_DIR="$ntmp" ../../lume agent bind "$ntmp/ffi_91/cmathext.h" >"$ntmp/ffi_91/bind.json" 2>"$ntmp/ffi_91/bind.err" || true
+    python3 - "$ntmp/ffi_91/bind.json" "$ntmp/ffi_91/generated_core.src" <<'PY' >/dev/null 2>&1
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as f:
+    binding = json.load(f)
+assert binding["ok"] is True
+with open(sys.argv[2], "w", encoding="utf-8") as f:
+    f.write(binding["generated_lume"] + "\n")
+PY
+    cat >"$ntmp/ffi_91/call_generated_prefix.src" <<'EOF'
+@capability(allow: ["ffi"])
+EOF
+    cat >"$ntmp/ffi_91/call_generated_suffix.src" <<'EOF'
+pub fn checked_generated_call() -> int / {ffi} ensures result >= 0 = let weighted = foreign_c_weighted_sum(6, 7, 10) in if weighted >= 0 then let checksum = foreign_c_str_checksum("Lume") in if checksum >= 0 then weighted + checksum else 0 else 0
+print checked_generated_call()
+EOF
+    cat "$ntmp/ffi_91/call_generated_prefix.src" "$ntmp/ffi_91/generated_core.src" "$ntmp/ffi_91/call_generated_suffix.src" >"$ntmp/ffi_91/call_generated.src"
     cat >"$ntmp/ffi_91/lume.toml" <<'EOF'
 [package]
 name = "ffi_91_demo"
@@ -1083,6 +1163,8 @@ print safe_call_c()
 EOF
     LUME_BIN_DIR="$ntmp" ../../lume build "$ntmp/ffi_91/call_c.src" -o "$ntmp/ffi_91/call_c_dyn.elf" 2>"$ntmp/ffi_91/dyn.err" || true
     LD_LIBRARY_PATH="$ntmp/ffi_91:${LD_LIBRARY_PATH:-}" "$ntmp/ffi_91/call_c_dyn.elf" >"$ntmp/ffi_91/dyn.out" 2>>"$ntmp/ffi_91/dyn.err" || true
+    LUME_BIN_DIR="$ntmp" ../../lume build "$ntmp/ffi_91/call_generated.src" -o "$ntmp/ffi_91/call_generated.elf" 2>"$ntmp/ffi_91/generated.err" || true
+    LD_LIBRARY_PATH="$ntmp/ffi_91:${LD_LIBRARY_PATH:-}" "$ntmp/ffi_91/call_generated.elf" >"$ntmp/ffi_91/generated.out" 2>>"$ntmp/ffi_91/generated.err" || true
     rm -f "$ntmp/ffi_91/lume.toml"
     LUME_BIN_DIR="$ntmp" ../../lume build --link "$ntmp/ffi_91/libcmathext.a" "$ntmp/ffi_91/call_c.src" -o "$ntmp/ffi_91/call_c_stat.elf" 2>"$ntmp/ffi_91/stat.err" || true
     "$ntmp/ffi_91/call_c_stat.elf" >"$ntmp/ffi_91/stat.out" 2>>"$ntmp/ffi_91/stat.err" || true
@@ -1111,7 +1193,7 @@ EOF
     printf '@manifest\n[package]\nname = "bad_ffi_man"\nversion = "0.1.0"\n[capabilities]\nallow = ["io"]\n[ffi]\nlibs = ["c"]\n' | "$ntmp/lmod" >"$ntmp/ffi_91/bad_man.out" 2>"$ntmp/ffi_91/bad_man.err"; ffi91_bman=$?
     printf '@export("C")\npub fn bad_wasm_str(x: int) -> str = "not-i64"\nprint 0\n' >"$ntmp/ffi_91/bad_wasm.src"
     LUME_BIN_DIR="$ntmp" ../../lume build "$ntmp/ffi_91/bad_wasm.src" -o "$ntmp/ffi_91/bad.wat" 2>"$ntmp/ffi_91/bad_wasm.err"; ffi91_bwasm=$?
-    if [ "$(cat "$ntmp/ffi_91/dyn.out" 2>/dev/null)" = "183" ] && [ "$(cat "$ntmp/ffi_91/stat.out" 2>/dev/null)" = "183" ] && [ "$(cat "$ntmp/ffi_91/host_stat.out" 2>/dev/null)" = "265,42" ] && [ "$(cat "$ntmp/ffi_91/host_dyn.out" 2>/dev/null)" = "265,42" ] && grep -q "extern int64_t lume_clamp_add(int64_t x, int64_t hi, int64_t bonus);" "$ntmp/ffi_91/liblumecore.h" && grep -q '(export "lume_clamp_add")' "$ntmp/ffi_91/lumecore.wat" && [ -s "$ntmp/ffi_91/lumecore.wasm" ] && [ "$ffi91_bman" != 0 ] && grep -q "\[E0200\]" "$ntmp/ffi_91/bad_man.err" && [ "$ffi91_bwasm" = 3 ] && grep -q '"code":"I0002"' "$ntmp/ffi_91/bad_wasm.err"; then ok "phase-5 Track I (#191): real dynamic (.so via lasm DT_NEEDED/PLT/GOT) & static (.a) C FFI linking + reverse C-ABI (.h/.a/.so called from C) & WASM (.wat/.wasm + [I0002]) export"; else bad "phase-5 Track I (#191): real FFI linking & C-ABI/WASM export"; cat "$ntmp/ffi_91/dyn.err" "$ntmp/ffi_91/dyn.out" "$ntmp/ffi_91/stat.err" "$ntmp/ffi_91/stat.out" "$ntmp/ffi_91/exp.err" "$ntmp/ffi_91/host_stat.out" "$ntmp/ffi_91/host_dyn.out" "$ntmp/ffi_91/bad_man.err" "$ntmp/ffi_91/bad_wasm.err" 2>/dev/null; fi
+    if [ "$(cat "$ntmp/ffi_91/dyn.out" 2>/dev/null)" = "183" ] && [ "$(cat "$ntmp/ffi_91/stat.out" 2>/dev/null)" = "183" ] && [ "$(cat "$ntmp/ffi_91/generated.out" 2>/dev/null)" = "183" ] && [ "$(cat "$ntmp/ffi_91/host_stat.out" 2>/dev/null)" = "265,42" ] && [ "$(cat "$ntmp/ffi_91/host_dyn.out" 2>/dev/null)" = "265,42" ] && grep -q "extern int64_t lume_clamp_add(int64_t x, int64_t hi, int64_t bonus);" "$ntmp/ffi_91/liblumecore.h" && grep -q '(export "lume_clamp_add")' "$ntmp/ffi_91/lumecore.wat" && [ -s "$ntmp/ffi_91/lumecore.wasm" ] && [ "$ffi91_bman" != 0 ] && grep -q "\[E0200\]" "$ntmp/ffi_91/bad_man.err" && [ "$ffi91_bwasm" = 3 ] && grep -q '"code":"I0002"' "$ntmp/ffi_91/bad_wasm.err"; then ok "phase-5 Track I (#191/#334): real dynamic (.so via lasm DT_NEEDED/PLT/GOT) & static (.a) C FFI linking + executable generated adapters + reverse C-ABI (.h/.a/.so called from C) & WASM (.wat/.wasm + [I0002]) export"; else bad "phase-5 Track I (#191/#334): real FFI linking, generated adapters & C-ABI/WASM export"; cat "$ntmp/ffi_91/dyn.err" "$ntmp/ffi_91/dyn.out" "$ntmp/ffi_91/stat.err" "$ntmp/ffi_91/stat.out" "$ntmp/ffi_91/bind.err" "$ntmp/ffi_91/generated.err" "$ntmp/ffi_91/generated.out" "$ntmp/ffi_91/exp.err" "$ntmp/ffi_91/host_stat.out" "$ntmp/ffi_91/host_dyn.out" "$ntmp/ffi_91/bad_man.err" "$ntmp/ffi_91/bad_wasm.err" 2>/dev/null; fi
     # Stage 5 Exit-Criterion Capstone (`examples/apps/lume_os/`):
     if LUME_BIN_DIR="$ntmp" ../../lume pkg verify ../../examples/apps/lume_os >"$ntmp/os_pkg.out" 2>&1 && LUME_BIN_DIR="$ntmp" ../../lume certify --json ../../examples/apps/lume_os/caps.src >"$ntmp/os_caps.cert.json" 2>&1 && LUME_BIN_DIR="$ntmp" ../../lume verify-cert --json "$ntmp/os_caps.cert.json" >"$ntmp/os_caps_vcert.json" 2>&1 && grep -q '"kernel_verified":true' "$ntmp/os_caps_vcert.json" && grep -q '"hash_verified":true' "$ntmp/os_caps_vcert.json" && LUME_BIN_DIR="$ntmp" ../../lume certify --json ../../examples/apps/lume_os/scheduler.src >"$ntmp/os_sched.cert.json" 2>&1 && LUME_BIN_DIR="$ntmp" ../../lume verify-cert --json "$ntmp/os_sched.cert.json" >"$ntmp/os_sched_vcert.json" 2>&1 && grep -q '"kernel_verified":true' "$ntmp/os_sched_vcert.json" && grep -q '"hash_verified":true' "$ntmp/os_sched_vcert.json" && grep -q '"kind":"wcet","status":"budget_checked"' "$ntmp/os_sched_vcert.json" && LUME_BIN_DIR="$ntmp" ../../lume test ../../examples/apps/lume_os/main.src >"$ntmp/os_test.out" 2>&1 && grep -q "13 passed, 0 failed" "$ntmp/os_test.out" && LUME_BIN_DIR="$ntmp" ../../lume run ../../examples/apps/lume_os/main.src >"$ntmp/os_run.out" 2>"$ntmp/os_run.err" && diff -u ../../examples/apps/lume_os/expected_output.txt "$ntmp/os_run.out" >/dev/null; then ok "phase-5 capstone: examples/apps/lume_os/ (independently verified capability microkernel + budget_checked scheduler + WASM driver + Stage-4 agent over IPC)"; else bad "phase-5 capstone: examples/apps/lume_os/"; cat "$ntmp/os_pkg.out" "$ntmp/os_caps_vcert.json" "$ntmp/os_sched_vcert.json" "$ntmp/os_test.out" "$ntmp/os_run.err" "$ntmp/os_run.out" 2>/dev/null; fi
     # P33 Software Protection (docs/06-software-protection.md, #188 — Bricks W1–W5):
