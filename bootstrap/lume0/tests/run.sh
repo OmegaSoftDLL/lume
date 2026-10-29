@@ -644,6 +644,7 @@ PY
     # phase-2 E3: `lume evolve` self-evolution & governance loop (`use levolve`: AI repair via `lcaas` fix-its,
     # 6 automated gates `compile`/`conformance`/`api_compat`/`capability`/`budget`/`fixpoint`, and mandatory human approval).
     if LUME_BIN_DIR="$ntmp" ../../lume run ../../compiler/stage1/evolve_demo.src >"$ntmp/ev_demo.out" 2>"$ntmp/ev_demo.err" && diff -u ../../tests/conformance/stage1/evolve_demo_asm.expected "$ntmp/ev_demo.out" >/dev/null; then ok "phase-2 E3: in-process self-evolution & governance engine (use levolve: AI fix-it repair + 6 gates + human approval)"; else bad "phase-2 E3: in-process self-evolution & governance engine (use levolve)"; cat "$ntmp/ev_demo.err" "$ntmp/ev_demo.out"; fi
+    if LUME_BIN_DIR="$ntmp" ../../lume run ../../compiler/stage1/evolve_evidence_ok.src >"$ntmp/ev_evidence.out" 2>"$ntmp/ev_evidence.err" && diff -u ../../tests/conformance/stage1/evolve_evidence_ok_asm.expected "$ntmp/ev_evidence.out" >/dev/null; then ok "phase-2 E3 (#330): evolve derives fail-closed gate and obligation evidence (PASS/FAIL/UNKNOWN)"; else bad "phase-2 E3 (#330): evolve derived evidence"; cat "$ntmp/ev_evidence.err" "$ntmp/ev_evidence.out"; fi
     if LUME_BIN_DIR="$ntmp" ../../lume run ../../compiler/stage1/ed25519_rfc8032_ok.src >"$ntmp/ed_rfc.out" 2>"$ntmp/ed_rfc.err" && diff -u ../../tests/conformance/stage1/ed25519_rfc8032_ok_asm.expected "$ntmp/ed_rfc.out" >/dev/null; then ok "phase-2 E3 (#222): ed25519_verify passes official RFC 8032 Section 7.1 test vectors (empty, 1B, 2B, 1024B, SHA(abc) + bit-flip/non-canonical rejection)"; else bad "phase-2 E3 (#222): ed25519_verify official RFC 8032 Section 7.1 test vectors"; cat "$ntmp/ed_rfc.err" "$ntmp/ed_rfc.out"; fi
     if command -v python3 >/dev/null 2>&1; then
         _sig_0001=$(tr -d '\r\n' < ../../evolve/proposals/0001_math_clamp/approval.sig)
@@ -677,6 +678,13 @@ assert u["status"] == "rejected_invalid_signature" and u["human_approved"] is Fa
 assert f["status"] == "rejected_invalid_signature" and f["human_approved"] is False and f["signature_verified"] is False and f["can_merge"] is False
 assert g["goal"] == "Add bounded range helper" and g["gates_ok"] is True and g["proofs_ok"] is True and g["benchmark_ok"] is True and g["fixpoint_stage2_eq_stage3"] is True
 assert ap["id"] == "0003_decimal_clamp" and ap["target"] == "compiler/stage1/decimal.src" and ap["gates_ok"] is True and ap["signature_verified"] is True and ap["can_merge"] is True
+for result in (v, a, ns, u, f, g, ap):
+    evidence = result["evidence"]
+    assert evidence["schema"] == "lume-evolve-evidence/0.1"
+    assert evidence["candidate_sha256"] == result["candidate_sha256"] and len(evidence["candidate_sha256"]) == 64
+    assert evidence["gate_result"] == ("PASS" if result["gates_ok"] else "FAIL")
+    assert evidence["claim_boundary"].startswith("local implementation evidence only")
+assert v["evidence"]["obligation_result"] == "UNKNOWN" and v["evidence"]["obligations"]["total"] == 0
 PY
         then ok "phase-2 E3 (#194, #203): lume evolve verify/propose/approve/apply enforces 6 gates + asymmetric Ed25519 maintainer signature verification + applies 0003_decimal_clamp"; else bad "phase-2 E3 (#194, #203): lume evolve Ed25519 governance & apply loop"; cat "$ntmp/ev_v.err" "$ntmp/ev_verify.json" "$ntmp/ev_a.err" "$ntmp/ev_approve.json" "$ntmp/ev_nosig.json" "$ntmp/ev_unauth.json" "$ntmp/ev_forged.json" "$ntmp/ev_prop_goal.json" "$ntmp/ev_app.err" "$ntmp/ev_apply_ok.json" 2>/dev/null; fi
         # Multiplier M2 (#258): `lume evolve` multi-file self-growth engine across target, prover, and stdlib domains
@@ -705,6 +713,12 @@ assert r5["id"] == "0005_prover_interval" and r5["domain"] == "prover" and r5["f
 assert r6["id"] == "0006_stdlib_math_mod" and r6["domain"] == "stdlib" and r6["files_count"] == 2 and r6["can_merge"] is True and r6["signature_verified"] is True
 assert rt["gates_ok"] is True and rt["signature_verified"] is False and rt["status"] == "rejected_invalid_signature" and rt["can_merge"] is False
 assert rd["gates_ok"] is False and rd["status"] == "rejected_by_gates"
+for result in (pt, pp, ps, r4, r5, r6, rt, rd):
+    evidence = result["evidence"]
+    assert evidence["schema"] == "lume-evolve-evidence/0.1"
+    assert evidence["candidate_sha256"] == result["candidate_sha256"] and len(evidence["candidate_sha256"]) == 64
+    assert evidence["gate_result"] == ("PASS" if result["gates_ok"] else "FAIL")
+assert rd["evidence"]["gate_result"] == "FAIL" and rd["can_merge"] is False
 PY
         then ok "multiplier M2 (#258, docs/33): lume evolve multi-file self-growth engine (target, prover hole synthesis, stdlib, Ed25519 + adversarial tamper/drift rejection)"; else bad "multiplier M2 (#258, docs/33): lume evolve multi-file self-growth engine"; cat "$ntmp/ev_m2_0004.err" "$ntmp/ev_m2_0004.json" "$ntmp/ev_m2_0005.err" "$ntmp/ev_m2_0005.json" "$ntmp/ev_m2_0006.err" "$ntmp/ev_m2_0006.json" "$ntmp/ev_m2_tampered.json" "$ntmp/ev_m2_drift.json" 2>/dev/null; fi
     fi

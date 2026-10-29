@@ -1,0 +1,7 @@
+lattice=FAIL,FAIL,UNKNOWN,UNKNOWN,PASS,UNKNOWN,UNKNOWN
+empty_gates=UNKNOWN empty_obligations=UNKNOWN
+future_obligation=UNKNOWN unknown=1
+no_obligations: gates=PASS obligations=UNKNOWN total=0 proven=0 budget=0 runtime=0 refuted=0 unknown=0 can_merge=0
+proven_obligation: gates=PASS obligations=PASS total=1 proven=1 budget=0 runtime=0 refuted=0 unknown=0 can_merge=0
+runtime_obligation: gates=PASS obligations=UNKNOWN total=1 proven=0 budget=0 runtime=1 refuted=0 unknown=0 can_merge=0
+refuted_obligation: gates=FAIL obligations=FAIL total=1 proven=0 budget=0 runtime=0 refuted=1 unknown=0 can_merge=0
