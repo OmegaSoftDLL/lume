@@ -11,7 +11,7 @@ human building every one.
 | Track | Frontier | Issue |
 |---|---|---|
 | **M1** | **Prover reach beyond QF_LIA (Shipped ✅)** — `QF_NIA` nonlinear integer arithmetic, `QF_BV` bitvectors & machine-int wraparound, `QF_ALIA` arrays + quantifiers (`forall_range`/`exists_range`), separation logic (`points_to`/`sep_conj`), refinement & dependent types (`Vec(n)`/`Index(n)`), lexicographic & relational termination (`total fn`), and LTL temporal logic (`always`/`eventually`/`until`/`leads_to`, #198), verified in `06b_phase3.src`, `lcaas.src`, and independent `lcert.src` (`compiler/stage1/m1_prover_ok.src`) | **#255 (Closed)** |
-| **M2** | **`lume evolve` as a self-growth engine** — the AI proposes→proves→lands large features (targets, prover theories, stdlib), gated and real | **#258** |
+| **M2** | **`lume evolve` as a self-growth engine (Shipped ✅)** — multi-file self-growth (`@domain <target|prover|stdlib>`, `@file <path>`, `lume evolve propose --domain ...`, `lume evolve grow`) driving propose→synthesize (`A0001` holes + `T1001`/`T1003`/`T2002` fix-its)→prove (`M1` theories + laws)→benchmark (`@bound` WCET + `max_asm_lines`)→fixpoint (`stage2 == stage3`)→Ed25519-signed multi-file land (`compiler/stage1/levolve.src`, `evolve/proposals/0004_target_rv64_sll`..`0006_stdlib_math_mod`) | **#258 (Closed)** |
 | **R** | **Universal reach** — real GPU (folds #250 ✅), MCUs, FPGA/HDL, mobile, web — run-verified, proofs preserved | **#256** |
 | **L** | **Standard library & domains** — net stack, async runtime, GUI, database, media, real ML | **#257** |
 | **I** | **Intent-as-source §1** — intent is the source, code is a proven cache (`docs/19` §1) | **#259** |

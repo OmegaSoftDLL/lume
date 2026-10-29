@@ -1,4 +1,4 @@
-## evolve/goals.src -- Ranked self-evolution goals & acceptance criteria (Track E / E3; `docs/04-roadmap.md`).
+## evolve/goals.src -- Ranked self-evolution goals & acceptance criteria (Track E / E3 & M2 #258; `docs/04-roadmap.md`, `docs/33-build-anything-plan.md`).
 ## Maintainers set direction here; `lume evolve` proposals reference a goal ID and must pass all 6 gates.
 
 type EvolveGoal = record {rank: int, id: str, area: str, summary: str, principles: str}
@@ -6,7 +6,11 @@ type EvolveGoal = record {rank: int, id: str, area: str, summary: str, principle
 fn goal_1() -> EvolveGoal = EvolveGoal{rank: 1, id: "G1_CORRECTNESS", area: "compiler/stage1", summary: "Eliminate bug classes via total type checking, contracts, and deterministic fix-its", principles: "P1,P7,P30,P31"}
 fn goal_2() -> EvolveGoal = EvolveGoal{rank: 2, id: "G2_STD_PURE", area: "std", summary: "Expand pure standard library helpers with zero capability escalation", principles: "P23,P26,P35"}
 fn goal_3() -> EvolveGoal = EvolveGoal{rank: 3, id: "G3_COMPACT_CORE", area: "compiler/stage1/lume", summary: "Preserve core size and assembly line budgets while maintaining stage2 == stage3 fixpoint", principles: "P24,P27,P28"}
+fn goal_4() -> EvolveGoal = EvolveGoal{rank: 4, id: "G4_UNIVERSAL_REACH", area: "target", summary: "Grow verified ISA encoders and target emitters end-to-end across multi-file proposals", principles: "P1,P7,P24,P30,P31"}
+fn goal_5() -> EvolveGoal = EvolveGoal{rank: 5, id: "G5_PROVER_THEORIES", area: "prover", summary: "Synthesize and verify sound abstract domains and decision procedures with laws", principles: "P1,P7,P30,P31,P34"}
 
 print goal_1().id + ": " + goal_1().summary
 print goal_2().id + ": " + goal_2().summary
 print goal_3().id + ": " + goal_3().summary
+print goal_4().id + ": " + goal_4().summary
+print goal_5().id + ": " + goal_5().summary

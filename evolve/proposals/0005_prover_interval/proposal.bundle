@@ -1,0 +1,42 @@
+@proposal 0005_prover_interval
+@domain prover
+@goal Grow multi-file interval arithmetic abstract domain and sound prover transfer
+@principles P1,P7,P30,P31,P34
+@capability pure
+@max_asm_lines 400
+@approval signed:ricardo:ed25519:1c5004d9a92946a3ee674fb830a25978597fa151166f821897505e2739874aa696584256a7e547285b43f39ebcd598d2152c866c19a95a9898e0e2ca116aff08
+@file compiler/stage1/mod_prover_iv.src
+@baseline
+fn iv_contains(lo: int, hi: int, x: int) -> int requires lo <= hi ensures result == 0 or result == 1 = if x >= lo and x <= hi then 1 else 0
+@end
+@candidate
+fn iv_contains(lo: int, hi: int, x: int) -> int requires lo <= hi ensures result == 0 or result == 1 = if x >= lo and x <= hi then 1 else 0
+@bound(cycles: 32)
+fn iv_add_lo(a_lo: int, b_lo: int) -> int requires a_lo >= 0 requires b_lo >= 0 ensures result == a_lo + b_lo and result >= a_lo = _
+@bound(cycles: 32)
+fn iv_add_hi(a_hi: int, b_hi: int) -> int requires a_hi >= 0 requires b_hi >= 0 ensures result == a_hi + b_hi and result >= a_hi = _
+fn test_iv_add_bounds_sound() = iv_add_lo(10, 20) == 30 and iv_add_hi(15, 25) == 40
+@end
+@file compiler/stage1/mod_prover_check.src
+@baseline
+use mod_prover_iv
+fn check_in_bounds(lo: int, hi: int, x: int) -> int requires lo <= hi ensures result == 0 or result == 1 = iv_contains(lo, hi, x)
+@end
+@candidate
+use mod_prover_iv
+fn check_in_bounds(lo: int, hi: int, x: int) -> int requires lo <= hi ensures result == 0 or result == 1 = iv_contains(lo, hi, x)
+@bound(cycles: 48)
+fn prove_sum_in_iv(a_lo: int, a_hi: int, b_lo: int, b_hi: int, s: int) -> int requires a_lo >= 0 and b_lo >= 0 and a_lo <= a_hi and b_lo <= b_hi ensures result == 0 or result == 1 = iv_contains(iv_add_lo(a_lo, b_lo), iv_add_hi(a_hi, b_hi), s)
+law iv_add_lo_comm(x: int, y: int) = iv_add_lo(x, y) == iv_add_lo(y, x)
+fn test_prove_sum_in_iv_verifies_interval() = prove_sum_in_iv(10, 15, 20, 25, 35) == 1
+@end
+@tests
+print iv_add_lo(10, 20)
+print iv_add_hi(15, 25)
+print prove_sum_in_iv(10, 15, 20, 25, 35)
+@end
+@expected
+30
+40
+1
+@end

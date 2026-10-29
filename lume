@@ -2027,22 +2027,41 @@ cmd_evolve() {
             ;;
         verify|propose|check|status)
             _efile=""
-            for _arg in "$@"; do
-                case "$_arg" in
-                    --json) ;;
-                    -*) usage ;;
-                    *) _efile=$_arg ;;
+            _edom=""
+            while [ $# -gt 0 ]; do
+                case "$1" in
+                    --domain)
+                        [ $# -ge 2 ] || usage
+                        _edom=$2
+                        shift 2
+                        ;;
+                    --json)
+                        shift
+                        ;;
+                    -*)
+                        usage
+                        ;;
+                    *)
+                        _efile=$1
+                        shift
+                        ;;
                 esac
             done
-            [ -n "$_efile" ] || _efile="$ROOT/evolve/proposals/0001_math_clamp/proposal.bundle"
-            if [ -d "$_efile" ] && [ -f "$_efile/proposal.bundle" ]; then
+            if [ -z "$_efile" ]; then
+                if [ "$_eact" = "propose" ] && [ -n "$_edom" ]; then
+                    _efile=""
+                else
+                    _efile="$ROOT/evolve/proposals/0001_math_clamp/proposal.bundle"
+                fi
+            fi
+            if [ -n "$_efile" ] && [ -d "$_efile" ] && [ -f "$_efile/proposal.bundle" ]; then
                 _efile="$_efile/proposal.bundle"
             fi
             _etmp_goal=""
             if [ ! -f "$_efile" ] && [ "$_eact" = "propose" ]; then
                 _etmp_goal=$(mktemp)
                 _epin=$(mktemp)
-                printf '@cmd evolve-propose\n@goal %s\n' "$_efile" > "$_epin"
+                printf '@cmd evolve-propose\n@part %s\n@goal %s\n' "$_edom" "$_efile" > "$_epin"
                 run_core_tool lcli "$_epin" > "$_etmp_goal"
                 rm -f "$_epin"
                 _efile="$_etmp_goal"
@@ -2128,11 +2147,12 @@ cmd_evolve() {
                 *) return 1 ;;
             esac
             ;;
-        apply)
+        apply|grow)
             _efile=""
             _by=""
             _sig=""
             _etarget=""
+            _eroot="$ROOT"
             while [ $# -gt 0 ]; do
                 case "$1" in
                     --by)
@@ -2148,6 +2168,11 @@ cmd_evolve() {
                     --target)
                         [ $# -ge 2 ] || usage
                         _etarget=$2
+                        shift 2
+                        ;;
+                    --root)
+                        [ $# -ge 2 ] || usage
+                        _eroot=$2
                         shift 2
                         ;;
                     --json)
@@ -2193,12 +2218,49 @@ cmd_evolve() {
                     return 1
                     ;;
             esac
+            _emfiles=$(awk '/^@file[ \t]+/{sub(/^@file[ \t]+/,""); sub(/[ \t\r]+$/,""); print}' "$_efile")
+            if [ -n "$_emfiles" ] && [ -z "$_etarget" ]; then
+                for _rel_f in $_emfiles; do
+                    case "$_rel_f" in
+                        /*) _abs_f="$_rel_f" ;;
+                        *)  _abs_f="$_eroot/$_rel_f" ;;
+                    esac
+                    mkdir -p "$(dirname "$_abs_f")"
+                    _etmp_app=$(mktemp)
+                    printf '@mode apply\n@apply_file %s\n' "$_rel_f" > "$_etmp_app"
+                    cat "$_etmp" >> "$_etmp_app"
+                    _etmp_out=$(mktemp)
+                    if ! run_core_tool levolve "$_etmp_app" | tr -d '\r' > "$_etmp_out"; then
+                        rm -f "$_etmp" "$_etmp_app" "$_etmp_out"
+                        printf '%s\n' "$_ejson"
+                        return 1
+                    fi
+                    mv "$_etmp_out" "$_abs_f"
+                    rm -f "$_etmp_app"
+                done
+                for _rel_f in $_emfiles; do
+                    case "$_rel_f" in
+                        /*) _abs_f="$_rel_f" ;;
+                        *)  _abs_f="$_eroot/$_rel_f" ;;
+                    esac
+                    if grep -Eq '^fn[ \t]+test_' "$_abs_f"; then
+                        if ! cmd_test "$_abs_f" >/dev/null 2>&1; then
+                            rm -f "$_etmp"
+                            echo "lume evolve apply: target test suite failed after apply on $_abs_f" >&2
+                            return 1
+                        fi
+                    fi
+                done
+                rm -f "$_etmp"
+                printf '%s\n' "$_ejson"
+                return 0
+            fi
             if [ -z "$_etarget" ]; then
                 _rel_t=$(awk '/^@target[ \t]+/{sub(/^@target[ \t]+/,""); sub(/[ \t\r]+$/,""); print; exit}' "$_efile")
                 if [ -n "$_rel_t" ]; then
                     case "$_rel_t" in
                         /*) _etarget="$_rel_t" ;;
-                        *)  _etarget="$ROOT/$_rel_t" ;;
+                        *)  _etarget="$_eroot/$_rel_t" ;;
                     esac
                 fi
             fi

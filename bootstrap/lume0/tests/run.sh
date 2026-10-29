@@ -679,6 +679,34 @@ assert g["goal"] == "Add bounded range helper" and g["gates_ok"] is True and g["
 assert ap["id"] == "0003_decimal_clamp" and ap["target"] == "compiler/stage1/decimal.src" and ap["gates_ok"] is True and ap["signature_verified"] is True and ap["can_merge"] is True
 PY
         then ok "phase-2 E3 (#194, #203): lume evolve verify/propose/approve/apply enforces 6 gates + asymmetric Ed25519 maintainer signature verification + applies 0003_decimal_clamp"; else bad "phase-2 E3 (#194, #203): lume evolve Ed25519 governance & apply loop"; cat "$ntmp/ev_v.err" "$ntmp/ev_verify.json" "$ntmp/ev_a.err" "$ntmp/ev_approve.json" "$ntmp/ev_nosig.json" "$ntmp/ev_unauth.json" "$ntmp/ev_forged.json" "$ntmp/ev_prop_goal.json" "$ntmp/ev_app.err" "$ntmp/ev_apply_ok.json" 2>/dev/null; fi
+        # Multiplier M2 (#258): `lume evolve` multi-file self-growth engine across target, prover, and stdlib domains
+        mkdir -p "$ntmp/m2_ws/compiler/stage1"
+        LUME_BIN_DIR="$ntmp" ../../lume evolve propose --domain target "Grow RV64 shift encoder" >"$ntmp/ev_m2_prop_target.json" 2>/dev/null || true
+        LUME_BIN_DIR="$ntmp" ../../lume evolve propose --domain prover "Grow interval prover" >"$ntmp/ev_m2_prop_prover.json" 2>/dev/null || true
+        LUME_BIN_DIR="$ntmp" ../../lume evolve propose --domain stdlib "Grow stdlib math" >"$ntmp/ev_m2_prop_stdlib.json" 2>/dev/null || true
+        LUME_BIN_DIR="$ntmp" ../../lume evolve grow ../../evolve/proposals/0004_target_rv64_sll --root "$ntmp/m2_ws" >"$ntmp/ev_m2_0004.json" 2>"$ntmp/ev_m2_0004.err"; m2_0004_rc=$?
+        LUME_BIN_DIR="$ntmp" ../../lume evolve grow ../../evolve/proposals/0005_prover_interval --root "$ntmp/m2_ws" >"$ntmp/ev_m2_0005.json" 2>"$ntmp/ev_m2_0005.err"; m2_0005_rc=$?
+        LUME_BIN_DIR="$ntmp" ../../lume evolve grow ../../evolve/proposals/0006_stdlib_math_mod --root "$ntmp/m2_ws" >"$ntmp/ev_m2_0006.json" 2>"$ntmp/ev_m2_0006.err"; m2_0006_rc=$?
+        # Adversarial tamper test: 1-byte edit to multi-file candidate invalidates Ed25519 signature and prevents file write
+        sed 's/ensures result >= 19 = 19 +/ensures result >= 19 = 0 + 19 +/' ../../evolve/proposals/0004_target_rv64_sll/proposal.bundle >"$ntmp/ev_m2_tampered.bundle"
+        mkdir -p "$ntmp/m2_bad_ws/compiler/stage1"
+        LUME_BIN_DIR="$ntmp" ../../lume evolve grow "$ntmp/ev_m2_tampered.bundle" --root "$ntmp/m2_bad_ws" >"$ntmp/ev_m2_tampered.json" 2>/dev/null; m2_tamp_rc=$?
+        # Adversarial API drift test across multi-file bundle: breaking baseline symbol in file 1 fails api_compat gate
+        sed 's/fn sq(x: int) -> int/fn sq_renamed(x: int) -> int/' ../../evolve/proposals/0006_stdlib_math_mod/proposal.bundle >"$ntmp/ev_m2_drift.bundle"
+        LUME_BIN_DIR="$ntmp" ../../lume evolve verify "$ntmp/ev_m2_drift.bundle" >"$ntmp/ev_m2_drift.json" 2>/dev/null; m2_drift_rc=$?
+        if [ "$m2_0004_rc" = 0 ] && [ "$m2_0005_rc" = 0 ] && [ "$m2_0006_rc" = 0 ] && [ "$m2_tamp_rc" != 0 ] && [ "$m2_drift_rc" != 0 ] && [ -f "$ntmp/m2_ws/compiler/stage1/mod_target_isa.src" ] && [ -f "$ntmp/m2_ws/compiler/stage1/mod_target_emit.src" ] && [ -f "$ntmp/m2_ws/compiler/stage1/mod_prover_iv.src" ] && [ -f "$ntmp/m2_ws/compiler/stage1/mod_prover_check.src" ] && [ -f "$ntmp/m2_ws/compiler/stage1/mod_base.src" ] && [ -f "$ntmp/m2_ws/compiler/stage1/mod_math.src" ] && [ ! -f "$ntmp/m2_bad_ws/compiler/stage1/mod_target_isa.src" ] && grep -q "a_lo + b_lo" "$ntmp/m2_ws/compiler/stage1/mod_prover_iv.src" && grep -q "a_hi + b_hi" "$ntmp/m2_ws/compiler/stage1/mod_prover_iv.src" && python3 - "$ntmp/ev_m2_prop_target.json" "$ntmp/ev_m2_prop_prover.json" "$ntmp/ev_m2_prop_stdlib.json" "$ntmp/ev_m2_0004.json" "$ntmp/ev_m2_0005.json" "$ntmp/ev_m2_0006.json" "$ntmp/ev_m2_tampered.json" "$ntmp/ev_m2_drift.json" <<'PY' >/dev/null 2>&1
+import json, sys
+pt, pp, ps, r4, r5, r6, rt, rd = [json.load(open(x)) for x in sys.argv[1:9]]
+assert pt["domain"] == "target" and pt["files_count"] == 2 and pt["gates_ok"] is True and pt["proofs_ok"] is True
+assert pp["domain"] == "prover" and pp["files_count"] == 2 and pp["gates_ok"] is True and pp["repairs_applied"] == 2
+assert ps["domain"] == "stdlib" and ps["files_count"] == 2 and ps["gates_ok"] is True and ps["proofs_ok"] is True
+assert r4["id"] == "0004_target_rv64_sll" and r4["domain"] == "target" and r4["files_count"] == 2 and len(r4["files"]) == 2 and r4["can_merge"] is True and r4["signature_verified"] is True
+assert r5["id"] == "0005_prover_interval" and r5["domain"] == "prover" and r5["files_count"] == 2 and r5["repairs_applied"] == 2 and r5["can_merge"] is True and r5["signature_verified"] is True
+assert r6["id"] == "0006_stdlib_math_mod" and r6["domain"] == "stdlib" and r6["files_count"] == 2 and r6["can_merge"] is True and r6["signature_verified"] is True
+assert rt["gates_ok"] is True and rt["signature_verified"] is False and rt["status"] == "rejected_invalid_signature" and rt["can_merge"] is False
+assert rd["gates_ok"] is False and rd["status"] == "rejected_by_gates"
+PY
+        then ok "multiplier M2 (#258, docs/33): lume evolve multi-file self-growth engine (target, prover hole synthesis, stdlib, Ed25519 + adversarial tamper/drift rejection)"; else bad "multiplier M2 (#258, docs/33): lume evolve multi-file self-growth engine"; cat "$ntmp/ev_m2_0004.err" "$ntmp/ev_m2_0004.json" "$ntmp/ev_m2_0005.err" "$ntmp/ev_m2_0005.json" "$ntmp/ev_m2_0006.err" "$ntmp/ev_m2_0006.json" "$ntmp/ev_m2_tampered.json" "$ntmp/ev_m2_drift.json" 2>/dev/null; fi
     fi
     # phase-2 F3c (structural inference): a let-bound anonymous record's field access is checked without annotation.
     "$ntmp/lc" <../../compiler/stage1/field_ok.src >"$ntmp/fo.s" 2>"$ntmp/fo.err"; "$ntmp/lasm" <"$ntmp/fo.s" >"$ntmp/fo.elf" 2>/dev/null; chmod +x "$ntmp/fo.elf"
