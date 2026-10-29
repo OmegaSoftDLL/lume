@@ -1,5 +1,11 @@
 blank_issues_enabled: false
 contact_links:
+  - name: Documentation
+    url: https://omegasoftdll.github.io/lume/
+    about: Read the project overview, language reference, and implementation guides.
   - name: Project state, rules and architecture
     url: https://github.com/OmegaSoftDLL/lume/blob/main/docs/PROJECT_STATE.md
     about: Read this before opening an issue or PR.
+  - name: Security vulnerability
+    url: https://github.com/OmegaSoftDLL/lume/security/advisories/new
+    about: Report suspected vulnerabilities privately; do not open a public issue.

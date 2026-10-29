@@ -4,7 +4,9 @@
   <img alt="Language: Lume" src="https://img.shields.io/badge/language-Lume-8A2BE2">
   <img alt="Built with 100% Lume" src="https://img.shields.io/badge/built%20with-100%25%20Lume-8A2BE2">
   <a href="https://github.com/OmegaSoftDLL/lume/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/OmegaSoftDLL/lume/actions/workflows/ci.yml/badge.svg"></a>
-  <img alt="License: MIT OR Apache-2.0" src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue">
+  <a href="https://github.com/OmegaSoftDLL/lume/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/OmegaSoftDLL/lume"></a>
+  <a href="https://omegasoftdll.github.io/lume/"><img alt="Documentation" src="https://img.shields.io/badge/docs-omegasoftdll.github.io%2Flume-8A2BE2"></a>
+  <a href="COPYRIGHT"><img alt="License: MIT OR Apache-2.0" src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue"></a>
   <img alt="Status: Phases 0–5 complete · verification hardening in progress" src="https://img.shields.io/badge/status-phases%200--5%20complete%20%C2%B7%20verification%20hardening-8A2BE2">
   <img alt="PRs welcome" src="https://img.shields.io/badge/PRs-welcome-brightgreen">
 </p>
@@ -226,12 +228,15 @@ bootstrap/lume0 test` **and** `asan` must pass (0 failed); every fix ships with 
 (golden rule: no bugs in the toolchain); `main` is protected and requires a green PR. `docs/02-principles.md`
 lists the principles (P1–P35) each change serves.
 
+Participation is governed by the **[Code of Conduct](CODE_OF_CONDUCT.md)**. Suspected security
+vulnerabilities must be reported privately through the **[Security Policy](SECURITY.md)**.
+
 ## License
 
-Dual-licensed under **MIT** (`LICENSE-MIT`) **or Apache-2.0** (`LICENSE-APACHE`), at your option —
-the same scheme as the Rust project (Go uses BSD-3-Clause; both are permissive). See `COPYRIGHT`.
-The license covers the Lume toolchain, standard library and docs; it does not restrict what you do
-with programs you write in Lume or the binaries it produces for you.
+Dual-licensed under **[MIT](LICENSE-MIT)** or **[Apache-2.0](LICENSE-APACHE)**, at your option.
+See [`COPYRIGHT`](COPYRIGHT) for the licensing terms that apply to contributions. The license covers
+the Lume toolchain, standard library and docs; it does not restrict what you do with programs you
+write in Lume or the binaries it produces for you.
 
 ## Software protection (anti-reverse-engineering)
 
