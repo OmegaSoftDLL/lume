@@ -51,14 +51,14 @@ jobs:
 
           cat > stage/verify_ok.src <<'EOF'
           fn fib(n: int) -> int = if n < 2 then n else fib(n - 1) + fib(n - 2)
-          fn clamp_nonneg(x: int) -> int requires x >= 0 ensures result >= 0 = x
+          fn clamp_pos(x: int) -> int requires x >= 0 ensures result >= 5 = x + 5
           print fib(10)
-          print clamp_nonneg(42)
+          print clamp_pos(37)
           EOF
 
           cat > stage/verify_trap.src <<'EOF'
-          fn checked_sq(x: int) -> int requires x * x > 100 = x
-          print checked_sq(5)
+          fn sq_not49(x: int) -> int ensures result != 49 = x * x
+          print sq_not49(7)
           EOF
 
           # 1. linux-x86_64
@@ -67,6 +67,7 @@ jobs:
           cp build/bootstrap/lcli3  build/x86_64-bin/lcli
           cp bootstrap/lume0/lume0  build/x86_64-bin/lume0
           ./lume build --target x86_64-linux-elf stage/verify_ok.src -o build/x86_64-bin/lume-target-check
+          ./lume build --target x86_64-linux-elf stage/verify_trap.src -o build/x86_64-bin/lume-target-trap
           chmod +x build/x86_64-bin/*
           PKG_X64="lume-${VER}-linux-x86_64"
           sh scripts/install.sh --prefix "stage/${PKG_X64}" --from-local "$PWD" --from-dir "$PWD/build/x86_64-bin"
@@ -75,9 +76,10 @@ jobs:
 
           # 2. linux-aarch64 (cross-built static lume0 + aarch64-linux-elf target binaries)
           aarch64-linux-gnu-gcc -O2 -std=c11 -Wall -Wextra -pedantic -static \
-            bootstrap/lume0/main.c bootstrap/lume0/lexer.c bootstrap/lume0/parser.c \
-            bootstrap/lume0/ast.c bootstrap/lume0/interp.c bootstrap/lume0/bytecode.c \
-            bootstrap/lume0/diag.c bootstrap/lume0/elf64.c -lm -o build/aarch64-bin/lume0
+            bootstrap/lume0/main.c bootstrap/lume0/lexer.c bootstrap/lume0/diag.c \
+            bootstrap/lume0/ast.c bootstrap/lume0/parser.c bootstrap/lume0/value.c \
+            bootstrap/lume0/interp.c bootstrap/lume0/lbe.c bootstrap/lume0/asmgen.c \
+            bootstrap/lume0/elf.c bootstrap/lume0/resolve.c -lm -o build/aarch64-bin/lume0
           ./lume build --target aarch64-linux-elf stage/verify_ok.src -o build/aarch64-bin/lume-target-check
           ./lume build --target aarch64-linux-elf stage/verify_trap.src -o build/aarch64-bin/lume-target-trap
           chmod +x build/aarch64-bin/*
@@ -88,9 +90,10 @@ jobs:
 
           # 3. linux-riscv64 (cross-built static lume0 + riscv64-linux-elf target binaries)
           riscv64-linux-gnu-gcc -O2 -std=c11 -Wall -Wextra -pedantic -static \
-            bootstrap/lume0/main.c bootstrap/lume0/lexer.c bootstrap/lume0/parser.c \
-            bootstrap/lume0/ast.c bootstrap/lume0/interp.c bootstrap/lume0/bytecode.c \
-            bootstrap/lume0/diag.c bootstrap/lume0/elf64.c -lm -o build/riscv64-bin/lume0
+            bootstrap/lume0/main.c bootstrap/lume0/lexer.c bootstrap/lume0/diag.c \
+            bootstrap/lume0/ast.c bootstrap/lume0/parser.c bootstrap/lume0/value.c \
+            bootstrap/lume0/interp.c bootstrap/lume0/lbe.c bootstrap/lume0/asmgen.c \
+            bootstrap/lume0/elf.c bootstrap/lume0/resolve.c -lm -o build/riscv64-bin/lume0
           ./lume build --target riscv64-linux-elf stage/verify_ok.src -o build/riscv64-bin/lume-target-check
           ./lume build --target riscv64-linux-elf stage/verify_trap.src -o build/riscv64-bin/lume-target-trap
           chmod +x build/riscv64-bin/*
@@ -186,21 +189,22 @@ jobs:
 
           cat > stage/verify_ok.src <<'EOF'
           fn fib(n: int) -> int = if n < 2 then n else fib(n - 1) + fib(n - 2)
-          fn clamp_nonneg(x: int) -> int requires x >= 0 ensures result >= 0 = x
+          fn clamp_pos(x: int) -> int requires x >= 0 ensures result >= 5 = x + 5
           print fib(10)
-          print clamp_nonneg(42)
+          print clamp_pos(37)
           EOF
 
           cat > stage/verify_trap.src <<'EOF'
-          fn checked_sq(x: int) -> int requires x * x > 100 = x
-          print checked_sq(5)
+          fn sq_not49(x: int) -> int ensures result != 49 = x * x
+          print sq_not49(7)
           EOF
 
           # 1. macos-aarch64 (Apple Silicon native Mach-O 64)
           cc -arch arm64 -O2 -std=c11 -Wall -Wextra -pedantic \
-            bootstrap/lume0/main.c bootstrap/lume0/lexer.c bootstrap/lume0/parser.c \
-            bootstrap/lume0/ast.c bootstrap/lume0/interp.c bootstrap/lume0/bytecode.c \
-            bootstrap/lume0/diag.c bootstrap/lume0/elf64.c -lm -o build/macos-aarch64-bin/lume0
+            bootstrap/lume0/main.c bootstrap/lume0/lexer.c bootstrap/lume0/diag.c \
+            bootstrap/lume0/ast.c bootstrap/lume0/parser.c bootstrap/lume0/value.c \
+            bootstrap/lume0/interp.c bootstrap/lume0/lbe.c bootstrap/lume0/asmgen.c \
+            bootstrap/lume0/elf.c bootstrap/lume0/resolve.c -lm -o build/macos-aarch64-bin/lume0
           ./lume build --target aarch64-macos-macho stage/verify_ok.src -o build/macos-aarch64-bin/lume-target-check
           ./lume build --target aarch64-macos-macho stage/verify_trap.src -o build/macos-aarch64-bin/lume-target-trap
           chmod +x build/macos-aarch64-bin/*
@@ -211,9 +215,10 @@ jobs:
 
           # 2. macos-x86_64 (Intel x86_64 Mach-O 64)
           cc -arch x86_64 -O2 -std=c11 -Wall -Wextra -pedantic \
-            bootstrap/lume0/main.c bootstrap/lume0/lexer.c bootstrap/lume0/parser.c \
-            bootstrap/lume0/ast.c bootstrap/lume0/interp.c bootstrap/lume0/bytecode.c \
-            bootstrap/lume0/diag.c bootstrap/lume0/elf64.c -lm -o build/macos-x86_64-bin/lume0
+            bootstrap/lume0/main.c bootstrap/lume0/lexer.c bootstrap/lume0/diag.c \
+            bootstrap/lume0/ast.c bootstrap/lume0/parser.c bootstrap/lume0/value.c \
+            bootstrap/lume0/interp.c bootstrap/lume0/lbe.c bootstrap/lume0/asmgen.c \
+            bootstrap/lume0/elf.c bootstrap/lume0/resolve.c -lm -o build/macos-x86_64-bin/lume0
           ./lume build --target x86_64-macos-macho stage/verify_ok.src -o build/macos-x86_64-bin/lume-target-check
           ./lume build --target x86_64-macos-macho stage/verify_trap.src -o build/macos-x86_64-bin/lume-target-trap
           chmod +x build/macos-x86_64-bin/*
@@ -298,21 +303,22 @@ jobs:
           mkdir -p dist stage build/win64-bin bootstrap/lume0
 
           gcc -O2 -std=c11 -Wall -Wextra "-Dfchmod(fd,mode)=0" -Wl,--stack,67108864 \
-            bootstrap/lume0/main.c bootstrap/lume0/lexer.c bootstrap/lume0/parser.c \
-            bootstrap/lume0/ast.c bootstrap/lume0/interp.c bootstrap/lume0/bytecode.c \
-            bootstrap/lume0/diag.c bootstrap/lume0/elf64.c -lm -o bootstrap/lume0/lume0.exe
+            bootstrap/lume0/main.c bootstrap/lume0/lexer.c bootstrap/lume0/diag.c \
+            bootstrap/lume0/ast.c bootstrap/lume0/parser.c bootstrap/lume0/value.c \
+            bootstrap/lume0/interp.c bootstrap/lume0/lbe.c bootstrap/lume0/asmgen.c \
+            bootstrap/lume0/elf.c bootstrap/lume0/resolve.c -lm -o bootstrap/lume0/lume0.exe
           cp bootstrap/lume0/lume0.exe build/win64-bin/lume0.exe
 
           cat > stage/verify_ok.src <<'EOF'
           fn fib(n: int) -> int = if n < 2 then n else fib(n - 1) + fib(n - 2)
-          fn clamp_nonneg(x: int) -> int requires x >= 0 ensures result >= 0 = x
+          fn clamp_pos(x: int) -> int requires x >= 0 ensures result >= 5 = x + 5
           print fib(10)
-          print clamp_nonneg(42)
+          print clamp_pos(37)
           EOF
 
           cat > stage/verify_trap.src <<'EOF'
-          fn checked_sq(x: int) -> int requires x * x > 100 = x
-          print checked_sq(5)
+          fn sq_not49(x: int) -> int ensures result != 49 = x * x
+          print sq_not49(7)
           EOF
 
           ./lume build --target x86_64-windows-pe stage/verify_ok.src -o build/win64-bin/lume-target-check.exe

@@ -148,6 +148,7 @@ fi
 # elf.c/asmgen.c stay ASan-covered by the `as/ld` block above.
 if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_ASAN:-}" ]; then
     ntmp=$(mktemp -d)
+    export LUME_BIN_DIR="$ntmp"
     for prog in nfib ev strtest modtest reclist list calc slicen; do
         case "$prog" in calc) exp=calc_asm;; modtest) exp=modtest_core;; list) exp=list_core_native;; *) exp=${prog}_asm;; esac
         $BIN run ../../compiler/stage1/data_asm_cc.lume ../../compiler/stage1/$prog.src "$ntmp/$prog.s" >/dev/null 2>&1
