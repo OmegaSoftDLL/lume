@@ -355,10 +355,21 @@ cmd_build() {
     fi
     if [ -z "$_out" ]; then
         _out="${_src%.src}"
+        _out="${_out%.intent}"
         if [ "$_out" = "$_src" ]; then
             _out="$_src.out"
         fi
     fi
+    case "$_src" in
+        *.intent)
+            _icache="${_src}.cache.src"
+            if ! synthesize_intent_to_cache "$_src" "$_icache"; then
+                rm -f "$_out"
+                exit 3
+            fi
+            _src="$_icache"
+            ;;
+    esac
     if [ -z "$_protect" ] && [ -n "$_profile" ]; then
         case "$_profile" in
             release) _protect="standard" ;;
@@ -698,6 +709,14 @@ cmd_run() {
                 return $?
             fi
             ;;
+        *.intent)
+            _icache="${_file}.cache.src"
+            if ! synthesize_intent_to_cache "$_file" "$_icache"; then
+                exit 3
+            fi
+            cmd_run "$_icache" "$@"
+            return $?
+            ;;
         *.src)
             if is_linux_x86_64 && [ -z "${LUME0_ASAN:-}" ]; then
                 _tmpbin=$(mktemp)
@@ -931,6 +950,10 @@ cmd_check() {
         exit 66
     fi
     case "$_file" in
+        *.intent)
+            cmd_intent build --json "$_file"
+            return $?
+            ;;
         *.src)
             _bundled=$(mktemp)
             if ! bundle_src_if_needed "$_file" "$_bundled"; then
@@ -1836,6 +1859,141 @@ cmd_repl() {
     return 0
 }
 
+synthesize_intent_to_cache() {
+    _if_in=$1
+    _if_cache=$2
+    _if_cert="${_if_cache%.src}.cert.json"
+    _if_tmp=$(mktemp)
+    printf '@mode intent-code\n' > "$_if_tmp"
+    cat "$_if_in" >> "$_if_tmp"
+    if [ -f "$_if_cache" ]; then
+        printf '\n@split\n' >> "$_if_tmp"
+        cat "$_if_cache" >> "$_if_tmp"
+    fi
+    _if_out=$(mktemp)
+    if ! run_core_tool lcaas "$_if_tmp" | tr -d '\r' > "$_if_out"; then
+        rm -f "$_if_tmp" "$_if_out"
+        return 3
+    fi
+    mv "$_if_out" "$_if_cache"
+    rm -f "$_if_tmp"
+    cmd_certify "$_if_cache" > "$_if_cert" 2>/dev/null || true
+    return 0
+}
+
+cmd_intent() {
+    [ $# -ge 1 ] || usage
+    _iact="build"
+    case "$1" in
+        build|run|verify|status|clean)
+            _iact=$1
+            shift
+            ;;
+    esac
+    _ifile=""
+    _icache=""
+    _iout=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -o)
+                [ $# -ge 2 ] || usage
+                _iout=$2
+                shift 2
+                ;;
+            --cache)
+                [ $# -ge 2 ] || usage
+                _icache=$2
+                shift 2
+                ;;
+            --json)
+                shift
+                ;;
+            -*)
+                usage
+                ;;
+            *)
+                if [ -z "$_ifile" ]; then
+                    _ifile=$1
+                fi
+                shift
+                ;;
+        esac
+    done
+    [ -n "$_ifile" ] || usage
+    if [ ! -f "$_ifile" ]; then
+        echo "lume intent: cannot read $_ifile" >&2
+        exit 66
+    fi
+    [ -n "$_icache" ] || _icache="${_ifile}.cache.src"
+    _icert="${_icache%.src}.cert.json"
+    case "$_iact" in
+        clean)
+            rm -f "$_icache" "$_icert"
+            printf '{"ok":true,"mode":"intent-clean","cache_file":"%s"}\n' "$_icache"
+            return 0
+            ;;
+        verify|status)
+            _itmp=$(mktemp)
+            printf '@mode intent-verify\n' > "$_itmp"
+            cat "$_ifile" >> "$_itmp"
+            if [ -f "$_icache" ]; then
+                printf '\n@split\n' >> "$_itmp"
+                cat "$_icache" >> "$_itmp"
+            fi
+            _ijson=$(run_core_tool lcaas "$_itmp")
+            rm -f "$_itmp"
+            printf '%s\n' "$_ijson"
+            case "$_ijson" in
+                *'"ok":true'*) return 0 ;;
+                *) return 1 ;;
+            esac
+            ;;
+        run)
+            if ! synthesize_intent_to_cache "$_ifile" "$_icache"; then
+                exit 3
+            fi
+            cmd_run "$_icache"
+            return $?
+            ;;
+        build|*)
+            _itmp=$(mktemp)
+            printf '@mode intent-build\n' > "$_itmp"
+            cat "$_ifile" >> "$_itmp"
+            if [ -f "$_icache" ]; then
+                printf '\n@split\n' >> "$_itmp"
+                cat "$_icache" >> "$_itmp"
+            fi
+            _ijson=$(run_core_tool lcaas "$_itmp")
+            rm -f "$_itmp"
+            case "$_ijson" in
+                *'"ok":true'*) ;;
+                *)
+                    printf '%s\n' "$_ijson"
+                    return 3
+                    ;;
+            esac
+            case "$_ijson" in
+                *'"cache_hit":true'*)
+                    if [ ! -f "$_icert" ]; then
+                        cmd_certify "$_icache" > "$_icert" 2>/dev/null || true
+                    fi
+                    ;;
+                *)
+                    if ! synthesize_intent_to_cache "$_ifile" "$_icache"; then
+                        printf '%s\n' "$_ijson"
+                        return 3
+                    fi
+                    ;;
+            esac
+            if [ -n "$_iout" ]; then
+                cmd_build "$_icache" -o "$_iout"
+            fi
+            printf '%s\n' "$_ijson"
+            return 0
+            ;;
+    esac
+}
+
 cmd_certify() {
     [ $# -ge 1 ] || usage
     _cfile=""
@@ -1966,6 +2124,12 @@ cmd_prove() {
         echo "lume prove: cannot read $_pfile" >&2
         exit 66
     fi
+    case "$_pfile" in
+        *.intent)
+            cmd_intent build --json "$_pfile"
+            return $?
+            ;;
+    esac
     _pbun=$(mktemp)
     if ! bundle_src_if_needed "$_pfile" "$_pbun"; then
         rm -f "$_pbun"
@@ -2407,6 +2571,9 @@ case "$_sub" in
         ;;
     prove)
         cmd_prove "$@"
+        ;;
+    intent)
+        cmd_intent "$@"
         ;;
     certify)
         cmd_certify "$@"

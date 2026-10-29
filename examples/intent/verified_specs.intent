@@ -1,0 +1,41 @@
+@intent VerifiedTreasuryAndPhysics
+@version 1
+@capability pure
+
+## 1. Linear QF_LIA spec: safe vault withdrawal
+pub fn safe_withdraw(bal: int, amt: int) -> int
+    requires bal >= amt
+    requires amt >= 0
+    ensures result == bal - amt and result >= 0
+    = _
+
+## 2. Algebraic law over safe_withdraw
+law withdraw_zero_id(bal: int) = safe_withdraw(bal, 0) == bal
+
+## 3. Non-linear QF_NIA spec: kinetic energy / square non-negativity
+pub fn kinetic_sq(v: int) -> int
+    ensures result == v * v and result >= 0
+    = _
+
+## 4. Non-linear QF_NIA spec: squared Euclidean error (Positivstellensatz)
+pub fn sq_dist(target: int, actual: int) -> int
+    ensures result == (target - actual) * (target - actual) and result >= 0
+    = _
+
+## 5. Non-linear QF_NIA spec: positive bounding-box area
+pub fn bbox_area(w: int, h: int) -> int
+    requires w >= 3
+    requires h >= 4
+    ensures result == w * h and result >= 12
+    = _
+
+## 6. Piecewise spec: absolute magnitude
+pub fn abs_mag(x: int) -> int
+    ensures result >= 0 and result >= x and result >= 0 - x
+    = _
+
+print safe_withdraw(100, 35)
+print kinetic_sq(0 - 7)
+print sq_dist(10, 4)
+print bbox_area(5, 6)
+print abs_mag(0 - 42)

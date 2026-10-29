@@ -1534,6 +1534,33 @@ EOF
     printf 'total fn bad_up(lo: int, hi: int) -> int = if lo >= hi then 0 else bad_up(lo + 1, hi + 1)\nprint bad_up(0, 5)\n' >"$ntmp/m1_bad_up.src"
     "$ntmp/lc" <"$ntmp/m1_bad_up.src" >"$ntmp/m1_bad_up.s" 2>"$ntmp/m1_bad_up.err"; m1bup=$?
     if [ -x "$ntmp/m1_ok.elf" ] && "$ntmp/m1_ok.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/m1_prover_ok_asm.expected - >/dev/null && [ -s "$ntmp/m1_nia1.s" ] && ! grep -q "call ctfail" "$ntmp/m1_nia1.s" && [ -s "$ntmp/m1_nia2.s" ] && ! grep -q "call ctfail" "$ntmp/m1_nia2.s" && [ -s "$ntmp/m1_nia3.s" ] && ! grep -q "call ctfail" "$ntmp/m1_nia3.s" && [ -s "$ntmp/m1_bv1.s" ] && ! grep -q "call ctfail" "$ntmp/m1_bv1.s" && [ -s "$ntmp/m1_bv2.s" ] && ! grep -q "call ctfail" "$ntmp/m1_bv2.s" && [ -s "$ntmp/m1_arr1.s" ] && ! grep -q "call ctfail" "$ntmp/m1_arr1.s" && [ -s "$ntmp/m1_arr2.s" ] && ! grep -q "call ctfail" "$ntmp/m1_arr2.s" && [ -s "$ntmp/m1_sep1.s" ] && ! grep -q "call ctfail" "$ntmp/m1_sep1.s" && [ -s "$ntmp/m1_ref1.s" ] && ! grep -q "call ctfail" "$ntmp/m1_ref1.s" && [ -s "$ntmp/m1_ref2.s" ] && ! grep -q "call ctfail" "$ntmp/m1_ref2.s" && grep -q "xorq" "$ntmp/m1_ok.s" && grep -q "andq" "$ntmp/m1_ok.s" && grep -q "salq" "$ntmp/m1_ok.s" && grep -q "\.Lqloop_" "$ntmp/m1_ok.s" && grep -q '"name":"nia_cauchy_schwarz","kind":"contract","status":"proven"' "$ntmp/m1_prove.json" && grep -q '"name":"bv_u8_wrap_add","kind":"contract","status":"proven"' "$ntmp/m1_prove.json" && grep -q '"name":"arr_row_diff","kind":"contract","status":"proven"' "$ntmp/m1_prove.json" && grep -q '"name":"quant_forall_sq","kind":"contract","status":"proven"' "$ntmp/m1_prove.json" && grep -q '"name":"sep_frame_preserve","kind":"contract","status":"proven"' "$ntmp/m1_prove.json" && grep -q '"name":"refine_dep_idx","kind":"contract","status":"proven"' "$ntmp/m1_prove.json" && grep -q '"name":"ack","kind":"termination","status":"proven"' "$ntmp/m1_prove.json" && grep -q '"name":"range_sum","kind":"termination","status":"proven"' "$ntmp/m1_prove.json" && grep -q '"kernel_verified":true' "$ntmp/m1_vcert.json" && grep -q '"hash_verified":true' "$ntmp/m1_vcert.json" && [ "$m1bnia" = 3 ] && [ ! -s "$ntmp/m1_bad_nia.s" ] && grep -q "\[V0001\]" "$ntmp/m1_bad_nia.err" && grep -q "x = 0 (result = 0)" "$ntmp/m1_bad_nia.err" && [ "$m1bbv" = 3 ] && [ ! -s "$ntmp/m1_bad_bv.s" ] && grep -q "\[V0001\]" "$ntmp/m1_bad_bv.err" && grep -q "x = 255 (result = 0)" "$ntmp/m1_bad_bv.err" && [ "$m1barr" = 3 ] && [ ! -s "$ntmp/m1_bad_arr.s" ] && grep -q "\[V0001\]" "$ntmp/m1_bad_arr.err" && [ "$m1bsep" = 3 ] && [ ! -s "$ntmp/m1_bad_sep.s" ] && grep -q "\[V0001\]" "$ntmp/m1_bad_sep.err" && [ "$m1bref" = 3 ] && [ ! -s "$ntmp/m1_bad_ref.s" ] && grep -q "\[V0001\]" "$ntmp/m1_bad_ref.err" && [ "$m1blex" = 3 ] && [ ! -s "$ntmp/m1_bad_lex.s" ] && grep -q "\[A0002\]" "$ntmp/m1_bad_lex.err" && [ "$m1bup" = 3 ] && [ ! -s "$ntmp/m1_bad_up.s" ] && grep -q "\[A0002\]" "$ntmp/m1_bad_up.err"; then ok "Multiplier M1 (#255): QF_NIA, QF_BV + wraparound, QF_ALIA arrays + quantifiers (native x86-64 .Lqloop_), Separation Logic, Refinement & Dependent Types, Lexicographic/Relational Termination + lcert kernel check"; else bad "Multiplier M1 (#255): m1_prover_ok.src & 6-theory negative checks"; cat "$ntmp/m1_ok.err" "$ntmp/m1_prove.json" "$ntmp/m1_vcert.json" "$ntmp/m1_bad_nia.err" "$ntmp/m1_bad_bv.err" "$ntmp/m1_bad_arr.err" "$ntmp/m1_bad_sep.err" "$ntmp/m1_bad_ref.err" "$ntmp/m1_bad_lex.err" "$ntmp/m1_bad_up.err" 2>/dev/null; fi
+
+    # Track I (#259): Intent-as-Source §1 (spec as primary source, code as regenerable proven cache)
+    "$ntmp/lc" <../../compiler/stage1/track_i_intent_ok.src >"$ntmp/ti_ok.s" 2>"$ntmp/ti_ok.err" || true
+    "$ntmp/lasm" <"$ntmp/ti_ok.s" >"$ntmp/ti_ok.elf" 2>/dev/null || true
+    chmod +x "$ntmp/ti_ok.elf" 2>/dev/null || true
+    awk '/^synth_withdraw:/{p=1} p{print} p&&/^    ret$/{exit}' "$ntmp/ti_ok.s" >"$ntmp/ti_fn1.s"
+    awk '/^synth_sq:/{p=1} p{print} p&&/^    ret$/{exit}' "$ntmp/ti_ok.s" >"$ntmp/ti_fn2.s"
+    awk '/^synth_sq_dist:/{p=1} p{print} p&&/^    ret$/{exit}' "$ntmp/ti_ok.s" >"$ntmp/ti_fn3.s"
+    awk '/^synth_area:/{p=1} p{print} p&&/^    ret$/{exit}' "$ntmp/ti_ok.s" >"$ntmp/ti_fn4.s"
+    awk '/^synth_abs:/{p=1} p{print} p&&/^    ret$/{exit}' "$ntmp/ti_ok.s" >"$ntmp/ti_fn5.s"
+    cp ../../examples/intent/verified_specs.intent "$ntmp/spec.intent"
+    LUME_BIN_DIR="$ntmp" ../../lume intent build --json "$ntmp/spec.intent" -o "$ntmp/spec.elf" >"$ntmp/ti_b1.json" 2>/dev/null || true
+    LUME_BIN_DIR="$ntmp" ../../lume intent build --json "$ntmp/spec.intent" >"$ntmp/ti_b2.json" 2>/dev/null || true
+    LUME_BIN_DIR="$ntmp" ../../lume intent verify --json "$ntmp/spec.intent" >"$ntmp/ti_v1.json" 2>/dev/null || true
+    sed 's/print bbox_area(5, 6)/print bbox_area(6, 7)/' "$ntmp/spec.intent" >"$ntmp/spec_mod.intent"
+    mv "$ntmp/spec_mod.intent" "$ntmp/spec.intent"
+    ti_stale_rc=0
+    LUME_BIN_DIR="$ntmp" ../../lume intent verify --json "$ntmp/spec.intent" >"$ntmp/ti_vstale.json" 2>/dev/null || ti_stale_rc=$?
+    LUME_BIN_DIR="$ntmp" ../../lume intent build --json "$ntmp/spec.intent" -o "$ntmp/spec2.elf" >"$ntmp/ti_b3.json" 2>/dev/null || true
+    ti_spec2_out=$("$ntmp/spec2.elf" 2>/dev/null | tr '\n' ',' || true)
+    printf '\nprint 999\n' >>"$ntmp/spec.intent.cache.src"
+    ti_tamper_rc=0
+    LUME_BIN_DIR="$ntmp" ../../lume intent verify --json "$ntmp/spec.intent" >"$ntmp/ti_vtamper.json" 2>/dev/null || ti_tamper_rc=$?
+    printf '@intent BadSpec\npub fn impossible(x: int) -> int requires x >= 0 ensures result < 0 and result > 0 = _\nprint impossible(1)\n' >"$ntmp/bad.intent"
+    ti_bad_rc=0
+    LUME_BIN_DIR="$ntmp" ../../lume intent build --json "$ntmp/bad.intent" >"$ntmp/ti_bad.json" 2>/dev/null || ti_bad_rc=$?
+    if [ -x "$ntmp/ti_ok.elf" ] && "$ntmp/ti_ok.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/track_i_intent_ok_asm.expected - >/dev/null && [ -s "$ntmp/ti_fn1.s" ] && ! grep -q "call ctfail" "$ntmp/ti_fn1.s" && [ -s "$ntmp/ti_fn2.s" ] && ! grep -q "call ctfail" "$ntmp/ti_fn2.s" && [ -s "$ntmp/ti_fn3.s" ] && ! grep -q "call ctfail" "$ntmp/ti_fn3.s" && [ -s "$ntmp/ti_fn4.s" ] && ! grep -q "call ctfail" "$ntmp/ti_fn4.s" && [ -s "$ntmp/ti_fn5.s" ] && ! grep -q "call ctfail" "$ntmp/ti_fn5.s" && [ -x "$ntmp/spec.elf" ] && "$ntmp/spec.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/track_i_intent_ok_asm.expected - >/dev/null && [ -f "$ntmp/spec.intent.cache.src" ] && [ -f "$ntmp/spec.intent.cache.cert.json" ] && grep -q '"ok":true' "$ntmp/ti_b1.json" && grep -q '"cache_status":"regenerated_cache_missing"' "$ntmp/ti_b1.json" && grep -q '"re_synthesized":true' "$ntmp/ti_b1.json" && grep -q '"theory":"QF_NIA"' "$ntmp/ti_b1.json" && grep -q '"cache_hit":true' "$ntmp/ti_b2.json" && grep -q '"cache_status":"up_to_date"' "$ntmp/ti_b2.json" && grep -q '"cache_valid":true' "$ntmp/ti_v1.json" && [ "$ti_stale_rc" -ne 0 ] && grep -q '"cache_status":"regenerated_spec_changed"' "$ntmp/ti_vstale.json" && grep -q '"cache_status":"regenerated_spec_changed"' "$ntmp/ti_b3.json" && grep -q '"re_synthesized":true' "$ntmp/ti_b3.json" && [ "$ti_spec2_out" = "65,49,36,42,42," ] && [ "$ti_tamper_rc" -ne 0 ] && grep -q '"cache_tampered":true' "$ntmp/ti_vtamper.json" && grep -q '"code":"V0005"' "$ntmp/ti_vtamper.json" && [ "$ti_bad_rc" -eq 3 ] && grep -q '"cache_status":"rejected_unprovable_spec"' "$ntmp/ti_bad.json" && grep -q '"code":"V0001"' "$ntmp/ti_bad.json"; then ok "Track I (#259, docs/19 §1): intent-as-source (.intent synthesis via QF_LIA/QF_NIA, zero-guard ELF, SHA-256 proven cache hit, re-synthesis on spec change, V0005 tamper & V0001 unprovable rejection)"; else bad "Track I (#259, docs/19 §1): intent-as-source pipeline"; cat "$ntmp/ti_ok.err" "$ntmp/ti_b1.json" "$ntmp/ti_b2.json" "$ntmp/ti_v1.json" "$ntmp/ti_vstale.json" "$ntmp/ti_b3.json" "$ntmp/ti_vtamper.json" "$ntmp/ti_bad.json" 2>/dev/null; fi
 else
     ok "no-toolchain ELF pipeline (skipped: not linux/x86_64, or under ASan)"
 fi
@@ -1627,6 +1654,28 @@ EOF
     _tl_x_out=$(../../lume prove --json "$_tl_x_tmp" 2>/dev/null || true)
     rm -f "$_tl_x_tmp"
     if printf '%s' "$_tl_x_out" | grep -q '"ok":true' && printf '%s' "$_tl_x_out" | grep -q '"name":"relu","kind":"contract","status":"proven"' && printf '%s' "$_tl_x_out" | grep -q '"name":"abs","kind":"contract","status":"proven"' && printf '%s' "$_tl_x_out" | grep -q '"name":"clamp","kind":"contract","status":"proven"' && printf '%s' "$_tl_x_out" | grep -q '"result":"67\\n51\\n4\\n1\\n3"'; then ok "track-L cross-platform (#257): non-polynomial symbolic autodiff (relu, sq, cube, abs, clamp, leaky_relu, quot, value_and_grad) + QF_LIA contract proof"; else bad "track-L cross-platform (#257): symbolic autodiff & QF_LIA proof"; printf '%s\n' "$_tl_x_out"; fi
+
+    _ti_x_d=$(mktemp -d)
+    cat > "$_ti_x_d/spec.intent" <<'EOF'
+@intent CrossPlatformTreasury
+@version 1
+pub fn safe_withdraw(bal: int, amt: int) -> int
+    requires bal >= amt
+    requires amt >= 0
+    ensures result == bal - amt and result >= 0
+    = _
+pub fn sq_dist(target: int, actual: int) -> int
+    ensures result == (target - actual) * (target - actual) and result >= 0
+    = _
+print safe_withdraw(100, 35)
+print sq_dist(10, 4)
+EOF
+    _ti_x_b1=$(../../lume intent build --json "$_ti_x_d/spec.intent" 2>/dev/null || true)
+    printf '\nprint 999\n' >>"$_ti_x_d/spec.intent.cache.src"
+    _ti_x_t_rc=0
+    _ti_x_vt=$(../../lume intent verify --json "$_ti_x_d/spec.intent" 2>/dev/null) || _ti_x_t_rc=$?
+    rm -rf "$_ti_x_d"
+    if printf '%s' "$_ti_x_b1" | grep -q '"ok":true' && printf '%s' "$_ti_x_b1" | grep -q '"cache_status":"regenerated_cache_missing"' && printf '%s' "$_ti_x_b1" | grep -q '"theory":"QF_NIA"' && printf '%s' "$_ti_x_b1" | grep -q '"result":"65\\n36"' && [ "$_ti_x_t_rc" -ne 0 ] && printf '%s' "$_ti_x_vt" | grep -q '"cache_tampered":true' && printf '%s' "$_ti_x_vt" | grep -q '"code":"V0005"'; then ok "Track I cross-platform (#259, docs/19 §1): .intent QF_LIA/QF_NIA synthesis, SHA-256 proven cache & V0005 tamper detection"; else bad "Track I cross-platform (#259, docs/19 §1)"; printf '%s\n' "$_ti_x_b1" "t_rc=$_ti_x_t_rc" "$_ti_x_vt"; fi
 
     if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
         _mac_d=$(mktemp -d)

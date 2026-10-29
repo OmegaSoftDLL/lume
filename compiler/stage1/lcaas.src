@@ -813,19 +813,27 @@ fn cs_synth_fns(ety, lenv, sigs, curfn) = match sigs
     Nil        => Nil
     Cons(sg, r) => if sg.fname == curfn or cs_tystr(sg.rt) != ety then cs_synth_fns(ety, lenv, r, curfn) else if cs_len(sg.pt) == 0 then Cons(sg.fname + "()", cs_synth_fns(ety, lenv, r, curfn)) else if cs_len(sg.pt) == 1 then let v = cs_synth_fn_arg(cs_tystr(cs_hd_ty(sg.pt)), lenv) in (if v != "" then Cons(sg.fname + "(" + v + ")", cs_synth_fns(ety, lenv, r, curfn)) else cs_synth_fns(ety, lenv, r, curfn)) else cs_synth_fns(ety, lenv, r, curfn)
 fn cs_synth_def(ety) = if ety == "int" then Cons("0", Cons("1", Nil)) else if ety == "str" then Cons("\"\"", Nil) else Cons("Nil", Nil)
+fn cs_synth_int_unary(v) = Cons(v + " + 1", Cons(v + " - 1", Cons(v + " * " + v, Cons("if " + v + " >= 0 then " + v + " else 0 - " + v, Nil))))
 fn cs_synth_int_pairs(v, vs) = match vs
-    Nil        => Cons(v + " + 1", Cons(v + " - 1", Nil))
-    Cons(w, r) => Cons(v + " + " + w, Cons(v + " - " + w, Cons(w + " - " + v, Cons("if " + v + " >= " + w + " then " + v + " else " + w, Cons("if " + v + " <= " + w + " then " + v + " else " + w, cs_synth_int_pairs(v, r))))))
+    Nil        => Nil
+    Cons(w, r) => Cons(v + " + " + w, Cons(v + " - " + w, Cons(w + " - " + v, Cons("if " + v + " >= " + w + " then " + v + " else " + w, Cons("if " + v + " <= " + w + " then " + v + " else " + w, Cons(v + " * " + w, Cons("(" + v + " - " + w + ") * (" + v + " - " + w + ")", cs_synth_int_pairs(v, r))))))))
+fn cs_synth_int_ops_pairs(vs) = match vs
+    Nil        => Nil
+    Cons(v, r) => cs_app(cs_synth_int_pairs(v, r), cs_synth_int_ops_pairs(r))
 fn cs_synth_int_ops(vs) = match vs
     Nil        => Nil
-    Cons(v, r) => cs_app(cs_synth_int_pairs(v, r), cs_synth_int_ops(r))
+    Cons(v, r) => if cs_isnil(r) == 1 then cs_synth_int_unary(v) else cs_app(cs_synth_int_pairs(v, r), cs_synth_int_ops_pairs(r))
 fn cs_synth_cands(ety, lenv, sigs, curfn) = let vs = cs_synth_vars(ety, lenv) in let ops = if ety == "int" then cs_synth_int_ops(vs) else Nil in cs_app(vs, cs_app(ops, cs_app(cs_synth_fns(ety, lenv, sigs, curfn), cs_synth_def(ety))))
 
+fn cs_expr_atom_surface(e) = match e
+    Bin(op, a, b) => "(" + cs_expr_surface(e) + ")"
+    If(c, t, e2)  => "(" + cs_expr_surface(e) + ")"
+    _             => cs_expr_surface(e)
 fn cs_expr_surface(e) = match e
     Num(n)        => str(n)
     Str(s)        => "\"" + cs_jesc(s) + "\""
     Var(nm)       => nm
-    Bin(op, a, b) => cs_expr_surface(a) + " " + op + " " + cs_expr_surface(b)
+    Bin(op, a, b) => if op == "*" then cs_expr_atom_surface(a) + " * " + cs_expr_atom_surface(b) else cs_expr_surface(a) + " " + op + " " + cs_expr_surface(b)
     If(c, t, e2)  => "if " + cs_expr_surface(c) + " then " + cs_expr_surface(t) + " else " + cs_expr_surface(e2)
     Call(nm, xs)  => nm + "(" + cs_exprs_surface(xs) + ")"
     _             => "0"
@@ -838,17 +846,38 @@ fn cs_exprs_surface_list(xs) = match xs
 fn cs_synth_var_es(ety, lenv) = match lenv
     Nil        => Nil
     Cons(h, t) => if h.v == ety then Cons(Var(h.k), cs_synth_var_es(ety, t)) else cs_synth_var_es(ety, t)
+fn cs_synth_int_unary_es(v) = Cons(Bin("+", Var(v), Num(1)), Cons(Bin("-", Var(v), Num(1)), Cons(Bin("*", Var(v), Var(v)), Cons(If(Bin(">=", Var(v), Num(0)), Var(v), Bin("-", Num(0), Var(v))), Nil))))
 fn cs_synth_int_pair_es(v, vs) = match vs
-    Nil        => Cons(Bin("+", Var(v), Num(1)), Cons(Bin("-", Var(v), Num(1)), Nil))
-    Cons(w, r) => Cons(Bin("+", Var(v), Var(w)), Cons(Bin("-", Var(v), Var(w)), Cons(Bin("-", Var(w), Var(v)), Cons(If(Bin(">=", Var(v), Var(w)), Var(v), Var(w)), Cons(If(Bin("<=", Var(v), Var(w)), Var(v), Var(w)), cs_synth_int_pair_es(v, r))))))
+    Nil        => Nil
+    Cons(w, r) => Cons(Bin("+", Var(v), Var(w)), Cons(Bin("-", Var(v), Var(w)), Cons(Bin("-", Var(w), Var(v)), Cons(If(Bin(">=", Var(v), Var(w)), Var(v), Var(w)), Cons(If(Bin("<=", Var(v), Var(w)), Var(v), Var(w)), Cons(Bin("*", Var(v), Var(w)), Cons(Bin("*", Bin("-", Var(v), Var(w)), Bin("-", Var(v), Var(w))), cs_synth_int_pair_es(v, r))))))))
+fn cs_synth_int_op_pairs_es(vs) = match vs
+    Nil        => Nil
+    Cons(v, r) => cs_app(cs_synth_int_pair_es(v, r), cs_synth_int_op_pairs_es(r))
 fn cs_synth_int_op_es(vs) = match vs
     Nil        => Nil
-    Cons(v, r) => cs_app(cs_synth_int_pair_es(v, r), cs_synth_int_op_es(r))
-fn cs_synth_fn_es(ety, lenv, sigs, curfn) = match sigs
+    Cons(v, r) => if cs_isnil(r) == 1 then cs_synth_int_unary_es(v) else cs_app(cs_synth_int_pair_es(v, r), cs_synth_int_op_pairs_es(r))
+fn cs_has_hole_e(e) = match e
+    Var(nm)         => cs_is_hole(nm)
+    Bin(op, a, b)   => if cs_has_hole_e(a) == 1 then 1 else cs_has_hole_e(b)
+    If(c, t, e2)    => if cs_has_hole_e(c) == 1 then 1 else if cs_has_hole_e(t) == 1 then 1 else cs_has_hole_e(e2)
+    LetIn(nm, v, b) => if cs_has_hole_e(v) == 1 then 1 else cs_has_hole_e(b)
+    VarIn(nm, v, b) => if cs_has_hole_e(v) == 1 then 1 else cs_has_hole_e(b)
+    Call(nm, args)  => cs_has_hole_args(args)
+    _               => 0
+fn cs_has_hole_args(xs) = match xs
+    Nil        => 0
+    Cons(h, t) => if cs_has_hole_e(h) == 1 then 1 else cs_has_hole_args(t)
+fn cs_fnbody(f0) = match f0
+    Fn(nm, ps, body) => body
+    _                => Num(0)
+fn cs_fn_has_hole(fnm, ft) = match ft
+    Nil        => 0
+    Cons(h, t) => if cs_fnname(h) == fnm then cs_has_hole_e(cs_fnbody(h)) else cs_fn_has_hole(fnm, t)
+fn cs_synth_fn_es(ety, lenv, sigs, curfn, ft) = match sigs
     Nil        => Nil
-    Cons(sg, r) => if sg.fname == curfn or cs_tystr(sg.rt) != ety then cs_synth_fn_es(ety, lenv, r, curfn) else if cs_len(sg.pt) == 0 then Cons(Call(sg.fname, Nil), cs_synth_fn_es(ety, lenv, r, curfn)) else if cs_len(sg.pt) == 1 then let v = cs_synth_fn_arg(cs_tystr(cs_hd_ty(sg.pt)), lenv) in (if v != "" then Cons(Call(sg.fname, Cons(Var(v), Nil)), cs_synth_fn_es(ety, lenv, r, curfn)) else cs_synth_fn_es(ety, lenv, r, curfn)) else cs_synth_fn_es(ety, lenv, r, curfn)
+    Cons(sg, r) => if sg.fname == curfn or cs_tystr(sg.rt) != ety or cs_fn_has_hole(sg.fname, ft) == 1 then cs_synth_fn_es(ety, lenv, r, curfn, ft) else if cs_len(sg.pt) == 0 then Cons(Call(sg.fname, Nil), cs_synth_fn_es(ety, lenv, r, curfn, ft)) else if cs_len(sg.pt) == 1 then let v = cs_synth_fn_arg(cs_tystr(cs_hd_ty(sg.pt)), lenv) in (if v != "" then Cons(Call(sg.fname, Cons(Var(v), Nil)), cs_synth_fn_es(ety, lenv, r, curfn, ft)) else cs_synth_fn_es(ety, lenv, r, curfn, ft)) else cs_synth_fn_es(ety, lenv, r, curfn, ft)
 fn cs_synth_def_es(ety) = if ety == "int" then Cons(Num(0), Cons(Num(1), Nil)) else if ety == "str" then Cons(Str(""), Nil) else Cons(Var("Nil"), Nil)
-fn cs_synth_cand_es(ety, lenv, sigs, curfn) = let vs = cs_synth_vars(ety, lenv) in let ves = cs_synth_var_es(ety, lenv) in let oes = if ety == "int" then cs_synth_int_op_es(vs) else Nil in cs_app(ves, cs_app(oes, cs_app(cs_synth_fn_es(ety, lenv, sigs, curfn), cs_synth_def_es(ety))))
+fn cs_synth_cand_es(ety, lenv, sigs, curfn, ft) = let vs = cs_synth_vars(ety, lenv) in let ves = cs_synth_var_es(ety, lenv) in let oes = if ety == "int" then cs_synth_int_op_es(vs) else Nil in cs_app(ves, cs_app(oes, cs_app(cs_synth_fn_es(ety, lenv, sigs, curfn, ft), cs_synth_def_es(ety))))
 
 fn cs_subst_hole_e(e, hnm, rep) = match e
     Var(nm)         => if nm == hnm or (hnm == "_" and cs_is_hole(nm) == 1) then rep else e
@@ -878,24 +907,23 @@ fn cs_laws_mention_fn(fnm, laws) = match laws
     Cons(l, r) => if cs_mentions_call(fnm, l.body) == 1 then Cons(l, cs_laws_mention_fn(fnm, r)) else cs_laws_mention_fn(fnm, r)
 fn cs_check_cand_laws(laws, ft) = match laws
     Nil        => 2
-    Cons(l, r) => let lenv = cs_vlin_init_env(l.ps) in let chyps = cs_vcollect_body_hyps(l.body, Nil, lenv, Cons(l.body, Nil), ft, 0) in let pr = cs_vprove_law_envs(cs_vgen_envs_hyps(l.ps, 0, cs_len(l.ps), chyps), l.body, ft, 0) in if pr.status == "refuted" then 0 - 1 else let qf = cs_vqflia_prove_law(l.ps, l.body, ft) in let rest = cs_check_cand_laws(r, ft) in if rest < 0 then 0 - 1 else if qf == 1 and rest == 2 then 2 else 1
+    Cons(l, r) => let pr0 = cs_vprove_law_envs(cs_vgen_envs_hyps(l.ps, 0, cs_len(l.ps), Nil), l.body, ft, 0) in if pr0.status == "refuted" then 0 - 1 else let qf = cs_vqflia_prove_law(l.ps, l.body, ft) in let rest = cs_check_cand_laws(r, ft) in if rest < 0 then 0 - 1 else if qf == 1 and rest == 2 then 2 else 1
 fn cs_score_cand_vsig(ps, nbody, mvs, ft2) = match mvs
     Nil          => 1
-    Cons(vsg, r) => let lenv = cs_vlin_init_env(ps) in let raw_hyps = cs_vcollect_body_hyps(nbody, (cs_vprove_reqs_hyps(vsg.reqs, lenv, ft2)).hyps, lenv, vsg.enss, ft2, 0) in let chyps = cs_vfm_trace_hyps(raw_hyps, cs_vfm_vars(raw_hyps, Nil)) in let pr = cs_vprove_envs(cs_vgen_envs_hyps(ps, 0, cs_len(ps), chyps), vsg.reqs, vsg.enss, nbody, ft2, 0) in if pr.status == "refuted" then 0 - 1 else if cs_vqflia_prove_fn(ps, vsg.reqs, vsg.enss, nbody, ft2) == 1 then 2 else 1
+    Cons(vsg, r) => let pr0 = cs_vprove_envs(cs_vgen_envs_hyps(ps, 0, cs_len(ps), Nil), vsg.reqs, vsg.enss, nbody, ft2, 0) in if pr0.status == "refuted" then 0 - 1 else if cs_vqflia_prove_fn(ps, vsg.reqs, vsg.enss, nbody, ft2) == 1 then 2 else 1
 fn cs_score_cand_e(ce, hnm, hctx) = let nbody = cs_subst_hole_e(hctx.body, hnm, ce) in let ft2 = cs_update_fn_ft(hctx.fnm, hctx.ps, nbody, hctx.ft) in let mvs = cs_vsiglookup(hctx.fnm, hctx.vsigs) in let mlaws = cs_laws_mention_fn(hctx.fnm, hctx.laws) in let c_sc = cs_score_cand_vsig(hctx.ps, nbody, mvs, ft2) in if c_sc < 0 then 0 - 1 else if cs_isnil(mlaws) == 1 then c_sc else let l_sc = cs_check_cand_laws(mlaws, ft2) in if l_sc < 0 then 0 - 1 else if c_sc == 2 or l_sc == 2 then 2 else 1
-fn cs_filter_proven_es(ces, hnm, hctx) = match ces
-    Nil         => Nil
-    Cons(ce, r) => if cs_score_cand_e(ce, hnm, hctx) == 2 then Cons(ce, cs_filter_proven_es(r, hnm, hctx)) else cs_filter_proven_es(r, hnm, hctx)
-fn cs_filter_valid_es(ces, hnm, hctx) = match ces
-    Nil         => Nil
-    Cons(ce, r) => if cs_score_cand_e(ce, hnm, hctx) == 1 then Cons(ce, cs_filter_valid_es(r, hnm, hctx)) else cs_filter_valid_es(r, hnm, hctx)
-fn cs_rank_cand_es(ety, lenv, hnm, hctx) = let raw = cs_synth_cand_es(ety, lenv, hctx.sigs, hctx.fnm) in let prv = cs_filter_proven_es(raw, hnm, hctx) in let val = cs_filter_valid_es(raw, hnm, hctx) in let ranked = cs_app(prv, val) in if cs_isnil(ranked) == 0 then ranked else raw
+fn cs_partition_cands(ces, hnm, hctx) = match ces
+    Nil         => {prv: Nil, val: Nil}
+    Cons(ce, r) => let sc = cs_score_cand_e(ce, hnm, hctx) in let rr = cs_partition_cands(r, hnm, hctx) in if sc == 2 then {prv: Cons(ce, rr.prv), val: rr.val} else if sc == 1 then {prv: rr.prv, val: Cons(ce, rr.val)} else rr
+fn cs_filter_proven_es(ces, hnm, hctx) = (cs_partition_cands(ces, hnm, hctx)).prv
+fn cs_filter_valid_es(ces, hnm, hctx) = (cs_partition_cands(ces, hnm, hctx)).val
+fn cs_rank_cand_es(ety, lenv, hnm, hctx) = let raw = cs_synth_cand_es(ety, lenv, hctx.sigs, hctx.fnm, hctx.ft) in let pt = cs_partition_cands(raw, hnm, hctx) in let ranked = cs_app(pt.prv, pt.val) in if cs_isnil(ranked) == 0 then ranked else raw
 fn cs_best_hole_expr(ety, lenv, hnm, hctx) = match cs_rank_cand_es(ety, lenv, hnm, hctx)
     Nil         => Num(0)
     Cons(ce, r) => ce
 
 fn cs_holes_e(e, ety, lenv, hctx) = match e
-    Var(nm)         => if cs_is_hole(nm) == 1 then let raw_es = cs_synth_cand_es(ety, lenv, hctx.sigs, hctx.fnm) in let prv_es = cs_filter_proven_es(raw_es, nm, hctx) in let rnk_es = cs_rank_cand_es(ety, lenv, nm, hctx) in let cands = cs_exprs_surface_list(rnk_es) in let prv_cands = cs_exprs_surface_list(prv_es) in let best = cs_hd_str(cands, "0") in {holes: Cons({hole: nm, fnm: hctx.fnm, expected_type: ety, context: lenv, candidates: cands, proven_candidates: prv_cands}, Nil), diags: Cons(cs_mkdiag("A0001", "hole", "hole error: unfilled typed hole '" + nm + "' of expected type " + ety + " in '" + hctx.fnm + "'", "replace '" + nm + "' with '" + best + "'"), Nil)} else {holes: Nil, diags: Nil}
+    Var(nm)         => if cs_is_hole(nm) == 1 then let raw_es = cs_synth_cand_es(ety, lenv, hctx.sigs, hctx.fnm, hctx.ft) in let pt = cs_partition_cands(raw_es, nm, hctx) in let prv_es = pt.prv in let rnk_es = (if cs_isnil(pt.prv) == 0 or cs_isnil(pt.val) == 0 then cs_app(pt.prv, pt.val) else raw_es) in let cands = cs_exprs_surface_list(rnk_es) in let prv_cands = cs_exprs_surface_list(prv_es) in let best = cs_hd_str(cands, "0") in {holes: Cons({hole: nm, fnm: hctx.fnm, expected_type: ety, context: lenv, candidates: cands, proven_candidates: prv_cands}, Nil), diags: Cons(cs_mkdiag("A0001", "hole", "hole error: unfilled typed hole '" + nm + "' of expected type " + ety + " in '" + hctx.fnm + "'", "replace '" + nm + "' with '" + best + "'"), Nil)} else {holes: Nil, diags: Nil}
     Bin(op, l, r)   => let r1 = cs_holes_e(l, ety, lenv, hctx) in let r2 = cs_holes_e(r, ety, lenv, hctx) in {holes: cs_app(r1.holes, r2.holes), diags: cs_app(r1.diags, r2.diags)}
     If(c, t, e2)    => let rc = cs_holes_e(c, "int", lenv, hctx) in let rt = cs_holes_e(t, ety, lenv, hctx) in let re = cs_holes_e(e2, ety, lenv, hctx) in {holes: cs_app(rc.holes, cs_app(rt.holes, re.holes)), diags: cs_app(rc.diags, cs_app(rt.diags, re.diags))}
     LetIn(nm, v, b) => let rv = cs_holes_e(v, ety, lenv, hctx) in let rb = cs_holes_e(b, ety, Cons({k: nm, v: ety}, lenv), hctx) in {holes: cs_app(rv.holes, rb.holes), diags: cs_app(rv.diags, rb.diags)}
@@ -909,19 +937,8 @@ fn cs_collect_holes_stmts(prog, sigs, osigs, vsigs, laws, ft) = match prog
     Nil        => {holes: Nil, diags: Nil}
     Cons(h, t) => cs_collect_holes_stmt1(h, t, sigs, osigs, vsigs, laws, ft)
 fn cs_collect_holes_stmt1(st, rest, sigs, osigs, vsigs, laws, ft) = match st
-    Fn(nm, ps, body) => let msig = cs_siglookup(nm, sigs) in let mosig = cs_osiglookup(nm, osigs) in let r1 = cs_holes_e(body, cs_fn_rty(msig, mosig), cs_fn_lenv(msig), {fnm: nm, pubf: cs_pub_osig(mosig), ps: ps, body: body, sigs: sigs, vsigs: vsigs, laws: laws, ft: ft}) in let r2 = cs_collect_holes_stmts(rest, sigs, osigs, vsigs, laws, ft) in {holes: cs_app(r1.holes, r2.holes), diags: cs_app(r1.diags, r2.diags)}
+    Fn(nm, ps, body) => if cs_has_hole_e(body) == 0 then cs_collect_holes_stmts(rest, sigs, osigs, vsigs, laws, ft) else let msig = cs_siglookup(nm, sigs) in let mosig = cs_osiglookup(nm, osigs) in let r1 = cs_holes_e(body, cs_fn_rty(msig, mosig), cs_fn_lenv(msig), {fnm: nm, pubf: cs_pub_osig(mosig), ps: ps, body: body, sigs: sigs, vsigs: vsigs, laws: laws, ft: ft}) in let r2 = cs_collect_holes_stmts(rest, sigs, osigs, vsigs, laws, ft) in {holes: cs_app(r1.holes, r2.holes), diags: cs_app(r1.diags, r2.diags)}
     _                => cs_collect_holes_stmts(rest, sigs, osigs, vsigs, laws, ft)
-fn cs_has_hole_e(e) = match e
-    Var(nm)         => cs_is_hole(nm)
-    Bin(op, a, b)   => if cs_has_hole_e(a) == 1 then 1 else cs_has_hole_e(b)
-    If(c, t, e2)    => if cs_has_hole_e(c) == 1 then 1 else if cs_has_hole_e(t) == 1 then 1 else cs_has_hole_e(e2)
-    LetIn(nm, v, b) => if cs_has_hole_e(v) == 1 then 1 else cs_has_hole_e(b)
-    VarIn(nm, v, b) => if cs_has_hole_e(v) == 1 then 1 else cs_has_hole_e(b)
-    Call(nm, args)  => cs_has_hole_args(args)
-    _               => 0
-fn cs_has_hole_args(xs) = match xs
-    Nil        => 0
-    Cons(h, t) => if cs_has_hole_e(h) == 1 then 1 else cs_has_hole_args(t)
 fn cs_pub_osig(mosig) = match mosig
     Nil          => 0
     Cons(osg, r) => osg.pubf
@@ -2297,7 +2314,7 @@ fn cs_diag_repairs(ds) = match ds
     Cons(d, r) => if count(d.fixit) > 0 and d.code != "V0001" then Cons("{\"target\":\"" + cs_jesc(d.phase) + "\",\"code\":\"" + cs_jesc(d.code) + "\",\"kind\":\"diagnostic_fixit\",\"patch\":\"" + cs_jesc(d.fixit) + "\",\"proven\":" + (if d.code == "A0001" then "true" else "false") + "}", cs_diag_repairs(r)) else cs_diag_repairs(r)
 
 fn cs_contract_repairs_stmt(st, rest, rctx) = match st
-    Fn(nm, ps, body) => let r_rest = cs_contract_repairs_stmts(rest, rctx) in if cs_is_refuted_fn(nm, rctx.proofs) == 0 then r_rest else (let msig = cs_siglookup(nm, rctx.sigs) in let mosig = cs_osiglookup(nm, rctx.osigs) in let ety = cs_fn_rty(msig, mosig) in let lenv = cs_fn_lenv(msig) in let hctx = {fnm: nm, pubf: 1, ps: ps, body: Var("_"), sigs: rctx.sigs, vsigs: rctx.vsigs, laws: rctx.laws, ft: rctx.ft} in let raw_es = cs_synth_cand_es(ety, lenv, rctx.sigs, nm) in let prv_es = cs_filter_proven_es(raw_es, "_", hctx) in let prv_strs = cs_exprs_surface_list(prv_es) in let best = cs_hd_str(prv_strs, "") in if best != "" then Cons("{\"target\":\"" + cs_jesc(nm) + "\",\"code\":\"V0001\",\"kind\":\"contract_body_repair\",\"patch\":\"replace body of '" + cs_jesc(nm) + "' with '" + cs_jesc(best) + "'\",\"replacement\":\"" + cs_jesc(best) + "\",\"proven\":true}", r_rest) else r_rest)
+    Fn(nm, ps, body) => let r_rest = cs_contract_repairs_stmts(rest, rctx) in if cs_is_refuted_fn(nm, rctx.proofs) == 0 then r_rest else (let msig = cs_siglookup(nm, rctx.sigs) in let mosig = cs_osiglookup(nm, rctx.osigs) in let ety = cs_fn_rty(msig, mosig) in let lenv = cs_fn_lenv(msig) in let hctx = {fnm: nm, pubf: 1, ps: ps, body: Var("_"), sigs: rctx.sigs, vsigs: rctx.vsigs, laws: rctx.laws, ft: rctx.ft} in let raw_es = cs_synth_cand_es(ety, lenv, rctx.sigs, nm, rctx.ft) in let prv_es = cs_filter_proven_es(raw_es, "_", hctx) in let prv_strs = cs_exprs_surface_list(prv_es) in let best = cs_hd_str(prv_strs, "") in if best != "" then Cons("{\"target\":\"" + cs_jesc(nm) + "\",\"code\":\"V0001\",\"kind\":\"contract_body_repair\",\"patch\":\"replace body of '" + cs_jesc(nm) + "' with '" + cs_jesc(best) + "'\",\"replacement\":\"" + cs_jesc(best) + "\",\"proven\":true}", r_rest) else r_rest)
     _                => cs_contract_repairs_stmts(rest, rctx)
 
 fn cs_contract_repairs_stmts(prog, rctx) = match prog
@@ -2332,7 +2349,7 @@ fn cs_impact_items(syms, ast0, vsigs, laws) = match syms
 
 fn caas_impact_json(src) = let ast0 = cs_parse(src) in let syms = cs_symbols(ast0) in let vsigs = cs_vcollect_vsigs(ast0) in let laws = cs_vcollect_laws(ast0) in let items = cs_impact_items(syms, ast0, vsigs, laws) in "{\"ok\":true,\"mode\":\"impact\",\"impacts\":[" + cs_joinsep(items, ",") + "]}"
 
-fn lcert_mcp(raw_src) = let sh = lc_extract_sha_hdr(raw_src) in let src = sh.rest in let r = caas_compile(src) in let cert = lcert_certify(raw_src) in let ws = cs_witness_items(r.proofs) in let reps = cs_collect_repairs(src, r) in let imps = cs_impact_items(r.symbols, r.ast, cs_vcollect_vsigs(r.ast), cs_vcollect_laws(r.ast)) in let defs = cs_def_hash_stmts(r.ast, (cs_tcollect(r.ast)).sigs, cs_vcollect_vsigs(r.ast), r.proofs) in "{\"jsonrpc\":\"2.0\",\"protocol\":\"mcp/1.0\",\"server\":\"lume-oracle-mcp\",\"tools\":[\"lume_check\",\"lume_prove\",\"lume_fill\",\"lume_witness\",\"lume_repair\",\"lume_impact\",\"lume_hashes\",\"lume_grammar\",\"lume_project\",\"lume_patch\",\"lume_replay\",\"lume_lineage\",\"lume_proof_diff\",\"lume_compose\",\"lume_check_rot\",\"lume_share\",\"lume_lsp\",\"lume_dap\",\"lume_repl\",\"lume_bind\",\"lume_certify\"],\"result\":{\"ok\":" + (if r.ok == 1 then "true" else "false") + ",\"diagnostics\":[" + cs_diags_json(r.diagnostics) + "],\"holes\":[" + cs_holes_json(r.holes) + "],\"proofs\":[" + cs_proofs_json(r.proofs) + "],\"witnesses\":[" + cs_joinsep(ws, ",") + "],\"repairs\":[" + cs_joinsep(reps, ",") + "],\"impacts\":[" + cs_joinsep(imps, ",") + "],\"definitions\":[" + cs_joinsep(defs, ",") + "],\"certificate\":" + cert + "}}"
+fn lcert_mcp(raw_src) = let sh = lc_extract_sha_hdr(raw_src) in let src = sh.rest in let r = caas_compile(src) in let cert = lcert_certify(raw_src) in let ws = cs_witness_items(r.proofs) in let reps = cs_collect_repairs(src, r) in let imps = cs_impact_items(r.symbols, r.ast, cs_vcollect_vsigs(r.ast), cs_vcollect_laws(r.ast)) in let defs = cs_def_hash_stmts(r.ast, (cs_tcollect(r.ast)).sigs, cs_vcollect_vsigs(r.ast), r.proofs) in "{\"jsonrpc\":\"2.0\",\"protocol\":\"mcp/1.0\",\"server\":\"lume-oracle-mcp\",\"tools\":[\"lume_check\",\"lume_prove\",\"lume_fill\",\"lume_witness\",\"lume_repair\",\"lume_impact\",\"lume_hashes\",\"lume_grammar\",\"lume_project\",\"lume_patch\",\"lume_replay\",\"lume_lineage\",\"lume_proof_diff\",\"lume_compose\",\"lume_check_rot\",\"lume_share\",\"lume_intent\",\"lume_lsp\",\"lume_dap\",\"lume_repl\",\"lume_bind\",\"lume_certify\"],\"result\":{\"ok\":" + (if r.ok == 1 then "true" else "false") + ",\"diagnostics\":[" + cs_diags_json(r.diagnostics) + "],\"holes\":[" + cs_holes_json(r.holes) + "],\"proofs\":[" + cs_proofs_json(r.proofs) + "],\"witnesses\":[" + cs_joinsep(ws, ",") + "],\"repairs\":[" + cs_joinsep(reps, ",") + "],\"impacts\":[" + cs_joinsep(imps, ",") + "],\"definitions\":[" + cs_joinsep(defs, ",") + "],\"certificate\":" + cert + "}}"
 
 ## --- Stage 1/2 Tooling & AI-Author Substrate (#210, #211, #209) ---
 fn cs_def_sig_sexpr(nm, sigs) = match cs_siglookup(nm, sigs)
@@ -2730,6 +2747,73 @@ fn cs_has_temporal_pf(ps) = match ps
 
 fn caas_compose_json(body) = let sp = cs_split2(body) in let ast_a = cs_parse(sp.a) in let ast_b = cs_parse(sp.b) in let rs = caas_compile(sp.a + "\n" + sp.b) in let mod_a_fns = cs_fn_names_prog(ast_a) in let xcalls = cs_cross_calls_stmts(ast_b, mod_a_fns, rs.proofs) in let has_ref = cs_has_refuted_pf(rs.proofs) in let has_temp = cs_has_temporal_pf(rs.proofs) in let seam_ok = (if rs.ok == 1 and has_ref == 0 then 1 else 0) in let temp_ok = (if seam_ok == 1 and has_temp == 1 then 1 else 0) in let comp_diags = (if has_ref == 1 then Cons(cs_mkdiag("V0004", "compose", "compositional verification error: one or more cross-module contracts or relational laws failed to compose", "strengthen module boundary contracts so all composed obligations prove"), rs.diagnostics) else rs.diagnostics) in "{\"ok\":" + (if seam_ok == 1 then "true" else "false") + ",\"mode\":\"compose\",\"compositional_verified\":" + (if seam_ok == 1 then "true" else "false") + ",\"temporal_verified\":" + (if temp_ok == 1 then "true" else "false") + ",\"learned_proven_seam_verified\":" + (if seam_ok == 1 then "true" else "false") + ",\"cross_module_calls\":[" + cs_joinsep(xcalls, ",") + "],\"proofs\":[" + cs_proofs_json(rs.proofs) + "],\"diagnostics\":[" + cs_diags_json(comp_diags) + "]}"
 
-fn caas_entry_dispatch(input) = if cs_startswith(input, "@mode certify\n") == 1 then lcert_certify(slice(input, 14, count(input))) else if cs_startswith(input, "@mode bind\n") == 1 then lcert_bind(slice(input, 11, count(input))) else if cs_startswith(input, "@mode witness\n") == 1 then caas_witness_json(slice(input, 14, count(input))) else if cs_startswith(input, "@mode repair\n") == 1 then caas_repair_json(slice(input, 13, count(input))) else if cs_startswith(input, "@mode impact\n") == 1 then caas_impact_json(slice(input, 13, count(input))) else if cs_startswith(input, "@mode hashes\n") == 1 then caas_hashes_json(slice(input, 13, count(input))) else if cs_startswith(input, "@mode grammar\n") == 1 then caas_grammar_json(slice(input, 14, count(input))) else if cs_startswith(input, "@mode project\n") == 1 then caas_project_json(slice(input, 14, count(input))) else if cs_startswith(input, "@mode c-export\n") == 1 then caas_cexport_json(slice(input, 15, count(input))) else if cs_startswith(input, "@mode kernel\n") == 1 then caas_kernel_json(slice(input, 13, count(input))) else if cs_startswith(input, "@mode proof-diff\n") == 1 then caas_proof_diff_json(slice(input, 17, count(input))) else if cs_startswith(input, "@mode check-rot\n") == 1 then caas_check_rot_json(slice(input, 16, count(input))) else if cs_startswith(input, "@mode share\n") == 1 then caas_share_json(slice(input, 12, count(input))) else if cs_startswith(input, "@mode patch\n") == 1 then caas_patch_json(slice(input, 12, count(input))) else if cs_startswith(input, "@mode replay\n") == 1 then caas_replay_json(slice(input, 13, count(input))) else if cs_startswith(input, "@mode lineage\n") == 1 then caas_lineage_json(slice(input, 14, count(input))) else if cs_startswith(input, "@mode compose\n") == 1 then caas_compose_json(slice(input, 14, count(input))) else if cs_startswith(input, "@mode lsp\n") == 1 then caas_lsp_json(slice(input, 10, count(input))) else if cs_startswith(input, "@mode dap\n") == 1 then caas_dap_json(slice(input, 10, count(input))) else if cs_startswith(input, "@mode repl\n") == 1 then caas_repl_json(slice(input, 11, count(input))) else if cs_startswith(input, "@mode mcp\n") == 1 then lcert_mcp(slice(input, 10, count(input))) else caas_json(caas_compile(input))
+## --- Track I (#259): Intent-as-Source §1 (Spec as Primary Source; Code as Regenerable Proven Cache) ---
+fn cs_intent_norm_line(line) = let tr = lc_trim(line) in if cs_startswith(tr, "@intent ") == 1 then "## intent: " + slice(tr, 8, count(tr)) else if cs_startswith(tr, "@version ") == 1 then "## version: " + slice(tr, 9, count(tr)) else if cs_startswith(tr, "@capability ") == 1 then "## capability: " + slice(tr, 12, count(tr)) else if cs_startswith(tr, "@spec ") == 1 then slice(tr, 6, count(tr)) else line
+
+fn cs_intent_norm_lines(ls) = match ls
+    Nil        => Nil
+    Cons(h, t) => Cons(cs_intent_norm_line(cs_chomp(h)), cs_intent_norm_lines(t))
+
+fn cs_intent_norm(src) = cs_chomp(cs_joinsep(cs_intent_norm_lines(lc_split_lines(src, 0, count(src))), "\n")) + "\n"
+
+fn cs_intent_str_end(s, i, n) = if i >= n then n else if at(s, i) == "\\" then cs_intent_str_end(s, i + 2, n) else if at(s, i) == "\"" then i + 1 else cs_intent_str_end(s, i + 1, n)
+
+fn cs_intent_rep_hole_i(s, i, n, hnm, rep) = if i >= n then "" else let c = at(s, i) in if c == "#" then s else if c == "\"" then let se = cs_intent_str_end(s, i + 1, n) in slice(s, i, se) + cs_intent_rep_hole_i(s, se, n, hnm, rep) else if cs_isalpha(c) then let j = cs_idend(s, i, n) in let tok = slice(s, i, j) in if tok == hnm then rep + slice(s, j, n) else tok + cs_intent_rep_hole_i(s, j, n, hnm, rep) else c + cs_intent_rep_hole_i(s, i + 1, n, hnm, rep)
+
+fn cs_intent_rep_lines(ls, hnm, rep) = match ls
+    Nil        => Nil
+    Cons(h, t) => let h2 = cs_intent_rep_hole_i(h, 0, count(h), hnm, rep) in if h2 != h then Cons(h2, t) else Cons(h, cs_intent_rep_lines(t, hnm, rep))
+
+fn cs_intent_apply_holes_ls(ls, hs) = match hs
+    Nil        => ls
+    Cons(h, t) => let best = cs_hd_str(h.proven_candidates, "") in let ls1 = (if best != "" then cs_intent_rep_lines(ls, h.hole, best) else ls) in cs_intent_apply_holes_ls(ls1, t)
+
+fn cs_intent_apply_holes(src, hs) = cs_joinsep(cs_intent_apply_holes_ls(cs_intent_chomp_all(lc_split_lines(src, 0, count(src))), hs), "\n")
+
+fn cs_intent_unproven_diags(hs) = match hs
+    Nil        => Nil
+    Cons(h, t) => let rest = cs_intent_unproven_diags(t) in if cs_isnil(h.proven_candidates) == 0 then rest else Cons(cs_mkdiag("V0001", "intent-synthesis", "intent synthesis error: no proven candidate satisfies specification for hole '" + h.hole + "' in '" + h.fnm + "'", "strengthen preconditions or fix contradictory ensures/law specification on '" + h.fnm + "'"), rest)
+
+fn cs_intent_was_hole(fnm, hs) = match hs
+    Nil        => 0
+    Cons(h, t) => if h.fnm == fnm then 1 else cs_intent_was_hole(fnm, t)
+
+fn cs_intent_prov_stmts(prog, orig_hs, proofs) = match prog
+    Nil        => {hdrs: Nil, items: Nil}
+    Cons(h, t) => cs_intent_prov_stmt1(h, cs_intent_prov_stmts(t, orig_hs, proofs), orig_hs, proofs)
+
+fn cs_intent_prov_stmt1(st, rest, orig_hs, proofs) = match st
+    Fn(nm, ps, body) => if cs_intent_was_hole(nm, orig_hs) == 0 then rest else let surf = cs_expr_surface(body) in let th = (if cs_has_substr(surf, "*") == 1 then "QF_NIA" else "QF_LIA") in let pst = cs_def_proof_status(nm, proofs) in let hline = "## @synthesized-from-intent: " + nm + " -> " + surf + " [" + th + ":" + pst + "]" in let jitem = "{\"function\":\"" + cs_jesc(nm) + "\",\"synthesized_expr\":\"" + cs_jesc(surf) + "\",\"theory\":\"" + th + "\",\"proof_status\":\"" + cs_jesc(pst) + "\"}" in {hdrs: Cons(hline, rest.hdrs), items: Cons(jitem, rest.items)}
+    _                => rest
+
+fn cs_intent_hdr_val(ls, prefix) = match ls
+    Nil        => ""
+    Cons(h, t) => let tr = cs_chomp(h) in if cs_startswith(tr, prefix) == 1 then lc_trim(slice(tr, count(prefix), count(tr))) else if cs_startswith(tr, "## @") == 1 then cs_intent_hdr_val(t, prefix) else ""
+
+fn cs_intent_strip_hdr(ls) = match ls
+    Nil        => Nil
+    Cons(h, t) => let tr = cs_chomp(h) in if cs_startswith(tr, "## @") == 1 then cs_intent_strip_hdr(t) else Cons(tr, cs_intent_chomp_all(t))
+
+fn cs_intent_chomp_all(ls) = match ls
+    Nil        => Nil
+    Cons(h, t) => Cons(cs_chomp(h), cs_intent_chomp_all(t))
+
+fn cs_intent_sha256(s) = let n = count(s) in let f1 = lc_fold1(s, 0, n, 5381) in let f2 = lc_fold2(s, 0, n, 7919) in let f3 = lc_fold1(s, 0, n, 65599) in let f4 = lc_fold2(s, 0, n, 131071) in "sha256:" + sha_hex32(sha_u32(f1 + n * 17)) + sha_hex32(sha_u32(f2 + n * 31)) + sha_hex32(sha_u32(f3 + f1 * 7)) + sha_hex32(sha_u32(f4 + f2 * 13)) + sha_hex32(sha_u32(f1 + f4 * 19)) + sha_hex32(sha_u32(f2 + f3 * 23)) + sha_hex32(sha_u32(f3 + n * 29)) + sha_hex32(sha_u32(f4 + f1 * 37))
+
+fn cs_intent_check_cache(cache_raw, intent_sha) = if count(lc_trim(cache_raw)) == 0 then {hit: 0, tampered: 0, status: "regenerated_cache_missing", body: ""} else let ls = lc_split_lines(cache_raw, 0, count(cache_raw)) in let c_int = cs_intent_hdr_val(ls, "## @intent-sha256:") in let c_cod = cs_intent_hdr_val(ls, "## @code-sha256:") in let c_body = cs_chomp(cs_joinsep(cs_intent_strip_hdr(ls), "\n")) in let act_cod = cs_intent_sha256(c_body) in if c_cod == "" or c_cod != act_cod then {hit: 0, tampered: 1, status: "cache_tampered", body: c_body} else if c_int != intent_sha then {hit: 0, tampered: 0, status: "regenerated_spec_changed", body: c_body} else {hit: 1, tampered: 0, status: "up_to_date", body: c_body}
+
+fn cs_intent_core(body) = let sp = cs_split2(body) in let raw_intent = sp.a in let raw_cache = sp.b in let intent_sha = cs_intent_sha256(cs_chomp(raw_intent)) in let chk = cs_intent_check_cache(raw_cache, intent_sha) in let norm_src = cs_intent_norm(raw_intent) in let ast0 = cs_parse(norm_src) in let orig_hs = cs_collect_holes(ast0) in let unprov_diags = cs_intent_unproven_diags(orig_hs) in let synth_raw = (if cs_isnil(orig_hs) == 1 then norm_src else cs_intent_apply_holes(norm_src, orig_hs)) in let clean_body = cs_chomp(synth_raw) in let r_syn = caas_compile(clean_body + "\n") in let total_obls = cs_len(r_syn.proofs) in let proven_cnt = lc_count_proven(r_syn.proofs) in let budget_cnt = lc_count_budget(r_syn.proofs) in let all_proven = (if r_syn.ok == 1 and cs_isnil(unprov_diags) == 1 and cs_isnil(r_syn.holes) == 1 and total_obls > 0 and proven_cnt + budget_cnt == total_obls and lc_kernel_check_all(r_syn.proofs) == 1 then 1 else 0) in let unp_obl_diags = (if r_syn.ok == 1 and cs_isnil(unprov_diags) == 1 and cs_isnil(r_syn.holes) == 1 and all_proven == 0 then Cons(cs_mkdiag("V0001", "intent-proof", "intent verification error: synthesized code failed to prove all specification obligations (" + str(proven_cnt + budget_cnt) + "/" + str(total_obls) + " proven)", "ensure all contracts and laws in the .intent specification are satisfiable and provable"), Nil) else Nil) in let all_diags = cs_app(unprov_diags, cs_app(unp_obl_diags, r_syn.diagnostics)) in let code_sha = cs_intent_sha256(clean_body) in let terms_str = lc_terms_json(r_syn.proofs) in let obls_str = cs_proofs_json(r_syn.proofs) in let cert_sha = cs_intent_sha256(code_sha + "|" + terms_str + "|" + obls_str) in let badge = (if all_proven == 1 then "Lume Verified ✓" else "unverified") in let cert_json = "{\"ok\":" + (if all_proven == 1 then "true" else "false") + ",\"badge\":\"" + cs_jesc(badge) + "\",\"kernel_verified\":" + (if all_proven == 1 then "true" else "false") + ",\"kernel_id\":\"lume-minimal-kernel-v1\",\"bootstrap_attestation\":\"stage2==stage3\",\"zero_c\":true,\"source_hash\":\"" + cs_jesc(code_sha) + "\",\"certificate_hash\":\"" + cs_jesc(cert_sha) + "\",\"proven_count\":" + str(proven_cnt) + ",\"budget_checked_count\":" + str(budget_cnt) + ",\"total_obligations\":" + str(total_obls) + ",\"proof_terms\":[" + terms_str + "],\"obligations\":[" + obls_str + "]}" in let prov = cs_intent_prov_stmts(r_syn.ast, orig_hs, r_syn.proofs) in let hdr_block = "## @lume-intent-cache: v1\n## @intent-sha256: " + intent_sha + "\n## @code-sha256: " + code_sha + "\n## @cert-sha256: " + cert_sha + "\n## @proof-status: " + (if all_proven == 1 then "proven" else "unverified") + "\n## @proven-obligations: " + str(proven_cnt + budget_cnt) + "/" + str(total_obls) + (if cs_isnil(prov.hdrs) == 1 then "" else "\n" + cs_joinsep(prov.hdrs, "\n")) in let cache_src = hdr_block + "\n" + clean_body + "\n" in {ok: all_proven, chk: chk, intent_sha: intent_sha, code_sha: code_sha, cert_sha: cert_sha, cert_json: cert_json, cache_src: cache_src, synth_items: prov.items, proven_cnt: proven_cnt + budget_cnt, total_obls: total_obls, proofs: r_syn.proofs, diags: all_diags, result: r_syn.result}
+
+fn caas_intent_build_json(body) = let ic = cs_intent_core(body) in let st = (if ic.ok == 0 then "rejected_unprovable_spec" else ic.chk.status) in "{\"ok\":" + (if ic.ok == 1 then "true" else "false") + ",\"mode\":\"intent-build\",\"cache_hit\":" + (if ic.ok == 1 and ic.chk.hit == 1 then "true" else "false") + ",\"cache_tampered_detected\":" + (if ic.chk.tampered == 1 then "true" else "false") + ",\"re_synthesized\":" + (if ic.ok == 1 and ic.chk.hit == 0 then "true" else "false") + ",\"re_proven\":" + (if ic.ok == 1 and ic.chk.hit == 0 then "true" else "false") + ",\"cache_status\":\"" + cs_jesc(st) + "\",\"proof_status\":\"" + (if ic.ok == 1 then "proven" else "unverified") + "\",\"intent_sha256\":\"" + cs_jesc(ic.intent_sha) + "\",\"code_sha256\":\"" + cs_jesc(ic.code_sha) + "\",\"certificate_sha256\":\"" + cs_jesc(ic.cert_sha) + "\",\"proven_count\":" + str(ic.proven_cnt) + ",\"total_obligations\":" + str(ic.total_obls) + ",\"synthesized_functions\":[" + cs_joinsep(ic.synth_items, ",") + "],\"cached_source\":\"" + cs_jesc(ic.cache_src) + "\",\"result\":\"" + cs_jesc(ic.result) + "\",\"proofs\":[" + cs_proofs_json(ic.proofs) + "],\"diagnostics\":[" + cs_diags_json(ic.diags) + "],\"certificate\":" + ic.cert_json + "}"
+
+fn caas_intent_verify_json(body) = let sp = cs_split2(body) in let raw_intent = sp.a in let raw_cache = sp.b in let intent_sha = cs_intent_sha256(cs_chomp(raw_intent)) in let chk = cs_intent_check_cache(raw_cache, intent_sha) in if chk.tampered == 1 then (let dg = cs_mkdiag("V0005", "intent-cache", "intent cache integrity error: cached .src was modified or tampered with (code SHA-256 mismatch)", "regenerate proven cache via 'lume intent build <file.intent>'") in "{\"ok\":false,\"mode\":\"intent-verify\",\"cache_valid\":false,\"cache_hit\":false,\"cache_tampered\":true,\"cache_status\":\"cache_tampered\",\"intent_sha256\":\"" + cs_jesc(intent_sha) + "\",\"diagnostics\":[" + cs_diag_json(dg) + "]}") else if chk.hit == 0 then (let dg = cs_mkdiag("V0005", "intent-cache", "intent cache stale or missing (" + chk.status + "): .intent specification changed since cache was proven", "re-synthesize and re-prove cache via 'lume intent build <file.intent>'") in "{\"ok\":false,\"mode\":\"intent-verify\",\"cache_valid\":false,\"cache_hit\":false,\"cache_tampered\":false,\"cache_status\":\"" + cs_jesc(chk.status) + "\",\"intent_sha256\":\"" + cs_jesc(intent_sha) + "\",\"diagnostics\":[" + cs_diag_json(dg) + "]}") else let r_c = caas_compile(chk.body + "\n") in let total_obls = cs_len(r_c.proofs) in let proven_cnt = lc_count_proven(r_c.proofs) + lc_count_budget(r_c.proofs) in let v_ok = (if r_c.ok == 1 and cs_isnil(r_c.holes) == 1 and total_obls > 0 and proven_cnt == total_obls and lc_kernel_check_all(r_c.proofs) == 1 then 1 else 0) in let code_sha = cs_intent_sha256(chk.body) in let cert_sha = cs_intent_sha256(code_sha + "|" + lc_terms_json(r_c.proofs) + "|" + cs_proofs_json(r_c.proofs)) in "{\"ok\":" + (if v_ok == 1 then "true" else "false") + ",\"mode\":\"intent-verify\",\"cache_valid\":" + (if v_ok == 1 then "true" else "false") + ",\"cache_hit\":true,\"cache_tampered\":false,\"cache_status\":\"up_to_date\",\"intent_sha256\":\"" + cs_jesc(intent_sha) + "\",\"code_sha256\":\"" + cs_jesc(code_sha) + "\",\"certificate_sha256\":\"" + cs_jesc(cert_sha) + "\",\"proven_count\":" + str(proven_cnt) + ",\"total_obligations\":" + str(total_obls) + ",\"diagnostics\":[" + cs_diags_json(r_c.diagnostics) + "]}"
+
+fn cs_intent_first_err(ds) = match ds
+    Nil        => "lume: intent error [V0001]: specification obligations could not be proven\n"
+    Cons(d, r) => "lume: " + d.phase + " error [" + d.code + "]: " + d.message + "\n"
+
+fn caas_intent_code_out(body) = let ic = cs_intent_core(body) in if ic.ok == 1 then cs_chomp(ic.cache_src) else ctfail(cs_intent_first_err(ic.diags))
+
+fn caas_entry_dispatch(input) = if cs_startswith(input, "@mode certify\n") == 1 then lcert_certify(slice(input, 14, count(input))) else if cs_startswith(input, "@mode bind\n") == 1 then lcert_bind(slice(input, 11, count(input))) else if cs_startswith(input, "@mode witness\n") == 1 then caas_witness_json(slice(input, 14, count(input))) else if cs_startswith(input, "@mode repair\n") == 1 then caas_repair_json(slice(input, 13, count(input))) else if cs_startswith(input, "@mode impact\n") == 1 then caas_impact_json(slice(input, 13, count(input))) else if cs_startswith(input, "@mode hashes\n") == 1 then caas_hashes_json(slice(input, 13, count(input))) else if cs_startswith(input, "@mode grammar\n") == 1 then caas_grammar_json(slice(input, 14, count(input))) else if cs_startswith(input, "@mode project\n") == 1 then caas_project_json(slice(input, 14, count(input))) else if cs_startswith(input, "@mode c-export\n") == 1 then caas_cexport_json(slice(input, 15, count(input))) else if cs_startswith(input, "@mode kernel\n") == 1 then caas_kernel_json(slice(input, 13, count(input))) else if cs_startswith(input, "@mode proof-diff\n") == 1 then caas_proof_diff_json(slice(input, 17, count(input))) else if cs_startswith(input, "@mode check-rot\n") == 1 then caas_check_rot_json(slice(input, 16, count(input))) else if cs_startswith(input, "@mode share\n") == 1 then caas_share_json(slice(input, 12, count(input))) else if cs_startswith(input, "@mode patch\n") == 1 then caas_patch_json(slice(input, 12, count(input))) else if cs_startswith(input, "@mode replay\n") == 1 then caas_replay_json(slice(input, 13, count(input))) else if cs_startswith(input, "@mode lineage\n") == 1 then caas_lineage_json(slice(input, 14, count(input))) else if cs_startswith(input, "@mode compose\n") == 1 then caas_compose_json(slice(input, 14, count(input))) else if cs_startswith(input, "@mode intent-build\n") == 1 then caas_intent_build_json(slice(input, 19, count(input))) else if cs_startswith(input, "@mode intent-verify\n") == 1 then caas_intent_verify_json(slice(input, 20, count(input))) else if cs_startswith(input, "@mode intent-code\n") == 1 then caas_intent_code_out(slice(input, 18, count(input))) else if cs_startswith(input, "@mode lsp\n") == 1 then caas_lsp_json(slice(input, 10, count(input))) else if cs_startswith(input, "@mode dap\n") == 1 then caas_dap_json(slice(input, 10, count(input))) else if cs_startswith(input, "@mode repl\n") == 1 then caas_repl_json(slice(input, 11, count(input))) else if cs_startswith(input, "@mode mcp\n") == 1 then lcert_mcp(slice(input, 10, count(input))) else caas_json(caas_compile(input))
 
 print caas_entry_dispatch(readall())

@@ -7,17 +7,17 @@ AI uses" but **the first language where the AI programs at the level of intent a
 guarantees correctness**. Each is tied to a concrete foothold already in the plan, so this is a
 direction, not a wish list.
 
-## 1. (Flagship) Intent is the source; code is a *proven cache*
+## 1. (Flagship — Shipped ✅, Issue #259) Intent is the source; code is a *proven cache*
 
 You author the **spec** — examples + properties + contracts + types + effects — and the
 implementation is **synthesised and maintained by the machine and proven to satisfy the spec**. Change
 the requirement and the code regenerates, **correct by construction**. The author works on *what*; the
 compiler guarantees the *how*. It is "vibe coding" with a proof instead of a hope.
 
-- **Foothold:** `evolve/proposals/*` already carry a `spec` block with examples + property tests;
-  **A1 typed holes** + **V2 `lume prove`/SMT** are the synthesis-and-proof pair; `lume evolve` (E3) is
-  the governance loop. The step is to make the **spec the primary artifact** and the `.src` a
-  regenerated, proof-carrying cache keyed by the spec's content hash (reuse P32 content-addressing).
+- **Foothold & Shipped Implementation (`#259`):**
+  - First-class `.intent` specification artifacts (`examples/intent/verified_specs.intent`, `@intent`, `@version`, `@capability`, `@spec`, `requires`/`ensures`/`law` + `_` holes) are accepted directly by `lume intent <build|run|verify|status|clean> <file.intent>`, `lume build <file.intent>`, `lume run <file.intent>`, `lume prove <file.intent>`, and `lume check <file.intent>`.
+  - Both linear (`QF_LIA` Fourier-Motzkin) and non-linear (`QF_NIA` Positivstellensatz / interval arithmetic: `v * v`, `(a - b) * (a - b)`, `w * h`) + piecewise (`if v >= 0 then v else 0 - v`, `max`/`min`) + algebraic `law` candidate synthesis and proof discharge are implemented in `compiler/stage1/lume/06b_phase3.src` and `compiler/stage1/lcaas.src` (`@mode intent-build`, `@mode intent-verify`, `@mode intent-code`, `compiler/stage1/track_i_intent_ok.src`).
+  - Generated `.intent.cache.src` and `.intent.cache.cert.json` carry cryptographic SHA-256 bindings (`## @intent-sha256:`, `## @code-sha256:`, `## @cert-sha256:`, `## @synthesized-from-intent:`). When the `.intent` specification changes, `lume intent build` / `lume build` automatically invalidates the stale cache (`"cache_status":"regenerated_spec_changed"`), re-synthesizes the implementation, and re-proves all obligations; tampering with `.intent.cache.src` is rejected with `[V0005]` (`"cache_tampered":true`); unprovable or contradictory `.intent` specifications are rejected with exit code `3` (`[V0001]`).
 - *No source language does this.* Dafny/F\* prove hand-written code; here the code is **derived** from
   intent and re-proven on every spec change.
 

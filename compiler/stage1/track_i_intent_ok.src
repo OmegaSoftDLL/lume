@@ -1,0 +1,33 @@
+## Track I (#259): Intent-as-Source §1 — QF_LIA & QF_NIA hole-guided synthesis + zero-guard proof discharge.
+
+fn synth_withdraw(bal: int, amt: int) -> int
+    requires bal >= amt
+    requires amt >= 0
+    ensures result == bal - amt and result >= 0
+    = _
+
+law withdraw_zero(bal: int) = synth_withdraw(bal, 0) == bal
+
+fn synth_sq(v: int) -> int
+    ensures result == v * v and result >= 0
+    = _
+
+fn synth_sq_dist(a: int, b: int) -> int
+    ensures result == (a - b) * (a - b) and result >= 0
+    = _
+
+fn synth_area(w: int, h: int) -> int
+    requires w >= 3
+    requires h >= 4
+    ensures result == w * h and result >= 12
+    = _
+
+fn synth_abs(x: int) -> int
+    ensures result >= 0 and result >= x and result >= 0 - x
+    = _
+
+print synth_withdraw(100, 35)
+print synth_sq(0 - 7)
+print synth_sq_dist(10, 4)
+print synth_area(5, 6)
+print synth_abs(0 - 42)
