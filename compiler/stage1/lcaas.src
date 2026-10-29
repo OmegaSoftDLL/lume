@@ -659,7 +659,7 @@ fn cs_p35_has_test(nm, prog) = match prog
     Nil        => 0
     Cons(h, t) => if cs_p35_has_test_stmt(h, nm) == 1 then 1 else cs_p35_has_test(nm, t)
 fn cs_p35_has_test_stmt(st, nm) = match st
-    Fn(test_nm, ps, body) => if test_nm == "test_" + nm then 1 else 0
+    Fn(test_nm, ps, body) => if test_nm == "test_" + nm and cs_isnil(ps) == 1 then 1 else 0
     _                     => 0
 fn cs_p35_diags(osigs, prog) = match osigs
     Nil        => Nil

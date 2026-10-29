@@ -137,7 +137,8 @@ must name the principle it breaks.
   a cross-cutting rule. Per-function contracts (P15) guard a function; laws guard the whole program.
   (Modelled on Bend 2.)
 - **P35 — No untested public surface.** The compiler's structured diagnostics emit warning `[P35]`
-  for each `pub fn` without a matching `fn test_<name>()`; for example, `pub fn parse(...)` is
-  covered by `fn test_parse()`. The warning appears in `lume agent check` JSON and does not fail
-  compilation. Example-based coverage and strict-mode enforcement remain future work. (Modelled on
+  for each `pub fn` without a matching zero-argument `fn test_<name>()`. For example,
+  `fn test_parse()` satisfies the naming check for `pub fn parse(...)`; this does not prove the
+  test runs or exercises the function. The warning appears in `lume agent check` JSON and does not
+  fail compilation. Example-based coverage and strict-mode enforcement remain future work. (Modelled on
   NanoLang's mandatory `shadow` block.)

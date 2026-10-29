@@ -115,8 +115,9 @@ see the Phase 1–5 entries in §5 for the current state.
 - **Semantic `check`** (`resolve.c`): `R0200` undefined name, `T0001` literal type mismatch
   vs annotation, `D0001` duplicate parameter, `D0002` duplicate top-level function.
 - **P35 test coverage warning** (`compiler/stage1/lcaas.src`): `lume agent check` reports
-  structured warning `[P35]` for a `pub fn` without its matching `fn test_<name>()`. This is
-  advisory and does not fail compilation; example discovery and strict enforcement remain future work.
+  structured warning `[P35]` for a `pub fn` without a matching zero-argument `fn test_<name>()`.
+  This is a naming check, not proof that the test runs or exercises the function. It is advisory
+  and does not fail compilation; example discovery and strict enforcement remain future work.
 - LBE (binary AST), `lume0 describe`, JSON diagnostics.
 
 ## 6. What is NOT done (promises, not code — be honest about these)
