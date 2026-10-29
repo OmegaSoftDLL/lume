@@ -573,21 +573,32 @@ fn asynth_default(expty) = match expty
     TyList(e) => Cons("Nil", Nil)
     _         => Nil
 
+fn asynth_int_unary(v) = Cons(v + " + 1", Cons(v + " - 1", Cons(v + " * " + v, Cons("if " + v + " >= 0 then " + v + " else 0 - " + v, Nil))))
+
 fn asynth_int_pairs(v, vs) = match vs
-    Nil        => Cons(v + " + 1", Cons(v + " - 1", Nil))
-    Cons(w, r) => Cons(v + " + " + w, Cons(v + " - " + w, Cons(w + " - " + v, Cons("if " + v + " >= " + w + " then " + v + " else " + w, Cons("if " + v + " <= " + w + " then " + v + " else " + w, asynth_int_pairs(v, r))))))
+    Nil        => Nil
+    Cons(w, r) => Cons(v + " + " + w, Cons(v + " - " + w, Cons(w + " - " + v, Cons("if " + v + " >= " + w + " then " + v + " else " + w, Cons("if " + v + " <= " + w + " then " + v + " else " + w, Cons(v + " * " + w, Cons("(" + v + " - " + w + ") * (" + v + " - " + w + ")", asynth_int_pairs(v, r))))))))
 
 fn asynth_int_ops(vs) = match vs
     Nil        => Nil
-    Cons(v, r) => app(asynth_int_pairs(v, r), asynth_int_ops(r))
+    Cons(v, r) => if isnil(r) == 1 then asynth_int_unary(v) else app(asynth_int_pairs(v, r), asynth_int_ops_pairs(r))
+
+fn asynth_int_ops_pairs(vs) = match vs
+    Nil        => Nil
+    Cons(v, r) => app(asynth_int_pairs(v, r), asynth_int_ops_pairs(r))
 
 fn asynth_cands(expty, lenv, sigs, curfn) = let vs = asynth_vars(expty, lenv) in let ops = if tystr(expty) == "int" then asynth_int_ops(vs) else Nil in app(vs, app(ops, app(asynth_fns(expty, lenv, sigs, curfn), asynth_default(expty))))
+
+fn aexpr_atom_str(e) = match e
+    Bin(op, a, b) => "(" + aexpr_str(e) + ")"
+    If(c, t, e2)  => "(" + aexpr_str(e) + ")"
+    _             => aexpr_str(e)
 
 fn aexpr_str(e) = match e
     Num(n)        => str(n)
     Str(s)        => "\"" + s + "\""
     Var(nm)       => nm
-    Bin(op, a, b) => aexpr_str(a) + " " + op + " " + aexpr_str(b)
+    Bin(op, a, b) => if op == "*" then aexpr_atom_str(a) + " * " + aexpr_atom_str(b) else aexpr_str(a) + " " + op + " " + aexpr_str(b)
     If(c, t, e2)  => "if " + aexpr_str(c) + " then " + aexpr_str(t) + " else " + aexpr_str(e2)
     Call(nm, xs)  => nm + "(" + aexprs_str(xs) + ")"
     _             => "0"
@@ -600,24 +611,34 @@ fn asynth_var_exprs(expty, lenv) = match lenv
     Nil        => Nil
     Cons(h, t) => if tystr(h.v) != "?" and tcompat(expty, h.v) == 1 then Cons(Var(h.k), asynth_var_exprs(expty, t)) else asynth_var_exprs(expty, t)
 
+fn asynth_int_unary_es(v) = Cons(Bin("+", Var(v), Num(1)), Cons(Bin("-", Var(v), Num(1)), Cons(Bin("*", Var(v), Var(v)), Cons(If(Bin(">=", Var(v), Num(0)), Var(v), Bin("-", Num(0), Var(v))), Nil))))
+
 fn asynth_int_pair_es(v, vs) = match vs
-    Nil        => Cons(Bin("+", Var(v), Num(1)), Cons(Bin("-", Var(v), Num(1)), Nil))
-    Cons(w, r) => Cons(Bin("+", Var(v), Var(w)), Cons(Bin("-", Var(v), Var(w)), Cons(Bin("-", Var(w), Var(v)), Cons(If(Bin(">=", Var(v), Var(w)), Var(v), Var(w)), Cons(If(Bin("<=", Var(v), Var(w)), Var(v), Var(w)), asynth_int_pair_es(v, r))))))
+    Nil        => Nil
+    Cons(w, r) => Cons(Bin("+", Var(v), Var(w)), Cons(Bin("-", Var(v), Var(w)), Cons(Bin("-", Var(w), Var(v)), Cons(If(Bin(">=", Var(v), Var(w)), Var(v), Var(w)), Cons(If(Bin("<=", Var(v), Var(w)), Var(v), Var(w)), Cons(Bin("*", Var(v), Var(w)), Cons(Bin("*", Bin("-", Var(v), Var(w)), Bin("-", Var(v), Var(w))), asynth_int_pair_es(v, r))))))))
 
 fn asynth_int_op_es(vs) = match vs
     Nil        => Nil
-    Cons(v, r) => app(asynth_int_pair_es(v, r), asynth_int_op_es(r))
+    Cons(v, r) => if isnil(r) == 1 then asynth_int_unary_es(v) else app(asynth_int_pair_es(v, r), asynth_int_op_pairs_es(r))
 
-fn asynth_fn_es(expty, lenv, sigs, curfn) = match sigs
+fn asynth_int_op_pairs_es(vs) = match vs
     Nil        => Nil
-    Cons(sg, r) => if sg.fname == curfn or tystr(sg.rt) == "?" or tcompat(expty, sg.rt) == 0 then asynth_fn_es(expty, lenv, r, curfn) else if len(sg.pt) == 0 then Cons(Call(sg.fname, Nil), asynth_fn_es(expty, lenv, r, curfn)) else if len(sg.pt) == 1 then let v = asynth_fn_arg(ohd_ty(sg.pt), lenv) in (if v != "" then Cons(Call(sg.fname, Cons(Var(v), Nil)), asynth_fn_es(expty, lenv, r, curfn)) else asynth_fn_es(expty, lenv, r, curfn)) else asynth_fn_es(expty, lenv, r, curfn)
+    Cons(v, r) => app(asynth_int_pair_es(v, r), asynth_int_op_pairs_es(r))
+
+fn afn_has_hole(fnm, fns) = match fns
+    Nil        => 0
+    Cons(f, r) => if f.nm == fnm then ahas_hole_e(f.body) else afn_has_hole(fnm, r)
+
+fn asynth_fn_es(expty, lenv, sigs, curfn, fns) = match sigs
+    Nil        => Nil
+    Cons(sg, r) => if sg.fname == curfn or tystr(sg.rt) == "?" or tcompat(expty, sg.rt) == 0 or afn_has_hole(sg.fname, fns) == 1 then asynth_fn_es(expty, lenv, r, curfn, fns) else if len(sg.pt) == 0 then Cons(Call(sg.fname, Nil), asynth_fn_es(expty, lenv, r, curfn, fns)) else if len(sg.pt) == 1 then let v = asynth_fn_arg(ohd_ty(sg.pt), lenv) in (if v != "" then Cons(Call(sg.fname, Cons(Var(v), Nil)), asynth_fn_es(expty, lenv, r, curfn, fns)) else asynth_fn_es(expty, lenv, r, curfn, fns)) else asynth_fn_es(expty, lenv, r, curfn, fns)
 
 fn asynth_def_es(expty) = match expty
     TyName(n) => if n == "int" then Cons(Num(0), Cons(Num(1), Nil)) else if n == "str" then Cons(Str(""), Nil) else Nil
     TyList(e) => Cons(Var("Nil"), Nil)
     _         => Nil
 
-fn asynth_cand_es(expty, lenv, sigs, curfn) = let vs = asynth_vars(expty, lenv) in let ves = asynth_var_exprs(expty, lenv) in let oes = if tystr(expty) == "int" then asynth_int_op_es(vs) else Nil in app(ves, app(oes, app(asynth_fn_es(expty, lenv, sigs, curfn), asynth_def_es(expty))))
+fn asynth_cand_es(expty, lenv, sigs, curfn, fns) = let vs = asynth_vars(expty, lenv) in let ves = asynth_var_exprs(expty, lenv) in let oes = if tystr(expty) == "int" then asynth_int_op_es(vs) else Nil in app(ves, app(oes, app(asynth_fn_es(expty, lenv, sigs, curfn, fns), asynth_def_es(expty))))
 
 fn asubst_hole_e(e, hnm, rep) = match e
     Var(nm)         => if nm == hnm or (hnm == "_" and ais_hole_name(nm) == 1) then rep else e
@@ -653,23 +674,23 @@ fn omentions_call_args(fnm, xs) = match xs
 
 fn acheck_cand_laws(laws, fns) = match laws
     Nil        => 2
-    Cons(l, r) => let lenv = vlin_init_env(l.ps) in let chyps = vcollect_body_hyps(l.body, Nil, lenv, Cons(l.body, Nil), fns, 0) in let pr = vprove_law_envs(vgen_envs_hyps(l.ps, 0, len(l.ps), chyps), l.body, fns) in if pr.status < 0 then 0 - 1 else let qf = vqflia_prove_law(l.ps, l.body, fns) in let rest = acheck_cand_laws(r, fns) in if rest < 0 then 0 - 1 else if qf == 1 and rest == 2 then 2 else 1
+    Cons(l, r) => let pr0 = vprove_law_envs(vgen_envs_hyps(l.ps, 0, len(l.ps), Nil), l.body, fns) in if pr0.status < 0 then 0 - 1 else let qf = vqflia_prove_law(l.ps, l.body, fns) in let rest = acheck_cand_laws(r, fns) in if rest < 0 then 0 - 1 else if qf == 1 and rest == 2 then 2 else 1
 
 fn ascore_cand_e(ce, hnm, hctx) = let nbody = asubst_hole_e(hctx.body, hnm, ce) in let fns2 = aupdate_fn_ft(hctx.fnm, hctx.ps, nbody, hctx.fns) in let mvs = vsiglookup(hctx.fnm, hctx.vsigs) in let mlaws = alaws_mention_fn(hctx.fnm, hctx.laws) in let c_sc = ascore_cand_vsig(hctx.ps, nbody, mvs, fns2) in if c_sc < 0 then 0 - 1 else if isnil(mlaws) == 1 then c_sc else let l_sc = acheck_cand_laws(mlaws, fns2) in if l_sc < 0 then 0 - 1 else if c_sc == 2 or l_sc == 2 then 2 else 1
 
 fn ascore_cand_vsig(ps, nbody, mvs, fns2) = match mvs
     Nil          => 1
-    Cons(vsg, r) => let lenv = vlin_init_env(ps) in let raw_hyps = vcollect_body_hyps(nbody, (vprove_reqs_hyps(vsg.reqs, lenv, fns2)).hyps, lenv, vsg.enss, fns2, 0) in let chyps = vfm_trace_hyps(raw_hyps, vfm_vars(raw_hyps, Nil)) in let pr = vprove_envs(vgen_envs_hyps(ps, 0, len(ps), chyps), vsg.reqs, vsg.enss, nbody, fns2, 0) in if pr.status < 0 then 0 - 1 else if vqflia_prove_fn(ps, vsg.reqs, vsg.enss, nbody, fns2) == 1 then 2 else 1
+    Cons(vsg, r) => let pr0 = vprove_envs(vgen_envs_hyps(ps, 0, len(ps), Nil), vsg.reqs, vsg.enss, nbody, fns2, 0) in if pr0.status < 0 then 0 - 1 else if vqflia_prove_fn(ps, vsg.reqs, vsg.enss, nbody, fns2) == 1 then 2 else 1
 
-fn afilter_proven_es(ces, hnm, hctx) = match ces
-    Nil         => Nil
-    Cons(ce, r) => if ascore_cand_e(ce, hnm, hctx) == 2 then Cons(ce, afilter_proven_es(r, hnm, hctx)) else afilter_proven_es(r, hnm, hctx)
+fn apartition_cands(ces, hnm, hctx) = match ces
+    Nil         => {prv: Nil, val: Nil}
+    Cons(ce, r) => let sc = ascore_cand_e(ce, hnm, hctx) in let rr = apartition_cands(r, hnm, hctx) in if sc == 2 then {prv: Cons(ce, rr.prv), val: rr.val} else if sc == 1 then {prv: rr.prv, val: Cons(ce, rr.val)} else rr
 
-fn afilter_valid_es(ces, hnm, hctx) = match ces
-    Nil         => Nil
-    Cons(ce, r) => if ascore_cand_e(ce, hnm, hctx) == 1 then Cons(ce, afilter_valid_es(r, hnm, hctx)) else afilter_valid_es(r, hnm, hctx)
+fn afilter_proven_es(ces, hnm, hctx) = (apartition_cands(ces, hnm, hctx)).prv
 
-fn arank_cand_es(expty, lenv, hnm, hctx) = let raw = asynth_cand_es(expty, lenv, hctx.sigs, hctx.fnm) in let prv = afilter_proven_es(raw, hnm, hctx) in let val = afilter_valid_es(raw, hnm, hctx) in let ranked = app(prv, val) in if isnil(ranked) == 0 then ranked else raw
+fn afilter_valid_es(ces, hnm, hctx) = (apartition_cands(ces, hnm, hctx)).val
+
+fn arank_cand_es(expty, lenv, hnm, hctx) = let raw = asynth_cand_es(expty, lenv, hctx.sigs, hctx.fnm, hctx.fns) in let pt = apartition_cands(raw, hnm, hctx) in let ranked = app(pt.prv, pt.val) in if isnil(ranked) == 0 then ranked else raw
 
 fn abest_hole_expr(expty, lenv, hnm, hctx) = match arank_cand_es(expty, lenv, hnm, hctx)
     Nil         => Num(0)
