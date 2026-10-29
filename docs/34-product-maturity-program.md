@@ -78,7 +78,9 @@ in parallel with the product foundations below.
 4. **Verified component network:** content-addressed intents, bindings, tests, proofs, evidence, and
    artifacts discoverable and reusable across models and vendors.
 5. **Public economic benchmark (#230, #337):** real target execution measuring zero-shot success,
-   tokens, time, attempts, defects, and maintenance cost, never recorded success alone.
+   tokens, time, attempts, defects, and maintenance cost, never recorded success alone. Protocol 0.1
+   in `docs/35-economic-benchmark.md` is a bounded Lume-only real-execution harness; provider,
+   zero-shot, token, and cost results remain `UNKNOWN` until independently measured.
 6. **Reproducible killer capstones (#332, #333, #241):** one intent-to-SaaS/Web path and one
    intent-to-kernel/driver path through the same semantic and evidence fabric.
 

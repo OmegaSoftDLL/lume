@@ -1,0 +1,2 @@
+fn safe_deposit(bal: int, amt: int) -> int = bal + amt
+print safe_deposit(100, 25)

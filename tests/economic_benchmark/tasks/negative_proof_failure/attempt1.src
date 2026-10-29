@@ -1,0 +1,2 @@
+fn add_fee(amount: int, fee: int) -> int = amount + fee
+print add_fee(50, 5)

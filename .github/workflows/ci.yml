@@ -28,6 +28,16 @@ jobs:
       - name: Test under ASan/UBSan
         run: make -C bootstrap/lume0 asan
 
+  economic-benchmark:
+    name: Economic benchmark real-execution protocol (#337)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build seed
+        run: make -C bootstrap/lume0
+      - name: Run real compilation, proof, native execution, and negative gates
+        run: sh scripts/check-economic-benchmark.sh
+
   docs:
     name: Documentation & examples
     runs-on: ubuntu-latest
