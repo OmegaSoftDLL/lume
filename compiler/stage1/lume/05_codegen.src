@@ -44,11 +44,18 @@ fn lslot(k) = str(0 - 8 * (k + 1))
 fn lframe(n) = if (n * 8) % 16 != 0 then n * 8 + 8 else n * 8
 
 ## --- let-bound names reachable in an expression, in agen's collect_lets order ---
+fn lqvar(e) = match e
+    Var(nm) => nm
+    Str(nm) => nm
+    _       => "_qk"
+fn lcollect_quant(args) = match args
+    Cons(h, t) => Cons(lqvar(h), lcollectargs(t))
+    _          => Nil
 fn lcollect(e) = match e
     LetIn(nm, v, b) => Cons(nm, app(lcollect(v), lcollect(b)))
     Bin(op, l, r)   => app(lcollect(l), lcollect(r))
     If(c, t, e2)    => app(lcollect(c), app(lcollect(t), lcollect(e2)))
-    Call(nm, args)  => lcollectargs(args)
+    Call(nm, args)  => if (nm == "forall_range" or nm == "exists_range") and len(args) == 4 then lcollect_quant(args) else lcollectargs(args)
     Field(o, nm)    => lcollect(o)
     Rec(items)      => lcollectrec(items)
     RecT(tn, items) => lcollectrec(items)
@@ -199,7 +206,20 @@ fn llet(nm, v, vr, b, ctx) = let inner = {locals: ctx.locals, bound: app(ctx.bou
 fn lvar(nm, ctx, s) = if isctor(nm) then lctor(nm, Nil, ctx, s) else lres("    movq " + lslot(lidxof(ctx.locals, nm)) + "(%rbp), %rax\n    pushq %rax\n", s)
 fn lreuse1(args, ctx, s) = let ar = lstackargs(args, ctx, s) in lres(ar.code + "    popq %rsi\n    popq %rax\n    movq 24(%rax), %rcx\n    movq %rsi, 0(%rcx)\n    pushq %rax\n", ar)
 fn lreuse2(args, ctx, s) = let ar = lstackargs(args, ctx, s) in lres(ar.code + "    popq %rdx\n    popq %rsi\n    popq %rax\n    movq 24(%rax), %rcx\n    movq %rsi, 0(%rcx)\n    movq %rdx, 8(%rcx)\n    pushq %rax\n", ar)
-fn lcallx(nm, args, ctx, s) = if isctor(nm) then lctor(nm, args, ctx, s) else if nm == "__perceus_reuse_2" then lreuse2(args, ctx, s) else if nm == "__perceus_reuse_1" then lreuse1(args, ctx, s) else lcall(nm, args, ctx, s)
+fn lis_bv2_call(nm) = nm == "bv_xor" or nm == "bit_xor" or nm == "bv_and" or nm == "bit_and" or nm == "bv_or" or nm == "bit_or" or nm == "bv_shl" or nm == "bit_shl" or nm == "bv_shr" or nm == "bit_shr" or nm == "bv_add_u8" or nm == "bv_sub_u8" or nm == "bv_mul_u8"
+fn lis_bv1_call(nm) = nm == "bv_u8" or nm == "bv_not_u8"
+fn lbv2_op(nm) = if nm == "bv_xor" or nm == "bit_xor" then "    xorq %rcx, %rax\n" else if nm == "bv_and" or nm == "bit_and" then "    andq %rcx, %rax\n" else if nm == "bv_or" or nm == "bit_or" then "    orq %rcx, %rax\n" else if nm == "bv_shl" or nm == "bit_shl" then "    salq %cl, %rax\n" else if nm == "bv_shr" or nm == "bit_shr" then "    sarq %cl, %rax\n" else if nm == "bv_add_u8" then "    addq %rcx, %rax\n    andq $255, %rax\n" else if nm == "bv_sub_u8" then "    subq %rcx, %rax\n    andq $255, %rax\n" else "    imulq %rcx, %rax\n    andq $255, %rax\n"
+fn lbv1_op(nm) = if nm == "bv_u8" then "    andq $255, %rax\n" else "    notq %rax\n    andq $255, %rax\n"
+fn lbv2(nm, args, ctx, s) = let ar = lstackargs(args, ctx, s) in lres(ar.code + "    popq %rcx\n    popq %rax\n    movq 8(%rax), %rax\n    movq 8(%rcx), %rcx\n" + lbv2_op(nm) + "    movq %rax, %rdi\n    call mkint\n    pushq %rax\n", ar)
+fn lbv1(nm, args, ctx, s) = let ar = lstackargs(args, ctx, s) in lres(ar.code + "    popq %rax\n    movq 8(%rax), %rax\n" + lbv1_op(nm) + "    movq %rax, %rdi\n    call mkint\n    pushq %rax\n", ar)
+fn lqrest(args) = match args
+    Nil        => Nil
+    Cons(h, t) => t
+fn lqhead(args) = match args
+    Nil        => Num(0)
+    Cons(h, t) => h
+fn lquant(nm, args, ctx, s) = let vnm = lqvar(lqhead(args)) in let a1 = lqrest(args) in let lo_e = lqhead(a1) in let a2 = lqrest(a1) in let hi_e = lqhead(a2) in let pred_e = lqhead(lqrest(a2)) in let kslot = lslot(lidxof(ctx.locals, vnm)) + "(%rbp)" in let lab = str(s.nl) in let rlo = laexpr(lo_e, ctx, lnext(s)) in let rhi = laexpr(hi_e, ctx, rlo) in let rpr = laexpr(pred_e, ctx, rhi) in let is_all = if nm == "forall_range" then 1 else 0 in let j_early = if is_all == 1 then "    jz .Lqearly_" + lab + "\n" else "    jnz .Lqearly_" + lab + "\n" in let v_done = if is_all == 1 then "1" else "0" in let v_early = if is_all == 1 then "0" else "1" in lres(rlo.code + "    popq %rax\n    movq %rax, " + kslot + "\n.Lqloop_" + lab + ":\n" + rhi.code + "    popq %rcx\n    movq " + kslot + ", %rax\n    movq 8(%rax), %rax\n    cmpq 8(%rcx), %rax\n    jg .Lqdone_" + lab + "\n" + rpr.code + "    popq %rax\n    movq 8(%rax), %rax\n    testq %rax, %rax\n" + j_early + "    movq " + kslot + ", %rax\n    movq 8(%rax), %rdi\n    addq $1, %rdi\n    call mkint\n    movq %rax, " + kslot + "\n    jmp .Lqloop_" + lab + "\n.Lqdone_" + lab + ":\n    movq $" + v_done + ", %rdi\n    call mkint\n    pushq %rax\n    jmp .Lqend_" + lab + "\n.Lqearly_" + lab + ":\n    movq $" + v_early + ", %rdi\n    call mkint\n    pushq %rax\n.Lqend_" + lab + ":\n", rpr)
+fn lcallx(nm, args, ctx, s) = if isctor(nm) then lctor(nm, args, ctx, s) else if nm == "__perceus_reuse_2" then lreuse2(args, ctx, s) else if nm == "__perceus_reuse_1" then lreuse1(args, ctx, s) else if lis_bv2_call(nm) and len(args) == 2 then lbv2(nm, args, ctx, s) else if lis_bv1_call(nm) and len(args) == 1 then lbv1(nm, args, ctx, s) else if (nm == "forall_range" or nm == "exists_range") and len(args) == 4 then lquant(nm, args, ctx, s) else lcall(nm, args, ctx, s)
 fn laexpr(e, ctx, s) = match e
     Num(n)         => lres("    movq $" + str(n) + ", %rdi\n    call mkint\n    pushq %rax\n", s)
     Str(v)         => lstr(lstrlabel(v, s))

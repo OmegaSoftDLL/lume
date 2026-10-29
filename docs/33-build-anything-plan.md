@@ -10,9 +10,9 @@ human building every one.
 
 | Track | Frontier | Issue |
 |---|---|---|
-| **M1** | **Prover reach beyond QF_LIA** — nonlinear/bitvectors/arrays/quantifiers (SMT), separation logic, refinement/dependent types, termination, temporal (folds #198) | **#255** |
+| **M1** | **Prover reach beyond QF_LIA (Shipped ✅)** — `QF_NIA` nonlinear integer arithmetic, `QF_BV` bitvectors & machine-int wraparound, `QF_ALIA` arrays + quantifiers (`forall_range`/`exists_range`), separation logic (`points_to`/`sep_conj`), refinement & dependent types (`Vec(n)`/`Index(n)`), lexicographic & relational termination (`total fn`), and LTL temporal logic (`always`/`eventually`/`until`/`leads_to`, #198), verified in `06b_phase3.src`, `lcaas.src`, and independent `lcert.src` (`compiler/stage1/m1_prover_ok.src`) | **#255 (Closed)** |
 | **M2** | **`lume evolve` as a self-growth engine** — the AI proposes→proves→lands large features (targets, prover theories, stdlib), gated and real | **#258** |
-| **R** | **Universal reach** — real GPU (folds #250), MCUs, FPGA/HDL, mobile, web — run-verified, proofs preserved | **#256** |
+| **R** | **Universal reach** — real GPU (folds #250 ✅), MCUs, FPGA/HDL, mobile, web — run-verified, proofs preserved | **#256** |
 | **L** | **Standard library & domains** — net stack, async runtime, GUI, database, media, real ML | **#257** |
 | **I** | **Intent-as-source §1** — intent is the source, code is a proven cache (`docs/19` §1) | **#259** |
 | **O** | **General-purpose OS** on the microkernel — incremental, uses R+L | **#241** |

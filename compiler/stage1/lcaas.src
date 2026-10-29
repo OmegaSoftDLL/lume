@@ -167,7 +167,7 @@ fn cs_ptcons(n, rr) = {items: Cons(n, rr.items), rest: rr.rest}
 fn cs_pparams(ts) = if cs_hdtext(ts) == ")" then {items: Nil, tys: Nil, plist: Nil, rest: cs_drop1(ts)} else cs_pparamk(ts)
 fn cs_pparamk(ts) = if cs_hdtext(ts) == "comptime" then cs_pparam(cs_hdtext(cs_drop1(ts)), 1, cs_drop1(cs_drop1(ts))) else if cs_hdtext(ts) == "own" then cs_pparam(cs_hdtext(cs_drop1(ts)), 2, cs_drop1(cs_drop1(ts))) else if cs_hdtext(ts) == "mut" then cs_pparam(cs_hdtext(cs_drop1(ts)), 3, cs_drop1(cs_drop1(ts))) else cs_pparam(cs_hdtext(ts), 0, cs_drop1(ts))
 fn cs_pparam(nm, ct, ts) = if cs_hdtext(ts) == ":" then cs_pparamt(nm, ct, cs_ptype1(cs_drop1(ts))) else cs_pmore(nm, TyAny, ct, ts)
-fn cs_pparamt(nm, ct, r) = cs_pmore(nm, r.node, ct, r.rest)
+fn cs_pparamt(nm, ct, r) = if cs_hdtext(r.rest) == "where" then (let pr = cs_expr(cs_drop1(r.rest)) in cs_pmore(nm, TyRefine(r.node, pr.node), ct, pr.rest)) else cs_pmore(nm, r.node, ct, r.rest)
 fn cs_pmore(nm, ty, ct, ts) = if cs_hdtext(ts) == "," then cs_pmcons(nm, ty, ct, cs_pparams(cs_drop1(ts))) else cs_pmend(nm, ty, ct, cs_skiprp(ts))
 fn cs_pmcons(nm, ty, ct, rr) = {items: if ct != 1 then Cons(nm, rr.items) else rr.items, tys: Cons(ty, rr.tys), plist: Cons({cf: ct, pn: nm, pt: ty}, rr.plist), rest: rr.rest}
 fn cs_pmend(nm, ty, ct, rest) = {items: if ct != 1 then Cons(nm, Nil) else Nil, tys: Cons(ty, Nil), plist: Cons({cf: ct, pn: nm, pt: ty}, Nil), rest: rest}
@@ -175,7 +175,7 @@ fn cs_peffitems(ts) = if cs_hdtext(ts) == "}" then {items: Nil, rest: cs_drop1(t
 fn cs_peffrow(ts) = if cs_hdtext(ts) == "/" then (let t1 = cs_drop1(ts) in if cs_hdtext(t1) == "{" then cs_peffitems(cs_drop1(t1)) else {items: Cons(cs_hdtext(t1), Nil), rest: cs_drop1(t1)}) else {items: Nil, rest: ts}
 fn cs_pcontracts(ts) = if cs_hdtext(ts) == "requires" then let r = cs_expr(cs_drop1(ts)) in let rr = cs_pcontracts(r.rest) in {reqs: Cons(r.node, rr.reqs), enss: rr.enss, rest: rr.rest} else if cs_hdtext(ts) == "ensures" then let r = cs_expr(cs_drop1(ts)) in let rr = cs_pcontracts(r.rest) in {reqs: rr.reqs, enss: Cons(r.node, rr.enss), rest: rr.rest} else {reqs: Nil, enss: Nil, rest: ts}
 fn cs_pret(ts) = if cs_hdtext(ts) == "-" and cs_hdtext(cs_drop1(ts)) == ">" then cs_pret2(cs_ptype1(cs_drop1(cs_drop1(ts)))) else let er = cs_peffrow(ts) in let vc = cs_pcontracts(er.rest) in {ty: TyAny, fromp: "", effs: er.items, reqs: vc.reqs, enss: vc.enss, rest: vc.rest}
-fn cs_pret2(r) = if cs_hdtext(r.rest) == "from" then let rest2 = cs_drop1(cs_drop1(r.rest)) in let er = cs_peffrow(rest2) in let vc = cs_pcontracts(er.rest) in {ty: r.node, fromp: cs_hdtext(cs_drop1(r.rest)), effs: er.items, reqs: vc.reqs, enss: vc.enss, rest: vc.rest} else let er = cs_peffrow(r.rest) in let vc = cs_pcontracts(er.rest) in {ty: r.node, fromp: "", effs: er.items, reqs: vc.reqs, enss: vc.enss, rest: vc.rest}
+fn cs_pret2(r) = if cs_hdtext(r.rest) == "where" then (let pr = cs_expr(cs_drop1(r.rest)) in let er = cs_peffrow(pr.rest) in let vc = cs_pcontracts(er.rest) in {ty: r.node, fromp: "", effs: er.items, reqs: vc.reqs, enss: Cons(pr.node, vc.enss), rest: vc.rest}) else if cs_hdtext(r.rest) == "from" then let rest2 = cs_drop1(cs_drop1(r.rest)) in let er = cs_peffrow(rest2) in let vc = cs_pcontracts(er.rest) in {ty: r.node, fromp: cs_hdtext(cs_drop1(r.rest)), effs: er.items, reqs: vc.reqs, enss: vc.enss, rest: vc.rest} else let er = cs_peffrow(r.rest) in let vc = cs_pcontracts(er.rest) in {ty: r.node, fromp: "", effs: er.items, reqs: vc.reqs, enss: vc.enss, rest: vc.rest}
 fn cs_isany(t) = match t
     TyAny => 1
     _     => 0
@@ -197,8 +197,10 @@ fn cs_pfn(ts) = cs_pfnp(ts, 0, 0)
 
 fn cs_skiptp1(ts, close, d) = if d <= 0 then ts else if cs_isnil(ts) == 1 then Nil else if cs_hdtext(ts) == "[" or cs_hdtext(ts) == "(" then cs_skiptp1(cs_drop1(ts), close, d + 1) else if cs_hdtext(ts) == close then cs_skiptp1(cs_drop1(ts), close, d - 1) else cs_skiptp1(cs_drop1(ts), close, d)
 fn cs_skiptp(ts) = if cs_hdtext(ts) == "[" then cs_skiptp1(cs_drop1(ts), "]", 1) else if cs_hdtext(ts) == "(" then cs_skiptp1(cs_drop1(ts), ")", 1) else ts
-fn cs_ptype(ts) = let nm = cs_hdtext(ts) in let rest = cs_dropkw(cs_skiptp(cs_drop1(ts)), "=") in if cs_hdtext(rest) == "record" or cs_hdtext(rest) == "model" then cs_precordty(nm, cs_dropkw(cs_drop1(rest), "{")) else if cs_hdtext(rest) == "{" then cs_precordty(nm, cs_drop1(rest)) else cs_penumty(nm, cs_dropkw(rest, "enum"))
-fn cs_penumty(nm, ts) = let vs = cs_pvariants(ts) in {node: TypeS(nm, "enum", vs.items), inv: Nil, rest: vs.rest}
+fn cs_prefinety(nm, t) = let bty = TyName(cs_hdtext(t)) in let pr = cs_expr(cs_drop1(cs_drop1(t))) in {node: TypeRefineS(nm, bty, pr.node), inv: Nil, rest: pr.rest}
+fn cs_prefinebrace(nm, t) = let t1 = cs_drop1(t) in let bty = TyName(cs_hdtext(cs_drop1(cs_drop1(t1)))) in let pr = cs_expr(cs_dropkw(cs_drop1(cs_drop1(cs_drop1(t1))), "|")) in {node: TypeRefineS(nm, bty, pr.node), inv: Nil, rest: cs_dropkw(pr.rest, "}")}
+fn cs_ptype(ts) = let nm = cs_hdtext(ts) in let rest = cs_dropkw(cs_skiptp(cs_drop1(ts)), "=") in if cs_hdtext(rest) == "record" or cs_hdtext(rest) == "model" then cs_precordty(nm, cs_dropkw(cs_drop1(rest), "{")) else if cs_hdtext(rest) == "{" and cs_hdtext(cs_drop1(cs_drop1(cs_drop1(cs_drop1(rest))))) == "|" then cs_prefinebrace(nm, rest) else if cs_hdtext(rest) == "{" then cs_precordty(nm, cs_drop1(rest)) else if cs_hdtext(cs_drop1(rest)) == "where" then cs_prefinety(nm, rest) else cs_penumty(nm, cs_dropkw(rest, "enum"))
+fn cs_penumty(nm, ts) = let vs = cs_pvariants(cs_dropkw(ts, "|")) in {node: TypeS(nm, "enum", vs.items), inv: Nil, rest: vs.rest}
 fn cs_pvariants(ts) = cs_pvariant(cs_hdtext(ts), cs_drop1(ts))
 fn cs_pvariant(tag, ts) = if cs_hdtext(ts) == "(" then let a = cs_ptypes(cs_drop1(ts)) in cs_pvariantend(tag, cs_len(a.items), a.rest) else cs_pvariantend(tag, 0, ts)
 fn cs_pvariantend(tag, ar, ts) = if cs_hdtext(ts) == "|" then let rr = cs_pvariants(cs_drop1(ts)) in {items: Cons({tag: tag, ar: ar}, rr.items), rest: rr.rest} else {items: Cons({tag: tag, ar: ar}, Nil), rest: ts}
@@ -244,12 +246,13 @@ fn cs_parse(src) = cs_pprog(cs_lex(src, 0))
 
 ## --- symbol table extraction ---
 fn cs_tystr(ty) = match ty
-    TyAny           => "any"
-    TyName(nm)      => nm
-    TyList(inner)   => "[" + cs_tystr(inner) + "]"
-    TyApply(c, arg) => c + "[" + cs_tystr(arg) + "]"
-    TyTensor(e, ds) => "tensor[" + cs_tystr(e) + (if cs_isnil(ds) == 1 then "]" else ", " + cs_joinsep(ds, ", ") + "]")
-    _               => "any"
+    TyAny            => "any"
+    TyName(nm)       => nm
+    TyRefine(bty, p) => cs_tystr(bty)
+    TyList(inner)    => "[" + cs_tystr(inner) + "]"
+    TyApply(c, arg)  => c + "[" + cs_tystr(arg) + "]"
+    TyTensor(e, ds)  => "tensor[" + cs_tystr(e) + (if cs_isnil(ds) == 1 then "]" else ", " + cs_joinsep(ds, ", ") + "]")
+    _                => "any"
 fn cs_variants_str(vs) = match vs
     Nil        => ""
     Cons(h, t) => let s = h.tag + "(" + str(h.ar) + ")" in if cs_isnil(t) == 1 then s else s + " | " + cs_variants_str(t)
@@ -302,12 +305,34 @@ fn cs_tcollectr(prog) = match prog
 fn cs_tcollectr2(h, t) = match h
     TypeS(nm, k, items) => if k == "record" then Cons({rname: nm, fields: items}, cs_tcollectr(t)) else cs_tcollectr(t)
     _                   => cs_tcollectr(t)
-fn cs_tcollects(prog) = match prog
+fn cs_tcollectrt(prog) = match prog
     Nil        => Nil
-    Cons(h, t) => cs_tcollects2(h, t)
-fn cs_tcollects2(h, t) = match h
-    Sig(nm, ps, ts, rt) => Cons({fname: nm, pn: ps, pt: ts, rt: rt}, cs_tcollects(t))
-    _                   => cs_tcollects(t)
+    Cons(h, t) => cs_tcollectrt2(h, t)
+fn cs_tcollectrt2(h, t) = match h
+    TypeRefineS(nm, bty, pr) => Cons({nm: nm, bty: bty}, cs_tcollectrt(t))
+    _                        => cs_tcollectrt(t)
+fn cs_trtlookup(nm, rts) = match rts
+    Nil        => Nil
+    Cons(h, t) => if h.nm == nm then Cons(h.bty, Nil) else cs_trtlookup(nm, t)
+fn cs_tstrip_refine(ty, rts) = match ty
+    TyRefine(bty, pr) => cs_tstrip_refine(bty, rts)
+    TyName(n)         => cs_tstrip_refine_nm(n, cs_trtlookup(n, rts), rts)
+    TyList(e)         => TyList(cs_tstrip_refine(e, rts))
+    TyApply(n, e)     => TyApply(n, cs_tstrip_refine(e, rts))
+    _                 => ty
+fn cs_tstrip_refine_nm(n, m, rts) = match m
+    Nil          => TyName(n)
+    Cons(bty, r) => cs_tstrip_refine(bty, rts)
+fn cs_tstrip_refine_tys(tys, rts) = match tys
+    Nil        => Nil
+    Cons(h, t) => Cons(cs_tstrip_refine(h, rts), cs_tstrip_refine_tys(t, rts))
+fn cs_tcollects(prog) = cs_tcollects_rts(prog, cs_tcollectrt(prog))
+fn cs_tcollects_rts(prog, rts) = match prog
+    Nil        => Nil
+    Cons(h, t) => cs_tcollects2(h, t, rts)
+fn cs_tcollects2(h, t, rts) = match h
+    Sig(nm, ps, ts, rt) => Cons({fname: nm, pn: ps, pt: cs_tstrip_refine_tys(ts, rts), rt: cs_tstrip_refine(rt, rts)}, cs_tcollects_rts(t, rts))
+    _                   => cs_tcollects_rts(t, rts)
 fn cs_tcollectg(prog) = match prog
     Nil        => Nil
     Cons(h, t) => cs_tcollectg2(h, t)
@@ -351,7 +376,7 @@ fn cs_tier_inner(s) = if cs_startswith(s, "rc[") == 1 then slice(s, 3, count(s) 
 fn cs_exprty_money(xs) = match xs
     Cons(Str(ccy), rest) => if ccy != "" then "money[" + ccy + "]" else ""
     _                    => ""
-fn cs_exprty_tier(nm, args, tt) = if (nm == "rc" or nm == "rc_new") and cs_len(args) == 1 then (let sub = cs_exprty(cs_asthead(args), tt) in if sub != "" then "rc[" + sub + "]" else "") else if (nm == "arc" or nm == "arc_new") and cs_len(args) == 1 then (let sub = cs_exprty(cs_asthead(args), tt) in if sub != "" then "arc[" + sub + "]" else "") else if (nm == "clone" or nm == "rc_clone" or nm == "arc_clone") and cs_len(args) == 1 then cs_exprty(cs_asthead(args), tt) else if (nm == "downgrade" or nm == "weak_downgrade") and cs_len(args) == 1 then (let sub = cs_tier_inner(cs_exprty(cs_asthead(args), tt)) in if sub != "" then "weak[" + sub + "]" else "") else if (nm == "promise" or nm == "promise_new") and cs_len(args) == 1 then (let sub = cs_exprty(cs_asthead(args), tt) in if sub != "" then "promise[" + sub + "]" else "") else if (nm == "signal" or nm == "signal_new") and cs_len(args) == 1 then (let sub = cs_exprty(cs_asthead(args), tt) in if sub != "" then "signal[" + sub + "]" else "") else if (nm == "get" or nm == "rc_get" or nm == "arc_get" or nm == "signal_get" or nm == "await" or nm == "promise_await") and cs_len(args) == 1 then cs_tier_inner(cs_exprty(cs_asthead(args), tt)) else if (nm == "upgrade" or nm == "weak_upgrade") and cs_len(args) == 2 then cs_tier_inner(cs_exprty(cs_asthead(args), tt)) else if (nm == "strong_count" or nm == "rc_strong_count" or nm == "arc_strong_count" or nm == "version" or nm == "signal_version") and cs_len(args) == 1 then "int" else ""
+fn cs_exprty_tier(nm, args, tt) = if (nm == "rc" or nm == "rc_new") and cs_len(args) == 1 then (let sub = cs_exprty(cs_asthead(args), tt) in if sub != "" then "rc[" + sub + "]" else "") else if (nm == "arc" or nm == "arc_new") and cs_len(args) == 1 then (let sub = cs_exprty(cs_asthead(args), tt) in if sub != "" then "arc[" + sub + "]" else "") else if (nm == "clone" or nm == "rc_clone" or nm == "arc_clone") and cs_len(args) == 1 then cs_exprty(cs_asthead(args), tt) else if (nm == "downgrade" or nm == "weak_downgrade") and cs_len(args) == 1 then (let sub = cs_tier_inner(cs_exprty(cs_asthead(args), tt)) in if sub != "" then "weak[" + sub + "]" else "") else if (nm == "promise" or nm == "promise_new") and cs_len(args) == 1 then (let sub = cs_exprty(cs_asthead(args), tt) in if sub != "" then "promise[" + sub + "]" else "") else if (nm == "signal" or nm == "signal_new") and cs_len(args) == 1 then (let sub = cs_exprty(cs_asthead(args), tt) in if sub != "" then "signal[" + sub + "]" else "") else if (nm == "get" or nm == "rc_get" or nm == "arc_get" or nm == "signal_get" or nm == "await" or nm == "promise_await") and cs_len(args) == 1 then cs_tier_inner(cs_exprty(cs_asthead(args), tt)) else if (nm == "upgrade" or nm == "weak_upgrade") and cs_len(args) == 2 then cs_tier_inner(cs_exprty(cs_asthead(args), tt)) else if (nm == "strong_count" or nm == "rc_strong_count" or nm == "arc_strong_count" or nm == "version" or nm == "signal_version" or nm == "bv_u8" or nm == "bv_not_u8") and cs_len(args) == 1 then "int" else if (nm == "bv_xor" or nm == "bit_xor" or nm == "bv_and" or nm == "bit_and" or nm == "bv_or" or nm == "bit_or" or nm == "bv_shl" or nm == "bit_shl" or nm == "bv_shr" or nm == "bit_shr" or nm == "bv_add_u8" or nm == "bv_sub_u8" or nm == "bv_mul_u8") and cs_len(args) == 2 then "int" else if (nm == "forall_range" or nm == "exists_range") and cs_len(args) == 4 then "int" else ""
 fn cs_exprty(e, tt) = match e
     Num(n)          => "int"
     Str(v)          => "str"
@@ -597,10 +622,18 @@ fn cs_cbind(ps, vals, env) = match ps
 fn cs_cbind2(p, pt, vals, env) = match vals
     Nil         => env
     Cons(v, vt) => cs_cbind(pt, vt, Cons({k: p, v: v}, env))
-fn cs_ccall(nm, args, env, ft, cd) = cs_ccall2(nm, cs_fnlookup(nm, ft), args, env, ft, cd)
+fn cs_cquant_var(e) = match e
+    Var(nm) => nm
+    Str(s)  => s
+    _       => ""
+fn cs_cforall_loop(vnm, k, hi, pred, env, ft) = if k > hi then cs_cv_ok(cs_cv_int(1)) else let r = cs_ceval(pred, Cons({k: vnm, v: cs_cv_int(k)}, env), ft, 0) in if r.ok == 0 then r else if r.v.i == 0 then cs_cv_ok(cs_cv_int(0)) else cs_cforall_loop(vnm, k + 1, hi, pred, env, ft)
+fn cs_cexists_loop(vnm, k, hi, pred, env, ft) = if k > hi then cs_cv_ok(cs_cv_int(0)) else let r = cs_ceval(pred, Cons({k: vnm, v: cs_cv_int(k)}, env), ft, 0) in if r.ok == 0 then r else if r.v.i != 0 then cs_cv_ok(cs_cv_int(1)) else cs_cexists_loop(vnm, k + 1, hi, pred, env, ft)
+fn cs_is_cbv_builtin(nm) = nm == "bv_and" or nm == "bit_and" or nm == "bv_or" or nm == "bit_or" or nm == "bv_xor" or nm == "bit_xor" or nm == "bv_shl" or nm == "bit_shl" or nm == "bv_shr" or nm == "bit_shr" or nm == "bv_u8" or nm == "bv_not_u8" or nm == "bv_add_u8" or nm == "bv_sub_u8" or nm == "bv_mul_u8"
+fn cs_cpure_bv(nm, vs) = let a = (cs_cvhd(vs)).i in if nm == "bv_u8" and cs_len(vs) == 1 then cs_cv_ok(cs_cv_int(cs_vbv_mod(a, 256))) else if nm == "bv_not_u8" and cs_len(vs) == 1 then cs_cv_ok(cs_cv_int(255 - cs_vbv_mod(a, 256))) else if cs_len(vs) == 2 then (let b = (cs_cvhd(cs_cvtl(vs))).i in if nm == "bv_and" or nm == "bit_and" then cs_cv_ok(cs_cv_int(cs_vbv_and(cs_vbv_mod(a, 65536), cs_vbv_mod(b, 65536), 16))) else if nm == "bv_or" or nm == "bit_or" then cs_cv_ok(cs_cv_int(cs_vbv_or(cs_vbv_mod(a, 65536), cs_vbv_mod(b, 65536), 16))) else if nm == "bv_xor" or nm == "bit_xor" then cs_cv_ok(cs_cv_int(cs_vbv_xor(cs_vbv_mod(a, 65536), cs_vbv_mod(b, 65536), 16))) else if nm == "bv_shl" or nm == "bit_shl" then cs_cv_ok(cs_cv_int(a * cs_vbv_pow2(b))) else if nm == "bv_shr" or nm == "bit_shr" then cs_cv_ok(cs_cv_int(a / cs_vbv_pow2(b))) else if nm == "bv_add_u8" then cs_cv_ok(cs_cv_int(cs_vbv_mod(a + b, 256))) else if nm == "bv_sub_u8" then cs_cv_ok(cs_cv_int(cs_vbv_mod(a - b, 256))) else cs_cv_ok(cs_cv_int(cs_vbv_mod(a * b, 256)))) else cs_cv_err("comptime error: invalid arguments to builtin '" + nm + "'", "check argument count")
+fn cs_ccall(nm, args, env, ft, cd) = if (nm == "forall_range" or nm == "exists_range") and cs_len(args) == 4 then (let vnm = cs_cquant_var(cs_asthead(args)) in let rlo = cs_ceval(cs_astsecond(args), env, ft, cd) in let rhi = cs_ceval(cs_asthead(cs_cvtl(cs_cvtl(args))), env, ft, cd) in if vnm == "" or rlo.ok == 0 or rhi.ok == 0 then cs_cv_err("comptime error: invalid quantifier bounds", "") else let pred = cs_asthead(cs_cvtl(cs_cvtl(cs_cvtl(args)))) in if nm == "forall_range" then cs_cforall_loop(vnm, rlo.v.i, rhi.v.i, pred, env, ft) else cs_cexists_loop(vnm, rlo.v.i, rhi.v.i, pred, env, ft)) else cs_ccall2(nm, cs_fnlookup(nm, ft), args, env, ft, cd)
 fn cs_ccall2(nm, mf, args, env, ft, cd) = match mf
     Cons(fn0, rr) => let ra = cs_ceval_list(args, env, ft, cd) in if ra.ok == 0 then cs_cv_err(ra.err, ra.fix) else cs_ccall3(fn0, ra.vals, ft, cd)
-    Nil           => if nm == "str" or nm == "count" or nm == "at" or nm == "slice" or nm == "toint" or nm == "ord" or nm == "fs_write_sync" or nm == "fs_append_sync" or nm == "fs_read_file" then let ra = cs_ceval_list(args, env, ft, cd) in (if ra.ok == 0 then cs_cv_err(ra.err, ra.fix) else cs_cpure(nm, ra.vals)) else cs_cv_err("comptime error: cannot evaluate '" + nm + "' at compile time: not pure", "remove impure call '" + nm + "' from comptime or define pure 'fn " + nm + "'")
+    Nil           => if nm == "str" or nm == "count" or nm == "at" or nm == "slice" or nm == "toint" or nm == "ord" or nm == "fs_write_sync" or nm == "fs_append_sync" or nm == "fs_read_file" or cs_is_cbv_builtin(nm) == 1 then let ra = cs_ceval_list(args, env, ft, cd) in (if ra.ok == 0 then cs_cv_err(ra.err, ra.fix) else if cs_is_cbv_builtin(nm) == 1 then cs_cpure_bv(nm, ra.vals) else cs_cpure(nm, ra.vals)) else cs_cv_err("comptime error: cannot evaluate '" + nm + "' at compile time: not pure", "remove impure call '" + nm + "' from comptime or define pure 'fn " + nm + "'")
 fn cs_ccall3(fn0, vals, ft, cd) = match fn0
     Fn(fnm, ps, body) => cs_ceval(body, cs_cbind(ps, vals, Nil), ft, cd + 1)
     _                 => cs_cv_err("comptime error: invalid function", "")
@@ -920,7 +953,10 @@ fn cs_guard_ps(ps, c, guarded) = match ps
 fn cs_is_pos_num(e, minv) = match e
     Num(k) => if k >= minv then 1 else 0
     _      => 0
-fn cs_is_dec_bin(op, l, r, ps, guarded) = match l
+fn cs_is_guarded_var(e, ps, guarded) = match e
+    Var(p) => if cs_omem(p, ps) == 1 and cs_omem(p, guarded) == 1 then 1 else 0
+    _      => 0
+fn cs_is_dec_bin(op, l, r, ps, guarded) = if op == "%" and (cs_is_guarded_var(r, ps, guarded) == 1 or cs_is_pos_num(r, 2) == 1) then 1 else match l
     Var(p) => if cs_omem(p, ps) == 1 and cs_omem(p, guarded) == 1 then (if op == "-" and cs_is_pos_num(r, 1) == 1 then 1 else if op == "/" and cs_is_pos_num(r, 2) == 1 then 1 else 0) else 0
     _      => 0
 fn cs_is_dec_arg(arg, ps, subvars, guarded) = match arg
@@ -929,9 +965,32 @@ fn cs_is_dec_arg(arg, ps, subvars, guarded) = match arg
     MutE(inner)   => cs_is_dec_arg(inner, ps, subvars, guarded)
     Bin(op, l, r) => cs_is_dec_bin(op, l, r, ps, guarded)
     _             => 0
-fn cs_has_dec_arg(args, ps, subvars, guarded) = match args
+fn cs_is_same_param(arg, p) = match arg
+    Var(v)      => if v == p then 1 else 0
+    OwnE(inner) => cs_is_same_param(inner, p)
+    MutE(inner) => cs_is_same_param(inner, p)
+    _           => 0
+fn cs_is_inc_bin(op, l, r, p) = match l
+    Var(v) => if v == p and ((op == "+" and cs_is_pos_num(r, 1) == 1) or (op == "*" and cs_is_pos_num(r, 2) == 1)) then 1 else 0
+    _      => 0
+fn cs_is_inc_arg_for(arg, p) = match arg
+    OwnE(inner)   => cs_is_inc_arg_for(inner, p)
+    MutE(inner)   => cs_is_inc_arg_for(inner, p)
+    Bin(op, l, r) => cs_is_inc_bin(op, l, r, p)
+    _             => 0
+fn cs_has_fixed_guarded(args, ps, guarded) = match args
     Nil        => 0
-    Cons(a, r) => if cs_is_dec_arg(a, ps, subvars, guarded) == 1 then 1 else cs_has_dec_arg(r, ps, subvars, guarded)
+    Cons(a, r) => cs_has_fixed_g1(a, r, ps, guarded)
+fn cs_has_fixed_g1(a, ar, ps, guarded) = match ps
+    Nil         => 0
+    Cons(p, pr) => if cs_omem(p, guarded) == 1 and cs_is_same_param(a, p) == 1 then 1 else cs_has_fixed_guarded(ar, pr, guarded)
+fn cs_has_dec_arg(args, ps, subvars, guarded) = cs_lex_dec_args(args, ps, ps, subvars, guarded)
+fn cs_lex_dec_args(args, cur_ps, all_ps, subvars, guarded) = match args
+    Nil        => 0
+    Cons(a, r) => cs_lex_dec_step(a, r, cur_ps, all_ps, subvars, guarded)
+fn cs_lex_dec_step(a, ar, cur_ps, all_ps, subvars, guarded) = match cur_ps
+    Nil         => if cs_is_dec_arg(a, all_ps, subvars, guarded) == 1 then 1 else cs_lex_dec_args(ar, Nil, all_ps, subvars, guarded)
+    Cons(p, pr) => if cs_is_dec_arg(a, all_ps, subvars, guarded) == 1 then 1 else if cs_is_inc_arg_for(a, p) == 1 then (if cs_omem(p, guarded) == 1 and cs_has_fixed_guarded(ar, pr, guarded) == 1 then 1 else 0) else cs_lex_dec_args(ar, pr, all_ps, subvars, guarded)
 fn cs_achk_total_e(e, fnm, ps, subvars, guarded) = match e
     Call(cnm, args) => let da = cs_achk_total_args(args, fnm, ps, subvars, guarded) in if cnm == fnm and cs_has_dec_arg(args, ps, subvars, guarded) == 0 then Cons(cs_mkdiag("A0002", "totality", "totality error: cannot prove termination of 'total fn " + fnm + "': recursive call does not decrease any parameter", "recurse on a structural pattern subterm or a guarded 'n - 1' measure"), da) else da
     If(c, t, e2)    => let g2 = cs_guard_ps(ps, c, guarded) in cs_app(cs_achk_total_e(c, fnm, ps, subvars, guarded), cs_app(cs_achk_total_e(t, fnm, ps, subvars, g2), cs_achk_total_e(e2, fnm, ps, subvars, g2)))
@@ -1118,12 +1177,56 @@ fn cs_schk_conc_args(args, fnm, in_scope, nsvars, mvars) = match args
     Cons(h, t) => cs_app(cs_schk_conc_e(h, fnm, in_scope, nsvars, mvars), cs_schk_conc_args(t, fnm, in_scope, nsvars, mvars))
 
 ## --- Track V: Contract Verification (`requires`/`ensures`/`invariant`/`old`/`law`, `[V0001]`, `proofs`) ---
-fn cs_vcollect_vsigs(prog) = match prog
+fn cs_vcollect_rtypes(prog) = match prog
     Nil        => Nil
-    Cons(h, t) => cs_vcollect_vsig1(h, cs_vcollect_vsigs(t))
+    Cons(h, t) => cs_vcollect_rtype1(h, cs_vcollect_rtypes(t))
+fn cs_vcollect_rtype1(st, rest) = match st
+    TypeRefineS(nm, bty, pr) => Cons({nm: nm, bty: bty, pr: pr}, rest)
+    _                        => rest
+fn cs_vrtype_lookup(nm, rtypes) = match rtypes
+    Nil        => Nil
+    Cons(h, t) => if h.nm == nm then Cons(h, Nil) else cs_vrtype_lookup(nm, t)
+fn cs_vsubst_self(e, vnm) = match e
+    Var(nm)         => if nm == "self" then Var(vnm) else e
+    Bin(op, l, r)   => Bin(op, cs_vsubst_self(l, vnm), cs_vsubst_self(r, vnm))
+    If(c, t, e2)    => If(cs_vsubst_self(c, vnm), cs_vsubst_self(t, vnm), cs_vsubst_self(e2, vnm))
+    LetIn(nm, v, b) => LetIn(nm, cs_vsubst_self(v, vnm), if nm == "self" then b else cs_vsubst_self(b, vnm))
+    Call(cnm, args) => Call(cnm, cs_vsubst_self_args(args, vnm))
+    Field(o, fld)   => Field(cs_vsubst_self(o, vnm), fld)
+    _               => e
+fn cs_vsubst_self_args(xs, vnm) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons(cs_vsubst_self(h, vnm), cs_vsubst_self_args(t, vnm))
+fn cs_vrefine_preds(ty, vnm, rtypes) = match ty
+    TyRefine(bty, pr) => cs_app(cs_vrefine_preds(bty, vnm, rtypes), Cons(cs_vsubst_self(pr, vnm), Nil))
+    TyName(tn)        => cs_vrefine_preds_nm(tn, vnm, cs_vrtype_lookup(tn, rtypes), rtypes)
+    _                 => Nil
+fn cs_vrefine_preds_nm(tn, vnm, m, rtypes) = match m
+    Nil         => Nil
+    Cons(rt, r) => cs_app(cs_vrefine_preds(rt.bty, vnm, rtypes), Cons(cs_vsubst_self(rt.pr, vnm), Nil))
+fn cs_vrefine_param_reqs(ps, ts, rtypes) = match ps
+    Nil        => Nil
+    Cons(p, r) => cs_vrefine_param_reqs2(p, r, ts, rtypes)
+fn cs_vrefine_param_reqs2(p, r, ts, rtypes) = match ts
+    Nil          => Nil
+    Cons(ty, tr) => cs_app(cs_vrefine_preds(ty, p, rtypes), cs_vrefine_param_reqs(r, tr, rtypes))
+fn cs_vmerge_vsig(nm, ps, reqs, enss, vsigs) = if cs_isnil(reqs) == 1 and cs_isnil(enss) == 1 then vsigs else cs_vmerge_vsig2(nm, ps, reqs, enss, vsigs)
+fn cs_vmerge_vsig2(nm, ps, reqs, enss, vsigs) = match vsigs
+    Nil         => Cons({nm: nm, ps: ps, reqs: reqs, enss: enss}, Nil)
+    Cons(v, vr) => if v.nm == nm then Cons({nm: nm, ps: v.ps, reqs: cs_app(reqs, v.reqs), enss: cs_app(enss, v.enss)}, vr) else Cons(v, cs_vmerge_vsig2(nm, ps, reqs, enss, vr))
+fn cs_vcollect_vsigs(prog) = cs_vcollect_vsigs_r(prog, cs_vcollect_rtypes(prog), cs_vcollect_vsigs_raw(prog))
+fn cs_vcollect_vsigs_raw(prog) = match prog
+    Nil        => Nil
+    Cons(h, t) => cs_vcollect_vsig1(h, cs_vcollect_vsigs_raw(t))
 fn cs_vcollect_vsig1(st, rest) = match st
     VContractSig(nm, ps, reqs, enss) => Cons({nm: nm, ps: ps, reqs: reqs, enss: enss}, rest)
     _                                => rest
+fn cs_vcollect_vsigs_r(prog, rtypes, acc) = match prog
+    Nil        => acc
+    Cons(h, t) => cs_vcollect_vsigs_r(t, rtypes, cs_vcollect_vsig_sig(h, rtypes, acc))
+fn cs_vcollect_vsig_sig(st, rtypes, acc) = match st
+    Sig(nm, ps, ts, rt) => cs_vmerge_vsig(nm, ps, cs_vrefine_param_reqs(ps, ts, rtypes), cs_vrefine_preds(rt, "result", rtypes), acc)
+    _                   => acc
 fn cs_vcollect_invs(prog) = match prog
     Nil        => Nil
     Cons(h, t) => cs_vcollect_inv1(h, cs_vcollect_invs(t))
@@ -1206,7 +1309,16 @@ fn cs_n4_subst_call(e, vnm, gfn) = match e
 fn cs_n4_subst_args(xs, vnm, gfn) = match xs
     Nil        => Nil
     Cons(h, t) => Cons(cs_n4_subst_call(h, vnm, gfn), cs_n4_subst_args(t, vnm, gfn))
-fn cs_veval_call(cnm, args, env, old_env, ft, d) = if cnm == "old" and cs_len(args) == 1 then cs_veval(cs_asthead(args), old_env, old_env, ft, d) else if (cnm == "verify" or cnm == "law_check" or cnm == "evolve_approve" or cnm == "borrow" or cnm == "borrow_mut" or cnm == "move" or cnm == "clone") and cs_len(args) >= 1 then cs_veval(cs_asthead(args), env, old_env, ft, d) else if cnm == "grad" and cs_len(args) >= 2 then cs_veval_call("__ad_grad_" + cs_n4_var_name(cs_asthead(args)), cs_cvtl(args), env, old_env, ft, d) else if cnm == "jit" and cs_len(args) >= 2 then cs_veval_call(cs_n4_var_name(cs_asthead(args)), cs_cvtl(args), env, old_env, ft, d) else if cnm == "dec_add" and cs_len(args) == 2 then cs_veval_bin("+", cs_veval(cs_asthead(args), env, old_env, ft, d), cs_veval(cs_astsecond(args), env, old_env, ft, d)) else if cnm == "dec_sub" and cs_len(args) == 2 then cs_veval_bin("-", cs_veval(cs_asthead(args), env, old_env, ft, d), cs_veval(cs_astsecond(args), env, old_env, ft, d)) else if cnm == "dec_eq" and cs_len(args) == 2 then cs_veval_bin("==", cs_veval(cs_asthead(args), env, old_env, ft, d), cs_veval(cs_astsecond(args), env, old_env, ft, d)) else if cnm == "dec_lt" and cs_len(args) == 2 then cs_veval_bin("<", cs_veval(cs_asthead(args), env, old_env, ft, d), cs_veval(cs_astsecond(args), env, old_env, ft, d)) else if cnm == "dec_le" and cs_len(args) == 2 then cs_veval_bin("<=", cs_veval(cs_asthead(args), env, old_env, ft, d), cs_veval(cs_astsecond(args), env, old_env, ft, d)) else if cnm == "dec_gt" and cs_len(args) == 2 then cs_veval_bin(">", cs_veval(cs_asthead(args), env, old_env, ft, d), cs_veval(cs_astsecond(args), env, old_env, ft, d)) else if cnm == "dec_ge" and cs_len(args) == 2 then cs_veval_bin(">=", cs_veval(cs_asthead(args), env, old_env, ft, d), cs_veval(cs_astsecond(args), env, old_env, ft, d)) else cs_veval_ufn(cs_fnlookup(cnm, ft), cs_veval_args(args, env, old_env, ft, d), ft, d)
+fn cs_vbv_pow2(k) = if k <= 0 then 1 else if k >= 16 then 65536 * cs_vbv_pow2(k - 16) else if k >= 8 then 256 * cs_vbv_pow2(k - 8) else if k >= 4 then 16 * cs_vbv_pow2(k - 4) else 2 * cs_vbv_pow2(k - 1)
+fn cs_vbv_mod(x, m) = let r = x % m in if r < 0 then r + m else r
+fn cs_vbv_and(x, y, b) = if b <= 0 or x <= 0 or y <= 0 then 0 else ((x % 2) * (y % 2)) + 2 * cs_vbv_and(x / 2, y / 2, b - 1)
+fn cs_vbv_or(x, y, b) = if b <= 0 or (x <= 0 and y <= 0) then 0 else (if (x % 2) + (y % 2) >= 1 then 1 else 0) + 2 * cs_vbv_or(x / 2, y / 2, b - 1)
+fn cs_vbv_xor(x, y, b) = if b <= 0 or (x <= 0 and y <= 0) then 0 else (((x % 2) + (y % 2)) % 2) + 2 * cs_vbv_xor(x / 2, y / 2, b - 1)
+fn cs_veval_arr_lookup(k, ar) = let r = cs_vflookup(k, ar.fields) in if r.ok == 1 then r else let d = cs_vflookup("__def", ar.fields) in if d.ok == 1 then d else cs_vv_int(ar.i)
+fn cs_veval_forall_loop(vnm, k, hi, pred, env, ft) = if k > hi then cs_vv_int(1) else let r = cs_veval(pred, Cons({k: vnm, v: cs_vv_int(k)}, env), env, ft, 0) in if r.ok == 0 then cs_vv_err() else if r.i == 0 then cs_vv_int(0) else cs_veval_forall_loop(vnm, k + 1, hi, pred, env, ft)
+fn cs_veval_exists_loop(vnm, k, hi, pred, env, ft) = if k > hi then cs_vv_int(0) else let r = cs_veval(pred, Cons({k: vnm, v: cs_vv_int(k)}, env), env, ft, 0) in if r.ok == 0 then cs_vv_err() else if r.i != 0 then cs_vv_int(1) else cs_veval_exists_loop(vnm, k + 1, hi, pred, env, ft)
+fn cs_veval_m1_call(cnm, args, env, old_env, ft, d) = if (cnm == "bv_and" or cnm == "bit_and") and cs_len(args) == 2 then (let a = cs_veval(cs_asthead(args), env, old_env, ft, d) in let b = cs_veval(cs_astsecond(args), env, old_env, ft, d) in if a.ok == 0 or b.ok == 0 then cs_vv_err() else cs_vv_int(cs_vbv_and(cs_vbv_mod(a.i, 65536), cs_vbv_mod(b.i, 65536), 16))) else if (cnm == "bv_or" or cnm == "bit_or") and cs_len(args) == 2 then (let a = cs_veval(cs_asthead(args), env, old_env, ft, d) in let b = cs_veval(cs_astsecond(args), env, old_env, ft, d) in if a.ok == 0 or b.ok == 0 then cs_vv_err() else cs_vv_int(cs_vbv_or(cs_vbv_mod(a.i, 65536), cs_vbv_mod(b.i, 65536), 16))) else if (cnm == "bv_xor" or cnm == "bit_xor") and cs_len(args) == 2 then (let a = cs_veval(cs_asthead(args), env, old_env, ft, d) in let b = cs_veval(cs_astsecond(args), env, old_env, ft, d) in if a.ok == 0 or b.ok == 0 then cs_vv_err() else cs_vv_int(cs_vbv_xor(cs_vbv_mod(a.i, 65536), cs_vbv_mod(b.i, 65536), 16))) else if (cnm == "bv_shl" or cnm == "bit_shl") and cs_len(args) == 2 then (let a = cs_veval(cs_asthead(args), env, old_env, ft, d) in let b = cs_veval(cs_astsecond(args), env, old_env, ft, d) in if a.ok == 0 or b.ok == 0 or b.i < 0 then cs_vv_err() else cs_vv_int(a.i * cs_vbv_pow2(b.i))) else if (cnm == "bv_shr" or cnm == "bit_shr") and cs_len(args) == 2 then (let a = cs_veval(cs_asthead(args), env, old_env, ft, d) in let b = cs_veval(cs_astsecond(args), env, old_env, ft, d) in if a.ok == 0 or b.ok == 0 or b.i < 0 then cs_vv_err() else cs_vv_int(a.i / cs_vbv_pow2(b.i))) else if cnm == "bv_u8" and cs_len(args) == 1 then (let a = cs_veval(cs_asthead(args), env, old_env, ft, d) in if a.ok == 0 then cs_vv_err() else cs_vv_int(cs_vbv_mod(a.i, 256))) else if cnm == "bv_not_u8" and cs_len(args) == 1 then (let a = cs_veval(cs_asthead(args), env, old_env, ft, d) in if a.ok == 0 then cs_vv_err() else cs_vv_int(255 - cs_vbv_mod(a.i, 256))) else if cnm == "bv_add_u8" and cs_len(args) == 2 then (let a = cs_veval(cs_asthead(args), env, old_env, ft, d) in let b = cs_veval(cs_astsecond(args), env, old_env, ft, d) in if a.ok == 0 or b.ok == 0 then cs_vv_err() else cs_vv_int(cs_vbv_mod(a.i + b.i, 256))) else if cnm == "bv_sub_u8" and cs_len(args) == 2 then (let a = cs_veval(cs_asthead(args), env, old_env, ft, d) in let b = cs_veval(cs_astsecond(args), env, old_env, ft, d) in if a.ok == 0 or b.ok == 0 then cs_vv_err() else cs_vv_int(cs_vbv_mod(a.i - b.i, 256))) else if cnm == "bv_mul_u8" and cs_len(args) == 2 then (let a = cs_veval(cs_asthead(args), env, old_env, ft, d) in let b = cs_veval(cs_astsecond(args), env, old_env, ft, d) in if a.ok == 0 or b.ok == 0 then cs_vv_err() else cs_vv_int(cs_vbv_mod(a.i * b.i, 256))) else if (cnm == "array_new" or cnm == "array_const") and cs_len(args) == 1 then (let dv = cs_veval(cs_asthead(args), env, old_env, ft, d) in if dv.ok == 0 then cs_vv_err() else cs_vv_rec(Cons({key: "__def", val: dv}, Nil))) else if (cnm == "array_store" or cnm == "heap_write") and cs_len(args) == 3 then (let ar = cs_veval(cs_asthead(args), env, old_env, ft, d) in let ix = cs_veval(cs_astsecond(args), env, old_env, ft, d) in let vl = cs_veval(cs_asthead(cs_cvtl(cs_cvtl(args))), env, old_env, ft, d) in if ar.ok == 0 or ix.ok == 0 or vl.ok == 0 then cs_vv_err() else let d0 = cs_vflookup("__def", ar.fields) in let fs0 = if d0.ok == 1 then ar.fields else Cons({key: "__def", val: cs_vv_int(ar.i)}, ar.fields) in cs_vv_rec(Cons({key: str(ix.i), val: vl}, fs0))) else if (cnm == "array_select" or cnm == "heap_read") and cs_len(args) == 2 then (let ar = cs_veval(cs_asthead(args), env, old_env, ft, d) in let ix = cs_veval(cs_astsecond(args), env, old_env, ft, d) in if ar.ok == 0 or ix.ok == 0 then cs_vv_err() else cs_veval_arr_lookup(str(ix.i), ar)) else if (cnm == "points_to" or cnm == "heap_new") and cs_len(args) == 2 then (let pt = cs_veval(cs_asthead(args), env, old_env, ft, d) in let vl = cs_veval(cs_astsecond(args), env, old_env, ft, d) in if pt.ok == 0 or vl.ok == 0 then cs_vv_err() else cs_vv_rec(Cons({key: str(pt.i), val: vl}, Cons({key: "__dom", val: cs_vv_int(pt.i)}, Cons({key: "__valid", val: cs_vv_int(1)}, Nil))))) else if cnm == "sep_disjoint" and cs_len(args) == 2 then (let p1 = cs_veval(cs_asthead(args), env, old_env, ft, d) in let p2 = cs_veval(cs_astsecond(args), env, old_env, ft, d) in if p1.ok == 0 or p2.ok == 0 then cs_vv_err() else cs_vv_int(if p1.i != p2.i then 1 else 0)) else if cnm == "sep_conj" and cs_len(args) == 2 then (let h1 = cs_veval(cs_asthead(args), env, old_env, ft, d) in let h2 = cs_veval(cs_astsecond(args), env, old_env, ft, d) in if h1.ok == 0 or h2.ok == 0 then cs_vv_err() else let d1 = cs_vflookup("__dom", h1.fields) in let d2 = cs_vflookup("__dom", h2.fields) in let v1 = cs_vflookup("__valid", h1.fields) in let v2 = cs_vflookup("__valid", h2.fields) in let ok_sep = if d1.ok == 1 and d2.ok == 1 and d1.i != d2.i and (v1.ok == 0 or v1.i != 0) and (v2.ok == 0 or v2.i != 0) then 1 else 0 in {ok: 1, i: ok_sep, fields: Cons({key: "__valid", val: cs_vv_int(ok_sep)}, cs_app(h1.fields, h2.fields))}) else if cnm == "sep_valid" and cs_len(args) == 1 then (let h = cs_veval(cs_asthead(args), env, old_env, ft, d) in if h.ok == 0 then cs_vv_err() else let v = cs_vflookup("__valid", h.fields) in if v.ok == 1 then v else cs_vv_int(h.i)) else if cnm == "forall_range" and cs_len(args) == 4 then (let vnm = cs_n4_var_name(cs_asthead(args)) in let lo = cs_veval(cs_astsecond(args), env, old_env, ft, d) in let hi = cs_veval(cs_asthead(cs_cvtl(cs_cvtl(args))), env, old_env, ft, d) in if vnm == "" or lo.ok == 0 or hi.ok == 0 or hi.i - lo.i > 32 then cs_vv_err() else cs_veval_forall_loop(vnm, lo.i, hi.i, cs_asthead(cs_cvtl(cs_cvtl(cs_cvtl(args)))), env, ft)) else if cnm == "exists_range" and cs_len(args) == 4 then (let vnm = cs_n4_var_name(cs_asthead(args)) in let lo = cs_veval(cs_astsecond(args), env, old_env, ft, d) in let hi = cs_veval(cs_asthead(cs_cvtl(cs_cvtl(args))), env, old_env, ft, d) in if vnm == "" or lo.ok == 0 or hi.ok == 0 or hi.i - lo.i > 32 then cs_vv_err() else cs_veval_exists_loop(vnm, lo.i, hi.i, cs_asthead(cs_cvtl(cs_cvtl(cs_cvtl(args)))), env, ft)) else cs_veval_ufn(cs_fnlookup(cnm, ft), cs_veval_args(args, env, old_env, ft, d), ft, d)
+fn cs_veval_call(cnm, args, env, old_env, ft, d) = if cnm == "old" and cs_len(args) == 1 then cs_veval(cs_asthead(args), old_env, old_env, ft, d) else if (cnm == "verify" or cnm == "law_check" or cnm == "evolve_approve" or cnm == "borrow" or cnm == "borrow_mut" or cnm == "move" or cnm == "clone") and cs_len(args) >= 1 then cs_veval(cs_asthead(args), env, old_env, ft, d) else if cnm == "grad" and cs_len(args) >= 2 then cs_veval_call("__ad_grad_" + cs_n4_var_name(cs_asthead(args)), cs_cvtl(args), env, old_env, ft, d) else if cnm == "jit" and cs_len(args) >= 2 then cs_veval_call(cs_n4_var_name(cs_asthead(args)), cs_cvtl(args), env, old_env, ft, d) else if cnm == "dec_add" and cs_len(args) == 2 then cs_veval_bin("+", cs_veval(cs_asthead(args), env, old_env, ft, d), cs_veval(cs_astsecond(args), env, old_env, ft, d)) else if cnm == "dec_sub" and cs_len(args) == 2 then cs_veval_bin("-", cs_veval(cs_asthead(args), env, old_env, ft, d), cs_veval(cs_astsecond(args), env, old_env, ft, d)) else if cnm == "dec_eq" and cs_len(args) == 2 then cs_veval_bin("==", cs_veval(cs_asthead(args), env, old_env, ft, d), cs_veval(cs_astsecond(args), env, old_env, ft, d)) else if cnm == "dec_lt" and cs_len(args) == 2 then cs_veval_bin("<", cs_veval(cs_asthead(args), env, old_env, ft, d), cs_veval(cs_astsecond(args), env, old_env, ft, d)) else if cnm == "dec_le" and cs_len(args) == 2 then cs_veval_bin("<=", cs_veval(cs_asthead(args), env, old_env, ft, d), cs_veval(cs_astsecond(args), env, old_env, ft, d)) else if cnm == "dec_gt" and cs_len(args) == 2 then cs_veval_bin(">", cs_veval(cs_asthead(args), env, old_env, ft, d), cs_veval(cs_astsecond(args), env, old_env, ft, d)) else if cnm == "dec_ge" and cs_len(args) == 2 then cs_veval_bin(">=", cs_veval(cs_asthead(args), env, old_env, ft, d), cs_veval(cs_astsecond(args), env, old_env, ft, d)) else cs_veval_m1_call(cnm, args, env, old_env, ft, d)
 fn cs_veval_ufn(mf, ra, ft, d) = match mf
     Nil          => cs_vv_err()
     Cons(fn0, r) => if ra.ok == 0 then cs_vv_err() else cs_veval_ufn2(fn0, ra.vals, ft, d)
@@ -1216,7 +1328,7 @@ fn cs_veval_ufn2(fn0, vals, ft, d) = match fn0
 fn cs_vpts_a() = Cons(0, Cons(1, Cons(0 - 1, Nil)))
 fn cs_vpts_b() = Cons(0, Cons(1, Nil))
 fn cs_vpts_c() = Cons(0, Cons(1, Nil))
-fn cs_vpts_for(idx, total) = if total <= 1 then cs_vpts_a() else if total == 2 then cs_vpts_b() else if idx < 3 then cs_vpts_c() else Cons(0, Nil)
+fn cs_vpts_for(idx, total) = if total <= 1 then cs_vpts_a() else if total == 2 then cs_vpts_b() else if idx < 5 then cs_vpts_c() else Cons(0, Nil)
 fn cs_vgen_envs(ps, idx, total) = match ps
     Nil        => Cons(Nil, Nil)
     Cons(p, r) => cs_vcross_p(p, cs_vpts_for(idx, total), cs_vgen_envs(r, idx + 1, total))
@@ -1260,7 +1372,23 @@ fn cs_vlin_scale_cs1(k, cs) = match cs
 fn cs_vlin_add(a, b) = if a.ok == 0 or b.ok == 0 then cs_vlin_err() else {ok: 1, c0: a.c0 + b.c0, cs: cs_vlin_add_cs(a.cs, b.cs)}
 fn cs_vlin_scale(k, a) = if a.ok == 0 then cs_vlin_err() else {ok: 1, c0: k * a.c0, cs: cs_vlin_scale_cs(k, a.cs)}
 fn cs_vlin_sub(a, b) = cs_vlin_add(a, cs_vlin_scale(0 - 1, b))
-fn cs_vlin_mul(a, b) = if a.ok == 0 or b.ok == 0 then cs_vlin_err() else if cs_isnil(a.cs) == 1 then cs_vlin_scale(a.c0, b) else if cs_isnil(b.cs) == 1 then cs_vlin_scale(b.c0, a) else cs_vlin_err()
+fn cs_vmono_key(k1, k2) = if k1 <= k2 then k1 + "*" + k2 else k2 + "*" + k1
+fn cs_vlin_mul_term_cs(k1, c1, cs2) = match cs2
+    Nil        => Nil
+    Cons(h, t) => cs_vlin_add_term(cs_vmono_key(k1, h.k), c1 * h.c, cs_vlin_mul_term_cs(k1, c1, t))
+fn cs_vlin_mul_cs(cs1, cs2) = match cs1
+    Nil        => Nil
+    Cons(h, t) => cs_vlin_add_cs(cs_vlin_mul_term_cs(h.k, h.c, cs2), cs_vlin_mul_cs(t, cs2))
+fn cs_vlin_mul(a, b) = if a.ok == 0 or b.ok == 0 then cs_vlin_err() else if cs_isnil(a.cs) == 1 then cs_vlin_scale(a.c0, b) else if cs_isnil(b.cs) == 1 then cs_vlin_scale(b.c0, a) else let t0 = cs_vlin_add(cs_vlin_scale(a.c0, b), cs_vlin_scale(b.c0, {ok: 1, c0: 0, cs: a.cs})) in {ok: 1, c0: t0.c0, cs: cs_vlin_add_cs(t0.cs, cs_vlin_mul_cs(a.cs, b.cs))}
+fn cs_vlin_is_zero(l) = if l.ok == 1 and l.c0 == 0 and cs_isnil(l.cs) == 1 then 1 else 0
+fn cs_vlin_eq(a, b) = cs_vlin_is_zero(cs_vlin_sub(a, b))
+fn cs_phd_cs(cs) = match cs
+    Nil        => {k: "", c: 0}
+    Cons(h, t) => h
+fn cs_vlin_key_cs(cs) = match cs
+    Nil        => ""
+    Cons(h, t) => str(h.c) + "*" + h.k + (if cs_isnil(t) == 1 then "" else "+" + cs_vlin_key_cs(t))
+fn cs_vlin_key_str(l) = if l.ok == 0 then "?" else if cs_isnil(l.cs) == 1 then str(l.c0) else if l.c0 == 0 and cs_len(l.cs) == 1 and cs_vlin_coeff((cs_phd_cs(l.cs)).k, l.cs) == 1 then (cs_phd_cs(l.cs)).k else str(l.c0) + "+" + cs_vlin_key_cs(l.cs)
 fn cs_vlin_is_contra(l) = if l.ok == 1 and cs_isnil(l.cs) == 1 and l.c0 < 0 then 1 else 0
 fn cs_vfm_any_contra(hyps) = match hyps
     Nil        => 0
@@ -1292,6 +1420,89 @@ fn cs_vfm_unsat1(hyps, vars) = match vars
     Nil        => cs_vfm_any_contra(hyps)
     Cons(v, r) => let next = cs_vfm_elim_var(v, hyps) in if cs_vfm_any_contra(next) == 1 then 1 else if cs_len(next) > 48 then 0 else cs_vfm_unsat(next, r)
 fn cs_vfm_check_unsat(hyps) = cs_vfm_unsat(hyps, cs_vfm_vars(hyps, Nil))
+
+## --- Multiplier M1 (#255): QF_NIA / QF_BV / QF_ALIA / Separation Logic in `lcaas` ---
+fn cs_vnia_var_lb(v, hyps) = match hyps
+    Nil        => 0 - 999999
+    Cons(h, t) => let r = cs_vnia_var_lb(v, t) in if cs_len(h.cs) == 1 and cs_vlin_coeff(v, h.cs) == 1 then (let b = 0 - h.c0 in if b > r then b else r) else r
+fn cs_vnia_split_star(s, idx, n) = if idx >= n then Nil else if at(s, idx) == "*" then Cons(slice(s, 0, idx), Cons(slice(s, idx + 1, n), Nil)) else cs_vnia_split_star(s, idx + 1, n)
+fn cs_vnia_add_bvar(v, acc) = if v == "" or cs_omem(v, acc) == 1 then acc else Cons(v, acc)
+fn cs_vnia_add_bvars(vs, acc) = match vs
+    Nil        => acc
+    Cons(v, r) => cs_vnia_add_bvars(r, cs_vnia_add_bvar(v, acc))
+fn cs_vnia_vars_cs(cs, acc) = match cs
+    Nil        => acc
+    Cons(h, t) => cs_vnia_vars_cs(t, cs_vnia_add_bvars(cs_vnia_split_star(h.k, 0, count(h.k)), acc))
+fn cs_vnia_base_vars(hyps, acc) = match hyps
+    Nil        => acc
+    Cons(h, t) => cs_vnia_base_vars(t, if cs_len(h.cs) <= 3 then cs_vnia_vars_cs(h.cs, acc) else acc)
+fn cs_vnia_sq_hyps(vars) = match vars
+    Nil        => Nil
+    Cons(v, r) => Cons(cs_vlin_var(cs_vmono_key(v, v)), cs_vnia_sq_hyps(r))
+fn cs_vnia_diff_sq_pairs(v1, vars) = match vars
+    Nil         => Nil
+    Cons(v2, r) => let dv = cs_vlin_sub(cs_vlin_var(v1), cs_vlin_var(v2)) in let sv = cs_vlin_add(cs_vlin_var(v1), cs_vlin_var(v2)) in Cons(cs_vlin_mul(dv, dv), Cons(cs_vlin_mul(sv, sv), cs_vnia_diff_sq_pairs(v1, r)))
+fn cs_vnia_all_diff_sq(vars) = match vars
+    Nil        => Nil
+    Cons(v, r) => cs_app(cs_vnia_diff_sq_pairs(v, r), cs_vnia_all_diff_sq(r))
+fn cs_vnia_prod_pair(v1, lb1, vars, hyps) = match vars
+    Nil         => Nil
+    Cons(v2, r) => let lb2 = cs_vnia_var_lb(v2, hyps) in let rest = cs_vnia_prod_pair(v1, lb1, r, hyps) in if lb1 >= 0 and lb2 >= 0 then Cons({ok: 1, c0: 0 - (lb1 * lb2), cs: Cons({k: cs_vmono_key(v1, v2), c: 1}, Nil)}, Cons(cs_vlin_mul(cs_vlin_sub(cs_vlin_var(v1), cs_vlin_const(lb1)), cs_vlin_sub(cs_vlin_var(v2), cs_vlin_const(lb2))), rest)) else rest
+fn cs_vnia_prod_hyps(vars, hyps) = match vars
+    Nil         => Nil
+    Cons(v1, r) => let lb1 = cs_vnia_var_lb(v1, hyps) in cs_app(if lb1 >= 0 then cs_vnia_prod_pair(v1, lb1, vars, hyps) else Nil, cs_vnia_prod_hyps(r, hyps))
+fn cs_vnia_mono_z(x, y, vars, hyps) = match vars
+    Nil        => Nil
+    Cons(z, r) => let lbz = cs_vnia_var_lb(z, hyps) in let rest = cs_vnia_mono_z(x, y, r, hyps) in if lbz >= 0 then Cons(cs_vlin_sub(cs_vlin_var(cs_vmono_key(x, z)), cs_vlin_var(cs_vmono_key(y, z))), rest) else rest
+fn cs_vnia_mono_h1(h, vars, hyps) = if h.c0 <= 0 and cs_len(h.cs) == 2 then (let c1 = cs_phd_cs(h.cs) in let c2 = cs_phd_cs(cs_cvtl_cs(h.cs)) in if c1.c == 1 and c2.c == 0 - 1 then cs_vnia_mono_z(c1.k, c2.k, vars, hyps) else if c2.c == 1 and c1.c == 0 - 1 then cs_vnia_mono_z(c2.k, c1.k, vars, hyps) else Nil) else Nil
+fn cs_cvtl_cs(cs) = match cs
+    Nil        => Nil
+    Cons(h, t) => t
+fn cs_vnia_mono_hyps(cur, vars, hyps) = match cur
+    Nil        => Nil
+    Cons(h, t) => cs_app(cs_vnia_mono_h1(h, vars, hyps), cs_vnia_mono_hyps(t, vars, hyps))
+fn cs_vnia_enrich_hyps(goal_hyps, hyps) = let bvars = cs_vnia_base_vars(goal_hyps, cs_vnia_base_vars(hyps, Nil)) in let sqs = if cs_isnil(bvars) == 0 then cs_app(cs_vnia_sq_hyps(bvars), cs_vnia_all_diff_sq(bvars)) else Nil in cs_app(sqs, cs_app(cs_vnia_prod_hyps(bvars, hyps), cs_app(cs_vnia_mono_hyps(hyps, bvars, hyps), hyps)))
+fn cs_vlin_div_hyps(la, k, q) = let r = cs_vlin_sub(la, cs_vlin_scale(k, q)) in Cons(r, Cons(cs_vlin_sub(cs_vlin_const(k - 1), r), Nil))
+fn cs_vis_struct_call(cnm) = if cnm == "array_new" or cnm == "array_const" or cnm == "array_store" or cnm == "heap_write" or cnm == "points_to" or cnm == "heap_new" or cnm == "sep_conj" then 1 else 0
+fn cs_vis_struct_expr(e) = match e
+    Call(cnm, args) => cs_vis_struct_call(cnm)
+    _               => 0
+fn cs_vsep_dom_ptr(e) = match e
+    Call(cnm, args) => if (cnm == "points_to" or cnm == "heap_new") and cs_len(args) == 2 then Cons(cs_asthead(args), Nil) else if cnm == "sep_conj" and cs_len(args) == 2 then cs_app(cs_vsep_dom_ptr(cs_asthead(args)), cs_vsep_dom_ptr(cs_astsecond(args))) else if cnm == "heap_write" and cs_len(args) == 3 then cs_vsep_dom_ptr(cs_asthead(args)) else Nil
+    _               => Nil
+fn cs_vsep_disjoint_one(p, ps, hyps, lenv, ft, d) = match ps
+    Nil         => 1
+    Cons(q, qr) => if (cs_vprove_goal(Bin(">", p, q), hyps, lenv, ft, d) == 1 or cs_vprove_goal(Bin("<", p, q), hyps, lenv, ft, d) == 1 or cs_vprove_goal(Bin(">=", Bin("*", Bin("-", p, q), Bin("-", p, q)), Num(1)), hyps, lenv, ft, d) == 1) and cs_vsep_disjoint_one(p, qr, hyps, lenv, ft, d) == 1 then 1 else 0
+fn cs_vsep_disjoint_lists(ps1, ps2, hyps, lenv, ft, d) = match ps1
+    Nil         => 1
+    Cons(p, pr) => if cs_vsep_disjoint_one(p, ps2, hyps, lenv, ft, d) == 1 then cs_vsep_disjoint_lists(pr, ps2, hyps, lenv, ft, d) else 0
+fn cs_vsep_valid(e, hyps, lenv, ft, d) = match e
+    Call(cnm, args) => if (cnm == "points_to" or cnm == "heap_new") and cs_len(args) == 2 then 1 else if cnm == "sep_conj" and cs_len(args) == 2 then (let h1 = cs_asthead(args) in let h2 = cs_astsecond(args) in if cs_vsep_valid(h1, hyps, lenv, ft, d) == 1 and cs_vsep_valid(h2, hyps, lenv, ft, d) == 1 and cs_vsep_disjoint_lists(cs_vsep_dom_ptr(h1), cs_vsep_dom_ptr(h2), hyps, lenv, ft, d) == 1 then 1 else 0) else if cnm == "heap_write" and cs_len(args) == 3 then cs_vsep_valid(cs_asthead(args), hyps, lenv, ft, d) else 0
+    _               => 0
+fn cs_varr_select(arr_e, idx_e, hyps, lenv, ft, d) = match arr_e
+    Call(cnm, args) => if (cnm == "array_store" or cnm == "heap_write") and cs_len(args) == 3 then (let base_a = cs_asthead(args) in let st_i = cs_astsecond(args) in let st_v = cs_asthead(cs_cvtl(cs_cvtl(args))) in if cnm == "heap_write" and cs_vsep_valid(base_a, hyps, lenv, ft, d) == 0 and cs_n4_var_name(base_a) == "" then cs_vlin_err() else if cs_vprove_goal(Bin("==", idx_e, st_i), hyps, lenv, ft, d) == 1 then cs_vlin_expr(st_v, hyps, lenv, ft, d) else if cs_vprove_goal(Bin(">", idx_e, st_i), hyps, lenv, ft, d) == 1 or cs_vprove_goal(Bin("<", idx_e, st_i), hyps, lenv, ft, d) == 1 or cs_vprove_goal(Bin(">=", Bin("*", Bin("-", idx_e, st_i), Bin("-", idx_e, st_i)), Num(1)), hyps, lenv, ft, d) == 1 then cs_varr_select(base_a, idx_e, hyps, lenv, ft, d) else cs_vlin_err()) else if (cnm == "array_new" or cnm == "array_const") and cs_len(args) == 1 then cs_vlin_expr(cs_asthead(args), hyps, lenv, ft, d) else if (cnm == "points_to" or cnm == "heap_new") and cs_len(args) == 2 then (if cs_vprove_goal(Bin("==", idx_e, cs_asthead(args)), hyps, lenv, ft, d) == 1 then cs_vlin_expr(cs_astsecond(args), hyps, lenv, ft, d) else cs_vlin_err()) else if cnm == "sep_conj" and cs_len(args) == 2 then (if cs_vsep_valid(arr_e, hyps, lenv, ft, d) == 0 then cs_vlin_err() else let r1 = cs_varr_select(cs_asthead(args), idx_e, hyps, lenv, ft, d) in if r1.ok == 1 then r1 else cs_varr_select(cs_astsecond(args), idx_e, hyps, lenv, ft, d)) else cs_vlin_err()
+    Var(anm)        => let li = cs_vlin_expr(idx_e, hyps, lenv, ft, d) in if li.ok == 0 then cs_vlin_err() else cs_vlin_var("select(" + anm + "," + cs_vlin_key_str(li) + ")")
+    _               => cs_vlin_err()
+fn cs_vlin_xor_cancel(a, lb, hyps, lenv, ft, d) = match a
+    Call(cnm, args) => if (cnm == "bv_xor" or cnm == "bit_xor") and cs_len(args) == 2 then (let x = cs_asthead(args) in let k = cs_astsecond(args) in let lx = cs_vlin_expr(x, hyps, lenv, ft, d) in let lk = cs_vlin_expr(k, hyps, lenv, ft, d) in if lk.ok == 1 and cs_vlin_eq(lk, lb) == 1 then lx else if lx.ok == 1 and cs_vlin_eq(lx, lb) == 1 then lk else cs_vlin_err()) else cs_vlin_err()
+    _               => cs_vlin_err()
+fn cs_vlin_and_idem(a, lb, hyps, lenv, ft, d) = match a
+    Call(cnm, args) => if (cnm == "bv_and" or cnm == "bit_and") and cs_len(args) == 2 then (let lk = cs_vlin_expr(cs_astsecond(args), hyps, lenv, ft, d) in if lk.ok == 1 and cs_vlin_eq(lk, lb) == 1 then cs_vlin_expr(a, hyps, lenv, ft, d) else cs_vlin_err()) else cs_vlin_err()
+    _               => cs_vlin_err()
+fn cs_vlin_bv_xor(a, b, hyps, lenv, ft, d) = let la = cs_vlin_expr(a, hyps, lenv, ft, d) in let lb = cs_vlin_expr(b, hyps, lenv, ft, d) in if la.ok == 0 or lb.ok == 0 then cs_vlin_err() else if cs_vlin_eq(la, lb) == 1 then cs_vlin_const(0) else if cs_vlin_is_zero(la) == 1 then lb else if cs_vlin_is_zero(lb) == 1 then la else if cs_isnil(la.cs) == 1 and cs_isnil(lb.cs) == 1 then cs_vlin_const(cs_vbv_xor(cs_vbv_mod(la.c0, 65536), cs_vbv_mod(lb.c0, 65536), 16)) else let cx = cs_vlin_xor_cancel(a, lb, hyps, lenv, ft, d) in if cx.ok == 1 then cx else let cy = cs_vlin_xor_cancel(b, la, hyps, lenv, ft, d) in if cy.ok == 1 then cy else cs_vlin_var("bv_xor(" + cs_vmono_key(cs_vlin_key_str(la), cs_vlin_key_str(lb)) + ")")
+fn cs_vlin_bv_and(a, b, hyps, lenv, ft, d) = let la = cs_vlin_expr(a, hyps, lenv, ft, d) in let lb = cs_vlin_expr(b, hyps, lenv, ft, d) in if la.ok == 0 or lb.ok == 0 then cs_vlin_err() else if cs_vlin_is_zero(la) == 1 or cs_vlin_is_zero(lb) == 1 then cs_vlin_const(0) else if cs_vlin_eq(la, lb) == 1 then la else if cs_isnil(la.cs) == 1 and cs_isnil(lb.cs) == 1 then cs_vlin_const(cs_vbv_and(cs_vbv_mod(la.c0, 65536), cs_vbv_mod(lb.c0, 65536), 16)) else let ci = cs_vlin_and_idem(a, lb, hyps, lenv, ft, d) in if ci.ok == 1 then ci else if cs_isnil(lb.cs) == 1 and (lb.c0 == 1 or lb.c0 == 3 or lb.c0 == 7 or lb.c0 == 15 or lb.c0 == 31 or lb.c0 == 63 or lb.c0 == 127 or lb.c0 == 255) then (if cs_vfm_check_unsat(Cons(cs_vlin_sub(cs_vlin_const(0 - 1), la), hyps)) == 1 and cs_vfm_check_unsat(Cons(cs_vlin_sub(la, cs_vlin_const(lb.c0 + 1)), hyps)) == 1 then la else cs_vlin_sub(la, cs_vlin_scale(lb.c0 + 1, cs_vlin_var("div(" + cs_vlin_key_str(la) + "," + str(lb.c0 + 1) + ")")))) else cs_vlin_var("bv_and(" + cs_vmono_key(cs_vlin_key_str(la), cs_vlin_key_str(lb)) + ")")
+fn cs_vlin_bv_or(a, b, hyps, lenv, ft, d) = let la = cs_vlin_expr(a, hyps, lenv, ft, d) in let lb = cs_vlin_expr(b, hyps, lenv, ft, d) in if la.ok == 0 or lb.ok == 0 then cs_vlin_err() else if cs_vlin_is_zero(la) == 1 then lb else if cs_vlin_is_zero(lb) == 1 then la else if cs_vlin_eq(la, lb) == 1 then la else if cs_isnil(la.cs) == 1 and cs_isnil(lb.cs) == 1 then cs_vlin_const(cs_vbv_or(cs_vbv_mod(la.c0, 65536), cs_vbv_mod(lb.c0, 65536), 16)) else cs_vlin_var("bv_or(" + cs_vmono_key(cs_vlin_key_str(la), cs_vlin_key_str(lb)) + ")")
+fn cs_vlin_bv_u8(a, hyps, lenv, ft, d) = let la = cs_vlin_expr(a, hyps, lenv, ft, d) in if la.ok == 0 then cs_vlin_err() else if cs_isnil(la.cs) == 1 then cs_vlin_const(cs_vbv_mod(la.c0, 256)) else if cs_vfm_check_unsat(Cons(cs_vlin_sub(cs_vlin_const(0 - 1), la), hyps)) == 1 and cs_vfm_check_unsat(Cons(cs_vlin_sub(la, cs_vlin_const(256)), hyps)) == 1 then la else if cs_vfm_check_unsat(Cons(cs_vlin_sub(cs_vlin_const(255), la), hyps)) == 1 and cs_vfm_check_unsat(Cons(cs_vlin_sub(la, cs_vlin_const(512)), hyps)) == 1 then cs_vlin_sub(la, cs_vlin_const(256)) else cs_vlin_sub(la, cs_vlin_scale(256, cs_vlin_var("div(" + cs_vlin_key_str(la) + ",256)")))
+fn cs_vcollect_div_hyps_e(e, hyps, lenv, ft, d) = match e
+    Bin(op, a, b)   => let h1 = cs_app(cs_vcollect_div_hyps_e(a, hyps, lenv, ft, d), cs_vcollect_div_hyps_e(b, hyps, lenv, ft, d)) in if (op == "/" or op == "%") then (let la = cs_vlin_expr(a, hyps, lenv, ft, d) in let lb = cs_vlin_expr(b, hyps, lenv, ft, d) in if la.ok == 1 and lb.ok == 1 and cs_isnil(lb.cs) == 1 and lb.c0 > 0 then cs_app(cs_vlin_div_hyps(la, lb.c0, cs_vlin_var("div(" + cs_vlin_key_str(la) + "," + str(lb.c0) + ")")), h1) else h1) else h1
+    Call(cnm, args) => let h1 = cs_vcollect_div_hyps_args(args, hyps, lenv, ft, d) in if (cnm == "bv_and" or cnm == "bit_and") and cs_len(args) == 2 then (let la = cs_vlin_expr(cs_asthead(args), hyps, lenv, ft, d) in let lb = cs_vlin_expr(cs_astsecond(args), hyps, lenv, ft, d) in if la.ok == 1 and lb.ok == 1 and cs_isnil(lb.cs) == 1 and (lb.c0 == 1 or lb.c0 == 3 or lb.c0 == 7 or lb.c0 == 15 or lb.c0 == 31 or lb.c0 == 63 or lb.c0 == 127 or lb.c0 == 255) then cs_app(cs_vlin_div_hyps(la, lb.c0 + 1, cs_vlin_var("div(" + cs_vlin_key_str(la) + "," + str(lb.c0 + 1) + ")")), h1) else h1) else if (cnm == "bv_u8" or cnm == "bv_not_u8") and cs_len(args) == 1 then (let la = cs_vlin_expr(cs_asthead(args), hyps, lenv, ft, d) in if la.ok == 1 then cs_app(cs_vlin_div_hyps(la, 256, cs_vlin_var("div(" + cs_vlin_key_str(la) + ",256)")), h1) else h1) else if cnm == "bv_add_u8" and cs_len(args) == 2 then (let la = cs_vlin_expr(Bin("+", cs_asthead(args), cs_astsecond(args)), hyps, lenv, ft, d) in if la.ok == 1 then cs_app(cs_vlin_div_hyps(la, 256, cs_vlin_var("div(" + cs_vlin_key_str(la) + ",256)")), h1) else h1) else h1
+    If(c, t, e2)    => cs_app(cs_vcollect_div_hyps_e(c, hyps, lenv, ft, d), cs_app(cs_vcollect_div_hyps_e(t, hyps, lenv, ft, d), cs_vcollect_div_hyps_e(e2, hyps, lenv, ft, d)))
+    LetIn(nm, v, b) => cs_app(cs_vcollect_div_hyps_e(v, hyps, lenv, ft, d), cs_vcollect_div_hyps_e(b, hyps, lenv, ft, d))
+    _               => Nil
+fn cs_vcollect_div_hyps_args(xs, hyps, lenv, ft, d) = match xs
+    Nil        => Nil
+    Cons(h, t) => cs_app(cs_vcollect_div_hyps_e(h, hyps, lenv, ft, d), cs_vcollect_div_hyps_args(t, hyps, lenv, ft, d))
+
 fn cs_vlin_init_env(ps) = match ps
     Nil        => Nil
     Cons(p, r) => Cons({k: p, v: cs_vlin_var(p)}, cs_vlin_init_env(r))
@@ -1304,6 +1515,7 @@ fn cs_vlin_bind_ps(ps, vs) = match ps
 fn cs_vlin_bind_p1(p, r, vs) = match vs
     Nil         => Nil
     Cons(v, vr) => Cons({k: p, v: v}, cs_vlin_bind_ps(r, vr))
+fn cs_vlin_bin_op(op, l, r, hyps, lenv, ft, d) = let la = cs_vlin_expr(l, hyps, lenv, ft, d) in let lb = cs_vlin_expr(r, hyps, lenv, ft, d) in if op == "+" then cs_vlin_add(la, lb) else if op == "-" then cs_vlin_sub(la, lb) else if op == "*" then cs_vlin_mul(la, lb) else if op == "/" then (if la.ok == 0 or lb.ok == 0 then cs_vlin_err() else if cs_isnil(lb.cs) == 1 and lb.c0 > 0 then (if cs_isnil(la.cs) == 1 then cs_vlin_const(la.c0 / lb.c0) else cs_vlin_var("div(" + cs_vlin_key_str(la) + "," + str(lb.c0) + ")")) else cs_vlin_err()) else if op == "%" then (if la.ok == 0 or lb.ok == 0 then cs_vlin_err() else if cs_isnil(lb.cs) == 1 and lb.c0 > 0 then (if cs_isnil(la.cs) == 1 then cs_vlin_const(la.c0 % lb.c0) else cs_vlin_sub(la, cs_vlin_scale(lb.c0, cs_vlin_var("div(" + cs_vlin_key_str(la) + "," + str(lb.c0) + ")")))) else cs_vlin_err()) else cs_vlin_err()
 fn cs_vlin_expr(e, hyps, lenv, ft, d) = if d > 6 then cs_vlin_err() else cs_vlin_expr1(e, hyps, lenv, ft, d)
 fn cs_vlin_expr1(e, hyps, lenv, ft, d) = match e
     Num(n)          => cs_vlin_const(n)
@@ -1313,38 +1525,45 @@ fn cs_vlin_expr1(e, hyps, lenv, ft, d) = match e
     CT(inner)       => cs_vlin_expr(inner, hyps, lenv, ft, d)
     DeferE(c, b)    => cs_vlin_expr(b, hyps, lenv, ft, d)
     ErrDeferE(c, b) => cs_vlin_expr(b, hyps, lenv, ft, d)
-    LetIn(nm, v, b) => let gfn = cs_n4_is_grad_let(v) in if gfn != "" then cs_vlin_expr(cs_n4_subst_call(b, nm, "__ad_grad_" + gfn), hyps, lenv, ft, d) else let lv = cs_vlin_expr(v, hyps, lenv, ft, d) in if lv.ok == 0 then cs_vlin_err() else cs_vlin_expr(b, hyps, Cons({k: nm, v: lv}, lenv), ft, d)
-    VarIn(nm, v, b) => let lv = cs_vlin_expr(v, hyps, lenv, ft, d) in if lv.ok == 0 then cs_vlin_err() else cs_vlin_expr(b, hyps, Cons({k: nm, v: lv}, lenv), ft, d)
-    Bin(op, l, r)   => if op == "+" then cs_vlin_add(cs_vlin_expr(l, hyps, lenv, ft, d), cs_vlin_expr(r, hyps, lenv, ft, d)) else if op == "-" then cs_vlin_sub(cs_vlin_expr(l, hyps, lenv, ft, d), cs_vlin_expr(r, hyps, lenv, ft, d)) else if op == "*" then cs_vlin_mul(cs_vlin_expr(l, hyps, lenv, ft, d), cs_vlin_expr(r, hyps, lenv, ft, d)) else cs_vlin_err()
+    LetIn(nm, v, b) => let gfn = cs_n4_is_grad_let(v) in if gfn != "" then cs_vlin_expr(cs_n4_subst_call(b, nm, "__ad_grad_" + gfn), hyps, lenv, ft, d) else if cs_vis_struct_expr(v) == 1 then cs_vlin_expr(cs_temp_subst_var(b, nm, v), hyps, lenv, ft, d) else let lv = cs_vlin_expr(v, hyps, lenv, ft, d) in if lv.ok == 0 then cs_vlin_err() else cs_vlin_expr(b, hyps, Cons({k: nm, v: lv}, lenv), ft, d)
+    VarIn(nm, v, b) => if cs_vis_struct_expr(v) == 1 then cs_vlin_expr(cs_temp_subst_var(b, nm, v), hyps, lenv, ft, d) else let lv = cs_vlin_expr(v, hyps, lenv, ft, d) in if lv.ok == 0 then cs_vlin_err() else cs_vlin_expr(b, hyps, Cons({k: nm, v: lv}, lenv), ft, d)
+    Bin(op, l, r)   => cs_vlin_bin_op(op, l, r, hyps, lenv, ft, d)
     If(c, t, e2)    => let rp = cs_vcond_pos(c, hyps, lenv, ft, d) in let rn = cs_vcond_neg(c, hyps, lenv, ft, d) in if rp.ok == 1 and rn.ok == 1 and cs_vfm_check_unsat(cs_app(rn.hyps, hyps)) == 1 then cs_vlin_expr(t, hyps, lenv, ft, d) else if rp.ok == 1 and rn.ok == 1 and cs_vfm_check_unsat(cs_app(rp.hyps, hyps)) == 1 then cs_vlin_expr(e2, hyps, lenv, ft, d) else cs_vlin_err()
     Call(cnm, args) => cs_vlin_call(cnm, args, hyps, lenv, ft, d)
     _               => cs_vlin_err()
 fn cs_vlin_args(args, hyps, lenv, ft, d) = match args
     Nil        => {ok: 1, vals: Nil}
     Cons(h, t) => let rh = cs_vlin_expr(h, hyps, lenv, ft, d) in if rh.ok == 0 then {ok: 0, vals: Nil} else let rt = cs_vlin_args(t, hyps, lenv, ft, d) in if rt.ok == 0 then {ok: 0, vals: Nil} else {ok: 1, vals: Cons(rh, rt.vals)}
-fn cs_vlin_call(cnm, args, hyps, lenv, ft, d) = if cnm == "old" and cs_len(args) == 1 then cs_vlin_expr(cs_asthead(args), hyps, lenv, ft, d) else if (cnm == "verify" or cnm == "law_check" or cnm == "evolve_approve" or cnm == "borrow" or cnm == "borrow_mut" or cnm == "move" or cnm == "clone") and cs_len(args) >= 1 then cs_vlin_expr(cs_asthead(args), hyps, lenv, ft, d) else if cnm == "grad" and cs_len(args) >= 2 then cs_vlin_call("__ad_grad_" + cs_n4_var_name(cs_asthead(args)), cs_cvtl(args), hyps, lenv, ft, d) else if cnm == "jvp" and cs_len(args) == 3 then cs_vlin_mul(cs_vlin_call("__ad_grad_" + cs_n4_var_name(cs_asthead(args)), Cons(cs_astsecond(args), Nil), hyps, lenv, ft, d), cs_vlin_expr(cs_asthead(cs_cvtl(cs_cvtl(args))), hyps, lenv, ft, d)) else if cnm == "vjp" and cs_len(args) == 3 then cs_vlin_mul(cs_vlin_expr(cs_asthead(cs_cvtl(cs_cvtl(args))), hyps, lenv, ft, d), cs_vlin_call("__ad_grad_" + cs_n4_var_name(cs_asthead(args)), Cons(cs_astsecond(args), Nil), hyps, lenv, ft, d)) else if cnm == "jit" and cs_len(args) >= 2 then cs_vlin_call(cs_n4_var_name(cs_asthead(args)), cs_cvtl(args), hyps, lenv, ft, d) else if cnm == "dec_add" and cs_len(args) == 2 then cs_vlin_add(cs_vlin_expr(cs_asthead(args), hyps, lenv, ft, d), cs_vlin_expr(cs_astsecond(args), hyps, lenv, ft, d)) else if cnm == "dec_sub" and cs_len(args) == 2 then cs_vlin_sub(cs_vlin_expr(cs_asthead(args), hyps, lenv, ft, d), cs_vlin_expr(cs_astsecond(args), hyps, lenv, ft, d)) else cs_vlin_ufn(cs_fnlookup(cnm, ft), cs_vlin_args(args, hyps, lenv, ft, d), hyps, ft, d)
+fn cs_vlin_m1_call(cnm, args, hyps, lenv, ft, d) = if (cnm == "bv_xor" or cnm == "bit_xor") and cs_len(args) == 2 then cs_vlin_bv_xor(cs_asthead(args), cs_astsecond(args), hyps, lenv, ft, d) else if (cnm == "bv_and" or cnm == "bit_and") and cs_len(args) == 2 then cs_vlin_bv_and(cs_asthead(args), cs_astsecond(args), hyps, lenv, ft, d) else if (cnm == "bv_or" or cnm == "bit_or") and cs_len(args) == 2 then cs_vlin_bv_or(cs_asthead(args), cs_astsecond(args), hyps, lenv, ft, d) else if (cnm == "bv_shl" or cnm == "bit_shl") and cs_len(args) == 2 then (let lk = cs_vlin_expr(cs_astsecond(args), hyps, lenv, ft, d) in if lk.ok == 1 and cs_isnil(lk.cs) == 1 and lk.c0 >= 0 then cs_vlin_scale(cs_vbv_pow2(lk.c0), cs_vlin_expr(cs_asthead(args), hyps, lenv, ft, d)) else cs_vlin_err()) else if (cnm == "bv_shr" or cnm == "bit_shr") and cs_len(args) == 2 then (let lk = cs_vlin_expr(cs_astsecond(args), hyps, lenv, ft, d) in if lk.ok == 1 and cs_isnil(lk.cs) == 1 and lk.c0 >= 0 then cs_vlin_bin_op("/", cs_asthead(args), Num(cs_vbv_pow2(lk.c0)), hyps, lenv, ft, d) else cs_vlin_err()) else if cnm == "bv_u8" and cs_len(args) == 1 then cs_vlin_bv_u8(cs_asthead(args), hyps, lenv, ft, d) else if cnm == "bv_not_u8" and cs_len(args) == 1 then cs_vlin_sub(cs_vlin_const(255), cs_vlin_bv_u8(cs_asthead(args), hyps, lenv, ft, d)) else if cnm == "bv_add_u8" and cs_len(args) == 2 then cs_vlin_bv_u8(Bin("+", cs_asthead(args), cs_astsecond(args)), hyps, lenv, ft, d) else if cnm == "bv_sub_u8" and cs_len(args) == 2 then cs_vlin_bv_u8(Bin("-", cs_asthead(args), cs_astsecond(args)), hyps, lenv, ft, d) else if (cnm == "array_select" or cnm == "heap_read") and cs_len(args) == 2 then cs_varr_select(cs_asthead(args), cs_astsecond(args), hyps, lenv, ft, d) else if cnm == "sep_valid" and cs_len(args) == 1 then (if cs_vsep_valid(cs_asthead(args), hyps, lenv, ft, d) == 1 then cs_vlin_const(1) else cs_vlin_err()) else if cnm == "sep_disjoint" and cs_len(args) == 2 then (if cs_vprove_goal(Bin("!=", cs_asthead(args), cs_astsecond(args)), hyps, lenv, ft, d) == 1 then cs_vlin_const(1) else cs_vlin_err()) else if cnm == "forall_range" and cs_len(args) == 4 then (if cs_vprove_forall_range(args, hyps, lenv, ft, d) == 1 then cs_vlin_const(1) else cs_vlin_err()) else if cnm == "exists_range" and cs_len(args) == 4 then (if cs_vprove_exists_range(args, hyps, lenv, ft, d) == 1 then cs_vlin_const(1) else cs_vlin_err()) else cs_vlin_ufn(cs_fnlookup(cnm, ft), cs_vlin_args(args, hyps, lenv, ft, d), hyps, ft, d)
+fn cs_vlin_call(cnm, args, hyps, lenv, ft, d) = if cnm == "old" and cs_len(args) == 1 then cs_vlin_expr(cs_asthead(args), hyps, lenv, ft, d) else if (cnm == "verify" or cnm == "law_check" or cnm == "evolve_approve" or cnm == "borrow" or cnm == "borrow_mut" or cnm == "move" or cnm == "clone") and cs_len(args) >= 1 then cs_vlin_expr(cs_asthead(args), hyps, lenv, ft, d) else if cnm == "grad" and cs_len(args) >= 2 then cs_vlin_call("__ad_grad_" + cs_n4_var_name(cs_asthead(args)), cs_cvtl(args), hyps, lenv, ft, d) else if cnm == "jvp" and cs_len(args) == 3 then cs_vlin_mul(cs_vlin_call("__ad_grad_" + cs_n4_var_name(cs_asthead(args)), Cons(cs_astsecond(args), Nil), hyps, lenv, ft, d), cs_vlin_expr(cs_asthead(cs_cvtl(cs_cvtl(args))), hyps, lenv, ft, d)) else if cnm == "vjp" and cs_len(args) == 3 then cs_vlin_mul(cs_vlin_expr(cs_asthead(cs_cvtl(cs_cvtl(args))), hyps, lenv, ft, d), cs_vlin_call("__ad_grad_" + cs_n4_var_name(cs_asthead(args)), Cons(cs_astsecond(args), Nil), hyps, lenv, ft, d)) else if cnm == "jit" and cs_len(args) >= 2 then cs_vlin_call(cs_n4_var_name(cs_asthead(args)), cs_cvtl(args), hyps, lenv, ft, d) else if cnm == "dec_add" and cs_len(args) == 2 then cs_vlin_add(cs_vlin_expr(cs_asthead(args), hyps, lenv, ft, d), cs_vlin_expr(cs_astsecond(args), hyps, lenv, ft, d)) else if cnm == "dec_sub" and cs_len(args) == 2 then cs_vlin_sub(cs_vlin_expr(cs_asthead(args), hyps, lenv, ft, d), cs_vlin_expr(cs_astsecond(args), hyps, lenv, ft, d)) else cs_vlin_m1_call(cnm, args, hyps, lenv, ft, d)
 fn cs_vlin_ufn(mf, ra, hyps, ft, d) = match mf
     Nil          => cs_vlin_err()
     Cons(fn0, r) => if ra.ok == 0 then cs_vlin_err() else cs_vlin_ufn2(fn0, ra.vals, hyps, ft, d)
 fn cs_vlin_ufn2(fn0, vals, hyps, ft, d) = match fn0
     Fn(fnm, ps, body) => cs_vlin_expr(body, hyps, cs_vlin_bind_ps(ps, vals), ft, d + 1)
     _                 => cs_vlin_err()
-fn cs_vcond_cmp_pos(op, la, lb) = if la.ok == 0 or lb.ok == 0 then {ok: 0, hyps: Nil} else if op == ">=" then {ok: 1, hyps: Cons(cs_vlin_sub(la, lb), Nil)} else if op == ">" then {ok: 1, hyps: Cons(cs_vlin_sub(cs_vlin_sub(la, lb), cs_vlin_const(1)), Nil)} else if op == "<=" then {ok: 1, hyps: Cons(cs_vlin_sub(lb, la), Nil)} else if op == "<" then {ok: 1, hyps: Cons(cs_vlin_sub(cs_vlin_sub(lb, la), cs_vlin_const(1)), Nil)} else if op == "==" then {ok: 1, hyps: Cons(cs_vlin_sub(la, lb), Cons(cs_vlin_sub(lb, la), Nil))} else {ok: 0, hyps: Nil}
-fn cs_vcond_cmp_neg(op, la, lb) = if la.ok == 0 or lb.ok == 0 then {ok: 0, hyps: Nil} else if op == ">=" then cs_vcond_cmp_pos("<", la, lb) else if op == ">" then cs_vcond_cmp_pos("<=", la, lb) else if op == "<=" then cs_vcond_cmp_pos(">", la, lb) else if op == "<" then cs_vcond_cmp_pos(">=", la, lb) else if op == "!=" then cs_vcond_cmp_pos("==", la, lb) else {ok: 0, hyps: Nil}
+fn cs_vcond_cmp_pos(op, la, lb) = if la.ok == 0 or lb.ok == 0 then {ok: 0, hyps: Nil} else if op == ">=" then {ok: 1, hyps: Cons(cs_vlin_sub(la, lb), Nil)} else if op == ">" then {ok: 1, hyps: Cons(cs_vlin_sub(cs_vlin_sub(la, lb), cs_vlin_const(1)), Nil)} else if op == "<=" then {ok: 1, hyps: Cons(cs_vlin_sub(lb, la), Nil)} else if op == "<" then {ok: 1, hyps: Cons(cs_vlin_sub(cs_vlin_sub(lb, la), cs_vlin_const(1)), Nil)} else if op == "==" then {ok: 1, hyps: Cons(cs_vlin_sub(la, lb), Cons(cs_vlin_sub(lb, la), Nil))} else if op == "!=" then (let d = cs_vlin_sub(la, lb) in {ok: 1, hyps: Cons(cs_vlin_sub(cs_vlin_mul(d, d), cs_vlin_const(1)), Nil)}) else {ok: 0, hyps: Nil}
+fn cs_vcond_cmp_neg(op, la, lb) = if la.ok == 0 or lb.ok == 0 then {ok: 0, hyps: Nil} else if op == ">=" then cs_vcond_cmp_pos("<", la, lb) else if op == ">" then cs_vcond_cmp_pos("<=", la, lb) else if op == "<=" then cs_vcond_cmp_pos(">", la, lb) else if op == "<" then cs_vcond_cmp_pos(">=", la, lb) else if op == "!=" then cs_vcond_cmp_pos("==", la, lb) else if op == "==" then cs_vcond_cmp_pos("!=", la, lb) else {ok: 0, hyps: Nil}
 fn cs_vcond_pos(e, hyps, lenv, ft, d) = match e
     Bin(op, a, b)   => if op == "and" then (let r1 = cs_vcond_pos(a, hyps, lenv, ft, d) in let r2 = cs_vcond_pos(b, hyps, lenv, ft, d) in if r1.ok == 1 and r2.ok == 1 then {ok: 1, hyps: cs_app(r1.hyps, r2.hyps)} else {ok: 0, hyps: Nil}) else cs_vcond_cmp_pos(op, cs_vlin_expr(a, hyps, lenv, ft, d), cs_vlin_expr(b, hyps, lenv, ft, d))
-    Call(cnm, args) => if cnm == "dec_eq" and cs_len(args) == 2 then cs_vcond_cmp_pos("==", cs_vlin_expr(cs_asthead(args), hyps, lenv, ft, d), cs_vlin_expr(cs_astsecond(args), hyps, lenv, ft, d)) else if cnm == "dec_ge" and cs_len(args) == 2 then cs_vcond_cmp_pos(">=", cs_vlin_expr(cs_asthead(args), hyps, lenv, ft, d), cs_vlin_expr(cs_astsecond(args), hyps, lenv, ft, d)) else if cnm == "dec_gt" and cs_len(args) == 2 then cs_vcond_cmp_pos(">", cs_vlin_expr(cs_asthead(args), hyps, lenv, ft, d), cs_vlin_expr(cs_astsecond(args), hyps, lenv, ft, d)) else if cnm == "dec_le" and cs_len(args) == 2 then cs_vcond_cmp_pos("<=", cs_vlin_expr(cs_asthead(args), hyps, lenv, ft, d), cs_vlin_expr(cs_astsecond(args), hyps, lenv, ft, d)) else if cnm == "dec_lt" and cs_len(args) == 2 then cs_vcond_cmp_pos("<", cs_vlin_expr(cs_asthead(args), hyps, lenv, ft, d), cs_vlin_expr(cs_astsecond(args), hyps, lenv, ft, d)) else {ok: 0, hyps: Nil}
+    Call(cnm, args) => if cnm == "dec_eq" and cs_len(args) == 2 then cs_vcond_cmp_pos("==", cs_vlin_expr(cs_asthead(args), hyps, lenv, ft, d), cs_vlin_expr(cs_astsecond(args), hyps, lenv, ft, d)) else if cnm == "dec_ge" and cs_len(args) == 2 then cs_vcond_cmp_pos(">=", cs_vlin_expr(cs_asthead(args), hyps, lenv, ft, d), cs_vlin_expr(cs_astsecond(args), hyps, lenv, ft, d)) else if cnm == "dec_gt" and cs_len(args) == 2 then cs_vcond_cmp_pos(">", cs_vlin_expr(cs_asthead(args), hyps, lenv, ft, d), cs_vlin_expr(cs_astsecond(args), hyps, lenv, ft, d)) else if cnm == "dec_le" and cs_len(args) == 2 then cs_vcond_cmp_pos("<=", cs_vlin_expr(cs_asthead(args), hyps, lenv, ft, d), cs_vlin_expr(cs_astsecond(args), hyps, lenv, ft, d)) else if cnm == "dec_lt" and cs_len(args) == 2 then cs_vcond_cmp_pos("<", cs_vlin_expr(cs_asthead(args), hyps, lenv, ft, d), cs_vlin_expr(cs_astsecond(args), hyps, lenv, ft, d)) else if cnm == "sep_disjoint" and cs_len(args) == 2 then cs_vcond_cmp_neg("==", cs_vlin_expr(cs_asthead(args), hyps, lenv, ft, d), cs_vlin_expr(cs_astsecond(args), hyps, lenv, ft, d)) else {ok: 0, hyps: Nil}
     _               => {ok: 0, hyps: Nil}
 fn cs_vcond_neg(e, hyps, lenv, ft, d) = match e
     Bin(op, a, b)   => cs_vcond_cmp_neg(op, cs_vlin_expr(a, hyps, lenv, ft, d), cs_vlin_expr(b, hyps, lenv, ft, d))
-    Call(cnm, args) => if cnm == "dec_ge" and cs_len(args) == 2 then cs_vcond_cmp_neg(">=", cs_vlin_expr(cs_asthead(args), hyps, lenv, ft, d), cs_vlin_expr(cs_astsecond(args), hyps, lenv, ft, d)) else if cnm == "dec_gt" and cs_len(args) == 2 then cs_vcond_cmp_neg(">", cs_vlin_expr(cs_asthead(args), hyps, lenv, ft, d), cs_vlin_expr(cs_astsecond(args), hyps, lenv, ft, d)) else if cnm == "dec_le" and cs_len(args) == 2 then cs_vcond_cmp_neg("<=", cs_vlin_expr(cs_asthead(args), hyps, lenv, ft, d), cs_vlin_expr(cs_astsecond(args), hyps, lenv, ft, d)) else if cnm == "dec_lt" and cs_len(args) == 2 then cs_vcond_cmp_neg("<", cs_vlin_expr(cs_asthead(args), hyps, lenv, ft, d), cs_vlin_expr(cs_astsecond(args), hyps, lenv, ft, d)) else {ok: 0, hyps: Nil}
+    Call(cnm, args) => if cnm == "dec_ge" and cs_len(args) == 2 then cs_vcond_cmp_neg(">=", cs_vlin_expr(cs_asthead(args), hyps, lenv, ft, d), cs_vlin_expr(cs_astsecond(args), hyps, lenv, ft, d)) else if cnm == "dec_gt" and cs_len(args) == 2 then cs_vcond_cmp_neg(">", cs_vlin_expr(cs_asthead(args), hyps, lenv, ft, d), cs_vlin_expr(cs_astsecond(args), hyps, lenv, ft, d)) else if cnm == "dec_le" and cs_len(args) == 2 then cs_vcond_cmp_neg("<=", cs_vlin_expr(cs_asthead(args), hyps, lenv, ft, d), cs_vlin_expr(cs_astsecond(args), hyps, lenv, ft, d)) else if cnm == "dec_lt" and cs_len(args) == 2 then cs_vcond_cmp_neg("<", cs_vlin_expr(cs_asthead(args), hyps, lenv, ft, d), cs_vlin_expr(cs_astsecond(args), hyps, lenv, ft, d)) else if cnm == "sep_disjoint" and cs_len(args) == 2 then cs_vcond_cmp_pos("==", cs_vlin_expr(cs_asthead(args), hyps, lenv, ft, d), cs_vlin_expr(cs_astsecond(args), hyps, lenv, ft, d)) else {ok: 0, hyps: Nil}
     _               => {ok: 0, hyps: Nil}
 fn cs_vprove_reqs_hyps(reqs, lenv, ft) = match reqs
     Nil        => {ok: 1, hyps: Nil}
     Cons(h, t) => let r1 = cs_vcond_pos(h, Nil, lenv, ft, 0) in if r1.ok == 0 then {ok: 0, hyps: Nil} else let r2 = cs_vprove_reqs_hyps(t, lenv, ft) in if r2.ok == 0 then {ok: 0, hyps: Nil} else {ok: 1, hyps: cs_app(r1.hyps, r2.hyps)}
 fn cs_vprove_let_val(nm, v, b, hyps, lenv, ft) = match v
     If(c, t, e2) => let rp = cs_vcond_pos(c, hyps, lenv, ft, 0) in let rn = cs_vcond_neg(c, hyps, lenv, ft, 0) in if rp.ok == 1 and rn.ok == 1 and cs_vprove_let_val(nm, t, b, cs_app(rp.hyps, hyps), lenv, ft) == 1 and cs_vprove_let_val(nm, e2, b, cs_app(rn.hyps, hyps), lenv, ft) == 1 then 1 else 0
-    _            => let lv = cs_vlin_expr(v, hyps, lenv, ft, 0) in if lv.ok == 0 then 0 else cs_vprove_goal(b, hyps, Cons({k: nm, v: lv}, lenv), ft, 0)
+    _            => if cs_vis_struct_expr(v) == 1 then cs_vprove_goal(cs_temp_subst_var(b, nm, v), hyps, lenv, ft, 0) else let lv = cs_vlin_expr(v, hyps, lenv, ft, 0) in if lv.ok == 0 then 0 else cs_vprove_goal(b, cs_app(cs_vcollect_div_hyps_e(v, hyps, lenv, ft, 0), hyps), Cons({k: nm, v: lv}, lenv), ft, 0)
+fn cs_vprove_forall_range(args, hyps, lenv, ft, d) = let vnm = cs_n4_var_name(cs_asthead(args)) in let lo_e = cs_astsecond(args) in let hi_e = cs_asthead(cs_cvtl(cs_cvtl(args))) in let pred_e = cs_asthead(cs_cvtl(cs_cvtl(cs_cvtl(args)))) in let llo = cs_vlin_expr(lo_e, hyps, lenv, ft, d) in let lhi = cs_vlin_expr(hi_e, hyps, lenv, ft, d) in if vnm == "" or llo.ok == 0 or lhi.ok == 0 then 0 else let lv = cs_vlin_var("_q_" + vnm) in let hyps2 = Cons(cs_vlin_sub(lv, llo), Cons(cs_vlin_sub(lhi, lv), hyps)) in cs_vprove_goal(pred_e, hyps2, Cons({k: vnm, v: lv}, lenv), ft, d + 1)
+fn cs_vprove_exists_w(vnm, w, lo_e, hi_e, pred_e, ctx) = if cs_vprove_goal(Bin(">=", w, lo_e), ctx.hyps, ctx.lenv, ctx.ft, ctx.d) == 1 and cs_vprove_goal(Bin("<=", w, hi_e), ctx.hyps, ctx.lenv, ctx.ft, ctx.d) == 1 and cs_vprove_goal(cs_temp_subst_var(pred_e, vnm, w), ctx.hyps, ctx.lenv, ctx.ft, ctx.d) == 1 then 1 else 0
+fn cs_vprove_exists_list(vnm, ws, lo_e, hi_e, pred_e, ctx) = match ws
+    Nil         => 0
+    Cons(w, wr) => if cs_vprove_exists_w(vnm, w, lo_e, hi_e, pred_e, ctx) == 1 then 1 else cs_vprove_exists_list(vnm, wr, lo_e, hi_e, pred_e, ctx)
+fn cs_vprove_exists_range(args, hyps, lenv, ft, d) = let vnm = cs_n4_var_name(cs_asthead(args)) in let lo_e = cs_astsecond(args) in let hi_e = cs_asthead(cs_cvtl(cs_cvtl(args))) in let pred_e = cs_asthead(cs_cvtl(cs_cvtl(cs_cvtl(args)))) in if vnm == "" then 0 else let ws = Cons(lo_e, Cons(hi_e, Cons(Bin("+", lo_e, Num(1)), Cons(Bin("-", hi_e, Num(1)), Cons(Bin("/", Bin("+", lo_e, hi_e), Num(2)), Nil))))) in cs_vprove_exists_list(vnm, ws, lo_e, hi_e, pred_e, {hyps: hyps, lenv: lenv, ft: ft, d: d + 1})
 fn cs_vprove_goal(g, hyps, lenv, ft, d) = match g
     Num(n)          => if n != 0 then 1 else 0
     LetIn(nm, v, b) => let gfn = cs_n4_is_grad_let(v) in if gfn != "" then cs_vprove_goal(cs_n4_subst_call(b, nm, "__ad_grad_" + gfn), hyps, lenv, ft, d) else cs_vprove_let_val(nm, v, b, hyps, lenv, ft)
@@ -1352,19 +1571,19 @@ fn cs_vprove_goal(g, hyps, lenv, ft, d) = match g
     DeferE(c, b)    => cs_vprove_goal(b, hyps, lenv, ft, d)
     ErrDeferE(c, b) => cs_vprove_goal(b, hyps, lenv, ft, d)
     If(c, t, e2)    => let rp = cs_vcond_pos(c, hyps, lenv, ft, d) in let rn = cs_vcond_neg(c, hyps, lenv, ft, d) in if rp.ok == 1 and cs_vprove_goal(t, cs_app(rp.hyps, hyps), lenv, ft, d) == 1 and (cs_vprove_goal(e2, hyps, lenv, ft, d) == 1 or (rn.ok == 1 and cs_vprove_goal(e2, cs_app(rn.hyps, hyps), lenv, ft, d) == 1)) then 1 else 0
-    Bin(op, a, b)   => if op == "and" then (if cs_vprove_goal(a, hyps, lenv, ft, d) == 1 and cs_vprove_goal(b, hyps, lenv, ft, d) == 1 then 1 else 0) else if op == "or" then (if cs_vprove_goal(a, hyps, lenv, ft, d) == 1 or cs_vprove_goal(b, hyps, lenv, ft, d) == 1 then 1 else let rna = cs_vcond_neg(a, hyps, lenv, ft, d) in if rna.ok == 1 and cs_vprove_goal(b, cs_app(rna.hyps, hyps), lenv, ft, d) == 1 then 1 else let rnb = cs_vcond_neg(b, hyps, lenv, ft, d) in if rnb.ok == 1 and cs_vprove_goal(a, cs_app(rnb.hyps, hyps), lenv, ft, d) == 1 then 1 else 0) else if op == "==" then (if cs_vprove_goal(Bin(">=", a, b), hyps, lenv, ft, d) == 1 and cs_vprove_goal(Bin("<=", a, b), hyps, lenv, ft, d) == 1 then 1 else 0) else (let rn = cs_vcond_neg(g, hyps, lenv, ft, d) in if rn.ok == 1 then cs_vfm_check_unsat(cs_app(rn.hyps, hyps)) else 0)
-    Call(cnm, args) => if cnm == "dec_eq" and cs_len(args) == 2 then cs_vprove_goal(Bin("==", cs_asthead(args), cs_astsecond(args)), hyps, lenv, ft, d) else if cnm == "dec_ge" and cs_len(args) == 2 then cs_vprove_goal(Bin(">=", cs_asthead(args), cs_astsecond(args)), hyps, lenv, ft, d) else if cnm == "dec_gt" and cs_len(args) == 2 then cs_vprove_goal(Bin(">", cs_asthead(args), cs_astsecond(args)), hyps, lenv, ft, d) else if cnm == "dec_le" and cs_len(args) == 2 then cs_vprove_goal(Bin("<=", cs_asthead(args), cs_astsecond(args)), hyps, lenv, ft, d) else if cnm == "dec_lt" and cs_len(args) == 2 then cs_vprove_goal(Bin("<", cs_asthead(args), cs_astsecond(args)), hyps, lenv, ft, d) else 0
+    Bin(op, a, b)   => if op == "and" then (if cs_vprove_goal(a, hyps, lenv, ft, d) == 1 and cs_vprove_goal(b, hyps, lenv, ft, d) == 1 then 1 else 0) else if op == "or" then (if cs_vprove_goal(a, hyps, lenv, ft, d) == 1 or cs_vprove_goal(b, hyps, lenv, ft, d) == 1 then 1 else let rna = cs_vcond_neg(a, hyps, lenv, ft, d) in if rna.ok == 1 and cs_vprove_goal(b, cs_app(rna.hyps, hyps), lenv, ft, d) == 1 then 1 else let rnb = cs_vcond_neg(b, hyps, lenv, ft, d) in if rnb.ok == 1 and cs_vprove_goal(a, cs_app(rnb.hyps, hyps), lenv, ft, d) == 1 then 1 else 0) else if op == "==" then (if cs_vprove_goal(Bin(">=", a, b), hyps, lenv, ft, d) == 1 and cs_vprove_goal(Bin("<=", a, b), hyps, lenv, ft, d) == 1 then 1 else 0) else if op == "!=" then (if cs_vprove_goal(Bin(">", a, b), hyps, lenv, ft, d) == 1 or cs_vprove_goal(Bin("<", a, b), hyps, lenv, ft, d) == 1 or cs_vprove_goal(Bin(">=", Bin("*", Bin("-", a, b), Bin("-", a, b)), Num(1)), hyps, lenv, ft, d) == 1 then 1 else 0) else (let dhyps = cs_app(cs_vcollect_div_hyps_e(g, hyps, lenv, ft, d), hyps) in let rn = cs_vcond_neg(g, dhyps, lenv, ft, d) in if rn.ok == 1 then cs_vfm_check_unsat(cs_app(rn.hyps, cs_vnia_enrich_hyps(rn.hyps, dhyps))) else 0)
+    Call(cnm, args) => if cnm == "dec_eq" and cs_len(args) == 2 then cs_vprove_goal(Bin("==", cs_asthead(args), cs_astsecond(args)), hyps, lenv, ft, d) else if cnm == "dec_ge" and cs_len(args) == 2 then cs_vprove_goal(Bin(">=", cs_asthead(args), cs_astsecond(args)), hyps, lenv, ft, d) else if cnm == "dec_gt" and cs_len(args) == 2 then cs_vprove_goal(Bin(">", cs_asthead(args), cs_astsecond(args)), hyps, lenv, ft, d) else if cnm == "dec_le" and cs_len(args) == 2 then cs_vprove_goal(Bin("<=", cs_asthead(args), cs_astsecond(args)), hyps, lenv, ft, d) else if cnm == "dec_lt" and cs_len(args) == 2 then cs_vprove_goal(Bin("<", cs_asthead(args), cs_astsecond(args)), hyps, lenv, ft, d) else if cnm == "sep_disjoint" and cs_len(args) == 2 then cs_vprove_goal(Bin("!=", cs_asthead(args), cs_astsecond(args)), hyps, lenv, ft, d) else if cnm == "sep_valid" and cs_len(args) == 1 then cs_vsep_valid(cs_asthead(args), hyps, lenv, ft, d) else if cnm == "sep_conj" and cs_len(args) == 2 then cs_vsep_valid(g, hyps, lenv, ft, d) else if cnm == "forall_range" and cs_len(args) == 4 then cs_vprove_forall_range(args, hyps, lenv, ft, d) else if cnm == "exists_range" and cs_len(args) == 4 then cs_vprove_exists_range(args, hyps, lenv, ft, d) else 0
     _               => 0
 fn cs_vprove_goals_all(enss, hyps, lenv, ft, d) = match enss
     Nil        => 1
     Cons(h, t) => if cs_vprove_goal(h, hyps, lenv, ft, d) == 1 then cs_vprove_goals_all(t, hyps, lenv, ft, d) else 0
 fn cs_vprove_body(body, hyps, lenv, enss, ft, d) = match body
-    LetIn(nm, v, b) => let gfn = cs_n4_is_grad_let(v) in if gfn != "" then cs_vprove_body(cs_n4_subst_call(b, nm, "__ad_grad_" + gfn), hyps, lenv, enss, ft, d) else let lv = cs_vlin_expr(v, hyps, lenv, ft, d) in if lv.ok == 0 then 0 else cs_vprove_body(b, hyps, Cons({k: nm, v: lv}, lenv), enss, ft, d)
-    VarIn(nm, v, b) => let lv = cs_vlin_expr(v, hyps, lenv, ft, d) in if lv.ok == 0 then 0 else cs_vprove_body(b, hyps, Cons({k: nm, v: lv}, lenv), enss, ft, d)
+    LetIn(nm, v, b) => let gfn = cs_n4_is_grad_let(v) in if gfn != "" then cs_vprove_body(cs_n4_subst_call(b, nm, "__ad_grad_" + gfn), hyps, lenv, enss, ft, d) else if cs_vis_struct_expr(v) == 1 then cs_vprove_body(cs_temp_subst_var(b, nm, v), hyps, lenv, enss, ft, d) else let lv = cs_vlin_expr(v, hyps, lenv, ft, d) in if lv.ok == 0 then 0 else cs_vprove_body(b, cs_app(cs_vcollect_div_hyps_e(v, hyps, lenv, ft, d), hyps), Cons({k: nm, v: lv}, lenv), enss, ft, d)
+    VarIn(nm, v, b) => if cs_vis_struct_expr(v) == 1 then cs_vprove_body(cs_temp_subst_var(b, nm, v), hyps, lenv, enss, ft, d) else let lv = cs_vlin_expr(v, hyps, lenv, ft, d) in if lv.ok == 0 then 0 else cs_vprove_body(b, cs_app(cs_vcollect_div_hyps_e(v, hyps, lenv, ft, d), hyps), Cons({k: nm, v: lv}, lenv), enss, ft, d)
     DeferE(c, b)    => cs_vprove_body(b, hyps, lenv, enss, ft, d)
     ErrDeferE(c, b) => cs_vprove_body(b, hyps, lenv, enss, ft, d)
     If(c, t, e2)    => let rp = cs_vcond_pos(c, hyps, lenv, ft, d) in let rn = cs_vcond_neg(c, hyps, lenv, ft, d) in if rp.ok == 1 and rn.ok == 1 and cs_vprove_body(t, cs_app(rp.hyps, hyps), lenv, enss, ft, d) == 1 and cs_vprove_body(e2, cs_app(rn.hyps, hyps), lenv, enss, ft, d) == 1 then 1 else 0
-    _               => let lb = cs_vlin_expr(body, hyps, lenv, ft, d) in if lb.ok == 0 then 0 else let penv = Cons({k: "result", v: lb}, Cons({k: "ret", v: lb}, lenv)) in cs_vprove_goals_all(enss, hyps, penv, ft, d)
+    _               => let dhyps = cs_app(cs_vcollect_div_hyps_e(body, hyps, lenv, ft, d), hyps) in let lb = cs_vlin_expr(body, dhyps, lenv, ft, d) in if lb.ok == 0 then 0 else let penv = Cons({k: "result", v: lb}, Cons({k: "ret", v: lb}, lenv)) in cs_vprove_goals_all(enss, dhyps, penv, ft, d)
 fn cs_vqflia_prove_fn(ps, reqs, enss, body, ft) = if cs_isnil(enss) == 1 then 0 else let lenv = cs_vlin_init_env(ps) in let rh = cs_vprove_reqs_hyps(reqs, lenv, ft) in if rh.ok == 0 then 0 else cs_vprove_body(body, rh.hyps, lenv, enss, ft, 0)
 fn cs_vqflia_prove_law(ps, body, ft) = let lenv = cs_vlin_init_env(ps) in if cs_vprove_goal(body, Nil, lenv, ft, 0) == 1 then 1 else if cs_len(ps) == 1 then let p0 = cs_vlin_var(cs_hd_str(ps, "")) in let hneg = Cons(cs_vlin_sub(cs_vlin_const(0 - 1), p0), Nil) in let hpos = Cons(p0, Nil) in if cs_vprove_goal(body, hneg, lenv, ft, 0) == 1 and cs_vprove_goal(body, hpos, lenv, ft, 0) == 1 then 1 else 0 else 0
 fn cs_vneg_goal_hyps(g, hyps, lenv, ft, d) = match g
@@ -1437,9 +1656,10 @@ fn cs_cert_inline_ufn2(cnm, cargs, fn0, ft, d) = match fn0
 fn cs_cert_clean_args(xs, ft, d) = match xs
     Nil        => Nil
     Cons(h, t) => Cons(cs_cert_clean_e(h, ft, d), cs_cert_clean_args(t, ft, d))
+fn cs_vis_m1_intrinsic(cnm) = if cs_vis_struct_call(cnm) == 1 or cnm == "array_select" or cnm == "heap_read" or cnm == "sep_valid" or cnm == "sep_disjoint" or cnm == "forall_range" or cnm == "exists_range" then 1 else 0
 fn cs_cert_clean_e(e, ft, d) = if d > 4 then e else cs_cert_clean_e1(e, ft, d)
 fn cs_cert_clean_e1(e, ft, d) = match e
-    Call(cnm, args) => let cargs = cs_cert_clean_args(args, ft, d) in if (cnm == "verify" or cnm == "old" or cnm == "law_check" or cnm == "evolve_approve" or cnm == "borrow" or cnm == "borrow_mut" or cnm == "move" or cnm == "clone") and cs_len(cargs) >= 1 then cs_asthead(cargs) else if cnm == "grad" and cs_len(cargs) >= 2 then cs_cert_inline_ufn("__ad_grad_" + cs_n4_var_name(cs_asthead(args)), cs_cvtl(cargs), cs_fnlookup("__ad_grad_" + cs_n4_var_name(cs_asthead(args)), ft), ft, d) else if cnm == "jit" and cs_len(cargs) >= 2 then cs_cert_inline_ufn(cs_n4_var_name(cs_asthead(args)), cs_cvtl(cargs), cs_fnlookup(cs_n4_var_name(cs_asthead(args)), ft), ft, d) else if cnm == "dec_add" and cs_len(cargs) == 2 then Bin("+", cs_asthead(cargs), cs_astsecond(cargs)) else if cnm == "dec_sub" and cs_len(cargs) == 2 then Bin("-", cs_asthead(cargs), cs_astsecond(cargs)) else if cnm == "dec_eq" and cs_len(cargs) == 2 then Bin("==", cs_asthead(cargs), cs_astsecond(cargs)) else if cnm == "dec_ge" and cs_len(cargs) == 2 then Bin(">=", cs_asthead(cargs), cs_astsecond(cargs)) else if cnm == "dec_gt" and cs_len(cargs) == 2 then Bin(">", cs_asthead(cargs), cs_astsecond(cargs)) else if cnm == "dec_le" and cs_len(cargs) == 2 then Bin("<=", cs_asthead(cargs), cs_astsecond(cargs)) else if cnm == "dec_lt" and cs_len(cargs) == 2 then Bin("<", cs_asthead(cargs), cs_astsecond(cargs)) else cs_cert_inline_ufn(cnm, cargs, cs_fnlookup(cnm, ft), ft, d)
+    Call(cnm, args) => let cargs = cs_cert_clean_args(args, ft, d) in if (cnm == "verify" or cnm == "old" or cnm == "law_check" or cnm == "evolve_approve" or cnm == "borrow" or cnm == "borrow_mut" or cnm == "move" or cnm == "clone") and cs_len(cargs) >= 1 then cs_asthead(cargs) else if cnm == "grad" and cs_len(cargs) >= 2 then cs_cert_inline_ufn("__ad_grad_" + cs_n4_var_name(cs_asthead(args)), cs_cvtl(cargs), cs_fnlookup("__ad_grad_" + cs_n4_var_name(cs_asthead(args)), ft), ft, d) else if cnm == "jit" and cs_len(cargs) >= 2 then cs_cert_inline_ufn(cs_n4_var_name(cs_asthead(args)), cs_cvtl(cargs), cs_fnlookup(cs_n4_var_name(cs_asthead(args)), ft), ft, d) else if cnm == "dec_add" and cs_len(cargs) == 2 then Bin("+", cs_asthead(cargs), cs_astsecond(cargs)) else if cnm == "dec_sub" and cs_len(cargs) == 2 then Bin("-", cs_asthead(cargs), cs_astsecond(cargs)) else if cnm == "dec_eq" and cs_len(cargs) == 2 then Bin("==", cs_asthead(cargs), cs_astsecond(cargs)) else if cnm == "dec_ge" and cs_len(cargs) == 2 then Bin(">=", cs_asthead(cargs), cs_astsecond(cargs)) else if cnm == "dec_gt" and cs_len(cargs) == 2 then Bin(">", cs_asthead(cargs), cs_astsecond(cargs)) else if cnm == "dec_le" and cs_len(cargs) == 2 then Bin("<=", cs_asthead(cargs), cs_astsecond(cargs)) else if cnm == "dec_lt" and cs_len(cargs) == 2 then Bin("<", cs_asthead(cargs), cs_astsecond(cargs)) else if cs_vis_m1_intrinsic(cnm) == 1 then Call(cnm, cargs) else cs_cert_inline_ufn(cnm, cargs, cs_fnlookup(cnm, ft), ft, d)
     Bin(op, a, b)   => Bin(op, cs_cert_clean_e(a, ft, d), cs_cert_clean_e(b, ft, d))
     If(c, t, e2)    => If(cs_cert_clean_e(c, ft, d), cs_cert_clean_e(t, ft, d), cs_cert_clean_e(e2, ft, d))
     LetIn(nm, v, b) => let gfn = cs_n4_is_grad_let(v) in if gfn != "" then cs_cert_clean_e(cs_n4_subst_call(b, nm, "__ad_grad_" + gfn), ft, d) else LetIn(nm, cs_cert_clean_e(v, ft, d), cs_cert_clean_e(b, ft, d))
@@ -1458,14 +1678,23 @@ fn cs_cert_term_fn(reqs, enss, body, ft) = "(implies " + cs_cert_reqs_sexpr(reqs
 fn cs_vprove_fn(nm, ps, body, mvs, ft) = match mvs
     Nil          => {proofs: Nil, diags: Nil}
     Cons(vsg, r) => let lenv = cs_vlin_init_env(ps) in let raw_hyps = cs_vcollect_body_hyps(body, (cs_vprove_reqs_hyps(vsg.reqs, lenv, ft)).hyps, lenv, vsg.enss, ft, 0) in let chyps = cs_vfm_trace_hyps(raw_hyps, cs_vfm_vars(raw_hyps, Nil)) in let pr = cs_vprove_envs(cs_vgen_envs_hyps(ps, 0, cs_len(ps), chyps), vsg.reqs, vsg.enss, body, ft, 0) in let st = if pr.status == "refuted" then "refuted" else if cs_vqflia_prove_fn(ps, vsg.reqs, vsg.enss, body, ft) == 1 then "proven" else "runtime_checked" in let ob = cs_exprs_sexpr(vsg.reqs) + " => " + cs_exprs_sexpr(vsg.enss) in let tm = cs_cert_term_fn(vsg.reqs, vsg.enss, body, ft) in let pf = Cons({name: nm, kind: "contract", status: st, obligation: ob, term: tm, counterexample: pr.cex}, Nil) in let dg = if st == "refuted" then Cons(cs_mkdiag("V0001", "contract", "contract error: cannot prove 'ensures' postcondition of '" + nm + "' — refuted with counterexample: " + pr.cex, "strengthen 'requires' precondition or fix implementation of '" + nm + "'"), Nil) else Nil in {proofs: pf, diags: dg}
-fn cs_vchk_call_req(cnm, args, fnm, mvs, ft) = match mvs
+fn cs_vchk_call_envs(envs, args, vsg, caller_reqs, ft) = match envs
+    Nil           => ""
+    Cons(cenv, r) => let cr = cs_veval_all_true(caller_reqs, cenv, cenv, ft) in if cr.ok == 0 or cr.hold == 0 then cs_vchk_call_envs(r, args, vsg, caller_reqs, ft) else let ra = cs_veval_args(args, cenv, cenv, ft, 0) in if ra.ok == 0 then cs_vchk_call_envs(r, args, vsg, caller_reqs, ft) else let env = cs_vbind_ps(vsg.ps, ra.vals) in let rq = cs_veval_all_true(vsg.reqs, env, env, ft) in if rq.ok == 1 and rq.hold == 0 then cs_vfmt_env(env) else cs_vchk_call_envs(r, args, vsg, caller_reqs, ft)
+fn cs_vcaller_reqs(mvs) = match mvs
+    Nil          => Nil
+    Cons(vsg, r) => vsg.reqs
+fn cs_vcaller_ps(mvs) = match mvs
+    Nil          => Nil
+    Cons(vsg, r) => vsg.ps
+fn cs_vchk_call_req(cnm, args, fnm, mvs, caller_mvs, ft) = match mvs
     Nil          => {proofs: Nil, diags: Nil}
-    Cons(vsg, r) => if cs_isnil(vsg.reqs) == 1 then {proofs: Nil, diags: Nil} else let ra = cs_veval_args(args, Nil, Nil, ft, 0) in if ra.ok == 0 then {proofs: Nil, diags: Nil} else let env = cs_vbind_ps(vsg.ps, ra.vals) in let rq = cs_veval_all_true(vsg.reqs, env, env, ft) in if rq.ok == 1 and rq.hold == 0 then let cex = cs_vfmt_env(env) in {proofs: Cons({name: cnm, kind: "call_requires", status: "refuted", obligation: cs_exprs_sexpr(vsg.reqs), term: "(implies (and) " + cs_expr_sexpr(cs_cert_conj(vsg.reqs)) + ")", counterexample: cex}, Nil), diags: Cons(cs_mkdiag("V0001", "contract", "contract error: call to '" + cnm + "' in '" + fnm + "' violates 'requires' precondition with counterexample: " + cex, "ensure arguments passed to '" + cnm + "' satisfy its 'requires' contract"), Nil)} else {proofs: Nil, diags: Nil}
+    Cons(vsg, r) => if cs_isnil(vsg.reqs) == 1 then {proofs: Nil, diags: Nil} else let ra = cs_veval_args(args, Nil, Nil, ft, 0) in if ra.ok == 1 then (let env = cs_vbind_ps(vsg.ps, ra.vals) in let rq = cs_veval_all_true(vsg.reqs, env, env, ft) in if rq.ok == 1 and rq.hold == 0 then let cex = cs_vfmt_env(env) in {proofs: Cons({name: cnm, kind: "call_requires", status: "refuted", obligation: cs_exprs_sexpr(vsg.reqs), term: "(implies (and) " + cs_expr_sexpr(cs_cert_conj(vsg.reqs)) + ")", counterexample: cex}, Nil), diags: Cons(cs_mkdiag("V0001", "contract", "contract error: call to '" + cnm + "' in '" + fnm + "' violates 'requires' precondition with counterexample: " + cex, "ensure arguments passed to '" + cnm + "' satisfy its 'requires' contract"), Nil)} else {proofs: Nil, diags: Nil}) else let cps = cs_vcaller_ps(caller_mvs) in let creqs = cs_vcaller_reqs(caller_mvs) in if cs_isnil(cps) == 1 then {proofs: Nil, diags: Nil} else let lenv = cs_vlin_init_env(cps) in let chyps = (cs_vprove_reqs_hyps(creqs, lenv, ft)).hyps in let cex = cs_vchk_call_envs(cs_vgen_envs_hyps(cps, 0, cs_len(cps), chyps), args, vsg, creqs, ft) in if cex != "" then {proofs: Cons({name: cnm, kind: "call_requires", status: "refuted", obligation: cs_exprs_sexpr(vsg.reqs), term: "(implies (and) " + cs_expr_sexpr(cs_cert_conj(vsg.reqs)) + ")", counterexample: cex}, Nil), diags: Cons(cs_mkdiag("V0001", "contract", "contract error: call to '" + cnm + "' in '" + fnm + "' violates 'requires' precondition with counterexample: " + cex, "ensure arguments passed to '" + cnm + "' satisfy its 'requires' contract"), Nil)} else {proofs: Nil, diags: Nil}
 fn cs_vchk_rect_inv(tn, items, fnm, miv, ft) = match miv
     Nil         => {proofs: Nil, diags: Nil}
     Cons(iv, r) => let rr = cs_veval_rec(items, Nil, Nil, ft, 0) in if rr.ok == 0 then {proofs: Nil, diags: Nil} else let env = cs_vfields_env(rr.fields) in let ri = cs_veval(iv.inv, env, env, ft, 0) in if ri.ok == 1 and ri.i == 0 then let cex = cs_vfmt_env(env) in {proofs: Cons({name: tn, kind: "invariant", status: "refuted", obligation: cs_expr_sexpr(iv.inv), term: "(implies (and) " + cs_expr_sexpr(iv.inv) + ")", counterexample: cex}, Nil), diags: Cons(cs_mkdiag("V0001", "contract", "contract error: record construction of '" + tn + "' in '" + fnm + "' violates type 'invariant' with counterexample: " + cex, "satisfy the 'invariant' of '" + tn + "' before constructing the record"), Nil)} else {proofs: Nil, diags: Nil}
 fn cs_vchk_expr_e(e, fnm, vsigs, invs, ft) = match e
-    Call(cnm, args) => let r1 = cs_vchk_call_req(cnm, args, fnm, cs_vsiglookup(cnm, vsigs), ft) in let r2 = cs_vchk_args_e(args, fnm, vsigs, invs, ft) in {proofs: cs_app(r1.proofs, r2.proofs), diags: cs_app(r1.diags, r2.diags)}
+    Call(cnm, args) => let r1 = cs_vchk_call_req(cnm, args, fnm, cs_vsiglookup(cnm, vsigs), cs_vsiglookup(fnm, vsigs), ft) in let r2 = cs_vchk_args_e(args, fnm, vsigs, invs, ft) in {proofs: cs_app(r1.proofs, r2.proofs), diags: cs_app(r1.diags, r2.diags)}
     RecT(tn, items) => let r1 = cs_vchk_rect_inv(tn, items, fnm, cs_vinvlookup(tn, invs), ft) in let r2 = cs_vchk_rec_e(items, fnm, vsigs, invs, ft) in {proofs: cs_app(r1.proofs, r2.proofs), diags: cs_app(r1.diags, r2.diags)}
     Rec(items)      => cs_vchk_rec_e(items, fnm, vsigs, invs, ft)
     Field(o, fld)   => cs_vchk_expr_e(o, fnm, vsigs, invs, ft)
@@ -1596,17 +1825,21 @@ fn cs_vprove_law_decl(nm, ps, body, ft) = match body
     Call(cnm, args) => let tr = cs_vprove_temporal_call(nm, cs_hd_str(ps, "s"), cnm, args, ft) in if cs_isnil(tr.proofs) == 0 then tr else (let lenv = cs_vlin_init_env(ps) in let chyps = cs_vcollect_body_hyps(body, Nil, lenv, Cons(body, Nil), ft, 0) in let pr = cs_vprove_law_envs(cs_vgen_envs_hyps(ps, 0, cs_len(ps), chyps), body, ft, 0) in let lst = if pr.status == "refuted" then "refuted" else if cs_vqflia_prove_law(ps, body, ft) == 1 then "proven" else "runtime_checked" in let pf = Cons({name: nm, kind: "law", status: lst, obligation: cs_expr_sexpr(body), term: "(implies (and) " + cs_expr_sexpr(cs_cert_clean_e(body, ft, 0)) + ")", counterexample: pr.cex}, Nil) in let dg = if lst == "refuted" then Cons(cs_mkdiag("V0001", "law", "contract error: law '" + nm + "' refuted with counterexample: " + pr.cex, "fix the implementation or refine law '" + nm + "'"), Nil) else Nil in {proofs: pf, diags: dg})
     _               => let lenv = cs_vlin_init_env(ps) in let chyps = cs_vcollect_body_hyps(body, Nil, lenv, Cons(body, Nil), ft, 0) in let pr = cs_vprove_law_envs(cs_vgen_envs_hyps(ps, 0, cs_len(ps), chyps), body, ft, 0) in let lst = if pr.status == "refuted" then "refuted" else if cs_vqflia_prove_law(ps, body, ft) == 1 then "proven" else "runtime_checked" in let pf = Cons({name: nm, kind: "law", status: lst, obligation: cs_expr_sexpr(body), term: "(implies (and) " + cs_expr_sexpr(cs_cert_clean_e(body, ft, 0)) + ")", counterexample: pr.cex}, Nil) in let dg = if lst == "refuted" then Cons(cs_mkdiag("V0001", "law", "contract error: law '" + nm + "' refuted with counterexample: " + pr.cex, "fix the implementation or refine law '" + nm + "'"), Nil) else Nil in {proofs: pf, diags: dg}
 
-fn cs_vprove_stmts(prog, vsigs, invs, wcets, ft) = match prog
+fn cs_vprove_total_fn(nm, ps, body, msig) = match msig
+    Nil         => Nil
+    Cons(sg, r) => if cs_ois_total(sg.freef) == 0 then Nil else let dt = cs_achk_total_e(body, nm, ps, Nil, Nil) in let ok = cs_isnil(dt) in Cons({name: nm, kind: "termination", status: if ok == 1 then "proven" else "refuted", obligation: "terminates(" + nm + ")", term: "(terminates " + nm + " (" + cs_joinsep(ps, " ") + "))", counterexample: if ok == 1 then "" else "non-decreasing recursive call in " + nm}, Nil)
+
+fn cs_vprove_stmts(prog, vsigs, invs, wcets, osigs, ft) = match prog
     Nil        => {proofs: Nil, diags: Nil}
-    Cons(h, t) => cs_vprove_stmt1(h, t, vsigs, invs, wcets, ft)
-fn cs_vprove_stmt1(st, rest, vsigs, invs, wcets, ft) = match st
-    VLawDecl(nm, ps, body)      => let r1 = cs_vprove_law_decl(nm, ps, body, ft) in let rr = cs_vprove_stmts(rest, vsigs, invs, wcets, ft) in {proofs: cs_app(r1.proofs, rr.proofs), diags: cs_app(r1.diags, rr.diags)}
-    VTypeInvariant(nm, fs, inv) => let pf = Cons({name: nm, kind: "invariant", status: "runtime_checked", obligation: cs_expr_sexpr(inv), term: "(implies (and) " + cs_expr_sexpr(cs_cert_clean_e(inv, ft, 0)) + ")", counterexample: ""}, Nil) in let rr = cs_vprove_stmts(rest, vsigs, invs, wcets, ft) in {proofs: cs_app(pf, rr.proofs), diags: rr.diags}
-    Fn(nm, ps, body)            => let r1 = cs_vprove_fn(nm, ps, body, cs_vsiglookup(nm, vsigs), ft) in let rw = cs_vwcet_prove_fn(nm, body, wcets, ft) in let r2 = cs_vchk_expr_e(body, nm, vsigs, invs, ft) in let rr = cs_vprove_stmts(rest, vsigs, invs, wcets, ft) in {proofs: cs_app(r1.proofs, cs_app(rw.proofs, cs_app(r2.proofs, rr.proofs))), diags: cs_app(r1.diags, cs_app(rw.diags, cs_app(r2.diags, rr.diags)))}
-    Print(v)                    => let r1 = cs_vchk_expr_e(v, "<main>", vsigs, invs, ft) in let rr = cs_vprove_stmts(rest, vsigs, invs, wcets, ft) in {proofs: cs_app(r1.proofs, rr.proofs), diags: cs_app(r1.diags, rr.diags)}
-    ExprS(v)                    => let r1 = cs_vchk_expr_e(v, "<main>", vsigs, invs, ft) in let rr = cs_vprove_stmts(rest, vsigs, invs, wcets, ft) in {proofs: cs_app(r1.proofs, rr.proofs), diags: cs_app(r1.diags, rr.diags)}
-    _                           => cs_vprove_stmts(rest, vsigs, invs, wcets, ft)
-fn cs_vprove_all(prog) = cs_vprove_stmts(prog, cs_vcollect_vsigs(prog), cs_vcollect_invs(prog), cs_vcollect_wcets(prog), cs_buildft(prog))
+    Cons(h, t) => cs_vprove_stmt1(h, t, vsigs, invs, wcets, osigs, ft)
+fn cs_vprove_stmt1(st, rest, vsigs, invs, wcets, osigs, ft) = match st
+    VLawDecl(nm, ps, body)      => let r1 = cs_vprove_law_decl(nm, ps, body, ft) in let rr = cs_vprove_stmts(rest, vsigs, invs, wcets, osigs, ft) in {proofs: cs_app(r1.proofs, rr.proofs), diags: cs_app(r1.diags, rr.diags)}
+    VTypeInvariant(nm, fs, inv) => let pf = Cons({name: nm, kind: "invariant", status: "runtime_checked", obligation: cs_expr_sexpr(inv), term: "(implies (and) " + cs_expr_sexpr(cs_cert_clean_e(inv, ft, 0)) + ")", counterexample: ""}, Nil) in let rr = cs_vprove_stmts(rest, vsigs, invs, wcets, osigs, ft) in {proofs: cs_app(pf, rr.proofs), diags: rr.diags}
+    Fn(nm, ps, body)            => let r1 = cs_vprove_fn(nm, ps, body, cs_vsiglookup(nm, vsigs), ft) in let pt = cs_vprove_total_fn(nm, ps, body, cs_osiglookup(nm, osigs)) in let rw = cs_vwcet_prove_fn(nm, body, wcets, ft) in let r2 = cs_vchk_expr_e(body, nm, vsigs, invs, ft) in let rr = cs_vprove_stmts(rest, vsigs, invs, wcets, osigs, ft) in {proofs: cs_app(r1.proofs, cs_app(pt, cs_app(rw.proofs, cs_app(r2.proofs, rr.proofs)))), diags: cs_app(r1.diags, cs_app(rw.diags, cs_app(r2.diags, rr.diags)))}
+    Print(v)                    => let r1 = cs_vchk_expr_e(v, "<main>", vsigs, invs, ft) in let rr = cs_vprove_stmts(rest, vsigs, invs, wcets, osigs, ft) in {proofs: cs_app(r1.proofs, rr.proofs), diags: cs_app(r1.diags, rr.diags)}
+    ExprS(v)                    => let r1 = cs_vchk_expr_e(v, "<main>", vsigs, invs, ft) in let rr = cs_vprove_stmts(rest, vsigs, invs, wcets, osigs, ft) in {proofs: cs_app(r1.proofs, rr.proofs), diags: cs_app(r1.diags, rr.diags)}
+    _                           => cs_vprove_stmts(rest, vsigs, invs, wcets, osigs, ft)
+fn cs_vprove_all(prog) = cs_vprove_stmts(prog, cs_vcollect_vsigs(prog), cs_vcollect_invs(prog), cs_vcollect_wcets(prog), cs_ocollects(prog), cs_buildft(prog))
 
 fn cs_n4_ty_dims(ty) = match ty
     TyTensor(e, ds) => ds
@@ -1925,7 +2158,7 @@ fn cs_eval_prog(prog) = cs_joinsep(cs_eval_stmts(prog, cs_buildft(prog)), "\n")
 
 ## --- PUBLIC CALLABLE LIBRARY API (`use lcaas`) ---
 fn cs_collect_holes(prog) = let tt = cs_tcollect(prog) in let osigs = cs_ocollects(prog) in let vsigs = cs_vcollect_vsigs(prog) in let laws = cs_vcollect_laws(prog) in (cs_collect_holes_stmts(prog, tt.sigs, osigs, vsigs, laws, tt.ft)).holes
-fn caas_compile(src) = let ast0 = cs_parse(src) in let syms = cs_symbols(ast0) in let ft0 = cs_buildft(ast0) in let gnms = cs_n4_collect_grads_prog(ast0, Nil) in let d_ad = cs_n4_chk_grad_fns(gnms, ft0) in let gfns = cs_n4_synth_grad_fns(gnms, ft0) in let ast = cs_app(gfns, ast0) in let tt = cs_tcollect(ast) in let osigs = cs_ocollects(ast) in let vsigs = cs_vcollect_vsigs(ast) in let invs = cs_vcollect_invs(ast) in let laws = cs_vcollect_laws(ast) in let wcets = cs_vcollect_wcets(ast) in let kt = {ksigs: cs_kcollect_effsigs(ast), edecls: cs_kcollect_effdecls(ast), caps: cs_kcollect_caps(ast), recs: tt.recs, vsigs: vsigs, osigs: osigs} in let hr = cs_collect_holes_stmts(ast0, tt.sigs, osigs, vsigs, laws, tt.ft) in let ast_filled = cs_fill_prog_holes(ast, tt.sigs, osigs, vsigs, laws, tt.ft) in let vr = cs_vprove_stmts(ast_filled, vsigs, invs, wcets, cs_buildft(ast_filled)) in let diags = cs_app(cs_p35_diags(osigs, ast0), cs_app(d_ad, cs_app(cs_diagnose_stmts(ast_filled, tt), cs_app(hr.diags, cs_app(vr.diags, cs_odiagnose_stmts(ast_filled, osigs, tt.sigs, kt, Nil)))))) in let raw_sexpr = cs_prog_sexpr(ast0) in if cs_has_error_diags(diags) == 1 then {ok: 0, diagnostics: diags, holes: hr.holes, proofs: vr.proofs, symbols: syms, ast: ast0, ast_sexpr: raw_sexpr, expanded: Nil, expanded_sexpr: "", asm: "", result: ""} else let exp = cs_expand(ast_filled) in {ok: 1, diagnostics: diags, holes: hr.holes, proofs: vr.proofs, symbols: syms, ast: ast0, ast_sexpr: raw_sexpr, expanded: exp, expanded_sexpr: cs_prog_sexpr(exp), asm: cs_asm_gen(exp), result: cs_eval_prog(exp)}
+fn caas_compile(src) = let ast0 = cs_parse(src) in let syms = cs_symbols(ast0) in let ft0 = cs_buildft(ast0) in let gnms = cs_n4_collect_grads_prog(ast0, Nil) in let d_ad = cs_n4_chk_grad_fns(gnms, ft0) in let gfns = cs_n4_synth_grad_fns(gnms, ft0) in let ast = cs_app(gfns, ast0) in let tt = cs_tcollect(ast) in let osigs = cs_ocollects(ast) in let vsigs = cs_vcollect_vsigs(ast) in let invs = cs_vcollect_invs(ast) in let laws = cs_vcollect_laws(ast) in let wcets = cs_vcollect_wcets(ast) in let kt = {ksigs: cs_kcollect_effsigs(ast), edecls: cs_kcollect_effdecls(ast), caps: cs_kcollect_caps(ast), recs: tt.recs, vsigs: vsigs, osigs: osigs} in let hr = cs_collect_holes_stmts(ast0, tt.sigs, osigs, vsigs, laws, tt.ft) in let ast_filled = cs_fill_prog_holes(ast, tt.sigs, osigs, vsigs, laws, tt.ft) in let vr = cs_vprove_stmts(ast_filled, vsigs, invs, wcets, osigs, cs_buildft(ast_filled)) in let diags = cs_app(cs_p35_diags(osigs, ast0), cs_app(d_ad, cs_app(cs_diagnose_stmts(ast_filled, tt), cs_app(hr.diags, cs_app(vr.diags, cs_odiagnose_stmts(ast_filled, osigs, tt.sigs, kt, Nil)))))) in let raw_sexpr = cs_prog_sexpr(ast0) in if cs_has_error_diags(diags) == 1 then {ok: 0, diagnostics: diags, holes: hr.holes, proofs: vr.proofs, symbols: syms, ast: ast0, ast_sexpr: raw_sexpr, expanded: Nil, expanded_sexpr: "", asm: "", result: ""} else let exp = cs_expand(ast_filled) in {ok: 1, diagnostics: diags, holes: hr.holes, proofs: vr.proofs, symbols: syms, ast: ast0, ast_sexpr: raw_sexpr, expanded: exp, expanded_sexpr: cs_prog_sexpr(exp), asm: cs_asm_gen(exp), result: cs_eval_prog(exp)}
 
 fn caas_check(src) = caas_compile(src)
 fn caas_fill(src) = (caas_compile(src)).holes
