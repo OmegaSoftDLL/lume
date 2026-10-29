@@ -1,0 +1,50 @@
+@proposal 0006_stdlib_math_mod
+@domain stdlib
+@goal Grow multi-file stdlib bounded math helpers with contracts and laws
+@principles P1,P7,P23,P26,P30,P31,P35
+@capability pure
+@max_asm_lines 400
+@approval signed:ricardo:ed25519:bf51d3466559fb582c37dc69dacf6eb773473fe46041a9921afd0da0a282fc7e95472957c957ceac4a71e1d6526853579f5e41d28937d13da574ec826b1e2101
+@file compiler/stage1/mod_base.src
+@baseline
+## mod_base.src -- shared foundational module for multi-module diamond test (Track T, brick T3).
+fn sq(x: int) -> int = x * x
+fn cube(x: int) -> int = x * sq(x)
+@end
+@candidate
+## mod_base.src -- shared foundational module for multi-module diamond test (Track T, brick T3).
+fn sq(x: int) -> int = x * x
+fn cube(x: int) -> int = x * sq(x)
+@bound(cycles: 24)
+fn abs_val(x: int) -> int ensures result >= 0 = if x < 0 then 0 - x else x
+fn test_abs_val_non_negative() = abs_val(0 - 12) == 12 and abs_val(7) == 7
+@end
+@file compiler/stage1/mod_math.src
+@baseline
+## mod_math.src -- intermediate module importing mod_base (Track T, brick T3).
+use mod_base
+
+fn hypot_sq(a: int, b: int) -> int = sq(a) + sq(b)
+fn quad(x: int) -> int = sq(sq(x))
+@end
+@candidate
+## mod_math.src -- intermediate module importing mod_base (Track T, brick T3).
+use mod_base
+
+fn hypot_sq(a: int, b: int) -> int = sq(a) + sq(b)
+fn quad(x: int) -> int = sq(sq(x))
+@bound(cycles: 32)
+fn manhattan(dx: int, dy: int) -> int ensures result >= 0 = abs_val(dx) + abs_val(dy)
+law manhattan_sym(a: int, b: int) = manhattan(a, b) == manhattan(b, a)
+fn test_manhattan_distance() = manhattan(0 - 3, 4) == 7 and hypot_sq(3, 4) == 25
+@end
+@tests
+print abs_val(0 - 12)
+print manhattan(0 - 3, 4)
+print hypot_sq(3, 4)
+@end
+@expected
+12
+7
+25
+@end
