@@ -4,7 +4,9 @@
   <img alt="Language: Lume" src="https://img.shields.io/badge/language-Lume-8A2BE2">
   <img alt="Built with 100% Lume" src="https://img.shields.io/badge/built%20with-100%25%20Lume-8A2BE2">
   <a href="https://github.com/OmegaSoftDLL/lume/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/OmegaSoftDLL/lume/actions/workflows/ci.yml/badge.svg"></a>
-  <img alt="License: MIT OR Apache-2.0" src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue">
+  <a href="https://github.com/OmegaSoftDLL/lume/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/OmegaSoftDLL/lume"></a>
+  <a href="https://omegasoftdll.github.io/lume/"><img alt="Documentation" src="https://img.shields.io/badge/docs-omegasoftdll.github.io%2Flume-8A2BE2"></a>
+  <a href="COPYRIGHT"><img alt="License: MIT OR Apache-2.0" src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue"></a>
   <img alt="Status: Phases 0–5 complete · verification hardening in progress" src="https://img.shields.io/badge/status-phases%200--5%20complete%20%C2%B7%20verification%20hardening-8A2BE2">
   <img alt="PRs welcome" src="https://img.shields.io/badge/PRs-welcome-brightgreen">
 </p>
@@ -141,7 +143,7 @@ This is a **staged, self-verifying bootstrap** — the model GCC, Rust and Go us
 
 - [x] **Phase 0 — design.** ~260-language survey, principles (P1–P35), specification v0.1, grammar, roadmap, vision, and worked examples.
 - [x] **Stage 0 — seed `lume0`** (C, disposable; now frozen as the reproducibility root). Lexer, parser, tree-walking interpreter, a semantic `check` (undefined names, literal/annotation types, call arity, duplicate and immutable-assignment errors — the AI-first edit→check→fix loop), and the seed's own x86-64 assembler + ELF64 writer (`lume0 asm`), so no external `as`/`ld`/`cc` is ever needed.
-- [x] **Stage 1 — self-hosting, no C in the loop. ✅ Done.** Both the compiler (`compiler/stage1/lumec.src`) and the assembler + ELF writer (`compiler/stage1/lasm.src`) are written in Lume-Core. `lumec` lexes, parses (functions, `print`, expressions, `match`, records, constructors) and emits x86-64; `lasm` writes the ELF byte-by-byte. `make bootstrap` runs the staged build — the GCC/Rust/Go model: the frozen C seed mints the first tools once, then stages 1–3 rebuild the whole toolchain from Lume source with **no C**, asserting **stage 2 == stage 3, bit for bit**. `lasm`'s ELF is byte-identical to the seed assembler and strictly more correct (nearest GAS `1f`/`1b` resolution, which the seed gets wrong); the 300 KB compiler assembles in ~2.8 s. `make test` 218/0, `make asan` 177/0. See `docs/10-stage1-status.md` and `docs/11-self-hosting-plan.md`.
+- [x] **Stage 1 — self-hosting, no C in the loop. ✅ Done.** Both the compiler (`compiler/stage1/lumec.src`) and the assembler + ELF writer (`compiler/stage1/lasm.src`) are written in Lume-Core. `lumec` lexes, parses (functions, `print`, expressions, `match`, records, constructors) and emits x86-64; `lasm` writes the ELF byte-by-byte. `make bootstrap` runs the staged build — the GCC/Rust/Go model: the frozen C seed mints the first tools once, then stages 1–3 rebuild the whole toolchain from Lume source with **no C**, asserting **stage 2 == stage 3, bit for bit**. `lasm`'s ELF is byte-identical to the seed assembler and strictly more correct (nearest GAS `1f`/`1b` resolution, which the seed gets wrong); the 300 KB compiler assembles in ~2.8 s. The full conformance and ASan/UBSan suites are required CI gates. See `docs/10-stage1-status.md` and `docs/11-self-hosting-plan.md`.
 - [x] **Stage 2 — comptime, macros, data, tooling, self-evolution, types. ✅ Done.** `comptime` (fold, pure-fn calls, generics via `comptime T: type`, `assert`, precomputed tables), hygienic macros + quasiquote, exact `decimal(p, s)` / `table[T]` / type-checked `query`, the single `lume` CLI (`build`/`run`/`test`/`fmt`/`doc`/`pkg`/`agent`/`evolve`) with capability-audited deps + SHA-256 lockfiles, the `lume evolve` self-evolution loop (compiler-as-a-service + 6 gates + human approval), and the gradual type system (F1 declarations, F2 annotations, F3 Hindley–Milner inference, F4 unified front-ends). Exit criterion met: the `examples/apps/inventory/` business app, built only with `lume`. All keeping `stage 2 == stage 3` and the Zero-C gate green in CI. See `docs/15-phase2-status.md`.
 - [x] **Stage 3 — ownership, effects, concurrency, verification. ✅ Done.** Track O (move/borrow checker, `from` regions, memory tiers), Track A (AI-native authoring: typed holes, `total`, provenance/uncertainty in the type), Track K (effect rows + algebraic handlers + `@capability` + Perceus reuse), Track S (structured concurrency, channels, supervised actors), and Track V (`requires`/`ensures`/`invariant`/`old`, `lume prove`, `LAWS`), plus the `job_server` capstone. The contract verifier is a **sound `QF_LIA` decision procedure** (Fourier–Motzkin / Farkas): `proven` obligations elide their runtime guard, others stay `runtime_checked`, never falsely proven. See `docs/16-phase3-plan.md`.
 - [x] **Stage 4 — tensors, autodiff, GPU kernels, `prob`, `rule`, `llm fn`. ✅ Done.** Shape-typed tensors with compile-time shape unification (`[T0300]`), differentiable `model` + symbolic autodiff (`grad`/`jvp`/`vjp`/`jit`), accelerator `kernel fn` (PTX/SPIR-V), probabilistic programming (`std.prob`), Datalog `rule`, typed `extern llm fn` with contract-repair + provenance, and spiking `std.neuro`; `mnist` and neuro-symbolic `agent` capstones. **Caveats (see the hardening item below):** symbolic autodiff covers only the `+ - * if` fragment and rejects other operators at compile time with `[N0400]` (#184, fixed); `jit` performs **real specialisation** (dispatch elided in the emitted asm, #229); `kernel fn` lowers AST bodies (`LetIn`, `If`, `Bin`, `Var`, `Num`) to SSA CUDA PTX 8.0 and Vulkan SPIR-V 1.6 (`[K0400]`) and executes them on instruction-level PTX 8.0 and SPIR-V 1.6 virtual machine emulators across multi-point SIMT grids (`ptx_vm_exec`, `spirv_vm_exec`, `ptx_vm_launch_1d`, `spirv_vm_launch_1d`, `lume agent kernel`, `"gpu_emu_verified": true`, #250); `std.prob` inference includes Metropolis–Hastings MCMC, reparameterised SVI, and systematic-resampling SMC (#192), while `examples/apps/mnist/` exports valid binary SafeTensors and ONNX protobuf files (#192). See `docs/24-phase4-plan.md`.
@@ -226,12 +228,15 @@ bootstrap/lume0 test` **and** `asan` must pass (0 failed); every fix ships with 
 (golden rule: no bugs in the toolchain); `main` is protected and requires a green PR. `docs/02-principles.md`
 lists the principles (P1–P35) each change serves.
 
+Participation is governed by the **[Code of Conduct](CODE_OF_CONDUCT.md)**. Suspected security
+vulnerabilities must be reported privately through the **[Security Policy](SECURITY.md)**.
+
 ## License
 
-Dual-licensed under **MIT** (`LICENSE-MIT`) **or Apache-2.0** (`LICENSE-APACHE`), at your option —
-the same scheme as the Rust project (Go uses BSD-3-Clause; both are permissive). See `COPYRIGHT`.
-The license covers the Lume toolchain, standard library and docs; it does not restrict what you do
-with programs you write in Lume or the binaries it produces for you.
+Dual-licensed under **[MIT](LICENSE-MIT)** or **[Apache-2.0](LICENSE-APACHE)**, at your option.
+See [`COPYRIGHT`](COPYRIGHT) for the licensing terms that apply to contributions. The license covers
+the Lume toolchain, standard library and docs; it does not restrict what you do with programs you
+write in Lume or the binaries it produces for you.
 
 ## Software protection (anti-reverse-engineering)
 

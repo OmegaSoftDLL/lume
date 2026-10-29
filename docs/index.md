@@ -7,13 +7,13 @@ can be `proven` and their runtime guards elided, and treats correctness as somet
 
 > **Honest status.** Early and pre-1.0. The compiler, Phases 1–5 (ownership, effects, concurrency,
 > contracts/proofs, AI-numerics, systems/interop), the inflection (the compiler dogfooding its own
-> features) and P33 software protection are implemented and self-hosting. Native codegen today is
-> **Linux x86-64 only**; macOS/Apple Silicon, Windows, RISC-V and bare-metal are planned (not built).
-> Some features are models or stubs clearly labelled as such, and verification/trust-layer hardening
-> is ongoing. See the open issues for exactly what is shipped vs. planned.
+> features) and P33 software protection are implemented and self-hosting. Release archives are
+> published and run-verified for Linux x86-64/AArch64/RISC-V, macOS AArch64/x86-64, and Windows
+> x86-64. Additional target, hardware, and language work remains open; some capabilities are
+> explicitly labelled models. See the open issues for exactly what is shipped vs. planned.
 
 ## Start here
-- [README](https://github.com/OmegaSoftDLL/lume) — overview, the ten pillars, a taste, quickstart.
+- [README](https://github.com/OmegaSoftDLL/lume) — overview, the eleven pillars, a taste, quickstart.
 - [05 — Vision](05-vision.md) · [02 — Principles (P1–P35)](02-principles.md) · [03 — Specification](03-specification.md)
 - [08 — AI-first](08-ai-first.md) — why the primary user is a model, not a person.
 

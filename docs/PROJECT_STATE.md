@@ -29,9 +29,9 @@ protection. License: dual **MIT OR Apache-2.0** (like Rust).
   checks pass.
 - Run `make -C bootstrap/lume0 test` AND `make -C bootstrap/lume0 asan` before committing;
   both must be `0 failed`.
-- Treat **C as the disposable seed only.** The seed interpreter `lume0` is C and will be
-  deleted once Lume self-hosts. New language capability should move toward native (no C),
-  and ultimately no `as`/`ld` either.
+- Treat **C as the frozen bootstrap seed only.** The seed interpreter `lume0` remains the
+  reproducibility root and is not on the steady-state path. Implement new language capabilities
+  in Lume, without expanding C or relying on external `as`/`ld`.
 - For each borrowed feature, check our implementation is **genuinely superior** to the
   source language's version, not a shallow clone. If it is only a doc promise, say so.
 - **Edit the self-hosted compiler in `compiler/stage1/lume/NN_*.src`, NOT in `lumec.src`.**
