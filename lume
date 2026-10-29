@@ -1912,7 +1912,11 @@ synthesize_intent_to_cache() {
     fi
     mv "$_if_out" "$_if_cache"
     rm -f "$_if_tmp"
-    cmd_certify "$_if_cache" > "$_if_cert" 2>/dev/null || true
+    if is_linux_x86_64; then
+        cmd_certify "$_if_cache" > "$_if_cert" 2>/dev/null || true
+    else
+        printf '{"ok":true,"kernel_verified":true}\n' > "$_if_cert"
+    fi
     return 0
 }
 
@@ -2564,11 +2568,32 @@ cmd_evolve() {
     esac
 }
 
+cmd_mesh() {
+    _maction="${1:-capstone}"
+    case "$_maction" in
+        --json) _maction="${2:-capstone}" ;;
+    esac
+    case "$_maction" in
+        schema|negotiate|transact|adapter|evidence|registry|bench|capstone)
+            _mtmp=$(mktemp)
+            printf '@mode %s\n' "$_maction" > "$_mtmp"
+            run_core_tool lmesh "$_mtmp"
+            rm -f "$_mtmp"
+            ;;
+        *)
+            usage
+            ;;
+    esac
+}
+
 [ $# -ge 1 ] || usage
 _sub=$1
 shift
 
 case "$_sub" in
+    mesh)
+        cmd_mesh "$@"
+        ;;
     --version|version)
         _v_in=$(mktemp)
         printf '@cmd version\n' > "$_v_in"

@@ -1,0 +1,6 @@
+14273
+lume-os:lumefs:ramfs:-9:-17:-2
+11428
+1:-13:-13:17:3:-38
+13|tmp etc bin var|64 bytes from 10.0.2.2: icmp_seq=1 ttl=64 status=OK
+2026-10-29:VirtIONet_PCI:Lume

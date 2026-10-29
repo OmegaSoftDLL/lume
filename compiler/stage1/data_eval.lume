@@ -9,6 +9,84 @@ type RV = enum
     VRec(fields: map[str, RV])
     VObj(tag: str, fields: [RV])
 
+fn bv_xor_8(x: int, y: int) -> int = ((x + y) % 2) + 2 * (((x / 2) + (y / 2)) % 2) + 4 * (((x / 4) + (y / 4)) % 2) + 8 * (((x / 8) + (y / 8)) % 2) + 16 * (((x / 16) + (y / 16)) % 2) + 32 * (((x / 32) + (y / 32)) % 2) + 64 * (((x / 64) + (y / 64)) % 2) + 128 * (((x / 128) + (y / 128)) % 2)
+
+fn bv_xor_i(a: int, b: int) -> int = bv_xor_8(a, b) + 256 * bv_xor_8(a / 256, b / 256) + 65536 * bv_xor_8(a / 65536, b / 65536) + 16777216 * bv_xor_8(a / 16777216, b / 16777216)
+
+fn bv_and_8(x: int, y: int) -> int = ((x % 2) * (y % 2)) + 2 * (((x / 2) % 2) * ((y / 2) % 2)) + 4 * (((x / 4) % 2) * ((y / 4) % 2)) + 8 * (((x / 8) % 2) * ((y / 8) % 2)) + 16 * (((x / 16) % 2) * ((y / 16) % 2)) + 32 * (((x / 32) % 2) * ((y / 32) % 2)) + 64 * (((x / 64) % 2) * ((y / 64) % 2)) + 128 * (((x / 128) % 2) * ((y / 128) % 2))
+
+fn bv_and_i(a: int, b: int) -> int = bv_and_8(a, b) + 256 * bv_and_8(a / 256, b / 256) + 65536 * bv_and_8(a / 65536, b / 65536) + 16777216 * bv_and_8(a / 16777216, b / 16777216)
+
+fn bv_or_8(x: int, y: int) -> int = (((x % 2) + (y % 2) + 1) / 2) + 2 * ((((x / 2) % 2) + ((y / 2) % 2) + 1) / 2) + 4 * ((((x / 4) % 2) + ((y / 4) % 2) + 1) / 2) + 8 * ((((x / 8) % 2) + ((y / 8) % 2) + 1) / 2) + 16 * ((((x / 16) % 2) + ((y / 16) % 2) + 1) / 2) + 32 * ((((x / 32) % 2) + ((y / 32) % 2) + 1) / 2) + 64 * ((((x / 64) % 2) + ((y / 64) % 2) + 1) / 2) + 128 * ((((x / 128) % 2) + ((y / 128) % 2) + 1) / 2)
+
+fn bv_or_i(a: int, b: int) -> int = bv_or_8(a, b) + 256 * bv_or_8(a / 256, b / 256) + 65536 * bv_or_8(a / 65536, b / 65536) + 16777216 * bv_or_8(a / 16777216, b / 16777216)
+
+fn sha_u32_i(x: int) -> int = ((x % 4294967296) + 4294967296) % 4294967296
+fn sha_rotr_i(x: int, p: int, q: int) -> int = (x / p) + (x % p) * q
+fn sha_bsig0_i(a: int) -> int = bv_xor_i(bv_xor_i(sha_rotr_i(a, 4, 1073741824), sha_rotr_i(a, 8192, 524288)), sha_rotr_i(a, 4194304, 1024))
+fn sha_bsig1_i(e: int) -> int = bv_xor_i(bv_xor_i(sha_rotr_i(e, 64, 67108864), sha_rotr_i(e, 2048, 2097152)), sha_rotr_i(e, 33554432, 128))
+fn sha_ssig0_i(x: int) -> int = bv_xor_i(bv_xor_i(sha_rotr_i(x, 128, 33554432), sha_rotr_i(x, 262144, 16384)), x / 8)
+fn sha_ssig1_i(x: int) -> int = bv_xor_i(bv_xor_i(sha_rotr_i(x, 131072, 32768), sha_rotr_i(x, 524288, 8192)), x / 1024)
+fn sha_ch_i(e: int, f: int, g: int) -> int = bv_xor_i(bv_and_i(e, f), bv_and_i(4294967295 - e, g))
+fn sha_maj_i(a: int, b: int, c: int) -> int = bv_xor_i(bv_xor_i(bv_and_i(a, b), bv_and_i(a, c)), bv_and_i(b, c))
+fn sha_pow256_i(k: int) -> int = if k <= 0 then 1 else if k == 1 then 256 else if k == 2 then 65536 else if k == 3 then 16777216 else if k == 4 then 4294967296 else if k == 5 then 1099511627776 else if k == 6 then 281474976710656 else 72057594037927936
+fn sha_byte_i(s: str, slen: int, total: int, idx: int) -> int = if idx < slen then (s[idx] as int) else if idx == slen then 128 else if idx >= total - 8 then ((slen * 8) / sha_pow256_i(total - 1 - idx)) % 256 else 0
+fn sha_word_i(s: str, slen: int, total: int, base: int) -> int = sha_byte_i(s, slen, total, base) * 16777216 + sha_byte_i(s, slen, total, base + 1) * 65536 + sha_byte_i(s, slen, total, base + 2) * 256 + sha_byte_i(s, slen, total, base + 3)
+fn sha_hex1_i(n: int) -> str = "0123456789abcdef"[n % 16..(n % 16) + 1]
+fn sha_hex32_i(w: int) -> str = sha_hex1_i(w / 268435456) + sha_hex1_i(w / 16777216) + sha_hex1_i(w / 1048576) + sha_hex1_i(w / 65536) + sha_hex1_i(w / 4096) + sha_hex1_i(w / 256) + sha_hex1_i(w / 16) + sha_hex1_i(w)
+
+fn sha256_hex_str(s: str) -> str
+    let slen = s.len()
+    let total = ((slen + 9 + 63) / 64) * 64
+    let ks = [1116352408, 1899447441, 3049323471, 3921009573, 961987163, 1508970993, 2453635748, 2870763221, 3624381080, 310598401, 607225278, 1426881987, 1925078388, 2162078206, 2614888103, 3248222580, 3835390401, 4022224774, 264347078, 604807628, 770255983, 1249150122, 1555081692, 1996064986, 2554220882, 2821834349, 2952996808, 3210313671, 3336571891, 3584528711, 113926993, 338241895, 666307205, 773529912, 1294757372, 1396182291, 1695183700, 1986661051, 2177026350, 2456956037, 2730485921, 2820302411, 3259730800, 3345764771, 3516065817, 3600352804, 4094571909, 275423344, 430227734, 506948616, 659060556, 883997877, 958139571, 1322822218, 1537002063, 1747873779, 1955562222, 2024104815, 2227730452, 2361852424, 2428436474, 2756734187, 3204031479, 3329325298]
+    var h0 = 1779033703
+    var h1 = 3144134277
+    var h2 = 1013904242
+    var h3 = 2773480762
+    var h4 = 1359893119
+    var h5 = 2600822924
+    var h6 = 528734635
+    var h7 = 1541459225
+    var blk = 0
+    while blk < total
+        var w = []
+        var t = 0
+        while t < 64
+            let wt = if t < 16 then sha_word_i(s, slen, total, blk + t * 4) else sha_u32_i(w[t - 16] + sha_ssig0_i(w[t - 15]) + w[t - 7] + sha_ssig1_i(w[t - 2]))
+            w.push(wt)
+            t = t + 1
+        var a = h0
+        var b = h1
+        var c = h2
+        var d = h3
+        var e = h4
+        var f = h5
+        var g = h6
+        var h = h7
+        t = 0
+        while t < 64
+            let t1 = sha_u32_i(h + sha_bsig1_i(e) + sha_ch_i(e, f, g) + ks[t] + w[t])
+            let t2 = sha_u32_i(sha_bsig0_i(a) + sha_maj_i(a, b, c))
+            h = g
+            g = f
+            f = e
+            e = sha_u32_i(d + t1)
+            d = c
+            c = b
+            b = a
+            a = sha_u32_i(t1 + t2)
+            t = t + 1
+        h0 = sha_u32_i(h0 + a)
+        h1 = sha_u32_i(h1 + b)
+        h2 = sha_u32_i(h2 + c)
+        h3 = sha_u32_i(h3 + d)
+        h4 = sha_u32_i(h4 + e)
+        h5 = sha_u32_i(h5 + f)
+        h6 = sha_u32_i(h6 + g)
+        h7 = sha_u32_i(h7 + h)
+        blk = blk + 64
+    sha_hex32_i(h0) + sha_hex32_i(h1) + sha_hex32_i(h2) + sha_hex32_i(h3) + sha_hex32_i(h4) + sha_hex32_i(h5) + sha_hex32_i(h6) + sha_hex32_i(h7)
+
 fn rv_int(v: RV) -> int
     match v
         VInt(n)     => n
@@ -25,12 +103,12 @@ fn rv_is_str(v: RV) -> bool
 fn rv_str(v: RV) -> str
     match v
         VStr(s)     => s
-        VInt(n)     => "{n}"
+        VInt(n)     => str(n)
         VObj(t, fs) => "<obj>"
 
 fn rv_show(v: RV) -> str
     match v
-        VInt(n)     => "{n}"
+        VInt(n)     => str(n)
         VStr(s)     => s
         VList(xs)   => "[" + xs.map(rv_show).join(", ") + "]"
         VRec(m)     => do
@@ -43,6 +121,32 @@ fn rv_show(v: RV) -> str
                 t
             else
                 t + "(" + fs.map(rv_show).join(", ") + ")"
+
+fn pat_ok(p: Pat, v: RV) -> bool
+    match p
+        PWild       => true
+        PBind(name) => true
+        PInt(k)     => do
+            match v
+                VInt(m)     => m == k
+                VStr(s)     => false
+                VList(xs)   => false
+                VRec(mm)    => false
+                VObj(t, fs) => false
+        PCons(tag, subs) => do
+            match v
+                VInt(m) => false
+                VStr(s) => false
+                VList(xs) => false
+                VRec(mm) => false
+                VObj(vtag, fields) => do
+                    var ok = false
+                    if vtag == tag and fields.len() == subs.len()
+                        ok = true
+                        for i in 0..subs.len()
+                            if not pat_ok(subs[i], fields[i])
+                                ok = false
+                    ok
 
 fn match_pat(p: Pat, v: RV, env: mut map[str, RV]) -> bool
     match p
@@ -64,14 +168,12 @@ fn match_pat(p: Pat, v: RV, env: mut map[str, RV]) -> bool
                 VList(xs) => false
                 VRec(mm) => false
                 VObj(vtag, fields) => do
-                    if vtag != tag
-                        return false
-                    if fields.len() != subs.len()
-                        return false
-                    var ok = true
-                    for i in 0..subs.len()
-                        if not match_pat(subs[i], fields[i], env)
-                            ok = false
+                    var ok = false
+                    if vtag == tag and fields.len() == subs.len()
+                        ok = true
+                        for i in 0..subs.len()
+                            if not match_pat(subs[i], fields[i], env)
+                                ok = false
                     ok
 
 ## a real copy: `var b = a` aliases a map, so a let-in / match binding would leak into the outer scope
@@ -94,99 +196,113 @@ fn deval(e: DExpr, env: map[str, RV], fns: map[str, DStmt]) -> RV
         DCons(tag, args) => VObj(tag: tag, fields: args.map(|a| deval(a, env, fns)))
         DCall(name, args) => do
             var result = VInt(n: 0)
-            var found = false
-            match fns.get(name) ?? DPrint(val: DInt(n: 0))
-                DFnS(fname, params, body) => do
-                    ## top-level lets are visible inside functions (the "$g" snapshot)
-                    var env2 = {}
-                    env2["$in"] = env.get("$in") ?? VStr(s: "/dev/stdin")
-                    match env.get("$g") ?? VInt(n: 0)
-                        VRec(gm) => do
-                            for e in gm.entries()
-                                env2[e[0]] = e[1]
-                            env2["$g"] = VRec(fields: gm)
-                        _ => do
-                            let _ = 0
-                    for i in 0..params.len()
-                        env2[params[i]] = deval(args[i], env, fns)
-                    result = deval(body, env2, fns)
-                    found = true
-                _ => do
-                    let _ = 0
-            if not found and name == "count"
-                let cv = deval(args[0], env, fns)
-                match cv
-                    VList(xs) => do
-                        result = VInt(n: xs.len())
-                    VStr(s) => do
-                        result = VInt(n: s.len())
+            if name == "sha256_hex" and args.len() == 1
+                result = VStr(s: sha256_hex_str(rv_str(deval(args[0], env, fns))))
+            elif fns.has(name)
+                match fns.get(name) ?? DPrint(val: DInt(n: 0))
+                    DFnS(fname, params, body) => do
+                        ## top-level lets are visible inside functions (the "$g" snapshot)
+                        var env2 = {}
+                        if env.has("$g")
+                            match env.get("$g") ?? VInt(n: 0)
+                                VRec(gm) => do
+                                    for e in gm.entries()
+                                        env2[e[0]] = e[1]
+                                    env2["$g"] = VRec(fields: gm)
+                                _ => do
+                                    let _ = 0
+                        for i in 0..params.len()
+                            env2[params[i]] = deval(args[i], env, fns)
+                        result = deval(body, env2, fns)
                     _ => do
-                        result = VInt(n: 0)
-            if not found and name == "at"
-                let asv = rv_str(deval(args[0], env, fns))
-                let aix = rv_int(deval(args[1], env, fns))
-                if aix >= 0 and aix < asv.len()
-                    result = VStr(s: asv[aix..aix + 1])
-                else
-                    result = VStr(s: "")
-            if not found and name == "slice"
-                let ssv = rv_str(deval(args[0], env, fns))
-                var sa = rv_int(deval(args[1], env, fns))
-                var sb = rv_int(deval(args[2], env, fns))
-                if sa < 0
-                    sa = 0
-                if sb > ssv.len()
-                    sb = ssv.len()
-                if sb < sa
-                    sb = sa
-                result = VStr(s: ssv[sa..sb])
-            if not found and name == "slicen"
-                let ssv = rv_str(deval(args[0], env, fns))
-                let sln = rv_int(deval(args[1], env, fns))
-                var sa = rv_int(deval(args[2], env, fns))
-                var sb = rv_int(deval(args[3], env, fns))
-                if sa < 0
-                    sa = 0
-                if sb > sln
-                    sb = sln
-                if sb < sa
-                    sb = sa
-                result = VStr(s: ssv[sa..sb])
-            if not found and name == "toint"
-                result = VInt(n: rv_str(deval(args[0], env, fns)).parse_int() ?? 0)
-            if not found and name == "str"
-                result = VStr(s: rv_str(deval(args[0], env, fns)))
-            if not found and name == "read"
-                ## one line of stdin (up to \n or EOF); lume0 has no stdin builtin, so this
-                ## reads /dev/stdin (works for `< file`, not pipes) and only ever sees the first line
-                let rin = io.read_file("/dev/stdin")
-                var rk = 0
-                while rk < rin.len() and rin[rk..rk + 1] != "\n"
-                    rk = rk + 1
-                result = VStr(s: rin[0..rk])
-            if not found and name == "readall"
-                let rpath = rv_str(env.get("$in") ?? VStr(s: "/dev/stdin"))
-                result = VStr(s: io.read_file(rpath))
-            if not found and name == "fs_write_sync"
-                let fpath = rv_str(deval(args[0], env, fns))
-                let fdata = rv_str(deval(args[1], env, fns))
-                let fok = io.write_file(fpath, fdata)
-                result = VInt(n: if fok then 1 else 0)
-            if not found and name == "fs_append_sync"
-                let fpath = rv_str(deval(args[0], env, fns))
-                let fdata = rv_str(deval(args[1], env, fns))
-                let fprev = io.read_file(fpath)
-                let fok = io.write_file(fpath, fprev + fdata)
-                result = VInt(n: if fok then 1 else 0)
-            if not found and name == "fs_read_file"
-                let fpath = rv_str(deval(args[0], env, fns))
-                result = VStr(s: io.read_file(fpath))
-            if not found and name == "ctfail"
-                panic rv_str(deval(args[0], env, fns))
-            if not found and name == "nl"
-                result = VStr(s: "\n")
-            if not found and name == "dq"
-                result = VStr(s: "\"")
+                        let _ = 0
+            else
+                if name == "count"
+                    let cv = deval(args[0], env, fns)
+                    match cv
+                        VList(xs) => do
+                            result = VInt(n: xs.len())
+                        VStr(s) => do
+                            result = VInt(n: s.len())
+                        _ => do
+                            result = VInt(n: 0)
+                if name == "at"
+                    let asv = rv_str(deval(args[0], env, fns))
+                    let aix = rv_int(deval(args[1], env, fns))
+                    if aix >= 0 and aix < asv.len()
+                        result = VStr(s: asv[aix..aix + 1])
+                    else
+                        result = VStr(s: "")
+                if name == "slice"
+                    let ssv = rv_str(deval(args[0], env, fns))
+                    var sa = rv_int(deval(args[1], env, fns))
+                    var sb = rv_int(deval(args[2], env, fns))
+                    if sa < 0
+                        sa = 0
+                    if sb > ssv.len()
+                        sb = ssv.len()
+                    if sb < sa
+                        sb = sa
+                    result = VStr(s: ssv[sa..sb])
+                if name == "slicen"
+                    let ssv = rv_str(deval(args[0], env, fns))
+                    let sln = rv_int(deval(args[1], env, fns))
+                    var sa = rv_int(deval(args[2], env, fns))
+                    var sb = rv_int(deval(args[3], env, fns))
+                    if sa < 0
+                        sa = 0
+                    if sb > sln
+                        sb = sln
+                    if sb < sa
+                        sb = sa
+                    result = VStr(s: ssv[sa..sb])
+                if name == "toint"
+                    result = VInt(n: rv_str(deval(args[0], env, fns)).parse_int() ?? 0)
+                if name == "str"
+                    result = VStr(s: rv_str(deval(args[0], env, fns)))
+                if name == "read"
+                    ## one line of stdin (up to \n or EOF); lume0 has no stdin builtin, so this
+                    ## reads /dev/stdin (works for `< file`, not pipes) and only ever sees the first line
+                    let rin = io.read_file("/dev/stdin")
+                    var rk = 0
+                    while rk < rin.len() and rin[rk..rk + 1] != "\n"
+                        rk = rk + 1
+                    result = VStr(s: rin[0..rk])
+                if name == "readall"
+                    var rpath = "/dev/stdin"
+                    if fns.has("$in")
+                        match fns.get("$in") ?? DPrint(val: DInt(n: 0))
+                            DLet(sp, dv) => do
+                                rpath = sp
+                            _ => do
+                                let _ = 0
+                    result = VStr(s: io.read_file(rpath))
+                if name == "fs_write_sync"
+                    let fpath = rv_str(deval(args[0], env, fns))
+                    let fdata = rv_str(deval(args[1], env, fns))
+                    let fok = io.write_file(fpath, fdata)
+                    result = VInt(n: if fok then 1 else 0)
+                if name == "fs_append_sync"
+                    let fpath = rv_str(deval(args[0], env, fns))
+                    let fdata = rv_str(deval(args[1], env, fns))
+                    let fprev = io.read_file(fpath)
+                    let fok = io.write_file(fpath, fprev + fdata)
+                    result = VInt(n: if fok then 1 else 0)
+                if name == "fs_read_file"
+                    let fpath = rv_str(deval(args[0], env, fns))
+                    result = VStr(s: io.read_file(fpath))
+                if name == "ctfail"
+                    panic rv_str(deval(args[0], env, fns))
+                if name == "bit_xor" or name == "bv_xor"
+                    result = VInt(n: bv_xor_i(rv_int(deval(args[0], env, fns)), rv_int(deval(args[1], env, fns))))
+                if name == "bit_and" or name == "bv_and"
+                    result = VInt(n: bv_and_i(rv_int(deval(args[0], env, fns)), rv_int(deval(args[1], env, fns))))
+                if name == "bit_or" or name == "bv_or"
+                    result = VInt(n: bv_or_i(rv_int(deval(args[0], env, fns)), rv_int(deval(args[1], env, fns))))
+                if name == "nl"
+                    result = VStr(s: "\n")
+                if name == "dq"
+                    result = VStr(s: "\"")
             result
         DStr(sv)      => VStr(s: sv)
         DList(elems)  => VList(items: elems.map(|a| deval(a, env, fns)))
@@ -207,52 +323,64 @@ fn deval(e: DExpr, env: map[str, RV], fns: map[str, DStmt]) -> RV
                 VList(xs) => if iv >= 0 and iv < xs.len() then xs[iv] else VInt(n: 0)
                 _         => VInt(n: 0)
         DBin(op, l, r) => do
+            var bres = VInt(n: 0)
             if op == "and"
                 if rv_int(deval(l, env, fns)) == 0
-                    return VInt(n: 0)
-                return VInt(n: if rv_int(deval(r, env, fns)) != 0 then 1 else 0)
-            if op == "or"
-                if rv_int(deval(l, env, fns)) != 0
-                    return VInt(n: 1)
-                return VInt(n: if rv_int(deval(r, env, fns)) != 0 then 1 else 0)
-            let lv = deval(l, env, fns)
-            let rv = deval(r, env, fns)
-            if op == "+" and rv_is_str(lv) and rv_is_str(rv)
-                return VStr(s: rv_str(lv) + rv_str(rv))
-            if rv_is_str(lv) and rv_is_str(rv)
-                let sl = rv_str(lv)
-                let sr = rv_str(rv)
-                if op == "=="
-                    return VInt(n: if sl == sr then 1 else 0)
-                if op == "!="
-                    return VInt(n: if sl == sr then 0 else 1)
-                if op == "<"
-                    return VInt(n: if sl < sr then 1 else 0)
-                if op == ">"
-                    return VInt(n: if sl > sr then 1 else 0)
-                if op == "<="
-                    return VInt(n: if sl <= sr then 1 else 0)
-                if op == ">="
-                    return VInt(n: if sl >= sr then 1 else 0)
-            let a = rv_int(lv)
-            let b = rv_int(rv)
-            match op
-                "+"  => VInt(n: a + b)
-                "-"  => VInt(n: a - b)
-                "*"  => VInt(n: a * b)
-                "/"  => VInt(n: if b == 0 then 0 else a / b)
-                "%"  => VInt(n: if b == 0 then 0 else a % b)
-                "<"  => VInt(n: if a < b then 1 else 0)
-                ">"  => VInt(n: if a > b then 1 else 0)
-                "<=" => VInt(n: if a <= b then 1 else 0)
-                ">=" => VInt(n: if a >= b then 1 else 0)
-                "==" => VInt(n: if a == b then 1 else 0)
-                "!=" => VInt(n: if a != b then 1 else 0)
-                _    => VInt(n: 0)
+                    bres = VInt(n: 0)
+                else
+                    bres = VInt(n: if rv_int(deval(r, env, fns)) != 0 then 1 else 0)
+            else
+                if op == "or"
+                    if rv_int(deval(l, env, fns)) != 0
+                        bres = VInt(n: 1)
+                    else
+                        bres = VInt(n: if rv_int(deval(r, env, fns)) != 0 then 1 else 0)
+                else
+                    let lv = deval(l, env, fns)
+                    let rv = deval(r, env, fns)
+                    match lv
+                        VInt(a) => do
+                            match rv
+                                VInt(b) => do
+                                    bres = match op
+                                        "+"  => VInt(n: a + b)
+                                        "-"  => VInt(n: a - b)
+                                        "*"  => VInt(n: a * b)
+                                        "/"  => VInt(n: if b == 0 then 0 else a / b)
+                                        "%"  => VInt(n: if b == 0 then 0 else a % b)
+                                        "<"  => VInt(n: if a < b then 1 else 0)
+                                        ">"  => VInt(n: if a > b then 1 else 0)
+                                        "<=" => VInt(n: if a <= b then 1 else 0)
+                                        ">=" => VInt(n: if a >= b then 1 else 0)
+                                        "==" => VInt(n: if a == b then 1 else 0)
+                                        "!=" => VInt(n: if a != b then 1 else 0)
+                                        _    => VInt(n: 0)
+                                _ => do
+                                    let _ = 0
+                        VStr(sl) => do
+                            match rv
+                                VStr(sr) => do
+                                    bres = match op
+                                        "+"  => VStr(s: sl + sr)
+                                        "==" => VInt(n: if sl == sr then 1 else 0)
+                                        "!=" => VInt(n: if sl == sr then 0 else 1)
+                                        "<"  => VInt(n: if sl < sr then 1 else 0)
+                                        ">"  => VInt(n: if sl > sr then 1 else 0)
+                                        "<=" => VInt(n: if sl <= sr then 1 else 0)
+                                        ">=" => VInt(n: if sl >= sr then 1 else 0)
+                                        _    => VInt(n: 0)
+                                _ => do
+                                    let _ = 0
+                        _ => do
+                            let _ = 0
+            bres
         DLetIn(name, value, body) => do
-            var env2 = env_copy(env)
-            env2[name] = deval(value, env2, fns)
-            deval(body, env2, fns)
+            let lv = deval(value, env, fns)
+            let prev = env.get(name) ?? VInt(n: 0)
+            env[name] = lv
+            let res = deval(body, env, fns)
+            env[name] = prev
+            res
         DIf(c, a, b) => do
             if rv_int(deval(c, env, fns)) != 0
                 deval(a, env, fns)
@@ -264,9 +392,10 @@ fn deval(e: DExpr, env: map[str, RV], fns: map[str, DStmt]) -> RV
             var done = false
             for arm in arms
                 if not done
-                    var local = env_copy(env)
-                    if match_pat(arm.pat, v, local)
-                        result = deval(arm.body, local, fns)
+                    if pat_ok(arm.pat, v)
+                        var env2 = env_copy(env)
+                        let _ = match_pat(arm.pat, v, env2)
+                        result = deval(arm.body, env2, fns)
                         done = true
             result
 
@@ -285,6 +414,7 @@ fn run_data(prog: [DStmt])
                 let _ = 0
     let cargs = env.args()
     let inpath = if cargs.len() >= 2 then cargs[1] else "/dev/stdin"
+    fns["$in"] = DLet(name: inpath, val: DInt(n: 0))
     var env = {}
     env["$in"] = VStr(s: inpath)
     for s in prog

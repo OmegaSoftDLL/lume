@@ -8,12 +8,7 @@ fn ld_is_digit(c: char) -> bool = c >= '0' and c <= '9'
 fn ld_is_alpha(c: char) -> bool = (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or c == '_'
 fn ld_is_alnum(c: char) -> bool = ld_is_alpha(c) or ld_is_digit(c)
 
-fn ld_two(s: str) -> bool
-    let ops = ["->", "=>", "==", "!=", "<=", ">=", "..", "+=", "-=", "*=", "/=", "|>", "&&", "||"]
-    for o in ops
-        if o == s
-            return true
-    false
+fn ld_two(s: str) -> bool = s == "->" or s == "=>" or s == "==" or s == "!=" or s == "<=" or s == ">=" or s == ".." or s == "+=" or s == "-=" or s == "*=" or s == "/=" or s == "|>" or s == "&&" or s == "||"
 
 ## count leading spaces at position i
 fn ld_spaces(src: str, i: int, n: int) -> int
@@ -97,9 +92,12 @@ fn lex_layout(src: str) -> [Token]
             # scan to the first UNESCAPED quote; the token text keeps the surrounding quotes
             # but holds the real bytes for \" \\ \n \t \r \0 (unknown escapes stay literal)
             var j = i + 1
+            var seg = j
             var sbuf = "\""
             while j < n and src[j] != '"'
                 if src[j] == '\\' and j + 1 < n
+                    if j > seg
+                        sbuf = sbuf + src[seg..j]
                     let e = src[j + 1]
                     if e == '"'
                         sbuf = sbuf + "\""
@@ -114,11 +112,13 @@ fn lex_layout(src: str) -> [Token]
                     elif e == '0'
                         sbuf = sbuf + "\0"
                     else
-                        sbuf = sbuf + "\\{e}"
+                        sbuf = sbuf + "\\" + src[j + 1..j + 2]
                     j += 2
+                    seg = j
                 else
-                    sbuf = sbuf + "{src[j]}"
                     j += 1
+            if j > seg
+                sbuf = sbuf + src[seg..j]
             toks.push(Token(kind: Str, text: sbuf + "\"", line: line, col: i + 1))
             i = j + 1
         else
@@ -132,7 +132,7 @@ fn lex_layout(src: str) -> [Token]
                 toks.push(Token(kind: Op, text: two, line: line, col: i + 1))
                 i += 2
             else
-                toks.push(Token(kind: Op, text: "{c}", line: line, col: i + 1))
+                toks.push(Token(kind: Op, text: src[i..i + 1], line: line, col: i + 1))
                 i += 1
 
     # close open blocks
