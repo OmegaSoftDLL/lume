@@ -29,7 +29,7 @@ class Lume < Formula
 
   test do
     assert_match "lume 0.2.0", shell_output("#{bin}/lume --version")
-    (testpath/"hello.lume").write "print 42\n"
-    assert_equal "42\n", shell_output("#{bin}/lume run #{testpath}/hello.lume")
+    (testpath/"hello.src").write "print 42\n"
+    assert_equal "42\n", shell_output("#{bin}/lume run #{testpath}/hello.src")
   end
 end
