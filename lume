@@ -847,6 +847,44 @@ cmd_doc() {
     fi
 }
 
+run_surface_tests() {
+    _st_file=$1
+    ensure_seed
+    if ! run_l0 check "$_st_file" >/dev/null; then
+        return 1
+    fi
+    _st_tokens=$(mktemp)
+    _st_names=$(mktemp)
+    _st_src=$(mktemp)
+    run_l0 tokens "$_st_file" > "$_st_tokens"
+    awk '
+        $1 ~ /:1$/ && $2 == "KW_FN" { state = 1; next }
+        state == 1 && $2 == "IDENT" { name = $3; state = 2; next }
+        state == 2 && $2 == "LPAREN" { state = 3; next }
+        state == 3 && $2 == "RPAREN" {
+            if (name ~ /^test_/) print name
+            state = 0
+            next
+        }
+        { state = 0 }
+    ' "$_st_tokens" > "$_st_names"
+    cp "$_st_file" "$_st_src"
+    _st_count=0
+    while IFS= read -r _st_name; do
+        [ -n "$_st_name" ] || continue
+        printf '\nassert %s(), "%s"\n' "$_st_name" "$_st_name" >> "$_st_src"
+        _st_count=$((_st_count + 1))
+    done < "$_st_names"
+    rm -f "$_st_tokens" "$_st_names"
+    if ! run_l0 run "$_st_src"; then
+        rm -f "$_st_src"
+        printf 'lume test: %s failed\n' "$_st_file" >&2
+        return 1
+    fi
+    rm -f "$_st_src"
+    printf '%d passed, 0 failed\n' "$_st_count"
+}
+
 cmd_test() {
     [ $# -ge 1 ] || usage
     _overall=0
@@ -871,14 +909,9 @@ cmd_test() {
                 rm -f "$_bundled" "$_tmpsrc"
                 ;;
             *)
-                _ts_in=$(mktemp)
-                printf '@cmd test-surface\n@pkg %s\n@src\n' "$_file" > "$_ts_in"
-                cat "$_file" >> "$_ts_in"
-                printf '\n@end\n' >> "$_ts_in"
-                if ! run_core_tool lcli "$_ts_in"; then
+                if ! run_surface_tests "$_file"; then
                     _overall=1
                 fi
-                rm -f "$_ts_in"
                 ;;
         esac
     done
@@ -981,17 +1014,15 @@ cmd_check() {
             fi
             ;;
         *)
-            _ck_in=$(mktemp)
-            printf '@cmd check-surface\n@pkg %s\n@src\n' "$_file" > "$_ck_in"
-            cat "$_file" >> "$_ck_in"
-            printf '\n@end\n' >> "$_ck_in"
-            if ! run_core_tool lcli "$_ck_in" >/dev/null; then
-                rm -f "$_ck_in"
-                exit 1
-            fi
-            rm -f "$_ck_in"
-            if [ -z "$_json" ]; then
-                echo "$_file: OK (Lume surface checked)" >&2
+            ensure_seed
+            if [ -n "$_json" ]; then
+                if run_l0 check "$_file" --json; then
+                    printf '{"ok":true,"command":"check"}\n'
+                else
+                    return 1
+                fi
+            else
+                run_l0 check "$_file"
             fi
             ;;
     esac
