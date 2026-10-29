@@ -66,8 +66,12 @@ Each of these is a real body of work. The staged, test-first approach here delib
       **verbatim** source bit-identically and stably: `lumec` → `gen1`, `asm(gen1)` = `lumec2`
       → `gen2`, `asm(gen2)` = `lumec3` → `gen3`, with `gen1 == gen2 == gen3`. The self-compiled
       `lumec2` compiles every conformance program correctly, no C in the target pipeline.
-- [ ] Lexical scoping (use-before-def / out-of-scope), fuller type checking (call arity, match
-      exhaustiveness, operator types), effects/ownership/contract enforcement.
+- [ ] The Stage-0 `lume0 check` resolver still collects names per module rather than enforcing
+      lexical scope: use-before-definition and out-of-scope references require further work
+      (`bootstrap/lume0/resolve.c`; tracked in #299). Direct top-level call arity is already
+      checked by `arity_walk`. The self-hosted compiler has separate type, effect, ownership,
+      and contract checks; their coverage must be assessed separately rather than inferred from
+      the seed resolver's limitations.
 - [x] **Zero-C self-host, staged (GCC/Rust/Go model).** `compiler/stage1/lasm.src` is an
       x86-64 assembler + ELF64 writer in Lume-Core (byte-level `emit`/`flush`), covering the
       full instruction set `lumec` emits incl. 64-bit immediates (`movabs`), ~18x faster after
@@ -76,7 +80,12 @@ Each of these is a real body of work. The staged, test-first approach here delib
       whole toolchain from Lume source with **no C**, and it asserts **stage 2 == stage 3,
       bit for bit**. The C seed is kept only as the reproducibility root, never on the
       steady-state path.
-- [ ] Byte-perfect `lasm` (drop the 1 trailing `\n` via a top-level expression statement in the
-      parser) and a runtime `slice`/`count` that is O(1), not O(n) via `strlen` (a further ~2x).
+- [x] **Byte-perfect `lasm` for the oracle regression cases.** Top-level expression statements
+      remove the trailing newline (PR #110). `bootstrap/lume0/tests/run.sh` compares the complete
+      ELF output against `lume0 asm` for `nfib`, `bigints`, and the compiler, and runs the two
+      example binaries. This check covers those cases; it is not a proof for all inputs.
+- [x] **Length-aware assembler line splitting.** `slicen(s, len, i, j)` avoids repeated `strlen`
+      when the input length is already known (PR #112). This removes that repeated scan from the
+      assembler hot path; it does not make arbitrary substring copying constant-time.
 
 This file is updated as the inventory grows.
