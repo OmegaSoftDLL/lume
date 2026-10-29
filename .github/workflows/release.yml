@@ -263,13 +263,15 @@ jobs:
           "$VERIFY_DIR/mx64/bin/lume" self verify --prefix "$VERIFY_DIR/mx64" | grep -q '"manifest_verified":true'
           file "$VERIFY_DIR/mx64/bin/lume0" | grep -q "Mach-O 64-bit executable x86_64"
           file "$VERIFY_DIR/mx64/bin/lume-target-check" | grep -q "Mach-O 64-bit executable x86_64"
-          if "$VERIFY_DIR/mx64/bin/lume-target-check" >/dev/null 2>&1; then
-            [ "$("$VERIFY_DIR/mx64/bin/lume-target-check" | tr '\n' ',')" = "55,42," ]
-            _rc=0; "$VERIFY_DIR/mx64/bin/lume-target-trap" >/dev/null 2>&1 || _rc=$?
-            [ "$_rc" -eq 3 ]
-            "$VERIFY_DIR/mx64/bin/lume" --version | grep -q "lume 0.2.0"
-            [ "$("$VERIFY_DIR/mx64/bin/lume" run stage/verify_ok.src | tr '\n' ',')" = "55,42," ]
+          if ! "$VERIFY_DIR/mx64/bin/lume-target-check" >/dev/null 2>&1; then
+            echo "FATAL: macos-x86_64 target validation failed" >&2
+            exit 1
           fi
+          [ "$("$VERIFY_DIR/mx64/bin/lume-target-check" | tr '\n' ',')" = "55,42," ]
+          _rc=0; "$VERIFY_DIR/mx64/bin/lume-target-trap" >/dev/null 2>&1 || _rc=$?
+          [ "$_rc" -eq 3 ]
+          "$VERIFY_DIR/mx64/bin/lume" --version | grep -q "lume 0.2.0"
+          [ "$("$VERIFY_DIR/mx64/bin/lume" run stage/verify_ok.src | tr '\n' ',')" = "55,42," ]
 
           rm -rf "$VERIFY_DIR"
 
