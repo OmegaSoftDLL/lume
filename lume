@@ -868,19 +868,22 @@ cmd_test() {
 cmd_fmt() {
     _check=0
     _stdout=0
-    _files=""
+    _nfiles=0
     for _arg in "$@"; do
         case "$_arg" in
             --check) _check=1 ;;
             --stdout) _stdout=1 ;;
             -*) usage ;;
-            *) _files="$_files $_arg" ;;
+            *) _nfiles=$((_nfiles + 1)) ;;
         esac
     done
-    set -- $_files
-    [ $# -ge 1 ] || usage
+    [ "$_nfiles" -ge 1 ] || usage
     _rc=0
-    for _file in "$@"; do
+    for _arg in "$@"; do
+        case "$_arg" in
+            --check|--stdout) continue ;;
+        esac
+        _file=$_arg
         if [ ! -f "$_file" ]; then
             echo "lume fmt: cannot read $_file" >&2
             exit 66
@@ -975,9 +978,9 @@ gen_lockfile() {
     _mjson=$2
     _lkin=$(mktemp)
     printf '@cmd pkg-lock\n@manifest %s\n@manifest_sha256 %s\n' "$_mjson" "$(sha256_file "$_pdir/lume.toml")" > "$_lkin"
-    for _sf in $(find "$_pdir" -maxdepth 2 \( -name '*.src' -o -name '*.lume' \) | LC_ALL=C sort); do
+    find "$_pdir" -maxdepth 2 \( -name '*.src' -o -name '*.lume' \) | LC_ALL=C sort | while IFS= read -r _sf; do
         _rel=${_sf#"$_pdir/"}
-        printf '@module %s %s\n' "$_rel" "$(sha256_file "$_sf")" >> "$_lkin"
+        printf '@module %s %s\n' "$(sha256_file "$_sf")" "$_rel" >> "$_lkin"
     done
     run_core_tool lcli "$_lkin"
     rm -f "$_lkin"
@@ -1075,7 +1078,7 @@ cmd_pkg() {
             rm -f "$_mtmp"
             _trin=$(mktemp)
             printf '@cmd pkg-tree\n@manifest %s\n' "$_mjson" > "$_trin"
-            for _sf in $(find "$_pdir" -maxdepth 2 -name '*.src' | LC_ALL=C sort); do
+            find "$_pdir" -maxdepth 2 -name '*.src' | LC_ALL=C sort | while IFS= read -r _sf; do
                 _rel=${_sf#"$_pdir/"}
                 printf '@modsrc %s\n' "$_rel" >> "$_trin"
                 cat "$_sf" >> "$_trin"
@@ -1152,7 +1155,7 @@ cmd_pkg() {
             _dest="$_store/$_pkgname"
             mkdir -p "$_dest"
             cp "$_pdir/lume.toml" "$_pdir/lume.lock" "$_dest/"
-            for _sf in $(find "$_pdir" -maxdepth 2 -name '*.src' | LC_ALL=C sort); do
+            find "$_pdir" -maxdepth 2 -name '*.src' | LC_ALL=C sort | while IFS= read -r _sf; do
                 cp "$_sf" "$_dest/"
             done
             cp "$_cert_tmp" "$_dest/proof.cert.json"
