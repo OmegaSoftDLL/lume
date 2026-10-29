@@ -6,7 +6,7 @@ cd "$(dirname "$0")/.."
 # The self-hosted lexer/parser recurse once per source character; compiling the ~117 KB
 # compiler needs a deep native stack. Raise the limit so the self-host tests do not
 # overflow the default 8 MB stack (a SIGSEGV when the compiler source grows).
-ulimit -s unlimited 2>/dev/null || ulimit -s 524288 2>/dev/null || true
+ulimit -s unlimited 2>/dev/null || ulimit -s 524288 2>/dev/null || ulimit -s 65520 2>/dev/null || ulimit -s 32768 2>/dev/null || true
 
 BIN=./lume0
 EX=../../examples
@@ -148,6 +148,7 @@ fi
 # elf.c/asmgen.c stay ASan-covered by the `as/ld` block above.
 if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_ASAN:-}" ]; then
     ntmp=$(mktemp -d)
+    export LUME_BIN_DIR="$ntmp"
     for prog in nfib ev strtest modtest reclist list calc slicen; do
         case "$prog" in calc) exp=calc_asm;; modtest) exp=modtest_core;; list) exp=list_core_native;; *) exp=${prog}_asm;; esac
         $BIN run ../../compiler/stage1/data_asm_cc.lume ../../compiler/stage1/$prog.src "$ntmp/$prog.s" >/dev/null 2>&1

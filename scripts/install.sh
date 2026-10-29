@@ -104,10 +104,14 @@ if [ -d "$SRC_BIN" ]; then
     for _b in "$SRC_BIN"/*; do
         if [ -f "$_b" ] && [ -x "$_b" ]; then
             _bn=$(basename -- "$_b")
-            cp "$_b" "$PREFIX/build/bin/$_bn"
-            chmod +x "$PREFIX/build/bin/$_bn"
-            cp "$_b" "$PREFIX/bin/$_bn"
-            chmod +x "$PREFIX/bin/$_bn"
+            case "$_bn" in
+                lc|lumec*|lasm*|lcli*|lmod*|lcaas*|lcert*|levolve*|ldoc*|ltest*|lfmt*|lprotect*|ltarget*|lume0*|lume-target-*)
+                    cp "$_b" "$PREFIX/build/bin/$_bn"
+                    chmod +x "$PREFIX/build/bin/$_bn"
+                    cp "$_b" "$PREFIX/bin/$_bn"
+                    chmod +x "$PREFIX/bin/$_bn"
+                    ;;
+            esac
         fi
     done
     if [ -f "$PREFIX/build/bin/lc" ] && [ ! -f "$PREFIX/build/bin/lumec" ]; then
@@ -118,7 +122,7 @@ if [ -d "$SRC_BIN" ]; then
     fi
 fi
 
-for _l0_cand in "$FROM_LOCAL/bootstrap/lume0/lume0" "$FROM_LOCAL/bootstrap/lume0/lume0.exe" "$SRC_BIN/lume0" "$SRC_BIN/lume0.exe"; do
+for _l0_cand in "$SRC_BIN/lume0" "$SRC_BIN/lume0.exe" "$FROM_LOCAL/bootstrap/lume0/lume0" "$FROM_LOCAL/bootstrap/lume0/lume0.exe"; do
     if [ -f "$_l0_cand" ] && [ -x "$_l0_cand" ]; then
         _l0_bn=$(basename -- "$_l0_cand")
         mkdir -p "$PREFIX/bootstrap/lume0"
