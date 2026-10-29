@@ -46,7 +46,9 @@ rule (`docs/28`): no brick is "done" until the real thing runs, with its guarant
 1. **`#337` — P0 machine-native inflection.** Start the semantic intent protocol immediately, then
    universal verified adapters (#334), portable renewable evidence (#330/#335), the content-addressed
    component network, public economic benchmarks, and independent SaaS/Web + kernel/driver capstones.
-   This is the primary track, not post-product adoption work.
+   The bounded Lume-only real-execution benchmark protocol 0.1 is in `docs/35`; public model/token/cost
+   measurements and fair alternative-language arms remain open. This is the primary track, not
+   post-product adoption work.
 2. **`#330` — versioned evolve evidence.** Candidate-bound, derived gate/obligation results; already
    in flight and directly feeds the P0 evidence protocol.
 3. **`#335` — material-change invalidation.** Extend the shipped #259 spec-change regeneration to

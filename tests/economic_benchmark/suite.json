@@ -1,0 +1,61 @@
+{
+  "schema": "lume-economic-benchmark-suite/0.1",
+  "id": "lume-core-real-execution-v1",
+  "target": "x86_64-linux-elf",
+  "tasks": [
+    {
+      "id": "clamp_nonnegative",
+      "expected_stdout": "0\n5\n",
+      "attempts": [
+        {
+          "path": "tasks/clamp_nonnegative/attempt1.src",
+          "self_test": {"outcome": "PASS", "failed_stage": null}
+        }
+      ]
+    },
+    {
+      "id": "safe_deposit_repair",
+      "expected_stdout": "125\n",
+      "attempts": [
+        {
+          "path": "tasks/safe_deposit_repair/attempt1.src",
+          "self_test": {"outcome": "FAIL", "failed_stage": "proof"}
+        },
+        {
+          "path": "tasks/safe_deposit_repair/attempt2.src",
+          "self_test": {"outcome": "PASS", "failed_stage": null}
+        }
+      ]
+    },
+    {
+      "id": "negative_compile_failure",
+      "expected_stdout": "",
+      "attempts": [
+        {
+          "path": "tasks/negative_compile_failure/attempt1.src",
+          "self_test": {"outcome": "FAIL", "failed_stage": "compile"}
+        }
+      ]
+    },
+    {
+      "id": "negative_proof_failure",
+      "expected_stdout": "55\n",
+      "attempts": [
+        {
+          "path": "tasks/negative_proof_failure/attempt1.src",
+          "self_test": {"outcome": "FAIL", "failed_stage": "proof"}
+        }
+      ]
+    },
+    {
+      "id": "negative_execution_failure",
+      "expected_stdout": "unreachable\n",
+      "attempts": [
+        {
+          "path": "tasks/negative_execution_failure/attempt1.src",
+          "self_test": {"outcome": "FAIL", "failed_stage": "execution"}
+        }
+      ]
+    }
+  ]
+}
