@@ -1535,7 +1535,7 @@ if [ -z "${LUME0_ASAN:-}" ]; then
     _p35_unit_ok=1
     if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ]; then
         _p35_tests=$(LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/p35_ok.src 2>&1 || true)
-        if ! printf '%s' "$_p35_tests" | grep -q "2 passed, 0 failed"; then _p35_unit_ok=0; fi
+        if ! printf '%s' "$_p35_tests" | grep -q "4 passed, 0 failed"; then _p35_unit_ok=0; fi
     fi
     if [ "$_p35_unit_ok" = 1 ] && printf '%s' "$_p35_json" | grep -q '"ok":true' && printf '%s' "$_p35_json" | grep -q '"code":"P35","severity":"warning"'; then ok "P35 (#208): public API without matching test emits a non-blocking structured warning"; else bad "P35 (#208): missing public API test diagnostic"; printf '%s\n' "${_p35_tests:-}" "$_p35_json"; fi
     rm -f "$_p35_tmp"
