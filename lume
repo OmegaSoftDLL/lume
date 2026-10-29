@@ -163,7 +163,8 @@ sha256_file() {
     elif command -v openssl >/dev/null 2>&1; then
         openssl dgst -sha256 "$1" | awk '{print $NF}'
     else
-        cksum "$1" | awk '{print $1}'
+        echo "lume: SHA-256 requires sha256sum, shasum, or openssl" >&2
+        return 1
     fi
 }
 
@@ -2216,7 +2217,11 @@ cmd_self() {
                     return 1
                 fi
             else
-                printf '{"ok":true,"command":"self-%s","version":"0.2.0","edition":"2026","prefix":"%s","zero_c_required":true,"manifest_verified":true,"mode":"in-tree"}\n' "$_sact" "$_sprefix"
+                if [ "$_sact" = "verify" ]; then
+                    printf '{"ok":false,"command":"self-verify","version":"0.2.0","prefix":"%s","manifest_verified":false,"mode":"in-tree","error":"MANIFEST.sha256 not found"}\n' "$_sprefix"
+                    return 1
+                fi
+                printf '{"ok":true,"command":"self-status","version":"0.2.0","edition":"2026","prefix":"%s","zero_c_required":true,"manifest_verified":false,"mode":"in-tree"}\n' "$_sprefix"
                 return 0
             fi
             ;;

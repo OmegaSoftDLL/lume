@@ -67,7 +67,8 @@ sha256_of() {
     elif command -v openssl >/dev/null 2>&1; then
         openssl dgst -sha256 "$1" | awk '{print $NF}'
     else
-        cksum "$1" | awk '{print $1}'
+        echo "install.sh: SHA-256 requires sha256sum, shasum, or openssl" >&2
+        return 1
     fi
 }
 
