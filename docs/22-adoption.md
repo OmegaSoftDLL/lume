@@ -73,8 +73,9 @@ Each track: goal · foothold (what already exists to build on) · acceptance.
   marketing asset (Go's single-binary story, but with a *provable* bootstrap).
 - **Acceptance.** Fresh machine → working `lume` in one command, no C toolchain, reproducible hash.
 
-The version-pinned Homebrew formula in `Formula/lume.rb` can be installed from a checkout with
-`brew install --formula ./Formula/lume.rb`. It uses the v0.2.0 release archives for Linux x86-64
+The version-pinned Homebrew formula in `Formula/lume.rb` can be installed from a checkout by
+creating a local tap with `brew tap-new lume-local/tools`, copying the formula into its `Formula`
+directory, and running `brew install lume-local/tools/lume`. It uses the v0.2.0 archives for Linux x86-64
 and macOS arm64/x86-64. A public tap and automatic formula updates are not configured. CI installs
 and exercises the released toolchain on those platforms. Archive hashes check integrity, not
 publisher identity.

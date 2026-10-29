@@ -18,12 +18,17 @@ jobs:
         os: [ubuntu-latest, macos-latest, macos-15-intel]
     steps:
       - uses: actions/checkout@v7
+      - name: Set up Homebrew
+        uses: Homebrew/actions/setup-homebrew@1f8e202ffddf94def7f42f6fa3a482e821489f9c
       - name: Install released archive through Homebrew
         env:
           HOMEBREW_NO_AUTO_UPDATE: 1
           HOMEBREW_NO_INSTALL_CLEANUP: 1
-        run: brew install --formula ./Formula/lume.rb
+        run: |
+          brew tap-new lume-local/tools
+          cp Formula/lume.rb "$(brew --repository lume-local/tools)/Formula/lume.rb"
+          brew install lume-local/tools/lume
       - name: Run installed toolchain and verify its manifest
         run: |
-          brew test ./Formula/lume.rb
+          brew test lume-local/tools/lume
           "$(brew --prefix lume)/bin/lume" self verify | grep -q '"manifest_verified":true'
