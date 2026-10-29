@@ -24,11 +24,9 @@ jobs:
         env:
           HOMEBREW_NO_AUTO_UPDATE: 1
           HOMEBREW_NO_INSTALL_CLEANUP: 1
-          GIT_AUTHOR_NAME: Lume CI
-          GIT_AUTHOR_EMAIL: ci@example.invalid
-          GIT_COMMITTER_NAME: Lume CI
-          GIT_COMMITTER_EMAIL: ci@example.invalid
         run: |
+          git config --global user.name "Lume CI"
+          git config --global user.email "ci@example.invalid"
           brew tap-new lume-local/tools
           cp Formula/lume.rb "$(brew --repository lume-local/tools)/Formula/lume.rb"
           brew install lume-local/tools/lume
