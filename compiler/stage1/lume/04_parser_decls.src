@@ -116,7 +116,8 @@ fn skiptp1(ts, close, d) = if d <= 0 then ts else if isnil(ts) == 1 then Nil els
 fn skiptypeparams(ts) = if headtext(ts) == "[" then skiptp1(droponce(ts), "]", 1) else if headtext(ts) == "(" then skiptp1(droponce(ts), ")", 1) else ts
 fn parsetype(t) = parsetypebody(headtext(t), dropkw(skiptypeparams(droponce(t)), "="))
 fn parserefinety(nm, t) = let bty = TyName(headtext(t)) in let pr = expr(droponce(droponce(t))) in {node: TypeRefineS(nm, bty, pr.node), inv: Nil, rest: pr.rest}
-fn parsetypebody(nm, t) = if headtext(t) == "record" or headtext(t) == "model" then parserecordty(nm, droponce(t)) else if headtext(droponce(t)) == "where" then parserefinety(nm, t) else parseenumty(nm, dropkw(t, "enum"))
+fn parserefinebrace(nm, t) = let t1 = droponce(t) in let bty = TyName(headtext(droponce(droponce(t1)))) in let pr = expr(dropkw(droponce(droponce(droponce(t1))), "|")) in {node: TypeRefineS(nm, bty, pr.node), inv: Nil, rest: skiprb(pr.rest)}
+fn parsetypebody(nm, t) = if headtext(t) == "record" or headtext(t) == "model" then parserecordty(nm, droponce(t)) else if headtext(t) == "{" and headtext(droponce(droponce(droponce(droponce(t))))) == "|" then parserefinebrace(nm, t) else if headtext(droponce(t)) == "where" then parserefinety(nm, t) else parseenumty(nm, dropkw(t, "enum"))
 fn parseenumty(nm, t) = let hb = if headtext(t) == "{" then 1 else 0 in parseenumty2(nm, hb, parsevariants(dropkw(dropkw(t, "{"), "|")))
 fn parseenumty2(nm, hb, vs) = {node: TypeS(nm, "enum", vs.items), inv: Nil, rest: if hb == 1 then skiprb(vs.rest) else vs.rest}
 fn parsevariants(ts) = parsevariant(headtext(ts), droponce(ts))

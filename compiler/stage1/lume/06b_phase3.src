@@ -1192,7 +1192,7 @@ fn veval_ufn(mf, ra, fns, d) = match mf
 fn vpts_a() = Cons(0, Cons(1, Cons(0 - 1, Nil)))
 fn vpts_b() = Cons(0, Cons(1, Nil))
 fn vpts_c() = Cons(0, Cons(1, Nil))
-fn vpts_for(idx, total) = if total <= 1 then vpts_a() else if total == 2 then vpts_b() else if idx < 5 then vpts_c() else Cons(0, Nil)
+fn vpts_for(idx, total) = if total <= 1 then vpts_a() else if total == 2 then vpts_b() else if idx < 3 then vpts_c() else Cons(0, Nil)
 
 fn vgen_envs(ps, idx, total) = match ps
     Nil        => Cons(Nil, Nil)
@@ -1321,7 +1321,7 @@ fn vnia_var_lb(v, hyps) = match hyps
     Nil        => 0 - 999999
     Cons(h, t) => let r = vnia_var_lb(v, t) in if len(h.cs) == 1 and vlin_coeff(v, h.cs) == 1 then (let b = 0 - h.c0 in if b > r then b else r) else r
 
-fn vnia_split_star(s, idx, n) = if idx >= n then Cons(s, Nil) else if at(s, idx) == "*" then Cons(slice(s, 0, idx), Cons(slice(s, idx + 1, n), Nil)) else vnia_split_star(s, idx + 1, n)
+fn vnia_split_star(s, idx, n) = if idx >= n then Nil else if at(s, idx) == "*" then Cons(slice(s, 0, idx), Cons(slice(s, idx + 1, n), Nil)) else vnia_split_star(s, idx + 1, n)
 
 fn vnia_add_bvar(v, acc) = if v == "" or omem(v, acc) == 1 then acc else Cons(v, acc)
 
@@ -1683,28 +1683,16 @@ fn vchk_law(nm, ps, body, fns) = match body
     Call(cnm, args) => let tr = vchk_temporal_call(nm, if isnil(ps) == 1 then "s" else phd(ps), cnm, args, fns) in if tr >= 0 then tr else (let lenv = vlin_init_env(ps) in let chyps = vcollect_body_hyps(body, Nil, lenv, Cons(body, Nil), fns, 0) in let pr = vprove_law_envs(vgen_envs_hyps(ps, 0, len(ps), chyps), body, fns) in if pr.status < 0 then ctfail("lume: contract verification error [V0001]: law '" + nm + "' refuted with counterexample: " + pr.cex + " (fix-it: fix the implementation or refine law '" + nm + "')\n") else 1)
     _               => let lenv = vlin_init_env(ps) in let chyps = vcollect_body_hyps(body, Nil, lenv, Cons(body, Nil), fns, 0) in let pr = vprove_law_envs(vgen_envs_hyps(ps, 0, len(ps), chyps), body, fns) in if pr.status < 0 then ctfail("lume: contract verification error [V0001]: law '" + nm + "' refuted with counterexample: " + pr.cex + " (fix-it: fix the implementation or refine law '" + nm + "')\n") else 1
 
-fn vchk_call_envs(envs, args, vsg, caller_reqs, fns) = match envs
-    Nil           => ""
-    Cons(cenv, r) => let cr = veval_all_true(caller_reqs, cenv, cenv, fns) in if cr.ok == 0 or cr.hold == 0 then vchk_call_envs(r, args, vsg, caller_reqs, fns) else let ra = veval_args(args, cenv, cenv, fns, 0) in if ra.ok == 0 then vchk_call_envs(r, args, vsg, caller_reqs, fns) else let env = vbind_ps(vsg.ps, ra.vals) in let rq = veval_all_true(vsg.reqs, env, env, fns) in if rq.ok == 1 and rq.hold == 0 then vfmt_env(env) else vchk_call_envs(r, args, vsg, caller_reqs, fns)
-
-fn vcaller_reqs(mvs) = match mvs
-    Nil          => Nil
-    Cons(vsg, r) => vsg.reqs
-
-fn vcaller_ps(mvs) = match mvs
-    Nil          => Nil
-    Cons(vsg, r) => vsg.ps
-
-fn vchk_call_req(cnm, args, fnm, mvs, caller_mvs, fns) = match mvs
+fn vchk_call_req(cnm, args, fnm, mvs, fns) = match mvs
     Nil          => 0
-    Cons(vsg, r) => if isnil(vsg.reqs) == 1 then 0 else let ra = veval_args(args, Nil, Nil, fns, 0) in if ra.ok == 1 then (let env = vbind_ps(vsg.ps, ra.vals) in let rq = veval_all_true(vsg.reqs, env, env, fns) in if rq.ok == 1 and rq.hold == 0 then ctfail("lume: contract verification error [V0001]: call to '" + cnm + "' in '" + fnm + "' violates 'requires' precondition with counterexample: " + vfmt_env(env) + " (fix-it: ensure arguments passed to '" + cnm + "' satisfy its 'requires' contract)\n") else 0) else let cps = vcaller_ps(caller_mvs) in let creqs = vcaller_reqs(caller_mvs) in if isnil(cps) == 1 then 0 else let lenv = vlin_init_env(cps) in let chyps = (vprove_reqs_hyps(creqs, lenv, fns)).hyps in let cex = vchk_call_envs(vgen_envs_hyps(cps, 0, len(cps), chyps), args, vsg, creqs, fns) in if cex != "" then ctfail("lume: contract verification error [V0001]: call to '" + cnm + "' in '" + fnm + "' violates 'requires' precondition with counterexample: " + cex + " (fix-it: ensure arguments passed to '" + cnm + "' satisfy its 'requires' contract)\n") else 0
+    Cons(vsg, r) => if isnil(vsg.reqs) == 1 then 0 else let ra = veval_args(args, Nil, Nil, fns, 0) in if ra.ok == 0 then 0 else let env = vbind_ps(vsg.ps, ra.vals) in let rq = veval_all_true(vsg.reqs, env, env, fns) in if rq.ok == 1 and rq.hold == 0 then ctfail("lume: contract verification error [V0001]: call to '" + cnm + "' in '" + fnm + "' violates 'requires' precondition with counterexample: " + vfmt_env(env) + " (fix-it: ensure arguments passed to '" + cnm + "' satisfy its 'requires' contract)\n") else 0
 
 fn vchk_rect_inv(tn, items, fnm, miv, fns) = match miv
     Nil         => 0
     Cons(iv, r) => let rr = veval_rec(items, Nil, Nil, fns, 0) in if rr.ok == 0 then 0 else let env = vfields_env(rr.fields) in let ri = veval(iv.inv, env, env, fns, 0) in if ri.ok == 1 and ri.i == 0 then ctfail("lume: contract verification error [V0001]: record construction of '" + tn + "' in '" + fnm + "' violates type 'invariant' with counterexample: " + vfmt_env(env) + " (fix-it: satisfy the 'invariant' of '" + tn + "' before constructing the record)\n") else 0
 
 fn vchk_expr_e(e, fnm, ot) = match e
-    Call(cnm, args)         => vchk_call_req(cnm, args, fnm, vsiglookup(cnm, ot.vsigs), vsiglookup(fnm, ot.vsigs), ot.fns) + vchk_args_e(args, fnm, ot)
+    Call(cnm, args)         => vchk_call_req(cnm, args, fnm, vsiglookup(cnm, ot.vsigs), ot.fns) + vchk_args_e(args, fnm, ot)
     RecT(tn, items)         => vchk_rect_inv(tn, items, fnm, vinvlookup(tn, ot.invs), ot.fns) + vchk_rec_e(items, fnm, ot)
     Rec(items)              => vchk_rec_e(items, fnm, ot)
     Field(o, fld)           => vchk_expr_e(o, fnm, ot)

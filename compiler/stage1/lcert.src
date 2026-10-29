@@ -177,7 +177,7 @@ fn lk_fm_check_unsat(hyps) = lk_fm_unsat(hyps, lk_fm_vars(hyps, Nil))
 fn lk_nia_var_lb(v, hyps) = match hyps
     Nil        => 0 - 999999
     Cons(h, t) => let r = lk_nia_var_lb(v, t) in if lk_len(h.cs) == 1 and lk_lin_coeff(v, h.cs) == 1 then (let b = 0 - h.c0 in if b > r then b else r) else r
-fn lk_nia_split_star(s, idx, n) = if idx >= n then Cons(s, Nil) else if at(s, idx) == "*" then Cons(slice(s, 0, idx), Cons(slice(s, idx + 1, n), Nil)) else lk_nia_split_star(s, idx + 1, n)
+fn lk_nia_split_star(s, idx, n) = if idx >= n then Nil else if at(s, idx) == "*" then Cons(slice(s, 0, idx), Cons(slice(s, idx + 1, n), Nil)) else lk_nia_split_star(s, idx + 1, n)
 fn lk_nia_add_bvar(v, acc) = if v == "" or lk_omem(v, acc) == 1 then acc else Cons(v, acc)
 fn lk_nia_add_bvars(vs, acc) = match vs
     Nil        => acc

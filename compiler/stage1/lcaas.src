@@ -198,8 +198,9 @@ fn cs_pfn(ts) = cs_pfnp(ts, 0, 0)
 fn cs_skiptp1(ts, close, d) = if d <= 0 then ts else if cs_isnil(ts) == 1 then Nil else if cs_hdtext(ts) == "[" or cs_hdtext(ts) == "(" then cs_skiptp1(cs_drop1(ts), close, d + 1) else if cs_hdtext(ts) == close then cs_skiptp1(cs_drop1(ts), close, d - 1) else cs_skiptp1(cs_drop1(ts), close, d)
 fn cs_skiptp(ts) = if cs_hdtext(ts) == "[" then cs_skiptp1(cs_drop1(ts), "]", 1) else if cs_hdtext(ts) == "(" then cs_skiptp1(cs_drop1(ts), ")", 1) else ts
 fn cs_prefinety(nm, t) = let bty = TyName(cs_hdtext(t)) in let pr = cs_expr(cs_drop1(cs_drop1(t))) in {node: TypeRefineS(nm, bty, pr.node), inv: Nil, rest: pr.rest}
-fn cs_ptype(ts) = let nm = cs_hdtext(ts) in let rest = cs_dropkw(cs_skiptp(cs_drop1(ts)), "=") in if cs_hdtext(rest) == "record" or cs_hdtext(rest) == "model" then cs_precordty(nm, cs_dropkw(cs_drop1(rest), "{")) else if cs_hdtext(rest) == "{" then cs_precordty(nm, cs_drop1(rest)) else if cs_hdtext(cs_drop1(rest)) == "where" then cs_prefinety(nm, rest) else cs_penumty(nm, cs_dropkw(rest, "enum"))
-fn cs_penumty(nm, ts) = let vs = cs_pvariants(ts) in {node: TypeS(nm, "enum", vs.items), inv: Nil, rest: vs.rest}
+fn cs_prefinebrace(nm, t) = let t1 = cs_drop1(t) in let bty = TyName(cs_hdtext(cs_drop1(cs_drop1(t1)))) in let pr = cs_expr(cs_dropkw(cs_drop1(cs_drop1(cs_drop1(t1))), "|")) in {node: TypeRefineS(nm, bty, pr.node), inv: Nil, rest: cs_dropkw(pr.rest, "}")}
+fn cs_ptype(ts) = let nm = cs_hdtext(ts) in let rest = cs_dropkw(cs_skiptp(cs_drop1(ts)), "=") in if cs_hdtext(rest) == "record" or cs_hdtext(rest) == "model" then cs_precordty(nm, cs_dropkw(cs_drop1(rest), "{")) else if cs_hdtext(rest) == "{" and cs_hdtext(cs_drop1(cs_drop1(cs_drop1(cs_drop1(rest))))) == "|" then cs_prefinebrace(nm, rest) else if cs_hdtext(rest) == "{" then cs_precordty(nm, cs_drop1(rest)) else if cs_hdtext(cs_drop1(rest)) == "where" then cs_prefinety(nm, rest) else cs_penumty(nm, cs_dropkw(rest, "enum"))
+fn cs_penumty(nm, ts) = let vs = cs_pvariants(cs_dropkw(ts, "|")) in {node: TypeS(nm, "enum", vs.items), inv: Nil, rest: vs.rest}
 fn cs_pvariants(ts) = cs_pvariant(cs_hdtext(ts), cs_drop1(ts))
 fn cs_pvariant(tag, ts) = if cs_hdtext(ts) == "(" then let a = cs_ptypes(cs_drop1(ts)) in cs_pvariantend(tag, cs_len(a.items), a.rest) else cs_pvariantend(tag, 0, ts)
 fn cs_pvariantend(tag, ar, ts) = if cs_hdtext(ts) == "|" then let rr = cs_pvariants(cs_drop1(ts)) in {items: Cons({tag: tag, ar: ar}, rr.items), rest: rr.rest} else {items: Cons({tag: tag, ar: ar}, Nil), rest: ts}
@@ -304,12 +305,34 @@ fn cs_tcollectr(prog) = match prog
 fn cs_tcollectr2(h, t) = match h
     TypeS(nm, k, items) => if k == "record" then Cons({rname: nm, fields: items}, cs_tcollectr(t)) else cs_tcollectr(t)
     _                   => cs_tcollectr(t)
-fn cs_tcollects(prog) = match prog
+fn cs_tcollectrt(prog) = match prog
     Nil        => Nil
-    Cons(h, t) => cs_tcollects2(h, t)
-fn cs_tcollects2(h, t) = match h
-    Sig(nm, ps, ts, rt) => Cons({fname: nm, pn: ps, pt: ts, rt: rt}, cs_tcollects(t))
-    _                   => cs_tcollects(t)
+    Cons(h, t) => cs_tcollectrt2(h, t)
+fn cs_tcollectrt2(h, t) = match h
+    TypeRefineS(nm, bty, pr) => Cons({nm: nm, bty: bty}, cs_tcollectrt(t))
+    _                        => cs_tcollectrt(t)
+fn cs_trtlookup(nm, rts) = match rts
+    Nil        => Nil
+    Cons(h, t) => if h.nm == nm then Cons(h.bty, Nil) else cs_trtlookup(nm, t)
+fn cs_tstrip_refine(ty, rts) = match ty
+    TyRefine(bty, pr) => cs_tstrip_refine(bty, rts)
+    TyName(n)         => cs_tstrip_refine_nm(n, cs_trtlookup(n, rts), rts)
+    TyList(e)         => TyList(cs_tstrip_refine(e, rts))
+    TyApply(n, e)     => TyApply(n, cs_tstrip_refine(e, rts))
+    _                 => ty
+fn cs_tstrip_refine_nm(n, m, rts) = match m
+    Nil          => TyName(n)
+    Cons(bty, r) => cs_tstrip_refine(bty, rts)
+fn cs_tstrip_refine_tys(tys, rts) = match tys
+    Nil        => Nil
+    Cons(h, t) => Cons(cs_tstrip_refine(h, rts), cs_tstrip_refine_tys(t, rts))
+fn cs_tcollects(prog) = cs_tcollects_rts(prog, cs_tcollectrt(prog))
+fn cs_tcollects_rts(prog, rts) = match prog
+    Nil        => Nil
+    Cons(h, t) => cs_tcollects2(h, t, rts)
+fn cs_tcollects2(h, t, rts) = match h
+    Sig(nm, ps, ts, rt) => Cons({fname: nm, pn: ps, pt: cs_tstrip_refine_tys(ts, rts), rt: cs_tstrip_refine(rt, rts)}, cs_tcollects_rts(t, rts))
+    _                   => cs_tcollects_rts(t, rts)
 fn cs_tcollectg(prog) = match prog
     Nil        => Nil
     Cons(h, t) => cs_tcollectg2(h, t)
@@ -1394,7 +1417,7 @@ fn cs_vfm_check_unsat(hyps) = cs_vfm_unsat(hyps, cs_vfm_vars(hyps, Nil))
 fn cs_vnia_var_lb(v, hyps) = match hyps
     Nil        => 0 - 999999
     Cons(h, t) => let r = cs_vnia_var_lb(v, t) in if cs_len(h.cs) == 1 and cs_vlin_coeff(v, h.cs) == 1 then (let b = 0 - h.c0 in if b > r then b else r) else r
-fn cs_vnia_split_star(s, idx, n) = if idx >= n then Cons(s, Nil) else if at(s, idx) == "*" then Cons(slice(s, 0, idx), Cons(slice(s, idx + 1, n), Nil)) else cs_vnia_split_star(s, idx + 1, n)
+fn cs_vnia_split_star(s, idx, n) = if idx >= n then Nil else if at(s, idx) == "*" then Cons(slice(s, 0, idx), Cons(slice(s, idx + 1, n), Nil)) else cs_vnia_split_star(s, idx + 1, n)
 fn cs_vnia_add_bvar(v, acc) = if v == "" or cs_omem(v, acc) == 1 then acc else Cons(v, acc)
 fn cs_vnia_add_bvars(vs, acc) = match vs
     Nil        => acc

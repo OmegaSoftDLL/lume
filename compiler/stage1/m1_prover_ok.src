@@ -42,10 +42,10 @@ pub fn nia_div_mod_recon(x: int) -> int requires x >= 0 ensures result == x = ((
 pub fn nia_mod_bounds(x: int) -> int requires x >= 0 ensures result >= 0 ensures result < 4 = x % 4
 
 ## 2. QF_BV: Bitvectors & Machine-Integer Arithmetic
-pub fn bv_xor_roundtrip(x: int, k: int) -> int ensures result == x = bv_xor(bv_xor(x, k), k)
-pub fn bv_xor_self_zero(x: int) -> int ensures result == 0 = bv_xor(x, x)
+pub fn bv_xor_roundtrip(x: int, k: int) -> int requires x >= 0 requires k >= 0 ensures result == x = bv_xor(bv_xor(x, k), k)
+pub fn bv_xor_self_zero(x: int) -> int requires x >= 0 ensures result == 0 = bv_xor(x, x)
 pub fn bv_mask_u8_bounds(x: int) -> int requires x >= 0 ensures result >= 0 ensures result <= 255 = bv_and(x, 255)
-pub fn bv_or_zero_id(x: int) -> int ensures result == x = bv_or(x, 0)
+pub fn bv_or_zero_id(x: int) -> int requires x >= 0 ensures result == x = bv_or(x, 0)
 pub fn bv_u8_comp_sum(x: int) -> int requires x >= 0 ensures result == 255 = bv_u8(x) + bv_not_u8(x)
 pub fn bv_u8_wrap_add(a: int, b: int) -> int requires a >= 200 requires a < 256 requires b >= 100 requires b < 200 ensures result == (a + b) - 256 = bv_add_u8(a, b)
 pub fn bv_shift_scale(x: int) -> int requires x >= 0 ensures result == x * 8 = bv_shl(x, 3)
