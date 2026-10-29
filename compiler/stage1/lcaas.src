@@ -2795,7 +2795,7 @@ fn cs_intent_chomp_all(ls) = match ls
     Nil        => Nil
     Cons(h, t) => Cons(cs_chomp(h), cs_intent_chomp_all(t))
 
-fn cs_intent_sha256(s) = let n = count(s) in let f1 = lc_fold1(s, 0, n, 5381) in let f2 = lc_fold2(s, 0, n, 7919) in let f3 = lc_fold1(s, 0, n, 65599) in let f4 = lc_fold2(s, 0, n, 131071) in "sha256:" + sha_hex32(sha_u32(f1 + n * 17)) + sha_hex32(sha_u32(f2 + n * 31)) + sha_hex32(sha_u32(f3 + f1 * 7)) + sha_hex32(sha_u32(f4 + f2 * 13)) + sha_hex32(sha_u32(f1 + f4 * 19)) + sha_hex32(sha_u32(f2 + f3 * 23)) + sha_hex32(sha_u32(f3 + n * 29)) + sha_hex32(sha_u32(f4 + f1 * 37))
+fn cs_intent_sha256(s) = lc_sha256(s)
 
 fn cs_intent_check_cache(cache_raw, intent_sha) = if count(lc_trim(cache_raw)) == 0 then {hit: 0, tampered: 0, status: "regenerated_cache_missing", body: ""} else let ls = lc_split_lines(cache_raw, 0, count(cache_raw)) in let c_int = cs_intent_hdr_val(ls, "## @intent-sha256:") in let c_cod = cs_intent_hdr_val(ls, "## @code-sha256:") in let c_body = cs_chomp(cs_joinsep(cs_intent_strip_hdr(ls), "\n")) in let act_cod = cs_intent_sha256(c_body) in if c_cod == "" or c_cod != act_cod then {hit: 0, tampered: 1, status: "cache_tampered", body: c_body} else if c_int != intent_sha then {hit: 0, tampered: 0, status: "regenerated_spec_changed", body: c_body} else {hit: 1, tampered: 0, status: "up_to_date", body: c_body}
 
