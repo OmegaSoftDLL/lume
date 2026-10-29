@@ -1537,7 +1537,7 @@ EOF
 
     # Track I (#259): Intent-as-Source §1 (spec as primary source, code as regenerable proven cache)
     "$ntmp/lc" <../../compiler/stage1/track_i_intent_ok.src >"$ntmp/ti_ok.s" 2>"$ntmp/ti_ok.err" || true
-    "$ntmp/lasm" "$ntmp/ti_ok.s" "$ntmp/ti_ok.elf" 2>/dev/null || true
+    "$ntmp/lasm" <"$ntmp/ti_ok.s" >"$ntmp/ti_ok.elf" 2>/dev/null || true
     chmod +x "$ntmp/ti_ok.elf" 2>/dev/null || true
     awk '/^synth_withdraw:/{p=1} p{print} p&&/^    ret$/{exit}' "$ntmp/ti_ok.s" >"$ntmp/ti_fn1.s"
     awk '/^synth_sq:/{p=1} p{print} p&&/^    ret$/{exit}' "$ntmp/ti_ok.s" >"$ntmp/ti_fn2.s"

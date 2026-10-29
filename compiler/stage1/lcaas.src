@@ -867,6 +867,9 @@ fn cs_has_hole_e(e) = match e
 fn cs_has_hole_args(xs) = match xs
     Nil        => 0
     Cons(h, t) => if cs_has_hole_e(h) == 1 then 1 else cs_has_hole_args(t)
+fn cs_fnbody(f0) = match f0
+    Fn(nm, ps, body) => body
+    _                => Num(0)
 fn cs_fn_has_hole(fnm, ft) = match ft
     Nil        => 0
     Cons(h, t) => if cs_fnname(h) == fnm then cs_has_hole_e(cs_fnbody(h)) else cs_fn_has_hole(fnm, t)
