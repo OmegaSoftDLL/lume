@@ -1,0 +1,7 @@
+## Official FIPS 180-4 vectors for intent/cache content identities (#259).
+
+use lcaas
+
+print cs_intent_sha256("")
+print cs_intent_sha256("abc")
+print cs_intent_sha256("The quick brown fox jumps over the lazy dog")

@@ -1672,6 +1672,19 @@ EOF
     awk '/^synth_abs:/{p=1} p{print} p&&/^    ret$/{exit}' "$ntmp/ti_ok.s" >"$ntmp/ti_fn5.s"
     cp ../../examples/intent/verified_specs.intent "$ntmp/spec.intent"
     LUME_BIN_DIR="$ntmp" ../../lume intent build --json "$ntmp/spec.intent" -o "$ntmp/spec.elf" >"$ntmp/ti_b1.json" 2>/dev/null || true
+    if LUME_BIN_DIR="$ntmp" ../../lume run ../../compiler/stage1/intent_hash_ok.src >"$ntmp/ti_hash.out" 2>"$ntmp/ti_hash.err" && diff -u ../../tests/conformance/stage1/intent_hash_ok_asm.expected "$ntmp/ti_hash.out" >/dev/null; then ok "Track I (#259): intent content identities pass official FIPS 180-4 SHA-256 vectors"; else bad "Track I (#259): official intent SHA-256 vectors"; cat "$ntmp/ti_hash.err" "$ntmp/ti_hash.out"; fi
+    if python3 - "$ntmp/spec.intent" "$ntmp/ti_b1.json" <<'PY' >/dev/null 2>&1
+import hashlib, json, pathlib, sys
+raw = pathlib.Path(sys.argv[1]).read_bytes().rstrip(b"\r\n ")
+result = json.loads(pathlib.Path(sys.argv[2]).read_text())
+expected_intent = "sha256:" + hashlib.sha256(raw).hexdigest()
+body = "\n".join(line for line in result["cached_source"].splitlines() if not line.startswith("## @")).rstrip("\r\n ")
+expected_code = "sha256:" + hashlib.sha256(body.encode()).hexdigest()
+assert result["intent_sha256"] == expected_intent
+assert result["code_sha256"] == expected_code
+assert result["certificate"]["source_hash"] == expected_code
+PY
+    then ok "Track I (#259): real CLI intent/code hashes agree with independent hashlib computation"; else bad "Track I (#259): independent hashlib intent/code identity verification"; cat "$ntmp/ti_b1.json"; fi
     LUME_BIN_DIR="$ntmp" ../../lume intent build --json "$ntmp/spec.intent" >"$ntmp/ti_b2.json" 2>/dev/null || true
     LUME_BIN_DIR="$ntmp" ../../lume intent verify --json "$ntmp/spec.intent" >"$ntmp/ti_v1.json" 2>/dev/null || true
     sed 's/print bbox_area(5, 6)/print bbox_area(6, 7)/' "$ntmp/spec.intent" >"$ntmp/spec_mod.intent"
