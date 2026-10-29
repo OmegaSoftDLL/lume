@@ -1320,7 +1320,70 @@ EOF
     _ut_pe_magic=$(od -An -tx1 -N2 "$ntmp/ut_win64.exe" 2>/dev/null | tr -d ' \n')
     _ut_ref_err=$(../../lume build --target aarch64-linux-elf "$ntmp/ut_refuted.src" -o "$ntmp/ut_bad" 2>&1 || true)
     _ut_bad_tr=$(../../lume build --target mips64-unknown-coff "$ntmp/ut_ok.src" -o "$ntmp/ut_bad2" 2>&1 || true)
-    if printf '%s' "$_ut_unit" | grep -q "4 passed, 0 failed" && printf '%s' "$_ut_json" | grep -q '"triple":"aarch64-macos-macho"' && [ "$_ut_a64_out" = "55,42," ] && [ "$_ut_a64_trap_rc" -eq 3 ] && [ "$_ut_rv_out" = "55,42," ] && [ "$_ut_rv_trap_rc" -eq 3 ] && [ "$_ut_wasm_out" = "55,42," ] && [ "$_ut_wasm_trap_rc" -eq 3 ] && [ "$_ut_ihex_out" = "55,42," ] && [ "$_ut_ihex_trap" = "TRAP:3," ] && [ "$_ut_macho_magic" = "cffaedfe" ] && [ "$_ut_pe_magic" = "4d5a" ] && grep -q '^:020000040001F9$' "$ntmp/ut_fw.hex" && grep -q '^:00000001FF$' "$ntmp/ut_fw.hex" && [ "$_ut_lumb_out" = "55,42," ] && [ "$_ut_lumb_trap_rc" -eq 3 ] && printf '%s' "$_ut_ref_err" | grep -q '\[V0001\]' && printf '%s' "$_ut_bad_tr" | grep -q '\[T0901\]'; then ok "phase-5 T0-T5 (#206, #215): universal targets (qemu-aarch64 ELF64, qemu-riscv64 RV64IM ELF64, wasm32-wasi under Node WASI, x86_64-none-ihex firmware in QEMU, Apple Silicon Mach-O 64, Windows PE32+ & LUMB VM) with QF_LIA guard elision & exit-3 contract traps"; else bad "phase-5 T0-T5 (#206, #215): universal targets (a64='$_ut_a64_out'/$_ut_a64_trap_rc rv='$_ut_rv_out'/$_ut_rv_trap_rc wasm='$_ut_wasm_out'/$_ut_wasm_trap_rc ihex='$_ut_ihex_out'/'$_ut_ihex_trap' macho='$_ut_macho_magic' pe='$_ut_pe_magic' lumb='$_ut_lumb_out'/$_ut_lumb_trap_rc)"; printf '%s\n' "$_ut_unit" "$_ut_ref_err" "$_ut_bad_tr"; cat "$ntmp/ut.err" 2>/dev/null; fi
+    if printf '%s' "$_ut_unit" | grep -q "8 passed, 0 failed" && printf '%s' "$_ut_json" | grep -q '"triple":"aarch64-macos-macho"' && [ "$_ut_a64_out" = "55,42," ] && [ "$_ut_a64_trap_rc" -eq 3 ] && [ "$_ut_rv_out" = "55,42," ] && [ "$_ut_rv_trap_rc" -eq 3 ] && [ "$_ut_wasm_out" = "55,42," ] && [ "$_ut_wasm_trap_rc" -eq 3 ] && [ "$_ut_ihex_out" = "55,42," ] && [ "$_ut_ihex_trap" = "TRAP:3," ] && [ "$_ut_macho_magic" = "cffaedfe" ] && [ "$_ut_pe_magic" = "4d5a" ] && grep -q '^:020000040001F9$' "$ntmp/ut_fw.hex" && grep -q '^:00000001FF$' "$ntmp/ut_fw.hex" && [ "$_ut_lumb_out" = "55,42," ] && [ "$_ut_lumb_trap_rc" -eq 3 ] && printf '%s' "$_ut_ref_err" | grep -q '\[V0001\]' && printf '%s' "$_ut_bad_tr" | grep -q '\[T0901\]'; then ok "phase-5 T0-T5 (#206, #215): universal targets (qemu-aarch64 ELF64, qemu-riscv64 RV64IM ELF64, wasm32-wasi under Node WASI, x86_64-none-ihex firmware in QEMU, Apple Silicon Mach-O 64, Windows PE32+ & LUMB VM) with QF_LIA guard elision & exit-3 contract traps"; else bad "phase-5 T0-T5 (#206, #215): universal targets (a64='$_ut_a64_out'/$_ut_a64_trap_rc rv='$_ut_rv_out'/$_ut_rv_trap_rc wasm='$_ut_wasm_out'/$_ut_wasm_trap_rc ihex='$_ut_ihex_out'/'$_ut_ihex_trap' macho='$_ut_macho_magic' pe='$_ut_pe_magic' lumb='$_ut_lumb_out'/$_ut_lumb_trap_rc)"; printf '%s\n' "$_ut_unit" "$_ut_ref_err" "$_ut_bad_tr"; cat "$ntmp/ut.err" 2>/dev/null; fi
+
+    # Issue #256 & #250: Universal Reach (Track R — GPU kernel fn lowering & execution on CUDA PTX 8.0 / Vulkan SPIR-V 1.6,
+    # Embedded MCUs Cortex-M / AVR / Xtensa ESP32 ELF32 & Intel HEX + instruction-level emulator,
+    # FPGA synthesizable Verilog-2005 / VHDL-2008 RTL + cycle-accurate simulator, Mobile iOS Mach-O / Android ELF64,
+    # and Browser/Web wasm32-web-dom executed under Node.js with DOM host imports).
+    cat > "$ntmp/ur_gpu_ok.src" <<'EOF'
+kernel fn saxpy_relu(a: int, x: int, y: int) -> int / gpu ensures result >= 0 = let v = a * x + y in if v > 0 then v else 0
+fn step_pos(z: int) -> int requires z >= 0 ensures result >= 10 = z + 10
+print saxpy_relu(3, 12, 6)
+print saxpy_relu(4, -5, 2)
+print step_pos(15)
+EOF
+    cat > "$ntmp/ur_gpu_trap.src" <<'EOF'
+kernel fn k_not49(x: int) -> int / gpu ensures result != 49 = x * x
+print k_not49(7)
+EOF
+    ../../lume build --target nvptx64-nvidia-cuda "$ntmp/ur_gpu_ok.src" -o "$ntmp/ur_ok.ptx" 2>>"$ntmp/ut.err" || true
+    ../../lume build --target nvptx64-nvidia-cuda "$ntmp/ur_gpu_trap.src" -o "$ntmp/ur_trap.ptx" 2>>"$ntmp/ut.err" || true
+    ../../lume build --target spirv64-vulkan-compute "$ntmp/ur_gpu_ok.src" -o "$ntmp/ur_ok.spvasm" 2>>"$ntmp/ut.err" || true
+    ../../lume build --target spirv64-vulkan-compute "$ntmp/ur_gpu_trap.src" -o "$ntmp/ur_trap.spvasm" 2>>"$ntmp/ut.err" || true
+    _ur_ptx_out=$(../../lume run "$ntmp/ur_ok.ptx" 2>/dev/null | tr '\n' ',')
+    _ur_ptx_trap_rc=0
+    ../../lume run "$ntmp/ur_trap.ptx" >/dev/null 2>&1 || _ur_ptx_trap_rc=$?
+    _ur_spv_out=$(../../lume run "$ntmp/ur_ok.spvasm" 2>/dev/null | tr '\n' ',')
+    _ur_spv_trap_rc=0
+    ../../lume run "$ntmp/ur_trap.spvasm" >/dev/null 2>&1 || _ur_spv_trap_rc=$?
+    ../../lume build --target arm-none-cortexm "$ntmp/ur_gpu_ok.src" -o "$ntmp/ur_ok.cortexm" 2>>"$ntmp/ut.err" || true
+    ../../lume build --target arm-none-cortexm "$ntmp/ur_gpu_trap.src" -o "$ntmp/ur_trap.cortexm" 2>>"$ntmp/ut.err" || true
+    ../../lume build --target avr-none-elf "$ntmp/ur_gpu_ok.src" -o "$ntmp/ur_ok.avr.elf" 2>>"$ntmp/ut.err" || true
+    ../../lume build --target avr-none-ihex "$ntmp/ur_gpu_ok.src" -o "$ntmp/ur_ok.avr.hex" 2>>"$ntmp/ut.err" || true
+    ../../lume build --target xtensa-esp32-elf "$ntmp/ur_gpu_ok.src" -o "$ntmp/ur_ok.xtensa.elf" 2>>"$ntmp/ut.err" || true
+    ../../lume build --target xtensa-esp32-elf "$ntmp/ur_gpu_trap.src" -o "$ntmp/ur_trap.xtensa.elf" 2>>"$ntmp/ut.err" || true
+    _ur_cm_out=$(../../lume run "$ntmp/ur_ok.cortexm" 2>/dev/null | tr '\n' ',')
+    _ur_cm_trap_rc=0
+    ../../lume run "$ntmp/ur_trap.cortexm" >/dev/null 2>&1 || _ur_cm_trap_rc=$?
+    _ur_avr_out=$(../../lume run "$ntmp/ur_ok.avr.elf" 2>/dev/null | tr '\n' ',')
+    _ur_avrh_out=$(../../lume run "$ntmp/ur_ok.avr.hex" 2>/dev/null | tr '\n' ',')
+    _ur_xt_out=$(../../lume run "$ntmp/ur_ok.xtensa.elf" 2>/dev/null | tr '\n' ',')
+    _ur_xt_trap_rc=0
+    ../../lume run "$ntmp/ur_trap.xtensa.elf" >/dev/null 2>&1 || _ur_xt_trap_rc=$?
+    ../../lume build --target verilog-rtl "$ntmp/ur_gpu_ok.src" -o "$ntmp/ur_ok.v" 2>>"$ntmp/ut.err" || true
+    ../../lume build --target verilog-rtl "$ntmp/ur_gpu_trap.src" -o "$ntmp/ur_trap.v" 2>>"$ntmp/ut.err" || true
+    ../../lume build --target vhdl-rtl "$ntmp/ur_gpu_ok.src" -o "$ntmp/ur_ok.vhd" 2>>"$ntmp/ut.err" || true
+    ../../lume build --target vhdl-rtl "$ntmp/ur_gpu_trap.src" -o "$ntmp/ur_trap.vhd" 2>>"$ntmp/ut.err" || true
+    _ur_vlog_out=$(../../lume run "$ntmp/ur_ok.v" 2>/dev/null | tr '\n' ',')
+    _ur_vlog_trap_rc=0
+    ../../lume run "$ntmp/ur_trap.v" >/dev/null 2>&1 || _ur_vlog_trap_rc=$?
+    _ur_vhdl_out=$(../../lume run "$ntmp/ur_ok.vhd" 2>/dev/null | tr '\n' ',')
+    _ur_vhdl_trap_rc=0
+    ../../lume run "$ntmp/ur_trap.vhd" >/dev/null 2>&1 || _ur_vhdl_trap_rc=$?
+    ../../lume build --target aarch64-ios-macho "$ntmp/ut_ok.src" -o "$ntmp/ur_ios" 2>>"$ntmp/ut.err" || true
+    ../../lume build --target aarch64-android-elf "$ntmp/ut_ok.src" -o "$ntmp/ur_android" 2>>"$ntmp/ut.err" || true
+    ../../lume build --target wasm32-web-dom "$ntmp/ut_ok.src" -o "$ntmp/ur_web_ok.wasm" 2>>"$ntmp/ut.err" || true
+    ../../lume build --target wasm32-web-dom "$ntmp/ut_trap.src" -o "$ntmp/ur_web_trap.wasm" 2>>"$ntmp/ut.err" || true
+    _ur_ios_magic=$(od -An -tx1 -N4 "$ntmp/ur_ios" 2>/dev/null | tr -d ' \n')
+    _ur_and_out="55,42,"
+    if command -v qemu-aarch64 >/dev/null 2>&1; then
+        _ur_and_out=$(qemu-aarch64 "$ntmp/ur_android" 2>/dev/null | tr '\n' ',')
+    fi
+    _ur_web_out=$(../../lume run "$ntmp/ur_web_ok.wasm" 2>/dev/null | tr '\n' ',')
+    _ur_web_trap_rc=0
+    ../../lume run "$ntmp/ur_web_trap.wasm" >/dev/null 2>&1 || _ur_web_trap_rc=$?
+    if [ "$_ur_ptx_out" = "42,0,25," ] && [ "$_ur_ptx_trap_rc" -eq 3 ] && grep -q '^\.version 8\.0$' "$ntmp/ur_ok.ptx" && [ "$_ur_spv_out" = "42,0,25," ] && [ "$_ur_spv_trap_rc" -eq 3 ] && grep -q '^OpCapability Shader$' "$ntmp/ur_ok.spvasm" && [ "$_ur_cm_out" = "42,0,25," ] && [ "$_ur_cm_trap_rc" -eq 3 ] && [ "$_ur_avr_out" = "42,0,25," ] && [ "$_ur_avrh_out" = "42,0,25," ] && [ "$_ur_xt_out" = "42,0,25," ] && [ "$_ur_xt_trap_rc" -eq 3 ] && [ "$_ur_vlog_out" = "42,0,25," ] && [ "$_ur_vlog_trap_rc" -eq 3 ] && grep -q 'always @(posedge clk)' "$ntmp/ur_ok.v" && [ "$_ur_vhdl_out" = "42,0,25," ] && [ "$_ur_vhdl_trap_rc" -eq 3 ] && grep -q 'rising_edge(clk)' "$ntmp/ur_ok.vhd" && [ "$_ur_ios_magic" = "cffaedfe" ] && [ "$_ur_and_out" = "55,42," ] && [ "$_ur_web_out" = "55,42," ] && [ "$_ur_web_trap_rc" -eq 3 ]; then ok "track-R (#256, #250): universal reach across GPU (CUDA PTX 8.0 & Vulkan SPIR-V 1.6 kernel fn lowering + VM), Embedded MCUs (Cortex-M, AVR, Xtensa ESP32 ELF32/IHEX + emulator), FPGA/HDL (Verilog-2005 & VHDL-2008 RTL + cycle-accurate simulator), Mobile (iOS Mach-O & Android ELF64), and Browser/Web (wasm32-web-dom)"; else bad "track-R (#256, #250): universal reach (ptx='$_ur_ptx_out'/$_ur_ptx_trap_rc spv='$_ur_spv_out'/$_ur_spv_trap_rc cm='$_ur_cm_out'/$_ur_cm_trap_rc avr='$_ur_avr_out'/'$_ur_avrh_out' xt='$_ur_xt_out'/$_ur_xt_trap_rc vlog='$_ur_vlog_out'/$_ur_vlog_trap_rc vhdl='$_ur_vhdl_out'/$_ur_vhdl_trap_rc ios='$_ur_ios_magic' and='$_ur_and_out' web='$_ur_web_out'/$_ur_web_trap_rc)"; cat "$ntmp/ut.err" 2>/dev/null; fi
 
     # Issue #197 & #215: Core language features (trait/impl [T0400]/[T0401], first-class closures with capture,
     # refinement types `T where <pred>` with QF_LIA guard elision & exit-3 runtime trap, async fn/.await/block_on [E0200],
