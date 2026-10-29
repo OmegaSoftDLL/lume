@@ -32,6 +32,7 @@ def parse_args():
     )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--artifacts", type=Path)
+    parser.add_argument("--setup-timeout", type=float, default=900.0)
     parser.add_argument("--compile-timeout", type=float, default=120.0)
     parser.add_argument("--proof-timeout", type=float, default=120.0)
     parser.add_argument("--execution-timeout", type=float, default=10.0)
@@ -41,7 +42,7 @@ def parse_args():
         help="Check fixture outcomes; never interpret them as model scores.",
     )
     args = parser.parse_args()
-    for name in ("compile_timeout", "proof_timeout", "execution_timeout"):
+    for name in ("setup_timeout", "compile_timeout", "proof_timeout", "execution_timeout"):
         if getattr(args, name) <= 0:
             parser.error("--%s must be positive" % name.replace("_", "-"))
     args.suite = args.suite.resolve()
@@ -355,6 +356,43 @@ def check_self_test(tasks):
     return errors
 
 
+def prepare_toolchain(args, report_base):
+    setup_dir = args.artifacts / "setup"
+    setup_dir.mkdir(parents=True, exist_ok=True)
+    steps = {}
+    commands = [
+        ("describe", [str(ROOT / "lume"), "describe", "--json"]),
+        (
+            "proof",
+            [
+                str(ROOT / "lume"),
+                "prove",
+                "--json",
+                str(ROOT / "tests" / "economic_benchmark" / "tasks" / "clamp_nonnegative" / "attempt1.src"),
+            ],
+        ),
+    ]
+    for name, command in commands:
+        stdout_path = setup_dir / (name + ".stdout")
+        stderr_path = setup_dir / (name + ".stderr")
+        result = run_process(command, args.setup_timeout, stdout_path, stderr_path)
+        result["logs"] = {
+            "stdout": relative_display(stdout_path, report_base),
+            "stderr": relative_display(stderr_path, report_base),
+        }
+        steps[name] = result
+        if result["status"] != "PASS":
+            diagnostics = stderr_path.read_text(encoding="utf-8", errors="replace")
+            raise SystemExit(
+                "economic benchmark toolchain setup failed at %s:\n%s" % (name, diagnostics)
+            )
+    return {
+        "outcome": "PASS",
+        "wall_time_ms": sum(step["wall_time_ms"] for step in steps.values()),
+        "steps": steps,
+    }
+
+
 def main():
     args = parse_args()
     if sys.version_info < (3, 8):
@@ -381,6 +419,7 @@ def main():
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.artifacts.mkdir(parents=True, exist_ok=True)
+    setup = prepare_toolchain(args, report_base)
     run_started = time.monotonic_ns()
     tasks = []
     for task in suite["tasks"]:
@@ -423,6 +462,7 @@ def main():
             "target": suite["target"],
         },
         "repository": repository,
+        "setup": setup,
         "environment": {
             "system": platform.system(),
             "machine": platform.machine(),
@@ -451,6 +491,7 @@ def main():
             "verification_wall_time_ms": (time.monotonic_ns() - run_started) // 1000000,
         },
         "timeouts_seconds": {
+            "setup": args.setup_timeout,
             "compile": args.compile_timeout,
             "proof": args.proof_timeout,
             "execution": args.execution_timeout,

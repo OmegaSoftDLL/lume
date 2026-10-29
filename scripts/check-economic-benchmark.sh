@@ -45,6 +45,7 @@ for field in (
 ):
     assert report["metrics"][field] == "UNKNOWN", field
 assert report["harness_self_test"]["outcome"] == "PASS"
+assert report["setup"]["outcome"] == "PASS"
 assert report["summary"]["attempts_total"] == 6
 assert report["summary"]["attempts_passed"] == 2
 assert report["summary"]["attempts_failed"] == 4

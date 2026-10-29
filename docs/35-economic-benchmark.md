@@ -43,8 +43,10 @@ make -C bootstrap/lume0
 sh scripts/check-economic-benchmark.sh
 ```
 
-The check builds the self-hosted tools through the existing `./lume` wrapper, runs six attempts, and
-verifies the report independently. The expected fixture outcomes are:
+The check first prepares the self-hosted tools through the existing `./lume` wrapper. This one-time
+setup has its own timeout and is reported separately, so cold toolchain construction is neither
+repeated nor counted as candidate compilation time. It then runs six attempts and verifies the report
+independently. The expected fixture outcomes are:
 
 - `clamp_nonnegative`: first-attempt `PASS`;
 - `safe_deposit_repair`: proof failure followed by a second-attempt `PASS`;
@@ -61,8 +63,9 @@ sh scripts/run-economic-benchmark.sh \
   --self-test
 ```
 
-The default suite is `tests/economic_benchmark/suite.json`. `--compile-timeout`, `--proof-timeout`,
-and `--execution-timeout` bound each process; their values are recorded in the report. Generated
+The default suite is `tests/economic_benchmark/suite.json`. `--setup-timeout` bounds each one-time
+toolchain preparation command; `--compile-timeout`, `--proof-timeout`, and `--execution-timeout`
+bound each candidate process. Their values are recorded in the report. Generated
 reports, logs, and binaries are outputs, not versioned evidence. A public result should include the
 JSON report and logs so another operator can inspect failures and rerun the same suite.
 
