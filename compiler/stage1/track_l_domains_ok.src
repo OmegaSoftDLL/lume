@@ -1,0 +1,124 @@
+## track_l_domains_ok.src -- End-to-end native verification of Track L (#257):
+##   1. Networking (`use net`): IPv4/CIDR, RFC 1071 checksum, UDP/TCP packet & 3-way handshake FSM,
+##      TLS 1.3 key schedule + AEAD tamper rejection, HTTP/1.1 parser/serializer, and real Linux kernel
+##      loopback TCP HTTP/1.1 & UDP socket exchanges (`net_http_loopback_exchange`, `net_udp_loopback_exchange`).
+##   2. Async I/O Runtime (`use async_rt`): readiness reactor, deadline timer wheel, bounded backpressure,
+##      multi-worker work-stealing scheduler, and real Linux kernel `epoll` + pipe wakeup (`reactor_epoll_pipe_exchange`).
+##   3. GUI & Graphics (`use gui`): 2D software framebuffer rasterizer, Porter-Duff source-over RGB alpha blending,
+##      `vbox`/`hbox` layout solver, spatial hit-testing + click dispatch, and Netpbm P3 `.ppm` & `.svg` frame output.
+##   4. Database (`use db`): multi-level B+Tree storage index with page splitting, range scan pruning,
+##      ACID transactions with MVCC snapshot isolation & rollback, and cost-based query planner (`IndexPointSeek`/`IndexRangeScan`/`SequentialScan`).
+##   5. Media (`use media`): RIFF/WAV 16-bit PCM audio codec, 3-tap FIR low-pass DSP filter, lossless RLE,
+##      and inter-frame video GOP (I-frame + P-frame temporal residual delta) codec.
+##   6. Real ML (`use tensor`, `use nn`, `use ai_runtime`): extended compiler symbolic autodiff (`relu`, `sq`,
+##      `cube`, `abs`, `clamp`, `leaky_relu`, `quot`, `value_and_grad`), reverse-mode Wengert tape autodiff
+##      (`tanh`, `sigmoid`, `exp`), `safetensors`/`onnx` binary frame + tamper verification, and Hamiltonian Monte Carlo (`infer_hmc`).
+
+use net
+use async_rt
+use gui
+use db
+use media
+use tensor
+use nn
+use ai_runtime
+
+fn relu(u: int) -> int
+    requires u >= 0 - 10000
+    ensures result >= 0
+= if u > 0 then u else 0
+
+fn sq(u: int) -> int = u * u
+fn cube(u: int) -> int = u * u * u
+
+fn abs(u: int) -> int
+    requires u >= 0 - 10000
+    ensures result >= 0
+= if u >= 0 then u else 0 - u
+
+fn clamp(u: int, lo: int, hi: int) -> int
+    requires lo <= hi
+    ensures result >= lo and result <= hi
+= if u < lo then lo else if u > hi then hi else u
+
+fn leaky_relu(u: int, k: int) -> int = if u > 0 then u else k * u
+fn quot(a: int, b: int) -> int = a / b
+
+fn f_nonpoly(x: int) -> int = cube(x) + sq(2 * x) + relu(x - 1) + abs(x - 5)
+fn f_clamp_leaky(x: int) -> int = clamp(3 * x, 0, 10) + leaky_relu(x, 2)
+fn f_quot(x: int) -> int = quot(12 * x, x + 1)
+
+fn tl_nth(xs, idx) = match xs
+    Nil        => 0
+    Cons(h, t) => if idx <= 0 then h else tl_nth(t, idx - 1)
+
+fn run_tcp_fsm() = let s1 = tcp_fsm_step("CLOSED", 2) in let s2 = tcp_fsm_step(s1, 18) in {established: if s2 == "ESTABLISHED" then 1 else 0}
+fn run_tls13_check() = let ks = tls13_key_schedule(9876543, 1234567) in let rec0 = tls13_aead_seal(ks.client_app_key, 1, 23, "GET /secure HTTP/1.1") in let open_ok = tls13_aead_open(ks.client_app_key, 1, rec0) in let open_bad = tls13_aead_open(ks.client_app_key, 2, rec0) in {ok: open_ok.ok, bad_ok: open_bad.ok}
+
+fn run_async_bp() = let r0 = reactor_new(2) in let b1 = reactor_submit_io(r0, 1, 3, 10) in let b2 = reactor_submit_io(b1.rt, 2, 3, 20) in let b3 = reactor_submit_io(b2.rt, 3, 3, 30) in b3.rt
+fn run_async_timer() = let a1 = reactor_schedule_timer(reactor_new(8), 201, 30, 300) in let a2 = reactor_schedule_timer(a1.rt, 202, 10, 100) in let rt2 = reactor_drain_ready(reactor_advance_clock(a2.rt, 15)) in reactor_completed_val(rt2.completed, 202)
+fn run_async_ws() = let ws0 = ws_pool_new(Cons(10, Cons(20, Cons(30, Cons(40, Nil)))), Nil) in ws_run_all(ws0)
+
+fn run_gui_scene() = let c0 = canvas_new(4, 3, rgb_pack(10, 20, 30)) in let c1 = canvas_fill_rect(c0, 1, 1, 2, 2, rgb_pack(200, 100, 50)) in let blend_mid = canvas_blend_rgb(rgb_pack(200, 100, 50), rgb_pack(0, 200, 100), 128) in let specs = Cons(ui_widget(10, 40, 16, rgb_pack(220, 40, 40), 1, "Run"), Cons(ui_widget(20, 40, 16, rgb_pack(40, 180, 80), 2, "Stop"), Nil)) in let vbox = ui_vbox_layout(specs, 4, 6, 4) in let ev = ui_dispatch_click(0, vbox, 12, 30) in let ppm = canvas_to_ppm(c1) in let svg = ui_to_svg(64, 64, vbox) in {px11: canvas_get_px(c1, 1, 1), blend: blend_mid, clicked: ev.hit_id, ser_ok: if count(ppm) > 50 and count(svg) > 80 then 1 else 0}
+
+fn run_db_tx() = let d0 = db_open(2) in let tx1 = db_begin_tx(d0) in let tx1a = db_put(db_put(db_put(db_put(db_put(tx1, 10, 100, 5), 20, 200, 15), 30, 300, 25), 40, 400, 35), 50, 500, 45) in let d1 = db_commit_tx(tx1a) in let tx2 = db_put(db_begin_tx(d1), 20, 999, 15) in let snap_v20 = db_snapshot_read(tx2, 20, 0) in let d2 = db_commit_tx(tx2) in let tx3 = db_put(db_delete(db_begin_tx(d2), 10), 30, 7777, 25) in let d3 = db_rollback_tx(tx3) in let q_range = db_exec_range_query(d3, 20, 40, 20) in let p_seek = db_plan_query(1000, 1, 30, 30) in let p_range = db_plan_query(1000, 1, 10, 20) in {h: btree_height(d3.committed_root), snap_v20: snap_v20, cur_v20: db_read(d3, 20, 0), cur_v10: db_read(d3, 10, 0), range_sum: q_range.sum_v, plan1: p_seek.plan, plan2: p_range.plan}
+
+fn run_media_pipeline() = let pcm = Cons(0 - 1200, Cons(0, Cons(1200, Cons(2400, Nil)))) in let wav = wav_encode_pcm16(pcm, 16000) in let wdec = wav_decode_pcm16(wav) in let fir = audio_fir3_lowpass(Cons(0, Cons(400, Cons(0, Cons(0, Nil))))) in let gop = video_encode_gop(Cons(10, Cons(20, Cons(30, Cons(40, Nil)))), Cons(12, Cons(19, Cons(35, Cons(40, Nil)))), Cons(15, Cons(19, Cons(33, Cons(44, Nil))))) in let gdec = video_decode_gop(gop) in {wav_ok: wdec.ok, sr: wdec.sample_rate, fir1: tl_nth(fir, 1), p1_runs: med_len(gop.pframe1), gop_ok: med_list_eq(gdec.f2, Cons(15, Cons(19, Cons(33, Cons(44, Nil)))))}
+
+fn run_wengert_and_models() = let t0 = ad_tape_new() in let vx = ad_var(t0, 1000) in let vw = ad_var(vx.tape, 500) in let vprod = ad_mul_milli(vw.tape, vx, vw) in let vth = ad_tanh_milli(vprod.tape, vprod) in let vsg = ad_sigmoid_milli(vth.tape, vprod) in let vex = ad_exp_milli(vsg.tape, vx) in let bwd = ad_backward(vex.tape, vth.id, 1000) in let mw = {rows: 2, cols: 2, data: Cons(1, Cons(2, Cons(3, Cons(4, Nil))))} in let mb = {rows: 1, cols: 2, data: Cons(5, Cons(6, Nil))} in let mdl = mlp2_new(mw, mb, mw, mb) in let st_json = model_save_safetensors(mdl) in let ox_json = model_export_onnx(mdl, "mlp2_l") in let hmc_post = infer_hmc(dist_beta(2, 2), 6, 2, 40) in {th: vth.val, sg: vsg.val, ex: vex.val, gx: ad_grad_of(bwd, vx.id), gw: ad_grad_of(bwd, vw.id), st_ok: model_verify_safetensors(st_json, mdl), ox_ok: model_verify_onnx(ox_json, mdl, "mlp2_l"), hmc_ok: if hmc_post >= 650 and hmc_post <= 680 then 1 else 0}
+
+## --- 1. Networking observations ---
+print (net_http_loopback_exchange(42981, "/v1/items", "sku=77")).status
+print (net_http_loopback_exchange(42983, "/v1/items", "sku=77")).method
+print (net_http_loopback_exchange(42985, "/v1/items", "sku=77")).path
+print (net_http_loopback_exchange(42987, "/v1/items", "sku=77")).resp_body
+print (net_udp_loopback_exchange(42989, "PING-UDP-42")).received
+print (run_tcp_fsm()).established
+print (run_tls13_check()).ok
+print (run_tls13_check()).bad_ok
+
+## --- 2. Async I/O Runtime observations ---
+print (reactor_epoll_pipe_exchange(777, 12345)).val2
+print (reactor_epoll_pipe_exchange(777, 12345)).val1
+print (run_async_bp()).rejected
+print run_async_timer()
+print (run_async_ws()).stolen
+print (run_async_ws()).total
+
+## --- 3. GUI & Graphics observations ---
+print (run_gui_scene()).px11
+print (run_gui_scene()).blend
+print (run_gui_scene()).clicked
+print (run_gui_scene()).ser_ok
+
+## --- 4. Database observations ---
+print (run_db_tx()).h
+print (run_db_tx()).snap_v20
+print (run_db_tx()).cur_v20
+print (run_db_tx()).cur_v10
+print (run_db_tx()).range_sum
+print (run_db_tx()).plan1
+print (run_db_tx()).plan2
+
+## --- 5. Media observations ---
+print (run_media_pipeline()).wav_ok
+print (run_media_pipeline()).sr
+print (run_media_pipeline()).fir1
+print (run_media_pipeline()).p1_runs
+print (run_media_pipeline()).gop_ok
+
+## --- 6. Real ML observations ---
+print (value_and_grad(f_nonpoly, 3)).val
+print (value_and_grad(f_nonpoly, 3)).grad
+print grad(f_clamp_leaky, 2)
+print grad(f_clamp_leaky, 5)
+print grad(f_clamp_leaky, 0 - 2)
+print grad(f_quot, 1)
+print (run_wengert_and_models()).th
+print (run_wengert_and_models()).sg
+print (run_wengert_and_models()).ex
+print (run_wengert_and_models()).gx
+print (run_wengert_and_models()).gw
+print (run_wengert_and_models()).st_ok
+print (run_wengert_and_models()).ox_ok
+print (run_wengert_and_models()).hmc_ok

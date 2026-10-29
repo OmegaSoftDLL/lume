@@ -207,12 +207,16 @@ fn deval(e: DExpr, env: map[str, RV], fns: map[str, DStmt]) -> RV
                 VList(xs) => if iv >= 0 and iv < xs.len() then xs[iv] else VInt(n: 0)
                 _         => VInt(n: 0)
         DBin(op, l, r) => do
+            if op == "and"
+                if rv_int(deval(l, env, fns)) == 0
+                    return VInt(n: 0)
+                return VInt(n: if rv_int(deval(r, env, fns)) != 0 then 1 else 0)
+            if op == "or"
+                if rv_int(deval(l, env, fns)) != 0
+                    return VInt(n: 1)
+                return VInt(n: if rv_int(deval(r, env, fns)) != 0 then 1 else 0)
             let lv = deval(l, env, fns)
             let rv = deval(r, env, fns)
-            if op == "and"
-                return VInt(n: if rv_int(lv) != 0 and rv_int(rv) != 0 then 1 else 0)
-            if op == "or"
-                return VInt(n: if rv_int(lv) != 0 or rv_int(rv) != 0 then 1 else 0)
             if op == "+" and rv_is_str(lv) and rv_is_str(rv)
                 return VStr(s: rv_str(lv) + rv_str(rv))
             if rv_is_str(lv) and rv_is_str(rv)

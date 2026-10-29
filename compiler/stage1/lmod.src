@@ -22,12 +22,12 @@ fn isalnum(c) = isdigit(c) or isalpha(c)
 fn nlpos(s, n, i) = if i >= n then i else if at(s, i) == "\n" then i else nlpos(s, n, i + 1)
 fn skipws(s, i, n) = if i >= n then i else if isws(at(s, i)) then skipws(s, i + 1, n) else i
 fn rtrimend(s, e) = if e <= 0 then 0 else if isws(at(s, e - 1)) then rtrimend(s, e - 1) else e
-fn rtrim(s) = let n = count(s) in slicen(s, n, 0, rtrimend(s, n))
+fn rtrim(s) = let n = count(s) in if n <= 0 then s else if isws(at(s, n - 1)) then slicen(s, n, 0, rtrimend(s, n - 1)) else s
 fn rtrimnl(s, e) = if e <= 0 then 0 else if at(s, e - 1) == "\n" or isws(at(s, e - 1)) then rtrimnl(s, e - 1) else e
-fn chomp(s) = slice(s, 0, rtrimnl(s, count(s)))
-fn ltrim(s) = let n = count(s) in let a = skipws(s, 0, n) in if a >= n then "" else slicen(s, n, a, n)
+fn chomp(s) = let n = count(s) in if n <= 0 then s else if at(s, n - 1) == "\n" or isws(at(s, n - 1)) then slicen(s, n, 0, rtrimnl(s, n - 1)) else s
+fn ltrim(s) = let n = count(s) in if n <= 0 then s else if isws(at(s, 0)) == 0 then s else let a = skipws(s, 1, n) in if a >= n then "" else slicen(s, n, a, n)
 fn trim(s) = ltrim(rtrim(s))
-fn startswith(s, p) = if count(s) < count(p) then 0 else slice(s, 0, count(p)) == p
+fn startswith(s, p) = let m = count(p) in if m == 0 then 1 else if count(s) < m then 0 else if at(s, 0) != at(p, 0) then 0 else slice(s, 0, m) == p
 fn isindented(raw) = if count(raw) == 0 then 0 else isws(at(raw, 0))
 
 ## --- list & string helpers ---
@@ -55,8 +55,13 @@ fn addsep(xs, sep) = match xs
     Cons(h, t) => if isnil(t) == 1 then Cons(h, Nil) else Cons(h + sep, addsep(t, sep))
 fn joinsep(xs, sep) = joinall(addsep(xs, sep))
 
+fn rnlpos(s, i) = if i < 0 then 0 - 1 else if at(s, i) == "\n" then i else rnlpos(s, i - 1)
 fn splitlinesn(s, n, i) = if i >= n then Nil else let e = nlpos(s, n, i) in Cons(slicen(s, n, i, e), splitlinesn(s, n, if e >= n then e else e + 1))
-fn splitlines(s) = splitlinesn(s, count(s), 0)
+fn find_nl_from(s, n, mid) = let wn = if mid + 256 <= n then 256 else n - mid in let w = slicen(s, n, mid, mid + wn) in let k = nlpos(w, wn, 0) in if k < wn then mid + k else if mid + wn >= n then n else find_nl_from(s, n, mid + wn)
+fn rfind_nl_from(s, n, end_pos) = if end_pos <= 0 then 0 - 1 else let start = if end_pos >= 256 then end_pos - 256 else 0 in let wn = end_pos - start in let w = slicen(s, n, start, end_pos) in let k = rnlpos(w, wn - 1) in if k >= 0 then start + k else rfind_nl_from(s, n, start)
+fn splitlines_no_right_nl(s, n, half) = let sp0 = rfind_nl_from(s, n, half) in if sp0 < 0 then Cons(s, Nil) else app(splitlines_dc(slicen(s, n, 0, sp0), sp0), Cons(slicen(s, n, sp0 + 1, n), Nil))
+fn splitlines_dc(s, n) = if n <= 256 then splitlinesn(s, n, 0) else let half = n / 2 in let sp = find_nl_from(s, n, half) in if sp >= n then splitlines_no_right_nl(s, n, half) else app(splitlines_dc(slicen(s, n, 0, sp), sp), splitlines_dc(slicen(s, n, sp + 1, n), n - sp - 1))
+fn splitlines(s) = splitlines_dc(s, count(s))
 
 fn contains(xs, x) = match xs
     Nil        => 0

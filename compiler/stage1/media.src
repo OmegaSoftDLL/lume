@@ -1,0 +1,116 @@
+## media.src -- Track L (`#257`) Standard Library: Audio/Video Codecs & DSP Pipelines (`use std.media` / `use media`).
+##
+## Provides:
+##   1. RIFF/WAV 16-bit PCM container encoder & decoder (`wav_encode_pcm16`, `wav_decode_pcm16`) with header & byte-count verification
+##   2. Audio DSP pipeline: saturating PCM16 gain limiter (`audio_clamp16`, `audio_gain_clamp16`), 3-tap `[1,2,1]/4` FIR low-pass filter (`audio_fir3_lowpass`), and energy/peak analysis
+##   3. Lossless Run-Length Encoding (RLE) image/frame codec (`media_rle_encode`, `media_rle_decode`)
+##   4. Inter-frame video GOP (I-frame + P-frame temporal residual delta) encoder & decoder (`video_encode_gop`, `video_decode_gop`)
+
+fn med_len(xs) = match xs
+    Nil        => 0
+    Cons(h, t) => 1 + med_len(t)
+
+fn med_app(xs, ys) = match xs
+    Nil        => ys
+    Cons(h, t) => Cons(h, med_app(t, ys))
+
+fn med_list_eq(xs, ys) = match xs
+    Nil        => if med_len(ys) == 0 then 1 else 0
+    Cons(x, r) => med_list_eq2(x, r, ys)
+
+fn med_list_eq2(x, r, ys) = match ys
+    Nil         => 0
+    Cons(y, yr) => if x == y then med_list_eq(r, yr) else 0
+
+## --- 1. RIFF/WAV PCM16 Container Encoder & Decoder ---
+fn audio_clamp16(s) = if s < (0 - 32768) then 0 - 32768 else if s > 32767 then 32767 else s
+
+fn pcm16_to_le_bytes(samples) = match samples
+    Nil        => Nil
+    Cons(s, r) => let c = audio_clamp16(s) in let u = if c < 0 then c + 65536 else c in let lo = u % 256 in let hi = (u / 256) % 256 in Cons(lo, Cons(hi, pcm16_to_le_bytes(r)))
+
+fn pcm16_from_le_bytes(bytes) = match bytes
+    Nil         => Nil
+    Cons(lo, r) => pcm16_from_le_bytes2(lo, r)
+
+fn pcm16_from_le_bytes2(lo, r) = match r
+    Nil          => Nil
+    Cons(hi, rr) => let u = ((hi % 256) * 256) + (lo % 256) in let s = if u >= 32768 then u - 65536 else u in Cons(s, pcm16_from_le_bytes(rr))
+
+fn wav_encode_pcm16(samples, sample_rate) = if sample_rate <= 0 then {ok: 0, magic: "", format: "", audio_format: 0, channels: 0, sample_rate: 0, bits_per_sample: 0, data_bytes: 0, chunk_size: 0, pcm_bytes: Nil} else let n_samples = med_len(samples) in let data_bytes = n_samples * 2 in let pbytes = pcm16_to_le_bytes(samples) in {ok: 1, magic: "RIFF", format: "WAVE", audio_format: 1, channels: 1, sample_rate: sample_rate, bits_per_sample: 16, data_bytes: data_bytes, chunk_size: 36 + data_bytes, pcm_bytes: pbytes}
+
+fn wav_decode_pcm16(wav) = if wav.ok == 0 then {ok: 0, sample_rate: 0, samples: Nil} else if wav.magic != "RIFF" or wav.format != "WAVE" then {ok: 0, sample_rate: 0, samples: Nil} else if wav.audio_format != 1 or wav.bits_per_sample != 16 or wav.sample_rate <= 0 then {ok: 0, sample_rate: 0, samples: Nil} else if wav.data_bytes != med_len(wav.pcm_bytes) or wav.chunk_size != (36 + wav.data_bytes) or (wav.data_bytes % 2) != 0 then {ok: 0, sample_rate: 0, samples: Nil} else {ok: 1, sample_rate: wav.sample_rate, samples: pcm16_from_le_bytes(wav.pcm_bytes)}
+
+## --- 2. Audio DSP Pipeline: Saturating Gain, FIR Low-Pass & Signal Metrics ---
+fn audio_gain_clamp16(samples, num, den) = match samples
+    Nil        => Nil
+    Cons(s, r) => Cons(audio_clamp16((s * num) / den), audio_gain_clamp16(r, num, den))
+
+fn audio_fir3_step(prev, xs) = match xs
+    Nil         => Nil
+    Cons(cur, r) => audio_fir3_step2(prev, cur, r)
+
+fn audio_fir3_step2(prev, cur, r) = match r
+    Nil          => Cons((prev + (2 * cur) + cur) / 4, Nil)
+    Cons(nxt, t) => Cons((prev + (2 * cur) + nxt) / 4, audio_fir3_step(cur, Cons(nxt, t)))
+
+fn audio_fir3_lowpass(samples) = match samples
+    Nil        => Nil
+    Cons(h, t) => audio_fir3_step(h, Cons(h, t))
+
+fn audio_abs(x) = if x < 0 then 0 - x else x
+
+fn audio_peak_abs(samples) = match samples
+    Nil        => 0
+    Cons(s, r) => let a = audio_abs(s) in let p = audio_peak_abs(r) in if a >= p then a else p
+
+fn audio_energy_sum(samples) = match samples
+    Nil        => 0
+    Cons(s, r) => (s * s) + audio_energy_sum(r)
+
+## --- 3. Lossless RLE Image/Frame Codec ---
+fn media_rle_acc(xs, cur_val, cur_run) = match xs
+    Nil        => Cons({val: cur_val, run: cur_run}, Nil)
+    Cons(h, t) => if h == cur_val then media_rle_acc(t, cur_val, cur_run + 1) else Cons({val: cur_val, run: cur_run}, media_rle_acc(t, h, 1))
+
+fn media_rle_encode(pixels) = match pixels
+    Nil        => Nil
+    Cons(h, t) => media_rle_acc(t, h, 1)
+
+fn media_repeat_val(v, n) = if n <= 0 then Nil else Cons(v, media_repeat_val(v, n - 1))
+
+fn media_rle_decode(runs) = match runs
+    Nil         => Nil
+    Cons(rn, r) => med_app(media_repeat_val(rn.val, rn.run), media_rle_decode(r))
+
+## --- 4. Inter-Frame Video GOP Codec (I-Frame + P-Frame Temporal Delta Coding) ---
+fn video_diff_frames(cur_f, prev_f) = match cur_f
+    Nil        => Nil
+    Cons(c, r) => video_diff_frames2(c, r, prev_f)
+
+fn video_diff_frames2(c, r, prev_f) = match prev_f
+    Nil         => Cons(c, video_diff_frames(r, Nil))
+    Cons(p, pr) => Cons(c - p, video_diff_frames(r, pr))
+
+fn video_add_delta(prev_f, delta_f) = match prev_f
+    Nil        => Nil
+    Cons(p, r) => video_add_delta2(p, r, delta_f)
+
+fn video_add_delta2(p, r, delta_f) = match delta_f
+    Nil         => Cons(p, video_add_delta(r, Nil))
+    Cons(d, dr) => Cons(p + d, video_add_delta(r, dr))
+
+fn video_encode_gop(f0, f1, f2) = let i0 = media_rle_encode(f0) in let p1 = media_rle_encode(video_diff_frames(f1, f0)) in let p2 = media_rle_encode(video_diff_frames(f2, f1)) in {iframe: i0, pframe1: p1, pframe2: p2, compressed_runs: med_len(i0) + med_len(p1) + med_len(p2)}
+
+fn video_decode_gop(gop) = let f0 = media_rle_decode(gop.iframe) in let f1 = video_add_delta(f0, media_rle_decode(gop.pframe1)) in let f2 = video_add_delta(f1, media_rle_decode(gop.pframe2)) in {f0: f0, f1: f1, f2: f2}
+
+## --- Unit tests (`lume test compiler/stage1/media.src`) ---
+fn test_wav_pcm16_encode_decode_roundtrip_and_header_validation() = let orig = Cons(0, Cons(12000, Cons(0 - 12000, Cons(32767, Cons(0 - 32768, Nil))))) in let wav = wav_encode_pcm16(orig, 44100) in let dec = wav_decode_pcm16(wav) in wav.ok == 1 and wav.data_bytes == 10 and wav.chunk_size == 46 and dec.ok == 1 and dec.sample_rate == 44100 and med_list_eq(orig, dec.samples) == 1
+
+fn test_audio_dsp_gain_saturation_and_fir_lowpass() = let sig = Cons(10000, Cons(0 - 20000, Cons(25000, Nil))) in let boosted = audio_gain_clamp16(sig, 2, 1) in let expected_boost = Cons(20000, Cons(0 - 32768, Cons(32767, Nil))) in let noisy = Cons(100, Cons(0 - 100, Cons(100, Cons(0 - 100, Nil)))) in let smoothed = audio_fir3_lowpass(noisy) in med_list_eq(boosted, expected_boost) == 1 and audio_energy_sum(smoothed) < audio_energy_sum(noisy) and audio_peak_abs(boosted) == 32768
+
+fn test_media_rle_lossless_roundtrip_and_compression() = let px = Cons(7, Cons(7, Cons(7, Cons(7, Cons(2, Cons(2, Cons(9, Cons(9, Cons(9, Nil))))))))) in let rle = media_rle_encode(px) in let dec = media_rle_decode(rle) in med_len(rle) == 3 and med_list_eq(px, dec) == 1
+
+fn test_video_gop_iframe_pframe_delta_codec_roundtrip() = let f0 = Cons(10, Cons(10, Cons(10, Cons(10, Cons(20, Cons(20, Nil)))))) in let f1 = Cons(10, Cons(10, Cons(10, Cons(10, Cons(25, Cons(25, Nil)))))) in let f2 = Cons(12, Cons(12, Cons(12, Cons(12, Cons(25, Cons(25, Nil)))))) in let gop = video_encode_gop(f0, f1, f2) in let dec = video_decode_gop(gop) in gop.compressed_runs < 18 and med_list_eq(f0, dec.f0) == 1 and med_list_eq(f1, dec.f1) == 1 and med_list_eq(f2, dec.f2) == 1
+
+fn test_media_corrupted_container_rejection() = let orig = Cons(100, Cons(200, Nil)) in let wav = wav_encode_pcm16(orig, 48000) in let bad_magic = {ok: 1, magic: "BAD!", format: "WAVE", audio_format: 1, channels: 1, sample_rate: 48000, bits_per_sample: 16, data_bytes: wav.data_bytes, chunk_size: wav.chunk_size, pcm_bytes: wav.pcm_bytes} in let bad_size = {ok: 1, magic: "RIFF", format: "WAVE", audio_format: 1, channels: 1, sample_rate: 48000, bits_per_sample: 16, data_bytes: 99, chunk_size: wav.chunk_size, pcm_bytes: wav.pcm_bytes} in let bad_rate = wav_encode_pcm16(orig, 0) in (wav_decode_pcm16(bad_magic)).ok == 0 and (wav_decode_pcm16(bad_size)).ok == 0 and bad_rate.ok == 0

@@ -114,7 +114,41 @@ fn nn_st_entry(t, off) = let end_off = off + nn_data_bytes(t) in "{\"dtype\":\"I
 
 fn model_save_safetensors(m) = let o1 = nn_data_bytes(m.w1) in let o2 = o1 + nn_data_bytes(m.b1) in let o3 = o2 + nn_data_bytes(m.w2) in "{\"__metadata__\":{\"format\":\"safetensors\",\"version\":\"" + model_content_hash(m) + "\"},\"w1\":" + nn_st_entry(m.w1, 0) + ",\"b1\":" + nn_st_entry(m.b1, o1) + ",\"w2\":" + nn_st_entry(m.w2, o2) + ",\"b2\":" + nn_st_entry(m.b2, o3) + "}"
 
+fn safetensors_binary_frame(m) = let hdr = model_save_safetensors(m) in let hlen = count(hdr) in let total_data = nn_data_bytes(m.w1) + nn_data_bytes(m.b1) + nn_data_bytes(m.w2) + nn_data_bytes(m.b2) in {header_len_le64: hlen, header_json: hdr, data_bytes: total_data, total_frame_bytes: 8 + hlen + total_data}
+
+fn nn_str_contains_at(s, pat, p0, i, n, m) = if i + m > n then 0 else if at(s, i) == p0 then (if slicen(s, n, i, i + m) == pat then 1 else nn_str_contains_at(s, pat, p0, i + 1, n, m)) else nn_str_contains_at(s, pat, p0, i + 1, n, m)
+fn nn_str_contains(s, pat) = let m = count(pat) in if m == 0 then 1 else nn_str_contains_at(s, pat, at(pat, 0), 0, count(s), m)
+
+fn model_verify_safetensors(st_json, m) = let o1 = nn_data_bytes(m.w1) in let o2 = o1 + nn_data_bytes(m.b1) in let o3 = o2 + nn_data_bytes(m.w2) in let o4 = o3 + nn_data_bytes(m.b2) in if nn_str_contains(st_json, "\"data_offsets\":[0," + str(o1) + "]") == 0 then 0 else if nn_str_contains(st_json, "\"data_offsets\":[" + str(o3) + "," + str(o4) + "]") == 0 then 0 else if nn_str_contains(st_json, "\"data\":[" + nn_data_csv(m.w1.data) + "]") == 0 then 0 else nn_str_contains(st_json, "\"version\":\"sha256:")
+
 fn model_export_onnx(m, name) = "{\"ir_version\":9,\"graph\":{\"name\":\"" + name + "\",\"hash\":\"" + model_content_hash(m) + "\",\"initializers\":{\"w1\":[" + nn_data_csv(m.w1.data) + "],\"b1\":[" + nn_data_csv(m.b1.data) + "],\"w2\":[" + nn_data_csv(m.w2.data) + "],\"b2\":[" + nn_data_csv(m.b2.data) + "]},\"nodes\":[\"MatMul\",\"Add\",\"Relu\",\"MatMul\",\"Add\"]}}"
+
+fn model_verify_onnx(onnx_json, m, name) = if nn_str_contains(onnx_json, "\"ir_version\":9") == 0 then 0 else if nn_str_contains(onnx_json, "\"name\":\"" + name + "\"") == 0 then 0 else if nn_str_contains(onnx_json, "\"MatMul\",\"Add\",\"Relu\"") == 0 then 0 else if nn_str_contains(onnx_json, "\"w1\":[" + nn_data_csv(m.w1.data) + "]") == 0 then 0 else nn_str_contains(onnx_json, "\"hash\":\"sha256:")
+
+## Reverse-mode Wengert tape autodiff (`ad_tape_new`, `ad_var`, `ad_add`, `ad_sub`, `ad_mul`, `ad_div`,
+## `ad_relu`, `ad_tanh_milli`, `ad_sigmoid_milli`, `ad_exp_milli`, `ad_backward`) in milliscale (1000 = 1.0).
+fn ad_tape_new() = {next_id: 0, nodes: Nil}
+fn ad_push_node(tape, val, p1, w1, p2, w2) = let id = tape.next_id in {tape: {next_id: id + 1, nodes: Cons({id: id, val: val, p1: p1, w1: w1, p2: p2, w2: w2}, tape.nodes)}, id: id, val: val}
+fn ad_var(tape, val) = ad_push_node(tape, val, 0 - 1, 0, 0 - 1, 0)
+fn ad_add(tape, a, b) = ad_push_node(tape, a.val + b.val, a.id, 1000, b.id, 1000)
+fn ad_sub(tape, a, b) = ad_push_node(tape, a.val - b.val, a.id, 1000, b.id, 0 - 1000)
+fn ad_mul_milli(tape, a, b) = ad_push_node(tape, (a.val * b.val) / 1000, a.id, b.val, b.id, a.val)
+fn ad_div_milli(tape, a, b) = let bv = if b.val == 0 then 1 else b.val in let q = (a.val * 1000) / bv in let wa = (1000 * 1000) / bv in let wb = 0 - ((a.val * 1000 * 1000) / (bv * bv)) in ad_push_node(tape, q, a.id, wa, b.id, wb)
+fn ad_relu(tape, a) = ad_push_node(tape, if a.val > 0 then a.val else 0, a.id, if a.val > 0 then 1000 else 0, 0 - 1, 0)
+fn nn_tanh_milli(x) = let xc = if x < 0 - 3000 then 0 - 3000 else if x > 3000 then 3000 else x in let x2 = (xc * xc) / 1000 in (xc * (27000 + x2)) / (27000 + 9 * x2)
+fn ad_tanh_milli(tape, a) = let t = nn_tanh_milli(a.val) in let dt = 1000 - (t * t) / 1000 in ad_push_node(tape, t, a.id, dt, 0 - 1, 0)
+fn ad_sigmoid_milli(tape, a) = let s = (1000 + nn_tanh_milli(a.val / 2)) / 2 in let ds = (s * (1000 - s)) / 1000 in ad_push_node(tape, s, a.id, ds, 0 - 1, 0)
+fn ad_exp_milli(tape, a) = let x = a.val in let x2 = (x * x) / 1000 in let num = 12000 + 6 * x + x2 in let den = if 12000 - 6 * x + x2 <= 0 then 1 else 12000 - 6 * x + x2 in let e = (1000 * num) / den in ad_push_node(tape, e, a.id, e, 0 - 1, 0)
+
+fn ad_adj_get(adjs, id) = match adjs
+    Nil        => 0
+    Cons(h, t) => if h.id == id then h.g else ad_adj_get(t, id)
+fn ad_adj_add(adjs, id, dg) = if id < 0 or dg == 0 then adjs else Cons({id: id, g: ad_adj_get(adjs, id) + dg}, adjs)
+fn ad_bwd_nodes(nodes, adjs) = match nodes
+    Nil        => adjs
+    Cons(n, r) => let g = ad_adj_get(adjs, n.id) in let a1 = ad_adj_add(adjs, n.p1, (g * n.w1) / 1000) in let a2 = ad_adj_add(a1, n.p2, (g * n.w2) / 1000) in ad_bwd_nodes(r, a2)
+fn ad_backward(tape, out_id, seed_milli) = ad_bwd_nodes(tape.nodes, Cons({id: out_id, g: seed_milli}, Nil))
+fn ad_grad_of(adjs, id) = ad_adj_get(adjs, id)
 
 ## GPU Accelerator Kernel Compilation (`kernel fn` AST lowering -> SSA CUDA PTX 8.0 & Vulkan SPIR-V 1.6)
 ## + Faithful Instruction-Level PTX & SPIR-V Virtual Machine Emulators (#250).
@@ -164,7 +198,7 @@ fn kvm_tokens(line) = kvm_tokens_loop(line, 0, count(line), 0, 0)
 
 fn kvm_line_end(s, i, n) = if i >= n then n else if at(s, i) == "\n" then i else kvm_line_end(s, i + 1, n)
 
-fn kvm_lines_loop(s, i, n) = if i >= n then Nil else let e = kvm_line_end(s, i, n) in Cons(slice(s, i, e), kvm_lines_loop(s, e + 1, n))
+fn kvm_lines_loop(s, i, n) = if i >= n then Nil else let e = kvm_line_end(s, i, n) in Cons(kvm_tokens(slice(s, i, e)), kvm_lines_loop(s, e + 1, n))
 
 fn kvm_lines(s) = kvm_lines_loop(s, 0, count(s))
 
@@ -188,7 +222,7 @@ fn ptx_vm_step(toks, regs, env) = let n = kvm_tok_len(toks) in if n == 0 then re
 
 fn ptx_vm_lines(ls, regs, env) = match ls
     Nil        => kvm_lookup("[%rd_out]", regs)
-    Cons(l, r) => ptx_vm_lines(r, ptx_vm_step(kvm_tokens(l), regs, env), env)
+    Cons(l, r) => ptx_vm_lines(r, ptx_vm_step(l, regs, env), env)
 
 fn ptx_vm_exec(ptx_src, env) = ptx_vm_lines(kvm_lines(ptx_src), Nil, env)
 
@@ -196,17 +230,21 @@ fn spirv_vm_step(toks, regs, env) = let n = kvm_tok_len(toks) in if n == 0 then 
 
 fn spirv_vm_lines(ls, regs, env) = match ls
     Nil        => kvm_lookup("%out_ptr", regs)
-    Cons(l, r) => spirv_vm_lines(r, spirv_vm_step(kvm_tokens(l), regs, env), env)
+    Cons(l, r) => spirv_vm_lines(r, spirv_vm_step(l, regs, env), env)
 
 fn spirv_vm_exec(spirv_src, env) = spirv_vm_lines(kvm_lines(spirv_src), Cons({k: "%zero", v: 0}, Cons({k: "%one", v: 1}, Nil)), env)
 
-fn ptx_vm_launch_1d(ptx_src, pnm, xs, base_env) = match xs
+fn ptx_vm_launch_lines(ls, pnm, xs, base_env) = match xs
     Nil        => Nil
-    Cons(x, r) => Cons(ptx_vm_exec(ptx_src, Cons({k: pnm, v: x}, base_env)), ptx_vm_launch_1d(ptx_src, pnm, r, base_env))
+    Cons(x, r) => Cons(ptx_vm_lines(ls, Nil, Cons({k: pnm, v: x}, base_env)), ptx_vm_launch_lines(ls, pnm, r, base_env))
 
-fn spirv_vm_launch_1d(spirv_src, pnm, xs, base_env) = match xs
+fn ptx_vm_launch_1d(ptx_src, pnm, xs, base_env) = ptx_vm_launch_lines(kvm_lines(ptx_src), pnm, xs, base_env)
+
+fn spirv_vm_launch_lines(ls, pnm, xs, base_env) = match xs
     Nil        => Nil
-    Cons(x, r) => Cons(spirv_vm_exec(spirv_src, Cons({k: pnm, v: x}, base_env)), spirv_vm_launch_1d(spirv_src, pnm, r, base_env))
+    Cons(x, r) => Cons(spirv_vm_lines(ls, Cons({k: "%zero", v: 0}, Cons({k: "%one", v: 1}, Nil)), Cons({k: pnm, v: x}, base_env)), spirv_vm_launch_lines(ls, pnm, r, base_env))
+
+fn spirv_vm_launch_1d(spirv_src, pnm, xs, base_env) = spirv_vm_launch_lines(kvm_lines(spirv_src), pnm, xs, base_env)
 
 ## Unit tests for `lume test compiler/stage1/nn.src`
 fn test_nn_mlp2_forward_and_loss() = let w1 = {rows: 2, cols: 2, data: Cons(1, Cons(0, Cons(0, Cons(1, Nil))))} in let b1 = {rows: 1, cols: 2, data: Cons(0, Cons(0, Nil))} in let w2 = {rows: 2, cols: 2, data: Cons(2, Cons(0, Cons(0, Cons(2, Nil))))} in let b2 = {rows: 1, cols: 2, data: Cons(0, Cons(0, Nil))} in let m = mlp2_new(w1, b1, w2, b2) in let x = {rows: 2, cols: 2, data: Cons(3, Cons(1, Cons(1, Cons(4, Nil))))} in let y = Cons(0, Cons(1, Nil)) in if mlp2_accuracy(m, x, y) == 100 and mlp2_loss(m, x, y) >= 0 then 1 else 0
@@ -215,6 +253,6 @@ fn test_nn_mlp2_grad_and_sgd_step() = let w1 = {rows: 2, cols: 2, data: Cons(1, 
 
 fn test_nn_adam_step() = let w1 = {rows: 2, cols: 2, data: Cons(1, Cons(0, Cons(0, Cons(1, Nil))))} in let b1 = {rows: 1, cols: 2, data: Cons(0, Cons(0, Nil))} in let m0 = mlp2_new(w1, b1, w1, b1) in let st0 = adam_init_mlp2(m0) in let x = {rows: 2, cols: 2, data: Cons(3, Cons(0, Cons(0, Cons(3, Nil))))} in let y = Cons(0, Cons(1, Nil)) in let g = mlp2_grad(m0, x, y) in let r = adam_step_mlp2(m0, st0, g, 1) in if r.state.step == 1 then 1 else 0
 
-fn test_nn_safetensors_and_onnx_export() = let w1 = {rows: 2, cols: 2, data: Cons(1, Cons(2, Cons(3, Cons(4, Nil))))} in let b1 = {rows: 1, cols: 2, data: Cons(5, Cons(6, Nil))} in let m = mlp2_new(w1, b1, w1, b1) in let h = model_content_hash(m) in let st = model_save_safetensors(m) in let ox = model_export_onnx(m, "mlp2") in if count(h) == 71 and sha256_hex("abc") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" and count(st) > 150 and count(ox) > 120 then 1 else 0
+fn test_nn_safetensors_and_onnx_export() = let w1 = {rows: 2, cols: 2, data: Cons(1, Cons(2, Cons(3, Cons(4, Nil))))} in let b1 = {rows: 1, cols: 2, data: Cons(5, Cons(6, Nil))} in let m = mlp2_new(w1, b1, w1, b1) in let m_bad = mlp2_new(w1, {rows: 1, cols: 3, data: Cons(5, Cons(6, Cons(7, Nil)))}, w1, b1) in let bf = safetensors_binary_frame(m) in let st = bf.header_json in let ox = model_export_onnx(m, "mlp2") in let t0 = ad_tape_new() in let x = ad_var(t0, 1000) in let w = ad_var(x.tape, 500) in let prod = ad_mul_milli(w.tape, x, w) in let th = ad_tanh_milli(prod.tape, prod) in let sg = ad_sigmoid_milli(th.tape, prod) in let ex = ad_exp_milli(sg.tape, x) in let bwd = ad_backward(ex.tape, th.id, 1000) in let gx = ad_grad_of(bwd, x.id) in let gw = ad_grad_of(bwd, w.id) in if sha256_hex("abc") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" and model_verify_safetensors(st, m) == 1 and model_verify_safetensors(st, m_bad) == 0 and bf.total_frame_bytes == 8 + bf.header_len_le64 + 96 and model_verify_onnx(ox, m, "mlp2") == 1 and model_verify_onnx(ox, m, "wrong_graph") == 0 and th.val == 465 and sg.val == 622 and ex.val == 2714 and gx == 392 and gw == 784 then 1 else 0
 
 fn test_nn_ptx_and_spirv_codegen() = let ps1 = Cons("x", Cons("w", Cons("b", Nil))) in let body1 = KLet("z", KBin("+", KBin("*", KVar("x"), KVar("w")), KVar("b")), KIf(KBin(">", KVar("z"), KNum(0)), KVar("z"), KNum(0))) in let ptx1 = kernel_emit_ptx("fused_affine_relu", 16, ps1, body1) in let spv1 = kernel_emit_spirv("fused_affine_relu", 16, ps1, body1) in let env_pos = Cons({k: "x", v: 6}, Cons({k: "w", v: 4}, Cons({k: "b", v: 0 - 3}, Nil))) in let env_neg = Cons({k: "x", v: 2}, Cons({k: "w", v: 0 - 5}, Cons({k: "b", v: 3}, Nil))) in let grid_xs = Cons(0 - 2, Cons(1, Cons(3, Cons(6, Nil)))) in let base_wb = Cons({k: "w", v: 4}, Cons({k: "b", v: 0 - 3}, Nil)) in let ptx_g = ptx_vm_launch_1d(ptx1, "x", grid_xs, base_wb) in let spv_g = spirv_vm_launch_1d(spv1, "x", grid_xs, base_wb) in let ps2 = Cons("x", Cons("a", Cons("b", Cons("c", Nil)))) in let body2 = KLet("u", KBin("+", KBin("*", KVar("a"), KVar("x")), KVar("b")), KBin("-", KBin("*", KVar("u"), KVar("x")), KVar("c"))) in let ptx2 = kernel_emit_ptx("horner_quad", 32, ps2, body2) in let spv2 = kernel_emit_spirv("horner_quad", 32, ps2, body2) in let env_hq = Cons({k: "x", v: 5}, Cons({k: "a", v: 3}, Cons({k: "b", v: 2}, Cons({k: "c", v: 7}, Nil)))) in if ptx1 != ptx2 and spv1 != spv2 and ptx_vm_exec(ptx1, env_pos) == 21 and spirv_vm_exec(spv1, env_pos) == 21 and ptx_vm_exec(ptx1, env_neg) == 0 and spirv_vm_exec(spv1, env_neg) == 0 and t_nth(ptx_g, 0) == 0 and t_nth(ptx_g, 1) == 1 and t_nth(ptx_g, 2) == 9 and t_nth(ptx_g, 3) == 21 and t_nth(spv_g, 2) == 9 and t_nth(spv_g, 3) == 21 and ptx_vm_exec(ptx2, env_hq) == 78 and spirv_vm_exec(spv2, env_hq) == 78 then 1 else 0
