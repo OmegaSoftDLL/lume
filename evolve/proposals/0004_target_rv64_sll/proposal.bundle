@@ -4,7 +4,7 @@
 @principles P1,P7,P24,P30,P31
 @capability pure
 @max_asm_lines 400
-@approval signed:ricardo:ed25519:f0415269daee6aebc288fb12cdfe617dd6b25d298ba00dfca97c3e91ff8989b99c25d2255abfb3af55cdd5ec2959e165025dc764313a1be6fcd96e9952617d0f
+@approval signed:ricardo:ed25519:d22c6d4b39e3a4c8bf3625ed1fda3ac69214c035e4759369fe3ea59d104f3dbfb29b7dfabdabea6378bd17621489b47ec2a89dfeb2b9d7a09cd9ff1cd1053c04
 @file compiler/stage1/mod_target_isa.src
 @baseline
 fn rv64_add(rd: int, rs1: int, rs2: int) -> int requires rd >= 0 and rd < 32 and rs1 >= 0 and rs1 < 32 and rs2 >= 0 and rs2 < 32 ensures result >= 51 = 51 + rd * 128 + rs1 * 32768 + rs2 * 1048576
@@ -13,7 +13,7 @@ fn rv64_add(rd: int, rs1: int, rs2: int) -> int requires rd >= 0 and rd < 32 and
 fn rv64_add(rd: int, rs1: int, rs2: int) -> int requires rd >= 0 and rd < 32 and rs1 >= 0 and rs1 < 32 and rs2 >= 0 and rs2 < 32 ensures result >= 51 = 51 + rd * 128 + rs1 * 32768 + rs2 * 1048576
 @bound(cycles: 32)
 fn rv64_slli(rd: int, rs1: int, shamt: int) -> int requires rd >= 0 and rd < 32 and rs1 >= 0 and rs1 < 32 and shamt >= 0 and shamt < 64 ensures result >= 19 = 19 + rd * 128 + 4096 + rs1 * 32768 + shamt * 1048576
-fn test_rv64_slli_encodes_opcode_and_shamt() = rv64_slli(10, 11, 3) == 3511523
+fn test_rv64_slli_encodes_opcode_and_shamt() = rv64_slli(10, 11, 3) == 3511571
 @end
 @file compiler/stage1/mod_target_emit.src
 @baseline
@@ -25,13 +25,13 @@ use mod_target_isa
 fn emit_rv64_pair(rd: int, rs1: int, rs2: int) -> int requires rd >= 0 and rd < 32 and rs1 >= 0 and rs1 < 32 and rs2 >= 0 and rs2 < 32 ensures result >= 51 = rv64_add(rd, rs1, rs2)
 @bound(cycles: 64)
 fn emit_rv64_scale(rd: int, rs1: int, shamt: int) -> int requires rd >= 0 and rd < 32 and rs1 >= 0 and rs1 < 32 and shamt >= 0 and shamt < 64 ensures result >= 70 = rv64_slli(rd, rs1, shamt) + rv64_add(rd, rd, rs1)
-fn test_emit_rv64_scale_combines_slli_and_add() = emit_rv64_scale(10, 11, 3) == 15374646
+fn test_emit_rv64_scale_combines_slli_and_add() = emit_rv64_scale(10, 11, 3) == 15374918
 @end
 @tests
 print rv64_slli(10, 11, 3)
 print emit_rv64_scale(10, 11, 3)
 @end
 @expected
-3511523
-15374646
+3511571
+15374918
 @end

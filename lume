@@ -2237,6 +2237,12 @@ cmd_evolve() {
                     fi
                     mv "$_etmp_out" "$_abs_f"
                     rm -f "$_etmp_app"
+                done
+                for _rel_f in $_emfiles; do
+                    case "$_rel_f" in
+                        /*) _abs_f="$_rel_f" ;;
+                        *)  _abs_f="$_eroot/$_rel_f" ;;
+                    esac
                     if grep -Eq '^fn[ \t]+test_' "$_abs_f"; then
                         if ! cmd_test "$_abs_f" >/dev/null 2>&1; then
                             rm -f "$_etmp"

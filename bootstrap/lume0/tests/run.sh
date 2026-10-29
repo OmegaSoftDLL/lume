@@ -688,7 +688,7 @@ PY
         LUME_BIN_DIR="$ntmp" ../../lume evolve grow ../../evolve/proposals/0005_prover_interval --root "$ntmp/m2_ws" >"$ntmp/ev_m2_0005.json" 2>"$ntmp/ev_m2_0005.err"; m2_0005_rc=$?
         LUME_BIN_DIR="$ntmp" ../../lume evolve grow ../../evolve/proposals/0006_stdlib_math_mod --root "$ntmp/m2_ws" >"$ntmp/ev_m2_0006.json" 2>"$ntmp/ev_m2_0006.err"; m2_0006_rc=$?
         # Adversarial tamper test: 1-byte edit to multi-file candidate invalidates Ed25519 signature and prevents file write
-        sed 's/rv64_slli(10, 11, 3)/rv64_slli(10, 11, 4)/' ../../evolve/proposals/0004_target_rv64_sll/proposal.bundle >"$ntmp/ev_m2_tampered.bundle"
+        sed 's/ensures result >= 19 = 19 +/ensures result >= 19 = 0 + 19 +/' ../../evolve/proposals/0004_target_rv64_sll/proposal.bundle >"$ntmp/ev_m2_tampered.bundle"
         mkdir -p "$ntmp/m2_bad_ws/compiler/stage1"
         LUME_BIN_DIR="$ntmp" ../../lume evolve grow "$ntmp/ev_m2_tampered.bundle" --root "$ntmp/m2_bad_ws" >"$ntmp/ev_m2_tampered.json" 2>/dev/null; m2_tamp_rc=$?
         # Adversarial API drift test across multi-file bundle: breaking baseline symbol in file 1 fails api_compat gate
@@ -703,7 +703,7 @@ assert ps["domain"] == "stdlib" and ps["files_count"] == 2 and ps["gates_ok"] is
 assert r4["id"] == "0004_target_rv64_sll" and r4["domain"] == "target" and r4["files_count"] == 2 and len(r4["files"]) == 2 and r4["can_merge"] is True and r4["signature_verified"] is True
 assert r5["id"] == "0005_prover_interval" and r5["domain"] == "prover" and r5["files_count"] == 2 and r5["repairs_applied"] == 2 and r5["can_merge"] is True and r5["signature_verified"] is True
 assert r6["id"] == "0006_stdlib_math_mod" and r6["domain"] == "stdlib" and r6["files_count"] == 2 and r6["can_merge"] is True and r6["signature_verified"] is True
-assert rt["can_merge"] is False
+assert rt["gates_ok"] is True and rt["signature_verified"] is False and rt["status"] == "rejected_invalid_signature" and rt["can_merge"] is False
 assert rd["gates_ok"] is False and rd["status"] == "rejected_by_gates"
 PY
         then ok "multiplier M2 (#258, docs/33): lume evolve multi-file self-growth engine (target, prover hole synthesis, stdlib, Ed25519 + adversarial tamper/drift rejection)"; else bad "multiplier M2 (#258, docs/33): lume evolve multi-file self-growth engine"; cat "$ntmp/ev_m2_0004.err" "$ntmp/ev_m2_0004.json" "$ntmp/ev_m2_0005.err" "$ntmp/ev_m2_0005.json" "$ntmp/ev_m2_0006.err" "$ntmp/ev_m2_0006.json" "$ntmp/ev_m2_tampered.json" "$ntmp/ev_m2_drift.json" 2>/dev/null; fi
