@@ -186,6 +186,25 @@ attempts (the write → compile → read-errors → fix loop, P1/P30/P31).
 ### The gates (all automatic, all required)
 > **Implemented today:** six gates in `compiler/stage1/levolve.src` and `./lume` — `compile`, `conformance` (including static `QF_LIA` `proofs_ok` contract/law verification), `api_compat`, `capability`, `budget` (including `benchmark_ok` `@bound` cycle-budget verification and assembly line budgets), and `fixpoint` (`stage2 == stage3` multi-stage codegen fixpoint + binary equality check when bootstrap binaries are present).
 
+#### Versioned evidence results (`#330`)
+
+Every `lume evolve` JSON result includes an `evidence` object identified as
+`lume-evolve-evidence/0.1`. It binds the evaluated candidate's SHA-256 and derives separate gate and
+obligation results from the actual evaluation records. Aggregation is fail-closed: `FAIL` dominates
+`UNKNOWN`, which dominates `PASS`. A failed gate is `FAIL`; an empty gate list is `UNKNOWN`; all
+passing gates are `PASS`.
+
+For obligations, `refuted` is `FAIL`, `runtime_checked`, an unrecognized status, or no obligations is
+`UNKNOWN`, and a non-empty set containing only `proven` or `budget_checked` obligations is `PASS`.
+The `obligations` counters expose every category. `budget_checked` retains its bounded structural
+cycle-budget meaning and is not relabelled as a sound WCET proof. The obligation result does not
+change merge eligibility: runtime-checked obligations may still merge with their runtime guards, but
+are not presented as static proofs. Existing JSON fields and `can_merge` remain compatible.
+
+This is local implementation evidence only. It does not establish execution assurance, certification,
+independent evaluation, evidence freshness, or dependency-graph invalidation; those require separate
+mechanisms.
+
 1. **Conformance**: every test in `tests/conformance/` passes for the edition.
 2. **Triple self-build**: `A → B → C`, `B == C` byte-identical, from `lume0` as the root.
 3. **Proofs**: `lume prove` on `std` contracts and the `lume-core` Lean development still check.

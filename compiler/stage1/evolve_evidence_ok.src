@@ -1,0 +1,21 @@
+## evolve_evidence_ok.src -- Versioned, fail-closed evolve evidence regression (#330).
+## Exercises real proposal evaluation for absent, proven, runtime-checked, and refuted obligations.
+
+use levolve
+
+fn evidence_prop(id, candidate, tests, expected) = {id: id, goal: "Exercise evolve evidence", principles: "P30,P31", capability: "pure", max_asm_lines: 200, baseline: "", candidate: candidate, tests: tests, expected: expected, approval: "none"}
+
+fn show_evidence(r) = r.id + ": gates=" + ev_gate_result(r.gates) + " obligations=" + ev_proof_result(r.proofs) + " total=" + str(cs_len(r.proofs)) + " proven=" + str(ev_proof_count(r.proofs, "proven")) + " budget=" + str(ev_proof_count(r.proofs, "budget_checked")) + " runtime=" + str(ev_proof_count(r.proofs, "runtime_checked")) + " refuted=" + str(ev_proof_count(r.proofs, "refuted")) + " unknown=" + str(ev_proof_unknown_count(r.proofs)) + " can_merge=" + str(r.can_merge)
+
+fn no_obligations() = "fn add(a: int, b: int) -> int = a + b\n"
+fn proven_obligation() = "fn abs_val(x: int) -> int ensures result >= 0 = if x < 0 then 0 - x else x\n"
+fn runtime_obligation() = "fn string_size(s: str) -> int ensures result >= 0 = count(s)\n"
+fn refuted_obligation() = "fn bad_inc(x: int) -> int ensures result > x = x\n"
+
+print "lattice=" + ev_combine_evidence("FAIL", "UNKNOWN") + "," + ev_combine_evidence("FAIL", "PASS") + "," + ev_combine_evidence("UNKNOWN", "PASS") + "," + ev_combine_evidence("PASS", "UNKNOWN") + "," + ev_combine_evidence("PASS", "PASS") + "," + ev_combine_evidence("UNKNOWN", "UNKNOWN") + "," + ev_combine_evidence("PASS", "future_status")
+print "empty_gates=" + ev_gate_result(Nil) + " empty_obligations=" + ev_proof_result(Nil)
+print "future_obligation=" + ev_proof_result(Cons({status: "future_status"}, Nil)) + " unknown=" + str(ev_proof_unknown_count(Cons({status: "future_status"}, Nil)))
+print show_evidence(evolve_evaluate(evidence_prop("no_obligations", no_obligations(), "print add(2, 3)\n", "5")))
+print show_evidence(evolve_evaluate(evidence_prop("proven_obligation", proven_obligation(), "print abs_val(0 - 7)\n", "7")))
+print show_evidence(evolve_evaluate(evidence_prop("runtime_obligation", runtime_obligation(), "print string_size(\"abc\")\n", "3")))
+print show_evidence(evolve_evaluate(evidence_prop("refuted_obligation", refuted_obligation(), "print bad_inc(4)\n", "4")))
