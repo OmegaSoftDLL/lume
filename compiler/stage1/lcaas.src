@@ -2223,11 +2223,11 @@ fn sha_pow2(n) = if n <= 0 then 1 else if n >= 16 then 65536 * sha_pow2(n - 16) 
 fn sha_shr(x, n) = x / sha_pow2(n)
 fn sha_rotr(x, n) = let p = sha_pow2(n) in (x / p) + ((x % p) * sha_pow2(32 - n))
 fn sha_xor3_4(x, y, z) = let b0 = ((x % 2) + (y % 2) + (z % 2)) % 2 in let b1 = (((x / 2) % 2) + ((y / 2) % 2) + ((z / 2) % 2)) % 2 in let b2 = (((x / 4) % 2) + ((y / 4) % 2) + ((z / 4) % 2)) % 2 in let b3 = (((x / 8) % 2) + ((y / 8) % 2) + ((z / 8) % 2)) % 2 in b0 + 2 * b1 + 4 * b2 + 8 * b3
-fn sha_xor3_n(x, y, z, nibs) = if nibs <= 0 then 0 else sha_xor3_4(x % 16, y % 16, z % 16) + 16 * sha_xor3_n(x / 16, y / 16, z / 16, nibs - 1)
+fn sha_xor3_n(x, y, z, nibs) = if nibs == 8 then bv_xor(bv_xor(x, y), z) else if nibs <= 0 then 0 else sha_xor3_4(x % 16, y % 16, z % 16) + 16 * sha_xor3_n(x / 16, y / 16, z / 16, nibs - 1)
 fn sha_ch_4(e, f, g) = let b0 = (if (e % 2) == 1 then (f % 2) else (g % 2)) in let b1 = (if ((e / 2) % 2) == 1 then ((f / 2) % 2) else ((g / 2) % 2)) in let b2 = (if ((e / 4) % 2) == 1 then ((f / 4) % 2) else ((g / 4) % 2)) in let b3 = (if ((e / 8) % 2) == 1 then ((f / 8) % 2) else ((g / 8) % 2)) in b0 + 2 * b1 + 4 * b2 + 8 * b3
-fn sha_ch_n(e, f, g, nibs) = if nibs <= 0 then 0 else sha_ch_4(e % 16, f % 16, g % 16) + 16 * sha_ch_n(e / 16, f / 16, g / 16, nibs - 1)
+fn sha_ch_n(e, f, g, nibs) = if nibs == 8 then bv_xor(bv_and(e, f), bv_and(bv_xor(e, 4294967295), g)) else if nibs <= 0 then 0 else sha_ch_4(e % 16, f % 16, g % 16) + 16 * sha_ch_n(e / 16, f / 16, g / 16, nibs - 1)
 fn sha_maj_4(a, b, c) = let b0 = (if (a % 2) + (b % 2) + (c % 2) >= 2 then 1 else 0) in let b1 = (if ((a / 2) % 2) + ((b / 2) % 2) + ((c / 2) % 2) >= 2 then 1 else 0) in let b2 = (if ((a / 4) % 2) + ((b / 4) % 2) + ((c / 4) % 2) >= 2 then 1 else 0) in let b3 = (if ((a / 8) % 2) + ((b / 8) % 2) + ((c / 8) % 2) >= 2 then 1 else 0) in b0 + 2 * b1 + 4 * b2 + 8 * b3
-fn sha_maj_n(a, b, c, nibs) = if nibs <= 0 then 0 else sha_maj_4(a % 16, b % 16, c % 16) + 16 * sha_maj_n(a / 16, b / 16, c / 16, nibs - 1)
+fn sha_maj_n(a, b, c, nibs) = if nibs == 8 then bv_xor(bv_xor(bv_and(a, b), bv_and(a, c)), bv_and(b, c)) else if nibs <= 0 then 0 else sha_maj_4(a % 16, b % 16, c % 16) + 16 * sha_maj_n(a / 16, b / 16, c / 16, nibs - 1)
 fn sha_big_sig0(a) = sha_xor3_n(sha_rotr(a, 2), sha_rotr(a, 13), sha_rotr(a, 22), 8)
 fn sha_big_sig1(e) = sha_xor3_n(sha_rotr(e, 6), sha_rotr(e, 11), sha_rotr(e, 25), 8)
 fn sha_sml_sig0(x) = sha_xor3_n(sha_rotr(x, 7), sha_rotr(x, 18), sha_shr(x, 3), 8)
