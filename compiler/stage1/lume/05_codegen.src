@@ -2,7 +2,7 @@
 ## Same output shape as `agen` in data_asmgen.lume for fn/print statements over Num/Var/Bin/Call/If/LetIn/Str/Rec/Field.
 ## No mutation: the state {nl, ns, dt} (label counter, string-label counter, rodata chunks) is threaded through
 ## every call and returned in {code, nl, ns, dt}; the per-function context is the immutable record {locals, bound}.
-## List/index nodes are out of scope and emit the same placeholder as agen. Output is joined pairwise
+## List/index nodes are out of scope; any unsupported AST node aborts compilation via ctfail ([C0001]). Output is joined pairwise
 ## (O(n log k)), never grown with a long right-nested `+` chain.
 
 ## --- list helpers ---
@@ -212,7 +212,7 @@ fn laexpr(e, ctx, s) = match e
     RecT(tn, items) => lrec(items, ctx, s)
     Field(o, nm)   => lfield(lstrlabel(nm, s), o, ctx)
     Match(sc, arms) => lmatch(str(s.nl), ctx, sc, arms, lnext(s))
-    _              => lres("    movq $0, %rax\n    pushq %rax\n    # unsupported expr\n", s)
+    _              => lres(ctfail("lume: codegen error [C0001]: unsupported AST expression node in native x86-64 codegen\n"), s)
 
 ## --- functions ---
 fn lparams(ps, i) = match ps

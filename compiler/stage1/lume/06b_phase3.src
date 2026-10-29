@@ -1306,10 +1306,14 @@ fn vprove_reqs_hyps(reqs, lenv, fns) = match reqs
     Nil        => {ok: 1, hyps: Nil}
     Cons(h, t) => let r1 = vcond_pos(h, Nil, lenv, fns, 0) in if r1.ok == 0 then {ok: 0, hyps: Nil} else let r2 = vprove_reqs_hyps(t, lenv, fns) in if r2.ok == 0 then {ok: 0, hyps: Nil} else {ok: 1, hyps: app(r1.hyps, r2.hyps)}
 
+fn vprove_let_val(nm, v, b, hyps, lenv, fns) = match v
+    If(c, t, e2) => let rp = vcond_pos(c, hyps, lenv, fns, 0) in let rn = vcond_neg(c, hyps, lenv, fns, 0) in if rp.ok == 1 and rn.ok == 1 and vprove_let_val(nm, t, b, app(rp.hyps, hyps), lenv, fns) == 1 and vprove_let_val(nm, e2, b, app(rn.hyps, hyps), lenv, fns) == 1 then 1 else 0
+    _            => let lv = vlin_expr(v, hyps, lenv, fns, 0) in if lv.ok == 0 then 0 else vprove_goal(b, hyps, Cons({k: nm, v: lv}, lenv), fns, 0)
+
 fn vprove_goal(g, hyps, lenv, fns, d) = match g
     Num(n)          => if n != 0 then 1 else 0
-    LetIn(nm, v, b) => let gfn = n4_is_grad_let(v) in if gfn != "" then vprove_goal(n4_subst_call(b, nm, "__ad_grad_" + gfn), hyps, lenv, fns, d) else let lv = vlin_expr(v, hyps, lenv, fns, d) in if lv.ok == 0 then 0 else vprove_goal(b, hyps, Cons({k: nm, v: lv}, lenv), fns, d)
-    VarIn(nm, v, b) => let lv = vlin_expr(v, hyps, lenv, fns, d) in if lv.ok == 0 then 0 else vprove_goal(b, hyps, Cons({k: nm, v: lv}, lenv), fns, d)
+    LetIn(nm, v, b) => let gfn = n4_is_grad_let(v) in if gfn != "" then vprove_goal(n4_subst_call(b, nm, "__ad_grad_" + gfn), hyps, lenv, fns, d) else vprove_let_val(nm, v, b, hyps, lenv, fns)
+    VarIn(nm, v, b) => vprove_let_val(nm, v, b, hyps, lenv, fns)
     DeferE(c, b)    => vprove_goal(b, hyps, lenv, fns, d)
     ErrDeferE(c, b) => vprove_goal(b, hyps, lenv, fns, d)
     If(c, t, e2)    => let rp = vcond_pos(c, hyps, lenv, fns, d) in let rn = vcond_neg(c, hyps, lenv, fns, d) in if rp.ok == 1 and vprove_goal(t, app(rp.hyps, hyps), lenv, fns, d) == 1 and (vprove_goal(e2, hyps, lenv, fns, d) == 1 or (rn.ok == 1 and vprove_goal(e2, app(rn.hyps, hyps), lenv, fns, d) == 1)) then 1 else 0
@@ -1377,7 +1381,112 @@ fn vprove_law_envs(envs, body, fns) = match envs
     Nil          => {status: 1, cex: ""}
     Cons(env, r) => let rb = veval(body, env, env, fns, 0) in if rb.ok == 1 and rb.i == 0 then {status: 0 - 1, cex: vfmt_env(env)} else vprove_law_envs(r, body, fns)
 
-fn vchk_law(nm, ps, body, fns) = let lenv = vlin_init_env(ps) in let chyps = vcollect_body_hyps(body, Nil, lenv, Cons(body, Nil), fns, 0) in let pr = vprove_law_envs(vgen_envs_hyps(ps, 0, len(ps), chyps), body, fns) in if pr.status < 0 then ctfail("lume: contract verification error [V0001]: law '" + nm + "' refuted with counterexample: " + pr.cex + " (fix-it: fix the implementation or refine law '" + nm + "')\n") else 1
+## --- Horizon H1 (#198): Real LTL Temporal Logic Prover (`always` □, `eventually` ◇, `until` U, `leads_to` ~>) ---
+fn vtemp_subst_var(e, vnm, rep) = match e
+    Var(nm)         => if nm == vnm then rep else e
+    Bin(op, a, b)   => Bin(op, vtemp_subst_var(a, vnm, rep), vtemp_subst_var(b, vnm, rep))
+    If(c, t, e2)    => If(vtemp_subst_var(c, vnm, rep), vtemp_subst_var(t, vnm, rep), vtemp_subst_var(e2, vnm, rep))
+    LetIn(nm, v, b) => LetIn(nm, vtemp_subst_var(v, vnm, rep), if nm == vnm then b else vtemp_subst_var(b, vnm, rep))
+    VarIn(nm, v, b) => VarIn(nm, vtemp_subst_var(v, vnm, rep), if nm == vnm then b else vtemp_subst_var(b, vnm, rep))
+    Call(cnm, args) => Call(cnm, vtemp_subst_args(args, vnm, rep))
+    _               => e
+
+fn vtemp_subst_args(xs, vnm, rep) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons(vtemp_subst_var(h, vnm, rep), vtemp_subst_args(t, vnm, rep))
+
+fn vtemp_subst_ps(body, ps, args) = match ps
+    Nil        => body
+    Cons(p, r) => vtemp_subst_ps1(body, p, r, args)
+
+fn vtemp_subst_ps1(body, p, r, args) = match args
+    Nil         => body
+    Cons(a, ar) => vtemp_subst_ps(vtemp_subst_var(body, p, a), r, ar)
+
+fn vtemp_inline_ufn(cnm, cargs, mf, fns, d) = match mf
+    Nil        => Call(cnm, cargs)
+    Cons(f, r) => vtemp_inline_e(vtemp_subst_ps(f.body, f.ps, cargs), fns, d + 1)
+
+fn vtemp_inline_args(xs, fns, d) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons(vtemp_inline_e(h, fns, d), vtemp_inline_args(t, fns, d))
+
+fn vtemp_inline_e(e, fns, d) = if d > 4 then e else vtemp_inline_e1(e, fns, d)
+
+fn vtemp_inline_e1(e, fns, d) = match e
+    Call(cnm, args) => let cargs = vtemp_inline_args(args, fns, d) in vtemp_inline_ufn(cnm, cargs, vfnlookup(cnm, fns), fns, d)
+    Bin(op, a, b)   => Bin(op, vtemp_inline_e(a, fns, d), vtemp_inline_e(b, fns, d))
+    If(c, t, e2)    => If(vtemp_inline_e(c, fns, d), vtemp_inline_e(t, fns, d), vtemp_inline_e(e2, fns, d))
+    LetIn(nm, v, b) => LetIn(nm, vtemp_inline_e(v, fns, d), vtemp_inline_e(b, fns, d))
+    VarIn(nm, v, b) => LetIn(nm, vtemp_inline_e(v, fns, d), vtemp_inline_e(b, fns, d))
+    _               => e
+
+fn vtemp_is_bool_e(e) = match e
+    Bin(op, a, b) => if tiscmp(op) == 1 or op == "and" or op == "or" then 1 else 0
+    _             => 0
+
+fn vtemp_init_cond(sv, init_e) = if vtemp_is_bool_e(init_e) == 1 then init_e else Bin("==", Var(sv), init_e)
+
+fn vtemp_neg_op(op) = if op == "<=" then ">" else if op == "<" then ">=" else if op == ">=" then "<" else if op == ">" then "<=" else if op == "==" then ">" else "!="
+
+fn vtemp_neg_cond(goal_e, rank_e) = match goal_e
+    Bin(op, a, b) => if op == "==" then Bin(">", rank_e, Num(0)) else Bin(vtemp_neg_op(op), a, b)
+    _             => Bin(">", rank_e, Num(0))
+
+fn vtemp_default_rank(sv, goal_e) = match goal_e
+    Bin(op, a, b) => if op == "<=" or op == "==" then Bin("-", a, b) else if op == "<" then Bin("+", Bin("-", a, b), Num(1)) else if op == ">=" then Bin("-", b, a) else if op == ">" then Bin("+", Bin("-", b, a), Num(1)) else Var(sv)
+    _             => Var(sv)
+
+fn vtemp_infer_rank(sv, goal_e, rest_args) = match rest_args
+    Nil        => vtemp_default_rank(sv, goal_e)
+    Cons(r, t) => r
+
+fn vtemp_arg3(args) = ohd_e(ptl(ptl(args)))
+fn vtemp_arg4(args) = ohd_e(ptl(ptl(ptl(args))))
+fn vtemp_rest3(args) = ptl(ptl(ptl(args)))
+fn vtemp_rest4(args) = ptl(ptl(ptl(ptl(args))))
+
+fn vtemp_cand_ints() = Cons(0, Cons(1, Cons(2, Cons(4, Cons(5, Cons(10, Cons(0 - 1, Cons(0 - 3, Nil))))))))
+
+fn vtemp_filter_seeds(sv, init_c, xs, fns) = match xs
+    Nil        => Nil
+    Cons(x, r) => let env = Cons({k: sv, v: vv_int(x)}, Nil) in let rv = veval(init_c, env, env, fns, 0) in if rv.ok == 1 and rv.i != 0 then Cons(x, vtemp_filter_seeds(sv, init_c, r, fns)) else vtemp_filter_seeds(sv, init_c, r, fns)
+
+fn vtemp_seeds(sv, init_e, fns) = if vtemp_is_bool_e(init_e) == 0 then (let rv = veval(init_e, Nil, Nil, fns, 0) in if rv.ok == 1 then Cons(rv.i, Nil) else vtemp_cand_ints()) else vtemp_filter_seeds(sv, init_e, vtemp_cand_ints(), fns)
+
+fn vtemp_trace_always(sv, s_cur, step_e, inv_e, fns, t_step) = let env = Cons({k: sv, v: vv_int(s_cur)}, Nil) in let ri = veval(inv_e, env, env, fns, 0) in if ri.ok == 1 and ri.i == 0 then {ok: 0, cex: "t=" + str(t_step) + ": " + sv + "=" + str(s_cur) + " (violates always invariant at t=" + str(t_step) + ")"} else if t_step >= 12 then {ok: 1, cex: ""} else let rn = veval(step_e, env, env, fns, 0) in if rn.ok == 0 or rn.i == s_cur then {ok: 1, cex: ""} else let rr = vtemp_trace_always(sv, rn.i, step_e, inv_e, fns, t_step + 1) in if rr.ok == 0 then {ok: 0, cex: "t=" + str(t_step) + ": " + sv + "=" + str(s_cur) + " -> " + rr.cex} else {ok: 1, cex: ""}
+
+fn vtemp_sim_always_list(sv, seeds, step_e, inv_e, fns) = match seeds
+    Nil         => {ok: 1, cex: ""}
+    Cons(s0, r) => let tr = vtemp_trace_always(sv, s0, step_e, inv_e, fns, 0) in if tr.ok == 0 then {ok: 0, cex: "trace: " + tr.cex} else vtemp_sim_always_list(sv, r, step_e, inv_e, fns)
+
+fn vtemp_ind_cex_list(sv, xs, step_e, inv_e, fns) = match xs
+    Nil        => {ok: 1, cex: ""}
+    Cons(x, r) => let env = Cons({k: sv, v: vv_int(x)}, Nil) in let ri = veval(inv_e, env, env, fns, 0) in if ri.ok == 1 and ri.i != 0 then (let rn = veval(step_e, env, env, fns, 0) in if rn.ok == 1 then (let env2 = Cons({k: sv, v: vv_int(rn.i)}, Nil) in let ri2 = veval(inv_e, env2, env2, fns, 0) in if ri2.ok == 1 and ri2.i == 0 then {ok: 0, cex: "inductive step counterexample: " + sv + "=" + str(x) + " -> " + sv + "'=" + str(rn.i) + " (invariant holds at " + str(x) + " but fails at next state " + str(rn.i) + ")"} else vtemp_ind_cex_list(sv, r, step_e, inv_e, fns)) else vtemp_ind_cex_list(sv, r, step_e, inv_e, fns)) else vtemp_ind_cex_list(sv, r, step_e, inv_e, fns)
+
+fn vtemp_prove_always(sv, init_e, step_e, inv_e, fns) = let sim = vtemp_sim_always_list(sv, vtemp_seeds(sv, init_e, fns), step_e, inv_e, fns) in if sim.ok == 0 then {status: 0 - 1, cex: sim.cex} else let lenv = Cons({k: sv, v: vlin_var(sv)}, Nil) in let init_c = vtemp_inline_e(vtemp_init_cond(sv, init_e), fns, 0) in let inv_in = vtemp_inline_e(inv_e, fns, 0) in let step_in = vtemp_inline_e(step_e, fns, 0) in let next_goal = LetIn("_s_next", step_in, vtemp_subst_var(inv_in, sv, Var("_s_next"))) in let rh_base = vcond_pos(init_c, Nil, lenv, fns, 0) in let rh_step = vcond_pos(inv_in, Nil, lenv, fns, 0) in if rh_base.ok == 1 and rh_step.ok == 1 and vprove_goal(inv_in, rh_base.hyps, lenv, fns, 0) == 1 and vprove_goal(next_goal, rh_step.hyps, lenv, fns, 0) == 1 then {status: 1, cex: ""} else let ic = vtemp_ind_cex_list(sv, vtemp_cand_ints(), step_e, inv_e, fns) in if ic.ok == 0 then {status: 0 - 1, cex: ic.cex} else {status: 0 - 1, cex: "inductive step (inv => inv[s := step(s)]) is not provable in QF_LIA"}
+
+fn vtemp_trace_ev(sv, s_cur, cfg, seen, fns, t_step) = let env = Cons({k: sv, v: vv_int(s_cur)}, Nil) in let rg = veval(cfg.goal_e, env, env, fns, 0) in if rg.ok == 1 and rg.i != 0 then {ok: 1, cex: ""} else if vmem_int(s_cur, seen) == 1 then {ok: 0, cex: "t=" + str(t_step) + ": " + sv + "=" + str(s_cur) + " (lasso cycle at " + sv + "=" + str(s_cur) + " while eventually goal false)"} else if t_step >= 16 then {ok: 0, cex: "t=" + str(t_step) + ": " + sv + "=" + str(s_cur) + " (eventually goal not reached within bounded horizon)"} else let rn = veval(cfg.step_e, env, env, fns, 0) in let r_cur = veval(cfg.rank_e, env, env, fns, 0) in if rn.ok == 0 then {ok: 1, cex: ""} else if rn.i == s_cur then {ok: 0, cex: "t=" + str(t_step) + ": " + sv + "=" + str(s_cur) + " -> t=" + str(t_step + 1) + ": " + sv + "=" + str(rn.i) + " (lasso cycle at " + sv + "=" + str(rn.i) + " while eventually goal false)"} else let env2 = Cons({k: sv, v: vv_int(rn.i)}, Nil) in let rg2 = veval(cfg.goal_e, env2, env2, fns, 0) in let r_nxt = veval(cfg.rank_e, env2, env2, fns, 0) in if rg2.ok == 1 and rg2.i == 0 and r_cur.ok == 1 and r_nxt.ok == 1 and r_nxt.i >= r_cur.i then {ok: 0, cex: "t=" + str(t_step) + ": " + sv + "=" + str(s_cur) + " -> t=" + str(t_step + 1) + ": " + sv + "=" + str(rn.i) + " (diverging rank " + str(r_nxt.i) + " >= " + str(r_cur.i) + " while eventually goal false)"} else let rr = vtemp_trace_ev(sv, rn.i, cfg, Cons(s_cur, seen), fns, t_step + 1) in if rr.ok == 0 then {ok: 0, cex: "t=" + str(t_step) + ": " + sv + "=" + str(s_cur) + " -> " + rr.cex} else {ok: 1, cex: ""}
+
+fn vtemp_sim_ev_list(sv, seeds, cfg, fns) = match seeds
+    Nil         => {ok: 1, cex: ""}
+    Cons(s0, r) => let tr = vtemp_trace_ev(sv, s0, cfg, Nil, fns, 0) in if tr.ok == 0 then {ok: 0, cex: "lasso/diverging trace: " + tr.cex} else vtemp_sim_ev_list(sv, r, cfg, fns)
+
+fn vtemp_prove_eventually(sv, init_e, step_e, goal_e, rank_e, fns) = let cfg = {step_e: step_e, goal_e: goal_e, rank_e: rank_e, hold_e: Num(1)} in let sim = vtemp_sim_ev_list(sv, vtemp_seeds(sv, init_e, fns), cfg, fns) in if sim.ok == 0 then {status: 0 - 1, cex: sim.cex} else let lenv = Cons({k: sv, v: vlin_var(sv)}, Nil) in let rank_in = vtemp_inline_e(rank_e, fns, 0) in let step_in = vtemp_inline_e(step_e, fns, 0) in let ng_in = vtemp_inline_e(vtemp_neg_cond(goal_e, rank_in), fns, 0) in let bnd_goal = Bin(">", rank_in, Num(0)) in let dec_goal = LetIn("_s_next", step_in, Bin("<", vtemp_subst_var(rank_in, sv, Var("_s_next")), rank_in)) in let rh_ng = vcond_pos(ng_in, Nil, lenv, fns, 0) in if rh_ng.ok == 1 and vprove_goal(bnd_goal, rh_ng.hyps, lenv, fns, 0) == 1 and vprove_goal(dec_goal, rh_ng.hyps, lenv, fns, 0) == 1 then {status: 1, cex: ""} else {status: 0 - 1, cex: "ranking function '" + sv + "' does not strictly decrease under transition step in QF_LIA"}
+
+fn vtemp_trace_until(sv, s_cur, cfg, seen, fns, t_step) = let env = Cons({k: sv, v: vv_int(s_cur)}, Nil) in let rg = veval(cfg.goal_e, env, env, fns, 0) in if rg.ok == 1 and rg.i != 0 then {ok: 1, cex: ""} else let rh = veval(cfg.hold_e, env, env, fns, 0) in if rh.ok == 1 and rh.i == 0 then {ok: 0, cex: "t=" + str(t_step) + ": " + sv + "=" + str(s_cur) + " (violates until hold condition before goal at t=" + str(t_step) + ")"} else if vmem_int(s_cur, seen) == 1 then {ok: 0, cex: "t=" + str(t_step) + ": " + sv + "=" + str(s_cur) + " (lasso cycle at " + sv + "=" + str(s_cur) + " before until goal reached)"} else if t_step >= 16 then {ok: 0, cex: "t=" + str(t_step) + ": " + sv + "=" + str(s_cur) + " (until goal not reached within bounded horizon)"} else let rn = veval(cfg.step_e, env, env, fns, 0) in if rn.ok == 0 then {ok: 1, cex: ""} else if rn.i == s_cur then {ok: 0, cex: "t=" + str(t_step) + ": " + sv + "=" + str(s_cur) + " -> t=" + str(t_step + 1) + ": " + sv + "=" + str(rn.i) + " (lasso cycle at " + sv + "=" + str(rn.i) + " before until goal reached)"} else let rr = vtemp_trace_until(sv, rn.i, cfg, Cons(s_cur, seen), fns, t_step + 1) in if rr.ok == 0 then {ok: 0, cex: "t=" + str(t_step) + ": " + sv + "=" + str(s_cur) + " -> " + rr.cex} else {ok: 1, cex: ""}
+
+fn vtemp_sim_until_list(sv, seeds, cfg, fns) = match seeds
+    Nil         => {ok: 1, cex: ""}
+    Cons(s0, r) => let tr = vtemp_trace_until(sv, s0, cfg, Nil, fns, 0) in if tr.ok == 0 then {ok: 0, cex: "until trace: " + tr.cex} else vtemp_sim_until_list(sv, r, cfg, fns)
+
+fn vtemp_prove_until(sv, init_e, step_e, hold_e, goal_e, fns) = let rank_e = vtemp_default_rank(sv, goal_e) in let cfg = {step_e: step_e, goal_e: goal_e, rank_e: rank_e, hold_e: hold_e} in let sim = vtemp_sim_until_list(sv, vtemp_seeds(sv, init_e, fns), cfg, fns) in if sim.ok == 0 then {status: 0 - 1, cex: sim.cex} else let ev = vtemp_prove_eventually(sv, init_e, step_e, goal_e, rank_e, fns) in if ev.status < 0 then ev else let lenv = Cons({k: sv, v: vlin_var(sv)}, Nil) in let init_c = vtemp_inline_e(vtemp_init_cond(sv, init_e), fns, 0) in let hold_in = vtemp_inline_e(hold_e, fns, 0) in let goal_in = vtemp_inline_e(goal_e, fns, 0) in let step_in = vtemp_inline_e(step_e, fns, 0) in let ng_in = vtemp_inline_e(vtemp_neg_cond(goal_e, vtemp_inline_e(rank_e, fns, 0)), fns, 0) in let rh_init = vcond_pos(init_c, Nil, lenv, fns, 0) in let rh_step = vcond_pos(Bin("and", ng_in, hold_in), Nil, lenv, fns, 0) in let next_hold = LetIn("_s_next", step_in, Bin("or", vtemp_subst_var(hold_in, sv, Var("_s_next")), vtemp_subst_var(goal_in, sv, Var("_s_next")))) in if rh_init.ok == 1 and rh_step.ok == 1 and vprove_goal(Bin("or", goal_in, hold_in), rh_init.hyps, lenv, fns, 0) == 1 and vprove_goal(next_hold, rh_step.hyps, lenv, fns, 0) == 1 then {status: 1, cex: ""} else {status: 0 - 1, cex: "until hold invariant is not preserved prior to reaching goal in QF_LIA"}
+
+fn vchk_temporal_call(nm, sv, cnm, args, fns) = if cnm == "always" and len(args) >= 3 then (let r = vtemp_prove_always(sv, ohd_e(args), ohd_e(ptl(args)), vtemp_arg3(args), fns) in if r.status < 0 then ctfail("lume: temporal verification error [V0005]: temporal law '" + nm + "' (always) refuted with counterexample: " + r.cex + " (fix-it: strengthen the state invariant or fix the transition function so the invariant holds initially and is preserved across every step)\n") else 1) else if cnm == "eventually" and len(args) >= 3 then (let g = vtemp_arg3(args) in let rk = vtemp_infer_rank(sv, g, vtemp_rest3(args)) in let r = vtemp_prove_eventually(sv, ohd_e(args), ohd_e(ptl(args)), g, rk, fns) in if r.status < 0 then ctfail("lume: temporal verification error [V0005]: temporal law '" + nm + "' (eventually) refuted with counterexample: " + r.cex + " (fix-it: ensure the transition step strictly decreases a well-founded ranking measure until the goal holds)\n") else 1) else if cnm == "until" and len(args) >= 4 then (let r = vtemp_prove_until(sv, ohd_e(args), ohd_e(ptl(args)), vtemp_arg3(args), vtemp_arg4(args), fns) in if r.status < 0 then ctfail("lume: temporal verification error [V0005]: temporal law '" + nm + "' (until) refuted with counterexample: " + r.cex + " (fix-it: ensure the hold predicate holds until the goal predicate is reached)\n") else 1) else if cnm == "leads_to" and len(args) >= 4 then (let g = vtemp_arg4(args) in let rk = vtemp_infer_rank(sv, g, vtemp_rest4(args)) in let r = vtemp_prove_eventually(sv, vtemp_arg3(args), ohd_e(ptl(args)), g, rk, fns) in if r.status < 0 then ctfail("lume: temporal verification error [V0005]: temporal law '" + nm + "' (leads_to) refuted with counterexample: " + r.cex + " (fix-it: ensure states satisfying the trigger eventually reach the response goal)\n") else 1) else 0 - 1
+
+fn vchk_law(nm, ps, body, fns) = match body
+    Call(cnm, args) => let tr = vchk_temporal_call(nm, if isnil(ps) == 1 then "s" else phd(ps), cnm, args, fns) in if tr >= 0 then tr else (let lenv = vlin_init_env(ps) in let chyps = vcollect_body_hyps(body, Nil, lenv, Cons(body, Nil), fns, 0) in let pr = vprove_law_envs(vgen_envs_hyps(ps, 0, len(ps), chyps), body, fns) in if pr.status < 0 then ctfail("lume: contract verification error [V0001]: law '" + nm + "' refuted with counterexample: " + pr.cex + " (fix-it: fix the implementation or refine law '" + nm + "')\n") else 1)
+    _               => let lenv = vlin_init_env(ps) in let chyps = vcollect_body_hyps(body, Nil, lenv, Cons(body, Nil), fns, 0) in let pr = vprove_law_envs(vgen_envs_hyps(ps, 0, len(ps), chyps), body, fns) in if pr.status < 0 then ctfail("lume: contract verification error [V0001]: law '" + nm + "' refuted with counterexample: " + pr.cex + " (fix-it: fix the implementation or refine law '" + nm + "')\n") else 1
 
 fn vchk_call_req(cnm, args, fnm, mvs, fns) = match mvs
     Nil          => 0

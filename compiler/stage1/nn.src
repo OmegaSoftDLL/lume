@@ -116,26 +116,97 @@ fn model_save_safetensors(m) = let o1 = nn_data_bytes(m.w1) in let o2 = o1 + nn_
 
 fn model_export_onnx(m, name) = "{\"ir_version\":9,\"graph\":{\"name\":\"" + name + "\",\"hash\":\"" + model_content_hash(m) + "\",\"initializers\":{\"w1\":[" + nn_data_csv(m.w1.data) + "],\"b1\":[" + nn_data_csv(m.b1.data) + "],\"w2\":[" + nn_data_csv(m.w2.data) + "],\"b2\":[" + nn_data_csv(m.b2.data) + "]},\"nodes\":[\"MatMul\",\"Add\",\"Relu\",\"MatMul\",\"Add\"]}}"
 
-## GPU Accelerator Kernel Emission (`kernel fn` body lowering -> CUDA PTX & Vulkan SPIR-V)
-fn kernel_ptx_op(op, i) = let r_in = "%r" + str(i) in let r_out = "%r" + str(i + 1) in if op == "mul" then "    mul.lo.s32 " + r_out + ", " + r_in + ", %r_w;\n" else if op == "add" then "    add.s32 " + r_out + ", " + r_in + ", %r_b;\n" else if op == "sub" then "    sub.s32 " + r_out + ", " + r_in + ", %r_b;\n" else if op == "relu" then "    max.s32 " + r_out + ", " + r_in + ", 0;\n" else "    mov.s32 " + r_out + ", " + r_in + ";\n"
+## GPU Accelerator Kernel Compilation (`kernel fn` AST lowering -> SSA CUDA PTX 8.0 & Vulkan SPIR-V 1.6)
+## + Faithful Instruction-Level PTX & SPIR-V Virtual Machine Emulators (#250).
+fn kernel_ptx_params(ps) = match ps
+    Nil        => ".param .u64 p_out"
+    Cons(p, r) => ".param .s64 p_" + p + ", " + kernel_ptx_params(r)
 
-fn kernel_ptx_ops(ops, i) = match ops
-    Nil         => "    st.global.s32 [%rd_out], %r" + str(i) + ";\n    ret;\n"
-    Cons(op, r) => kernel_ptx_op(op, i) + kernel_ptx_ops(r, i + 1)
+fn kernel_ptx_loads(ps) = match ps
+    Nil        => "    ld.param.u64 %rd_out, [p_out];\n"
+    Cons(p, r) => "    ld.param.s64 %r_" + p + ", [p_" + p + "];\n" + kernel_ptx_loads(r)
 
-fn kernel_lower_ptx(kname, tile, ops) = ".version 8.0\n.target sm_80\n.visible .entry " + kname + "(.param .u64 p_in, .param .s32 p_w, .param .s32 p_b, .param .u64 p_out)\n.maxntid " + str(tile) + ", 1, 1\n{\n    .reg .s32 %r<8>, %r_w, %r_b;\n    .reg .u64 %rd_in, %rd_out;\n    ld.param.u64 %rd_in, [p_in];\n    ld.param.s32 %r_w, [p_w];\n    ld.param.s32 %r_b, [p_b];\n    ld.param.u64 %rd_out, [p_out];\n    ld.global.s32 %r0, [%rd_in];\n" + kernel_ptx_ops(ops, 0) + "}"
+fn kernel_ptx_arith_op(op) = if op == "*" then "mul.lo.s64" else if op == "-" then "sub.s64" else if op == "/" then "div.s64" else if op == "%" then "rem.s64" else if op == "and" then "and.b64" else if op == "or" then "or.b64" else "add.s64"
 
-fn kernel_emit_ptx(kname, tile) = kernel_lower_ptx(kname, tile, Cons("mul", Cons("add", Cons("relu", Nil))))
+fn kernel_ptx_cmp_op(op) = if op == ">" then "gt" else if op == ">=" then "ge" else if op == "<" then "lt" else if op == "<=" then "le" else if op == "==" then "eq" else if op == "!=" then "ne" else ""
 
-fn kernel_spirv_op(op, i) = let r_in = "%v" + str(i) in let r_out = "%v" + str(i + 1) in if op == "mul" then "    " + r_out + " = OpIMul %int " + r_in + " %w\n" else if op == "add" then "    " + r_out + " = OpIAdd %int " + r_in + " %b\n" else if op == "sub" then "    " + r_out + " = OpISub %int " + r_in + " %b\n" else if op == "relu" then "    " + r_out + " = OpExtInst %int %glsl SMax " + r_in + " %zero\n" else "    " + r_out + " = OpCopyObject %int " + r_in + "\n"
+fn kernel_lower_ptx_e(e, id) = match e
+    KNum(n)       => let dst = "%r" + str(id) in {code: "    mov.s64 " + dst + ", " + str(n) + ";\n", dst: dst, next: id + 1}
+    KVar(nm)      => let dst = "%r" + str(id) in {code: "    mov.s64 " + dst + ", %r_" + nm + ";\n", dst: dst, next: id + 1}
+    KBin(op, l, r) => let rl = kernel_lower_ptx_e(l, id) in let rr = kernel_lower_ptx_e(r, rl.next) in let dst = "%r" + str(rr.next) in let cmp = kernel_ptx_cmp_op(op) in if cmp != "" then (let pdst = "%p" + str(rr.next) in {code: rl.code + rr.code + "    setp." + cmp + ".s64 " + pdst + ", " + rl.dst + ", " + rr.dst + ";\n    selp.s64 " + dst + ", 1, 0, " + pdst + ";\n", dst: dst, next: rr.next + 1}) else {code: rl.code + rr.code + "    " + kernel_ptx_arith_op(op) + " " + dst + ", " + rl.dst + ", " + rr.dst + ";\n", dst: dst, next: rr.next + 1}
+    KIf(c, t, e2) => let rc = kernel_lower_ptx_e(c, id) in let rt = kernel_lower_ptx_e(t, rc.next) in let re = kernel_lower_ptx_e(e2, rt.next) in let pdst = "%p" + str(re.next) in let dst = "%r" + str(re.next) in {code: rc.code + rt.code + re.code + "    setp.ne.s64 " + pdst + ", " + rc.dst + ", 0;\n    selp.s64 " + dst + ", " + rt.dst + ", " + re.dst + ", " + pdst + ";\n", dst: dst, next: re.next + 1}
+    KLet(nm, v, b) => let rv = kernel_lower_ptx_e(v, id) in let rb = kernel_lower_ptx_e(b, rv.next) in {code: rv.code + "    mov.s64 %r_" + nm + ", " + rv.dst + ";\n" + rb.code, dst: rb.dst, next: rb.next}
 
-fn kernel_spirv_ops(ops, i) = match ops
-    Nil         => "    OpStore %out_ptr %v" + str(i) + "\n    OpReturn\n"
-    Cons(op, r) => kernel_spirv_op(op, i) + kernel_spirv_ops(r, i + 1)
+fn kernel_emit_ptx(kname, tile, params, body_ast) = let b = kernel_lower_ptx_e(body_ast, 0) in ".version 8.0\n.target sm_80\n.visible .entry " + kname + "(" + kernel_ptx_params(params) + ")\n.maxntid " + str(tile) + ", 1, 1\n{\n" + kernel_ptx_loads(params) + b.code + "    st.global.s64 [%rd_out], " + b.dst + ";\n    ret;\n}"
 
-fn kernel_lower_spirv(kname, tile, ops) = "; SPIR-V\n; Version: 1.6\nOpCapability Shader\n%glsl = OpExtInstImport \"GLSL.std.450\"\nOpMemoryModel Logical GLSL450\nOpEntryPoint GLCompute %" + kname + " \"" + kname + "\"\nOpExecutionMode %" + kname + " LocalSize " + str(tile) + " 1 1\n%int = OpTypeInt 32 1\n%zero = OpConstant %int 0\n%" + kname + " = OpFunction %void None %fn_ty\n%entry = OpLabel\n" + kernel_spirv_ops(ops, 0) + "OpFunctionEnd"
+fn kernel_spirv_params(ps) = match ps
+    Nil        => ""
+    Cons(p, r) => "    %" + p + " = OpFunctionParameter %long\n" + kernel_spirv_params(r)
 
-fn kernel_emit_spirv(kname, tile) = kernel_lower_spirv(kname, tile, Cons("mul", Cons("add", Cons("relu", Nil))))
+fn kernel_spirv_arith_op(op) = if op == "*" then "OpIMul" else if op == "-" then "OpISub" else if op == "/" then "OpSDiv" else if op == "%" then "OpSMod" else if op == "and" then "OpBitwiseAnd" else if op == "or" then "OpBitwiseOr" else "OpIAdd"
+
+fn kernel_spirv_cmp_op(op) = if op == ">" then "OpSGreaterThan" else if op == ">=" then "OpSGreaterThanEqual" else if op == "<" then "OpSLessThan" else if op == "<=" then "OpSLessThanEqual" else if op == "==" then "OpIEqual" else if op == "!=" then "OpINotEqual" else ""
+
+fn kernel_lower_spirv_e(e, id) = match e
+    KNum(n)       => let dst = "%v" + str(id) in {code: "    " + dst + " = OpConstant %long " + str(n) + "\n", dst: dst, next: id + 1}
+    KVar(nm)      => let dst = "%v" + str(id) in {code: "    " + dst + " = OpCopyObject %long %" + nm + "\n", dst: dst, next: id + 1}
+    KBin(op, l, r) => let rl = kernel_lower_spirv_e(l, id) in let rr = kernel_lower_spirv_e(r, rl.next) in let dst = "%v" + str(rr.next) in let cmp = kernel_spirv_cmp_op(op) in if cmp != "" then (let bdst = "%b" + str(rr.next) in {code: rl.code + rr.code + "    " + bdst + " = " + cmp + " %bool " + rl.dst + " " + rr.dst + "\n    " + dst + " = OpSelect %long " + bdst + " %one %zero\n", dst: dst, next: rr.next + 1}) else {code: rl.code + rr.code + "    " + dst + " = " + kernel_spirv_arith_op(op) + " %long " + rl.dst + " " + rr.dst + "\n", dst: dst, next: rr.next + 1}
+    KIf(c, t, e2) => let rc = kernel_lower_spirv_e(c, id) in let rt = kernel_lower_spirv_e(t, rc.next) in let re = kernel_lower_spirv_e(e2, rt.next) in let bdst = "%b" + str(re.next) in let dst = "%v" + str(re.next) in {code: rc.code + rt.code + re.code + "    " + bdst + " = OpINotEqual %bool " + rc.dst + " %zero\n    " + dst + " = OpSelect %long " + bdst + " " + rt.dst + " " + re.dst + "\n", dst: dst, next: re.next + 1}
+    KLet(nm, v, b) => let rv = kernel_lower_spirv_e(v, id) in let rb = kernel_lower_spirv_e(b, rv.next) in {code: rv.code + "    %" + nm + " = OpCopyObject %long " + rv.dst + "\n" + rb.code, dst: rb.dst, next: rb.next}
+
+fn kernel_emit_spirv(kname, tile, params, body_ast) = let b = kernel_lower_spirv_e(body_ast, 0) in "; SPIR-V\n; Version: 1.6\nOpCapability Shader\nOpMemoryModel Logical GLSL450\nOpEntryPoint GLCompute %" + kname + " \"" + kname + "\"\nOpExecutionMode %" + kname + " LocalSize " + str(tile) + " 1 1\n%long = OpTypeInt 64 1\n%bool = OpTypeBool\n%zero = OpConstant %long 0\n%one = OpConstant %long 1\n%" + kname + " = OpFunction %void None %fn_ty\n" + kernel_spirv_params(params) + "%entry = OpLabel\n" + b.code + "    OpStore %out_ptr " + b.dst + "\n    OpReturn\nOpFunctionEnd"
+
+fn kvm_is_sep(c) = if c == " " or c == "\t" or c == "," or c == ";" or c == "\r" then 1 else 0
+
+fn kvm_tokens_loop(s, i, n, start, in_tok) = if i >= n then (if in_tok == 1 then Cons(slice(s, start, n), Nil) else Nil) else let sep = kvm_is_sep(at(s, i)) in if in_tok == 0 then (if sep == 1 then kvm_tokens_loop(s, i + 1, n, 0, 0) else kvm_tokens_loop(s, i + 1, n, i, 1)) else (if sep == 1 then Cons(slice(s, start, i), kvm_tokens_loop(s, i + 1, n, 0, 0)) else kvm_tokens_loop(s, i + 1, n, start, 1))
+
+fn kvm_tokens(line) = kvm_tokens_loop(line, 0, count(line), 0, 0)
+
+fn kvm_line_end(s, i, n) = if i >= n then n else if at(s, i) == "\n" then i else kvm_line_end(s, i + 1, n)
+
+fn kvm_lines_loop(s, i, n) = if i >= n then Nil else let e = kvm_line_end(s, i, n) in Cons(slice(s, i, e), kvm_lines_loop(s, e + 1, n))
+
+fn kvm_lines(s) = kvm_lines_loop(s, 0, count(s))
+
+fn kvm_tok_at(xs, idx) = match xs
+    Nil        => ""
+    Cons(h, t) => if idx <= 0 then h else kvm_tok_at(t, idx - 1)
+
+fn kvm_tok_len(xs) = match xs
+    Nil        => 0
+    Cons(h, t) => 1 + kvm_tok_len(t)
+
+fn kvm_lookup(k, regs) = match regs
+    Nil        => 0
+    Cons(h, t) => if h.k == k then h.v else kvm_lookup(k, t)
+
+fn kvm_parse_int(s) = if count(s) > 1 then (if at(s, 0) == "-" then 0 - toint(slice(s, 1, count(s))) else toint(s)) else toint(s)
+
+fn kvm_val(tok, regs) = if count(tok) > 0 then (if at(tok, 0) == "%" or at(tok, 0) == "[" then kvm_lookup(tok, regs) else kvm_parse_int(tok)) else 0
+
+fn ptx_vm_step(toks, regs, env) = let n = kvm_tok_len(toks) in if n == 0 then regs else let op = kvm_tok_at(toks, 0) in if op == "ld.param.s64" and n >= 3 then (let dst = kvm_tok_at(toks, 1) in let pref = kvm_tok_at(toks, 2) in let pnm = slice(pref, 3, count(pref) - 1) in Cons({k: dst, v: kvm_lookup(pnm, env)}, regs)) else if op == "mov.s64" and n >= 3 then Cons({k: kvm_tok_at(toks, 1), v: kvm_val(kvm_tok_at(toks, 2), regs)}, regs) else if op == "mul.lo.s64" and n >= 4 then Cons({k: kvm_tok_at(toks, 1), v: kvm_val(kvm_tok_at(toks, 2), regs) * kvm_val(kvm_tok_at(toks, 3), regs)}, regs) else if op == "add.s64" and n >= 4 then Cons({k: kvm_tok_at(toks, 1), v: kvm_val(kvm_tok_at(toks, 2), regs) + kvm_val(kvm_tok_at(toks, 3), regs)}, regs) else if op == "sub.s64" and n >= 4 then Cons({k: kvm_tok_at(toks, 1), v: kvm_val(kvm_tok_at(toks, 2), regs) - kvm_val(kvm_tok_at(toks, 3), regs)}, regs) else if op == "div.s64" and n >= 4 then Cons({k: kvm_tok_at(toks, 1), v: kvm_val(kvm_tok_at(toks, 2), regs) / kvm_val(kvm_tok_at(toks, 3), regs)}, regs) else if op == "rem.s64" and n >= 4 then Cons({k: kvm_tok_at(toks, 1), v: kvm_val(kvm_tok_at(toks, 2), regs) % kvm_val(kvm_tok_at(toks, 3), regs)}, regs) else if op == "and.b64" and n >= 4 then Cons({k: kvm_tok_at(toks, 1), v: if kvm_val(kvm_tok_at(toks, 2), regs) != 0 and kvm_val(kvm_tok_at(toks, 3), regs) != 0 then 1 else 0}, regs) else if op == "or.b64" and n >= 4 then Cons({k: kvm_tok_at(toks, 1), v: if kvm_val(kvm_tok_at(toks, 2), regs) != 0 or kvm_val(kvm_tok_at(toks, 3), regs) != 0 then 1 else 0}, regs) else if op == "setp.gt.s64" and n >= 4 then Cons({k: kvm_tok_at(toks, 1), v: if kvm_val(kvm_tok_at(toks, 2), regs) > kvm_val(kvm_tok_at(toks, 3), regs) then 1 else 0}, regs) else if op == "setp.ge.s64" and n >= 4 then Cons({k: kvm_tok_at(toks, 1), v: if kvm_val(kvm_tok_at(toks, 2), regs) >= kvm_val(kvm_tok_at(toks, 3), regs) then 1 else 0}, regs) else if op == "setp.lt.s64" and n >= 4 then Cons({k: kvm_tok_at(toks, 1), v: if kvm_val(kvm_tok_at(toks, 2), regs) < kvm_val(kvm_tok_at(toks, 3), regs) then 1 else 0}, regs) else if op == "setp.le.s64" and n >= 4 then Cons({k: kvm_tok_at(toks, 1), v: if kvm_val(kvm_tok_at(toks, 2), regs) <= kvm_val(kvm_tok_at(toks, 3), regs) then 1 else 0}, regs) else if op == "setp.eq.s64" and n >= 4 then Cons({k: kvm_tok_at(toks, 1), v: if kvm_val(kvm_tok_at(toks, 2), regs) == kvm_val(kvm_tok_at(toks, 3), regs) then 1 else 0}, regs) else if op == "setp.ne.s64" and n >= 4 then Cons({k: kvm_tok_at(toks, 1), v: if kvm_val(kvm_tok_at(toks, 2), regs) != kvm_val(kvm_tok_at(toks, 3), regs) then 1 else 0}, regs) else if op == "selp.s64" and n >= 5 then Cons({k: kvm_tok_at(toks, 1), v: if kvm_val(kvm_tok_at(toks, 4), regs) != 0 then kvm_val(kvm_tok_at(toks, 2), regs) else kvm_val(kvm_tok_at(toks, 3), regs)}, regs) else if op == "st.global.s64" and n >= 3 then Cons({k: kvm_tok_at(toks, 1), v: kvm_val(kvm_tok_at(toks, 2), regs)}, regs) else regs
+
+fn ptx_vm_lines(ls, regs, env) = match ls
+    Nil        => kvm_lookup("[%rd_out]", regs)
+    Cons(l, r) => ptx_vm_lines(r, ptx_vm_step(kvm_tokens(l), regs, env), env)
+
+fn ptx_vm_exec(ptx_src, env) = ptx_vm_lines(kvm_lines(ptx_src), Nil, env)
+
+fn spirv_vm_step(toks, regs, env) = let n = kvm_tok_len(toks) in if n == 0 then regs else let t0 = kvm_tok_at(toks, 0) in if t0 == "OpStore" and n >= 3 then Cons({k: kvm_tok_at(toks, 1), v: kvm_val(kvm_tok_at(toks, 2), regs)}, regs) else if n >= 4 and kvm_tok_at(toks, 1) == "=" then (let dst = t0 in let op = kvm_tok_at(toks, 2) in if op == "OpFunctionParameter" then Cons({k: dst, v: kvm_lookup(slice(dst, 1, count(dst)), env)}, regs) else if op == "OpConstant" and n >= 5 then Cons({k: dst, v: kvm_parse_int(kvm_tok_at(toks, 4))}, regs) else if op == "OpCopyObject" and n >= 5 then Cons({k: dst, v: kvm_val(kvm_tok_at(toks, 4), regs)}, regs) else if op == "OpIMul" and n >= 6 then Cons({k: dst, v: kvm_val(kvm_tok_at(toks, 4), regs) * kvm_val(kvm_tok_at(toks, 5), regs)}, regs) else if op == "OpIAdd" and n >= 6 then Cons({k: dst, v: kvm_val(kvm_tok_at(toks, 4), regs) + kvm_val(kvm_tok_at(toks, 5), regs)}, regs) else if op == "OpISub" and n >= 6 then Cons({k: dst, v: kvm_val(kvm_tok_at(toks, 4), regs) - kvm_val(kvm_tok_at(toks, 5), regs)}, regs) else if op == "OpSDiv" and n >= 6 then Cons({k: dst, v: kvm_val(kvm_tok_at(toks, 4), regs) / kvm_val(kvm_tok_at(toks, 5), regs)}, regs) else if op == "OpSMod" and n >= 6 then Cons({k: dst, v: kvm_val(kvm_tok_at(toks, 4), regs) % kvm_val(kvm_tok_at(toks, 5), regs)}, regs) else if op == "OpBitwiseAnd" and n >= 6 then Cons({k: dst, v: if kvm_val(kvm_tok_at(toks, 4), regs) != 0 and kvm_val(kvm_tok_at(toks, 5), regs) != 0 then 1 else 0}, regs) else if op == "OpBitwiseOr" and n >= 6 then Cons({k: dst, v: if kvm_val(kvm_tok_at(toks, 4), regs) != 0 or kvm_val(kvm_tok_at(toks, 5), regs) != 0 then 1 else 0}, regs) else if op == "OpSGreaterThan" and n >= 6 then Cons({k: dst, v: if kvm_val(kvm_tok_at(toks, 4), regs) > kvm_val(kvm_tok_at(toks, 5), regs) then 1 else 0}, regs) else if op == "OpSGreaterThanEqual" and n >= 6 then Cons({k: dst, v: if kvm_val(kvm_tok_at(toks, 4), regs) >= kvm_val(kvm_tok_at(toks, 5), regs) then 1 else 0}, regs) else if op == "OpSLessThan" and n >= 6 then Cons({k: dst, v: if kvm_val(kvm_tok_at(toks, 4), regs) < kvm_val(kvm_tok_at(toks, 5), regs) then 1 else 0}, regs) else if op == "OpSLessThanEqual" and n >= 6 then Cons({k: dst, v: if kvm_val(kvm_tok_at(toks, 4), regs) <= kvm_val(kvm_tok_at(toks, 5), regs) then 1 else 0}, regs) else if op == "OpIEqual" and n >= 6 then Cons({k: dst, v: if kvm_val(kvm_tok_at(toks, 4), regs) == kvm_val(kvm_tok_at(toks, 5), regs) then 1 else 0}, regs) else if op == "OpINotEqual" and n >= 6 then Cons({k: dst, v: if kvm_val(kvm_tok_at(toks, 4), regs) != kvm_val(kvm_tok_at(toks, 5), regs) then 1 else 0}, regs) else if op == "OpSelect" and n >= 7 then Cons({k: dst, v: if kvm_val(kvm_tok_at(toks, 4), regs) != 0 then kvm_val(kvm_tok_at(toks, 5), regs) else kvm_val(kvm_tok_at(toks, 6), regs)}, regs) else regs) else regs
+
+fn spirv_vm_lines(ls, regs, env) = match ls
+    Nil        => kvm_lookup("%out_ptr", regs)
+    Cons(l, r) => spirv_vm_lines(r, spirv_vm_step(kvm_tokens(l), regs, env), env)
+
+fn spirv_vm_exec(spirv_src, env) = spirv_vm_lines(kvm_lines(spirv_src), Cons({k: "%zero", v: 0}, Cons({k: "%one", v: 1}, Nil)), env)
+
+fn ptx_vm_launch_1d(ptx_src, pnm, xs, base_env) = match xs
+    Nil        => Nil
+    Cons(x, r) => Cons(ptx_vm_exec(ptx_src, Cons({k: pnm, v: x}, base_env)), ptx_vm_launch_1d(ptx_src, pnm, r, base_env))
+
+fn spirv_vm_launch_1d(spirv_src, pnm, xs, base_env) = match xs
+    Nil        => Nil
+    Cons(x, r) => Cons(spirv_vm_exec(spirv_src, Cons({k: pnm, v: x}, base_env)), spirv_vm_launch_1d(spirv_src, pnm, r, base_env))
 
 ## Unit tests for `lume test compiler/stage1/nn.src`
 fn test_nn_mlp2_forward_and_loss() = let w1 = {rows: 2, cols: 2, data: Cons(1, Cons(0, Cons(0, Cons(1, Nil))))} in let b1 = {rows: 1, cols: 2, data: Cons(0, Cons(0, Nil))} in let w2 = {rows: 2, cols: 2, data: Cons(2, Cons(0, Cons(0, Cons(2, Nil))))} in let b2 = {rows: 1, cols: 2, data: Cons(0, Cons(0, Nil))} in let m = mlp2_new(w1, b1, w2, b2) in let x = {rows: 2, cols: 2, data: Cons(3, Cons(1, Cons(1, Cons(4, Nil))))} in let y = Cons(0, Cons(1, Nil)) in if mlp2_accuracy(m, x, y) == 100 and mlp2_loss(m, x, y) >= 0 then 1 else 0
@@ -146,4 +217,4 @@ fn test_nn_adam_step() = let w1 = {rows: 2, cols: 2, data: Cons(1, Cons(0, Cons(
 
 fn test_nn_safetensors_and_onnx_export() = let w1 = {rows: 2, cols: 2, data: Cons(1, Cons(2, Cons(3, Cons(4, Nil))))} in let b1 = {rows: 1, cols: 2, data: Cons(5, Cons(6, Nil))} in let m = mlp2_new(w1, b1, w1, b1) in let h = model_content_hash(m) in let st = model_save_safetensors(m) in let ox = model_export_onnx(m, "mlp2") in if count(h) == 71 and sha256_hex("abc") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" and count(st) > 150 and count(ox) > 120 then 1 else 0
 
-fn test_nn_ptx_and_spirv_codegen() = let ptx = kernel_emit_ptx("fused_affine_relu", 16) in let spv = kernel_emit_spirv("fused_affine_relu", 16) in if count(ptx) > 150 and count(spv) > 150 then 1 else 0
+fn test_nn_ptx_and_spirv_codegen() = let ps1 = Cons("x", Cons("w", Cons("b", Nil))) in let body1 = KLet("z", KBin("+", KBin("*", KVar("x"), KVar("w")), KVar("b")), KIf(KBin(">", KVar("z"), KNum(0)), KVar("z"), KNum(0))) in let ptx1 = kernel_emit_ptx("fused_affine_relu", 16, ps1, body1) in let spv1 = kernel_emit_spirv("fused_affine_relu", 16, ps1, body1) in let env_pos = Cons({k: "x", v: 6}, Cons({k: "w", v: 4}, Cons({k: "b", v: 0 - 3}, Nil))) in let env_neg = Cons({k: "x", v: 2}, Cons({k: "w", v: 0 - 5}, Cons({k: "b", v: 3}, Nil))) in let grid_xs = Cons(0 - 2, Cons(1, Cons(3, Cons(6, Nil)))) in let base_wb = Cons({k: "w", v: 4}, Cons({k: "b", v: 0 - 3}, Nil)) in let ptx_g = ptx_vm_launch_1d(ptx1, "x", grid_xs, base_wb) in let spv_g = spirv_vm_launch_1d(spv1, "x", grid_xs, base_wb) in let ps2 = Cons("x", Cons("a", Cons("b", Cons("c", Nil)))) in let body2 = KLet("u", KBin("+", KBin("*", KVar("a"), KVar("x")), KVar("b")), KBin("-", KBin("*", KVar("u"), KVar("x")), KVar("c"))) in let ptx2 = kernel_emit_ptx("horner_quad", 32, ps2, body2) in let spv2 = kernel_emit_spirv("horner_quad", 32, ps2, body2) in let env_hq = Cons({k: "x", v: 5}, Cons({k: "a", v: 3}, Cons({k: "b", v: 2}, Cons({k: "c", v: 7}, Nil)))) in if ptx1 != ptx2 and spv1 != spv2 and ptx_vm_exec(ptx1, env_pos) == 21 and spirv_vm_exec(spv1, env_pos) == 21 and ptx_vm_exec(ptx1, env_neg) == 0 and spirv_vm_exec(spv1, env_neg) == 0 and t_nth(ptx_g, 0) == 0 and t_nth(ptx_g, 1) == 1 and t_nth(ptx_g, 2) == 9 and t_nth(ptx_g, 3) == 21 and t_nth(spv_g, 2) == 9 and t_nth(spv_g, 3) == 21 and ptx_vm_exec(ptx2, env_hq) == 78 and spirv_vm_exec(spv2, env_hq) == 78 then 1 else 0
