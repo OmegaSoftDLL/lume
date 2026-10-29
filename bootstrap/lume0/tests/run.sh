@@ -1653,8 +1653,16 @@ EOF
     printf '0000000000000000000000000000000000000000000000000000000000000000  %s.tar.gz\n' "$_ni_pkg" > "$_ni_d/tampered/SHA256SUMS"
     _ni_bad_rc=0
     _ni_bad_log=$(LUME_PREFIX="$_ni_d/bad" LUME_RELEASE_TAG="v0.2.0" LUME_RELEASE_BASE_URL="file://$_ni_d/tampered" sh ../../docs/install.sh 2>&1) || _ni_bad_rc=$?
+    mkdir -p "$_ni_d/unverified" "$_ni_d/no-sha" "$_ni_d/no-tools"
+    _ni_missing_rc=0
+    _ni_missing_out=$(LUME_HOME="$_ni_d/unverified" ../../lume self verify 2>/dev/null) || _ni_missing_rc=$?
+    ln -s "$(command -v dirname)" "$_ni_d/no-sha/dirname"
+    cp ../../lume "$_ni_d/no-tools/lume"
+    printf '%064d  lume\n' 0 >"$_ni_d/no-tools/MANIFEST.sha256"
+    _ni_nosha_rc=0
+    LUME_HOME="$_ni_d/no-tools" PATH="$_ni_d/no-sha" ../../lume self verify >/dev/null 2>&1 || _ni_nosha_rc=$?
     rm -rf "$_ni_d"
-    if printf '%s' "$_ni_pos_log" | grep -q "SHA-256 verified" && printf '%s' "$_ni_ver" | grep -q "lume 0.2.0" && printf '%s' "$_ni_sv" | grep -q '"manifest_verified":true' && [ "$_ni_bad_rc" -ne 0 ] && printf '%s' "$_ni_bad_log" | grep -q "SHA-256 mismatch — refusing to install"; then ok "multi-platform release installer (#262, #263): docs/install.sh clean install + self-verify + SHA-256 tamper rejection"; else bad "multi-platform release installer (#262, #263)"; printf '%s\n' "$_ni_pos_log" "$_ni_ver" "$_ni_sv" "bad_rc=$_ni_bad_rc" "$_ni_bad_log"; fi
+    if printf '%s' "$_ni_pos_log" | grep -q "SHA-256 verified" && printf '%s' "$_ni_ver" | grep -q "lume 0.2.0" && printf '%s' "$_ni_sv" | grep -q '"manifest_verified":true' && [ "$_ni_bad_rc" -ne 0 ] && printf '%s' "$_ni_bad_log" | grep -q "SHA-256 mismatch — refusing to install" && [ "$_ni_missing_rc" -ne 0 ] && printf '%s' "$_ni_missing_out" | grep -q '"manifest_verified":false' && [ "$_ni_nosha_rc" -ne 0 ]; then ok "multi-platform release installer (#262, #263, #316): clean install, tamper/missing-manifest rejection and fail-closed SHA-256"; else bad "multi-platform release installer (#262, #263, #316)"; printf '%s\n' "$_ni_pos_log" "$_ni_ver" "$_ni_sv" "$_ni_missing_out" "bad_rc=$_ni_bad_rc missing_rc=$_ni_missing_rc nosha_rc=$_ni_nosha_rc" "$_ni_bad_log"; fi
 else
     ok "cross-platform lcaas/lcert suite (skipped under ASan; covered in Step 4)"
 fi
