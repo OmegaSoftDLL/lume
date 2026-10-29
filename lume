@@ -19,7 +19,7 @@ set -eu
 
 # The self-hosted lexer/parser recurse per source character; raise the stack so compiling a
 # large Lume source does not overflow the default 8 MB stack.
-ulimit -s unlimited 2>/dev/null || ulimit -s 524288 2>/dev/null || true
+ulimit -s unlimited 2>/dev/null || ulimit -s 524288 2>/dev/null || ulimit -s 65520 2>/dev/null || ulimit -s 32768 2>/dev/null || true
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 if [ ! -d "$ROOT/compiler/stage1" ] && [ -d "$ROOT/../compiler/stage1" ]; then

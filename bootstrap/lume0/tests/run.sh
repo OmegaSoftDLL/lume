@@ -6,7 +6,7 @@ cd "$(dirname "$0")/.."
 # The self-hosted lexer/parser recurse once per source character; compiling the ~117 KB
 # compiler needs a deep native stack. Raise the limit so the self-host tests do not
 # overflow the default 8 MB stack (a SIGSEGV when the compiler source grows).
-ulimit -s unlimited 2>/dev/null || ulimit -s 524288 2>/dev/null || true
+ulimit -s unlimited 2>/dev/null || ulimit -s 524288 2>/dev/null || ulimit -s 65520 2>/dev/null || ulimit -s 32768 2>/dev/null || true
 
 BIN=./lume0
 EX=../../examples

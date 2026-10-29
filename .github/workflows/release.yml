@@ -183,9 +183,14 @@ jobs:
           else
             VER="${{ inputs.tag || 'v0.2.0' }}"
           fi
-          mkdir -p dist stage build/macos-aarch64-bin build/macos-x86_64-bin
+          mkdir -p dist stage build/macos-aarch64-bin build/macos-x86_64-bin bootstrap/lume0
 
-          make -C bootstrap/lume0
+          cc -arch arm64 -O2 -std=c11 -Wall -Wextra -pedantic -Wl,-stack_size,0x4000000 \
+            bootstrap/lume0/main.c bootstrap/lume0/lexer.c bootstrap/lume0/diag.c \
+            bootstrap/lume0/ast.c bootstrap/lume0/parser.c bootstrap/lume0/value.c \
+            bootstrap/lume0/interp.c bootstrap/lume0/lbe.c bootstrap/lume0/asmgen.c \
+            bootstrap/lume0/elf.c bootstrap/lume0/resolve.c -lm -o bootstrap/lume0/lume0
+          cp bootstrap/lume0/lume0 build/macos-aarch64-bin/lume0
 
           cat > stage/verify_ok.src <<'EOF'
           fn fib(n: int) -> int = if n < 2 then n else fib(n - 1) + fib(n - 2)
@@ -200,11 +205,6 @@ jobs:
           EOF
 
           # 1. macos-aarch64 (Apple Silicon native Mach-O 64)
-          cc -arch arm64 -O2 -std=c11 -Wall -Wextra -pedantic \
-            bootstrap/lume0/main.c bootstrap/lume0/lexer.c bootstrap/lume0/diag.c \
-            bootstrap/lume0/ast.c bootstrap/lume0/parser.c bootstrap/lume0/value.c \
-            bootstrap/lume0/interp.c bootstrap/lume0/lbe.c bootstrap/lume0/asmgen.c \
-            bootstrap/lume0/elf.c bootstrap/lume0/resolve.c -lm -o build/macos-aarch64-bin/lume0
           ./lume build --target aarch64-macos-macho stage/verify_ok.src -o build/macos-aarch64-bin/lume-target-check
           ./lume build --target aarch64-macos-macho stage/verify_trap.src -o build/macos-aarch64-bin/lume-target-trap
           chmod +x build/macos-aarch64-bin/*
@@ -214,7 +214,7 @@ jobs:
           tar -C stage -czf "dist/${PKG_MARM}.tar.gz" "${PKG_MARM}"
 
           # 2. macos-x86_64 (Intel x86_64 Mach-O 64)
-          cc -arch x86_64 -O2 -std=c11 -Wall -Wextra -pedantic \
+          cc -arch x86_64 -O2 -std=c11 -Wall -Wextra -pedantic -Wl,-stack_size,0x4000000 \
             bootstrap/lume0/main.c bootstrap/lume0/lexer.c bootstrap/lume0/diag.c \
             bootstrap/lume0/ast.c bootstrap/lume0/parser.c bootstrap/lume0/value.c \
             bootstrap/lume0/interp.c bootstrap/lume0/lbe.c bootstrap/lume0/asmgen.c \
