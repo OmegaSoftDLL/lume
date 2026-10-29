@@ -1,0 +1,105 @@
+type Arr = enum
+    | ArrConst(int)
+    | ArrWrite(Arr, int, int)
+
+fn array_new(v: int) -> Arr = ArrConst(v)
+fn array_store(a: Arr, i: int, v: int) -> Arr = ArrWrite(a, i, v)
+fn array_select(a: Arr, i: int) -> int = match a
+    ArrConst(v) => v
+    ArrWrite(base, k, v) => if i == k then v else array_select(base, i)
+
+type SepHeap = enum
+    | SepPts(int, int)
+    | SepJoin(SepHeap, SepHeap)
+    | SepWrite(SepHeap, int, int)
+
+fn points_to(p: int, v: int) -> SepHeap = SepPts(p, v)
+fn sep_conj(h1: SepHeap, h2: SepHeap) -> SepHeap = SepJoin(h1, h2)
+fn sep_disjoint(p: int, q: int) -> int = if p != q then 1 else 0
+fn heap_write(h: SepHeap, p: int, v: int) -> SepHeap = SepWrite(h, p, v)
+fn heap_read(h: SepHeap, p: int) -> int = match h
+    SepPts(q, v) => if p == q then v else 0
+    SepJoin(h1, h2) => let r1 = heap_read(h1, p) in if r1 != 0 then r1 else heap_read(h2, p)
+    SepWrite(base, q, v) => if p == q then v else heap_read(base, p)
+
+fn sep_dom(h: SepHeap) -> int = match h
+    SepPts(p, v) => p
+    SepJoin(h1, h2) => sep_dom(h1)
+    SepWrite(base, p, v) => sep_dom(base)
+
+fn sep_valid(h: SepHeap) -> int = match h
+    SepPts(p, v) => 1
+    SepJoin(h1, h2) => if sep_dom(h1) != sep_dom(h2) and sep_valid(h1) == 1 and sep_valid(h2) == 1 then 1 else 0
+    SepWrite(base, p, v) => sep_valid(base)
+
+## 1. QF_NIA: Nonlinear Integer Arithmetic
+pub fn nia_sq_nonneg(x: int) -> int requires x >= 0 ensures result >= 0 = x * x
+pub fn nia_diff_sq(a: int, b: int) -> int ensures result >= 0 = (a - b) * (a - b)
+pub fn nia_cauchy_schwarz(a: int, b: int) -> int ensures result >= 2 * a * b = (a * a) + (b * b)
+pub fn nia_prod_lb(a: int, b: int) -> int requires a >= 3 requires b >= 4 ensures result >= 12 = a * b
+pub fn nia_mul_mono(a: int, b: int, c: int) -> int requires a >= b requires c >= 0 ensures result >= b * c = a * c
+pub fn nia_div_mod_recon(x: int) -> int requires x >= 0 ensures result == x = ((x / 4) * 4) + (x % 4)
+pub fn nia_mod_bounds(x: int) -> int requires x >= 0 ensures result >= 0 ensures result < 4 = x % 4
+
+## 2. QF_BV: Bitvectors & Machine-Integer Arithmetic
+pub fn bv_xor_roundtrip(x: int, k: int) -> int ensures result == x = bv_xor(bv_xor(x, k), k)
+pub fn bv_xor_self_zero(x: int) -> int ensures result == 0 = bv_xor(x, x)
+pub fn bv_mask_u8_bounds(x: int) -> int requires x >= 0 ensures result >= 0 ensures result <= 255 = bv_and(x, 255)
+pub fn bv_or_zero_id(x: int) -> int ensures result == x = bv_or(x, 0)
+pub fn bv_u8_comp_sum(x: int) -> int requires x >= 0 ensures result == 255 = bv_u8(x) + bv_not_u8(x)
+pub fn bv_u8_wrap_add(a: int, b: int) -> int requires a >= 200 requires a < 256 requires b >= 100 requires b < 200 ensures result == (a + b) - 256 = bv_add_u8(a, b)
+pub fn bv_shift_scale(x: int) -> int requires x >= 0 ensures result == x * 8 = bv_shl(x, 3)
+
+## 3. QF_ALIA: Arrays & Quantifiers
+pub fn arr_row_same(a: Arr, i: int, v: int) -> int ensures result == v = array_select(array_store(a, i, v), i)
+pub fn arr_row_diff(a: Arr, i: int, j: int, v: int) -> int requires i != j ensures result == array_select(a, j) = array_select(array_store(a, i, v), j)
+pub fn arr_const_read(v: int, i: int) -> int ensures result == v = array_select(array_new(v), i)
+pub fn quant_forall_sq(n: int) -> int requires n >= 0 ensures result == 1 = forall_range(k, 0, n, k * k >= 0)
+pub fn quant_exists_mid(lo: int, hi: int) -> int requires lo <= hi ensures result == 1 = exists_range(k, lo, hi, k >= lo and k <= hi)
+
+## 4. Separation Logic & Heap Frame Rule
+pub fn sep_frame_preserve(p: int, q: int, a: int, b: int, v: int) -> int requires p != q ensures result == b = heap_read(heap_write(sep_conj(points_to(p, a), points_to(q, b)), p, v), q)
+pub fn sep_frame_update(p: int, q: int, a: int, b: int, v: int) -> int requires p != q ensures result == v = heap_read(heap_write(sep_conj(points_to(p, a), points_to(q, b)), p, v), p)
+pub fn sep_disjoint_heap(p: int, q: int, a: int, b: int) -> int requires p < q ensures result == 1 = sep_valid(sep_conj(points_to(p, a), points_to(q, b)))
+
+## 5. Refinement & Dependent Types
+type PosInt = int where self > 0
+type ByteVal = int where self >= 0 and self < 256
+
+pub fn refine_inc(x: PosInt) -> int where result >= 2 = x + 1
+pub fn refine_dep_idx(n: int where n > 0, i: int where i >= 0 and i < n) -> int where result >= 0 and result < n = i
+pub fn refine_byte_clamp(x: ByteVal) -> ByteVal = x
+
+## 6. Termination & Liveness (Lexicographic & Relational Interval Measures)
+pub total fn ack(m: int, n: int) -> int = if m <= 0 then n + 1 else if n <= 0 then ack(m - 1, 1) else ack(m - 1, ack(m, n - 1))
+pub total fn gcd_euclid(a: int, b: int) -> int = if b <= 0 then a else gcd_euclid(b, a % b)
+pub total fn range_sum(lo: int, hi: int) -> int = if lo >= hi then 0 else lo + range_sum(lo + 1, hi)
+
+print nia_sq_nonneg(9)
+print nia_diff_sq(3, 10)
+print nia_cauchy_schwarz(4, 7)
+print nia_prod_lb(5, 6)
+print nia_mul_mono(8, 5, 3)
+print nia_div_mod_recon(23)
+print nia_mod_bounds(23)
+print bv_xor_roundtrip(42, 19)
+print bv_xor_self_zero(123)
+print bv_mask_u8_bounds(519)
+print bv_or_zero_id(77)
+print bv_u8_comp_sum(200)
+print bv_u8_wrap_add(200, 100)
+print bv_shift_scale(9)
+print arr_row_same(array_new(0), 3, 99)
+print arr_row_diff(array_new(11), 3, 4, 99)
+print arr_const_read(55, 7)
+print quant_forall_sq(5)
+print quant_exists_mid(2, 8)
+print sep_frame_preserve(1, 2, 10, 20, 99)
+print sep_frame_update(1, 2, 10, 20, 99)
+print sep_disjoint_heap(1, 2, 10, 20)
+print refine_inc(5)
+print refine_dep_idx(8, 5)
+print refine_byte_clamp(128)
+print ack(2, 2)
+print gcd_euclid(48, 18)
+print range_sum(1, 6)

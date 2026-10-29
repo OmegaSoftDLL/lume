@@ -122,7 +122,26 @@ fn lk_lin_scale_cs1(k, cs) = match cs
 fn lk_lin_add(a, b) = if a.ok == 0 or b.ok == 0 then lk_lin_err() else {ok: 1, c0: a.c0 + b.c0, cs: lk_lin_add_cs(a.cs, b.cs)}
 fn lk_lin_scale(k, a) = if a.ok == 0 then lk_lin_err() else {ok: 1, c0: k * a.c0, cs: lk_lin_scale_cs(k, a.cs)}
 fn lk_lin_sub(a, b) = lk_lin_add(a, lk_lin_scale(0 - 1, b))
-fn lk_lin_mul(a, b) = if a.ok == 0 or b.ok == 0 then lk_lin_err() else if lk_isnil(a.cs) == 1 then lk_lin_scale(a.c0, b) else if lk_isnil(b.cs) == 1 then lk_lin_scale(b.c0, a) else lk_lin_err()
+fn lk_mono_key(k1, k2) = if k1 <= k2 then k1 + "*" + k2 else k2 + "*" + k1
+fn lk_lin_mul_term_cs(k1, c1, cs2) = match cs2
+    Nil        => Nil
+    Cons(h, t) => lk_lin_add_term(lk_mono_key(k1, h.k), c1 * h.c, lk_lin_mul_term_cs(k1, c1, t))
+fn lk_lin_mul_cs(cs1, cs2) = match cs1
+    Nil        => Nil
+    Cons(h, t) => lk_lin_add_cs(lk_lin_mul_term_cs(h.k, h.c, cs2), lk_lin_mul_cs(t, cs2))
+fn lk_lin_mul(a, b) = if a.ok == 0 or b.ok == 0 then lk_lin_err() else if lk_isnil(a.cs) == 1 then lk_lin_scale(a.c0, b) else if lk_isnil(b.cs) == 1 then lk_lin_scale(b.c0, a) else let t0 = lk_lin_add(lk_lin_scale(a.c0, b), lk_lin_scale(b.c0, {ok: 1, c0: 0, cs: a.cs})) in {ok: 1, c0: t0.c0, cs: lk_lin_add_cs(t0.cs, lk_lin_mul_cs(a.cs, b.cs))}
+fn lk_lin_is_zero(l) = if l.ok == 1 and l.c0 == 0 and lk_isnil(l.cs) == 1 then 1 else 0
+fn lk_lin_eq(a, b) = lk_lin_is_zero(lk_lin_sub(a, b))
+fn lk_phd_cs(cs) = match cs
+    Nil        => {k: "", c: 0}
+    Cons(h, t) => h
+fn lk_tl_cs(cs) = match cs
+    Nil        => Nil
+    Cons(h, t) => t
+fn lk_lin_key_cs(cs) = match cs
+    Nil        => ""
+    Cons(h, t) => str(h.c) + "*" + h.k + (if lk_isnil(t) == 1 then "" else "+" + lk_lin_key_cs(t))
+fn lk_lin_key_str(l) = if l.ok == 0 then "?" else if lk_isnil(l.cs) == 1 then str(l.c0) else if l.c0 == 0 and lk_len(l.cs) == 1 and lk_lin_coeff((lk_phd_cs(l.cs)).k, l.cs) == 1 then (lk_phd_cs(l.cs)).k else str(l.c0) + "+" + lk_lin_key_cs(l.cs)
 fn lk_lin_is_contra(l) = if l.ok == 1 and lk_isnil(l.cs) == 1 and l.c0 < 0 then 1 else 0
 fn lk_fm_any_contra(hyps) = match hyps
     Nil        => 0
@@ -155,6 +174,97 @@ fn lk_fm_unsat1(hyps, vars) = match vars
     Cons(v, r) => let next = lk_fm_elim_var(v, hyps) in if lk_fm_any_contra(next) == 1 then 1 else if lk_len(next) > 48 then 0 else lk_fm_unsat(next, r)
 fn lk_fm_check_unsat(hyps) = lk_fm_unsat(hyps, lk_fm_vars(hyps, Nil))
 
+fn lk_nia_var_lb(v, hyps) = match hyps
+    Nil        => 0 - 999999
+    Cons(h, t) => let r = lk_nia_var_lb(v, t) in if lk_len(h.cs) == 1 and lk_lin_coeff(v, h.cs) == 1 then (let b = 0 - h.c0 in if b > r then b else r) else r
+fn lk_nia_split_star(s, idx, n) = if idx >= n then Cons(s, Nil) else if at(s, idx) == "*" then Cons(slice(s, 0, idx), Cons(slice(s, idx + 1, n), Nil)) else lk_nia_split_star(s, idx + 1, n)
+fn lk_nia_add_bvar(v, acc) = if v == "" or lk_omem(v, acc) == 1 then acc else Cons(v, acc)
+fn lk_nia_add_bvars(vs, acc) = match vs
+    Nil        => acc
+    Cons(v, r) => lk_nia_add_bvars(r, lk_nia_add_bvar(v, acc))
+fn lk_nia_vars_cs(cs, acc) = match cs
+    Nil        => acc
+    Cons(h, t) => lk_nia_vars_cs(t, lk_nia_add_bvars(lk_nia_split_star(h.k, 0, count(h.k)), acc))
+fn lk_nia_base_vars(hyps, acc) = match hyps
+    Nil        => acc
+    Cons(h, t) => lk_nia_base_vars(t, if lk_len(h.cs) <= 3 then lk_nia_vars_cs(h.cs, acc) else acc)
+fn lk_nia_sq_hyps(vars) = match vars
+    Nil        => Nil
+    Cons(v, r) => Cons(lk_lin_var(lk_mono_key(v, v)), lk_nia_sq_hyps(r))
+fn lk_nia_diff_sq_pairs(v1, vars) = match vars
+    Nil         => Nil
+    Cons(v2, r) => let dv = lk_lin_sub(lk_lin_var(v1), lk_lin_var(v2)) in let sv = lk_lin_add(lk_lin_var(v1), lk_lin_var(v2)) in Cons(lk_lin_mul(dv, dv), Cons(lk_lin_mul(sv, sv), lk_nia_diff_sq_pairs(v1, r)))
+fn lk_nia_all_diff_sq(vars) = match vars
+    Nil        => Nil
+    Cons(v, r) => lk_app(lk_nia_diff_sq_pairs(v, r), lk_nia_all_diff_sq(r))
+fn lk_nia_prod_pair(v1, lb1, vars, hyps) = match vars
+    Nil         => Nil
+    Cons(v2, r) => let lb2 = lk_nia_var_lb(v2, hyps) in let rest = lk_nia_prod_pair(v1, lb1, r, hyps) in if lb1 >= 0 and lb2 >= 0 then Cons({ok: 1, c0: 0 - (lb1 * lb2), cs: Cons({k: lk_mono_key(v1, v2), c: 1}, Nil)}, Cons(lk_lin_mul(lk_lin_sub(lk_lin_var(v1), lk_lin_const(lb1)), lk_lin_sub(lk_lin_var(v2), lk_lin_const(lb2))), rest)) else rest
+fn lk_nia_prod_hyps(vars, hyps) = match vars
+    Nil         => Nil
+    Cons(v1, r) => let lb1 = lk_nia_var_lb(v1, hyps) in lk_app(if lb1 >= 0 then lk_nia_prod_pair(v1, lb1, vars, hyps) else Nil, lk_nia_prod_hyps(r, hyps))
+fn lk_nia_mono_z(x, y, vars, hyps) = match vars
+    Nil        => Nil
+    Cons(z, r) => let lbz = lk_nia_var_lb(z, hyps) in let rest = lk_nia_mono_z(x, y, r, hyps) in if lbz >= 0 then Cons(lk_lin_sub(lk_lin_var(lk_mono_key(x, z)), lk_lin_var(lk_mono_key(y, z))), rest) else rest
+fn lk_nia_mono_h1(h, vars, hyps) = if h.c0 <= 0 and lk_len(h.cs) == 2 then (let c1 = lk_phd_cs(h.cs) in let c2 = lk_phd_cs(lk_tl_cs(h.cs)) in if c1.c == 1 and c2.c == 0 - 1 then lk_nia_mono_z(c1.k, c2.k, vars, hyps) else if c2.c == 1 and c1.c == 0 - 1 then lk_nia_mono_z(c2.k, c1.k, vars, hyps) else Nil) else Nil
+fn lk_nia_mono_hyps(cur, vars, hyps) = match cur
+    Nil        => Nil
+    Cons(h, t) => lk_app(lk_nia_mono_h1(h, vars, hyps), lk_nia_mono_hyps(t, vars, hyps))
+fn lk_nia_enrich_hyps(goal_hyps, hyps) = let bvars = lk_nia_base_vars(goal_hyps, lk_nia_base_vars(hyps, Nil)) in let sqs = if lk_isnil(bvars) == 0 then lk_app(lk_nia_sq_hyps(bvars), lk_nia_all_diff_sq(bvars)) else Nil in lk_app(sqs, lk_app(lk_nia_prod_hyps(bvars, hyps), lk_app(lk_nia_mono_hyps(hyps, bvars, hyps), hyps)))
+fn lk_lin_div_hyps(la, k, q) = let r = lk_lin_sub(la, lk_lin_scale(k, q)) in Cons(r, Cons(lk_lin_sub(lk_lin_const(k - 1), r), Nil))
+fn lk_bv_mod(x, m) = let r = x % m in if r < 0 then r + m else r
+fn lk_bv_and(x, y, b) = if b <= 0 or x <= 0 or y <= 0 then 0 else ((x % 2) * (y % 2)) + 2 * lk_bv_and(x / 2, y / 2, b - 1)
+fn lk_bv_or(x, y, b) = if b <= 0 or (x <= 0 and y <= 0) then 0 else (if (x % 2) + (y % 2) >= 1 then 1 else 0) + 2 * lk_bv_or(x / 2, y / 2, b - 1)
+fn lk_bv_xor(x, y, b) = if b <= 0 or (x <= 0 and y <= 0) then 0 else (((x % 2) + (y % 2)) % 2) + 2 * lk_bv_xor(x / 2, y / 2, b - 1)
+
+fn lk_subst_sx(sx, vnm, rep) = match sx
+    SVar(nm)  => if nm == vnm then rep else sx
+    SList(xs) => SList(lk_subst_slist(xs, vnm, rep))
+    _         => sx
+fn lk_subst_slist(xs, vnm, rep) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons(lk_subst_sx(h, vnm, rep), lk_subst_slist(t, vnm, rep))
+
+fn lk_is_struct_call(op) = if op == "array_new" or op == "array_const" or op == "array_store" or op == "heap_write" or op == "points_to" or op == "heap_new" or op == "sep_conj" then 1 else 0
+fn lk_is_struct_sx(sx) = match sx
+    SList(xs) => if lk_isnil(xs) == 1 then 0 else lk_is_struct_call(lk_svar_name(lk_shd(xs)))
+    _         => 0
+
+fn lk_sep_dom_ptr(sx) = match sx
+    SList(xs) => if lk_isnil(xs) == 1 then Nil else let op = lk_svar_name(lk_shd(xs)) in let args = lk_stl(xs) in if (op == "points_to" or op == "heap_new") and lk_len(args) == 2 then Cons(lk_shd(args), Nil) else if op == "sep_conj" and lk_len(args) == 2 then lk_app(lk_sep_dom_ptr(lk_shd(args)), lk_sep_dom_ptr(lk_shd(lk_stl(args)))) else if op == "heap_write" and lk_len(args) == 3 then lk_sep_dom_ptr(lk_shd(args)) else Nil
+    _         => Nil
+fn lk_sep_disjoint_one(p, ps, hyps, lenv) = match ps
+    Nil         => 1
+    Cons(q, qr) => let diff = SList(Cons(SVar("-"), Cons(p, Cons(q, Nil)))) in if (lk_prove_goal(SList(Cons(SVar(">"), Cons(p, Cons(q, Nil)))), hyps, lenv) == 1 or lk_prove_goal(SList(Cons(SVar("<"), Cons(p, Cons(q, Nil)))), hyps, lenv) == 1 or lk_prove_goal(SList(Cons(SVar(">="), Cons(SList(Cons(SVar("*"), Cons(diff, Cons(diff, Nil)))), Cons(SNum(1), Nil)))), hyps, lenv) == 1) and lk_sep_disjoint_one(p, qr, hyps, lenv) == 1 then 1 else 0
+fn lk_sep_disjoint_lists(ps1, ps2, hyps, lenv) = match ps1
+    Nil         => 1
+    Cons(p, pr) => if lk_sep_disjoint_one(p, ps2, hyps, lenv) == 1 then lk_sep_disjoint_lists(pr, ps2, hyps, lenv) else 0
+fn lk_sep_valid(sx, hyps, lenv) = match sx
+    SList(xs) => if lk_isnil(xs) == 1 then 0 else let op = lk_svar_name(lk_shd(xs)) in let args = lk_stl(xs) in if (op == "points_to" or op == "heap_new") and lk_len(args) == 2 then 1 else if op == "sep_conj" and lk_len(args) == 2 then (let h1 = lk_shd(args) in let h2 = lk_shd(lk_stl(args)) in if lk_sep_valid(h1, hyps, lenv) == 1 and lk_sep_valid(h2, hyps, lenv) == 1 and lk_sep_disjoint_lists(lk_sep_dom_ptr(h1), lk_sep_dom_ptr(h2), hyps, lenv) == 1 then 1 else 0) else if op == "heap_write" and lk_len(args) == 3 then lk_sep_valid(lk_shd(args), hyps, lenv) else 0
+    _         => 0
+fn lk_arr_select(arr_sx, idx_sx, hyps, lenv) = match arr_sx
+    SList(xs) => if lk_isnil(xs) == 1 then lk_lin_err() else let op = lk_svar_name(lk_shd(xs)) in let args = lk_stl(xs) in if (op == "array_store" or op == "heap_write") and lk_len(args) == 3 then (let base_a = lk_shd(args) in let st_i = lk_shd(lk_stl(args)) in let st_v = lk_shd(lk_stl(lk_stl(args))) in let diff = SList(Cons(SVar("-"), Cons(idx_sx, Cons(st_i, Nil)))) in if op == "heap_write" and lk_sep_valid(base_a, hyps, lenv) == 0 and lk_svar_name(base_a) == "" then lk_lin_err() else if lk_prove_goal(SList(Cons(SVar("=="), Cons(idx_sx, Cons(st_i, Nil)))), hyps, lenv) == 1 then lk_lin_sexpr(st_v, hyps, lenv) else if lk_prove_goal(SList(Cons(SVar(">"), Cons(idx_sx, Cons(st_i, Nil)))), hyps, lenv) == 1 or lk_prove_goal(SList(Cons(SVar("<"), Cons(idx_sx, Cons(st_i, Nil)))), hyps, lenv) == 1 or lk_prove_goal(SList(Cons(SVar(">="), Cons(SList(Cons(SVar("*"), Cons(diff, Cons(diff, Nil)))), Cons(SNum(1), Nil)))), hyps, lenv) == 1 then lk_arr_select(base_a, idx_sx, hyps, lenv) else lk_lin_err()) else if (op == "array_new" or op == "array_const") and lk_len(args) == 1 then lk_lin_sexpr(lk_shd(args), hyps, lenv) else if (op == "points_to" or op == "heap_new") and lk_len(args) == 2 then (if lk_prove_goal(SList(Cons(SVar("=="), Cons(idx_sx, Cons(lk_shd(args), Nil)))), hyps, lenv) == 1 then lk_lin_sexpr(lk_shd(lk_stl(args)), hyps, lenv) else lk_lin_err()) else if op == "sep_conj" and lk_len(args) == 2 then (if lk_sep_valid(arr_sx, hyps, lenv) == 0 then lk_lin_err() else let r1 = lk_arr_select(lk_shd(args), idx_sx, hyps, lenv) in if r1.ok == 1 then r1 else lk_arr_select(lk_shd(lk_stl(args)), idx_sx, hyps, lenv)) else lk_lin_err()
+    SVar(anm) => let li = lk_lin_sexpr(idx_sx, hyps, lenv) in if li.ok == 0 then lk_lin_err() else lk_lin_var("select(" + anm + "," + lk_lin_key_str(li) + ")")
+    _         => lk_lin_err()
+
+fn lk_xor_cancel(a, lb, hyps, lenv) = match a
+    SList(xs) => if lk_len(xs) == 3 then (let op = lk_svar_name(lk_shd(xs)) in if op == "bv_xor" or op == "bit_xor" then (let x = lk_shd(lk_stl(xs)) in let k = lk_shd(lk_stl(lk_stl(xs))) in let lx = lk_lin_sexpr(x, hyps, lenv) in let lk = lk_lin_sexpr(k, hyps, lenv) in if lk.ok == 1 and lk_lin_eq(lk, lb) == 1 then lx else if lx.ok == 1 and lk_lin_eq(lx, lb) == 1 then lk else lk_lin_err()) else lk_lin_err()) else lk_lin_err()
+    _         => lk_lin_err()
+fn lk_and_idem(a, lb, hyps, lenv) = match a
+    SList(xs) => if lk_len(xs) == 3 then (let op = lk_svar_name(lk_shd(xs)) in if op == "bv_and" or op == "bit_and" then (let lk = lk_lin_sexpr(lk_shd(lk_stl(lk_stl(xs))), hyps, lenv) in if lk.ok == 1 and lk_lin_eq(lk, lb) == 1 then lk_lin_sexpr(a, hyps, lenv) else lk_lin_err()) else lk_lin_err()) else lk_lin_err()
+    _         => lk_lin_err()
+fn lk_lin_bv_xor(a, b, hyps, lenv) = let la = lk_lin_sexpr(a, hyps, lenv) in let lb = lk_lin_sexpr(b, hyps, lenv) in if la.ok == 0 or lb.ok == 0 then lk_lin_err() else if lk_lin_eq(la, lb) == 1 then lk_lin_const(0) else if lk_lin_is_zero(la) == 1 then lb else if lk_lin_is_zero(lb) == 1 then la else if lk_isnil(la.cs) == 1 and lk_isnil(lb.cs) == 1 then lk_lin_const(lk_bv_xor(lk_bv_mod(la.c0, 65536), lk_bv_mod(lb.c0, 65536), 16)) else let cx = lk_xor_cancel(a, lb, hyps, lenv) in if cx.ok == 1 then cx else let cy = lk_xor_cancel(b, la, hyps, lenv) in if cy.ok == 1 then cy else lk_lin_var("bv_xor(" + lk_mono_key(lk_lin_key_str(la), lk_lin_key_str(lb)) + ")")
+fn lk_lin_bv_and(a, b, hyps, lenv) = let la = lk_lin_sexpr(a, hyps, lenv) in let lb = lk_lin_sexpr(b, hyps, lenv) in if la.ok == 0 or lb.ok == 0 then lk_lin_err() else if lk_lin_is_zero(la) == 1 or lk_lin_is_zero(lb) == 1 then lk_lin_const(0) else if lk_lin_eq(la, lb) == 1 then la else if lk_isnil(la.cs) == 1 and lk_isnil(lb.cs) == 1 then lk_lin_const(lk_bv_and(lk_bv_mod(la.c0, 65536), lk_bv_mod(lb.c0, 65536), 16)) else let ci = lk_and_idem(a, lb, hyps, lenv) in if ci.ok == 1 then ci else if lk_isnil(lb.cs) == 1 and (lb.c0 == 1 or lb.c0 == 3 or lb.c0 == 7 or lb.c0 == 15 or lb.c0 == 31 or lb.c0 == 63 or lb.c0 == 127 or lb.c0 == 255) then (if lk_fm_check_unsat(Cons(lk_lin_sub(lk_lin_const(0 - 1), la), hyps)) == 1 and lk_fm_check_unsat(Cons(lk_lin_sub(la, lk_lin_const(lb.c0 + 1)), hyps)) == 1 then la else lk_lin_sub(la, lk_lin_scale(lb.c0 + 1, lk_lin_var("div(" + lk_lin_key_str(la) + "," + str(lb.c0 + 1) + ")")))) else lk_lin_var("bv_and(" + lk_mono_key(lk_lin_key_str(la), lk_lin_key_str(lb)) + ")")
+fn lk_lin_bv_or(a, b, hyps, lenv) = let la = lk_lin_sexpr(a, hyps, lenv) in let lb = lk_lin_sexpr(b, hyps, lenv) in if la.ok == 0 or lb.ok == 0 then lk_lin_err() else if lk_lin_is_zero(la) == 1 then lb else if lk_lin_is_zero(lb) == 1 then la else if lk_lin_eq(la, lb) == 1 then la else if lk_isnil(la.cs) == 1 and lk_isnil(lb.cs) == 1 then lk_lin_const(lk_bv_or(lk_bv_mod(la.c0, 65536), lk_bv_mod(lb.c0, 65536), 16)) else lk_lin_var("bv_or(" + lk_mono_key(lk_lin_key_str(la), lk_lin_key_str(lb)) + ")")
+fn lk_lin_bv_u8(a, hyps, lenv) = let la = lk_lin_sexpr(a, hyps, lenv) in if la.ok == 0 then lk_lin_err() else if lk_isnil(la.cs) == 1 then lk_lin_const(lk_bv_mod(la.c0, 256)) else if lk_fm_check_unsat(Cons(lk_lin_sub(lk_lin_const(0 - 1), la), hyps)) == 1 and lk_fm_check_unsat(Cons(lk_lin_sub(la, lk_lin_const(256)), hyps)) == 1 then la else if lk_fm_check_unsat(Cons(lk_lin_sub(lk_lin_const(255), la), hyps)) == 1 and lk_fm_check_unsat(Cons(lk_lin_sub(la, lk_lin_const(512)), hyps)) == 1 then lk_lin_sub(la, lk_lin_const(256)) else lk_lin_sub(la, lk_lin_scale(256, lk_lin_var("div(" + lk_lin_key_str(la) + ",256)")))
+
+fn lk_collect_div_hyps_sx(sx, hyps, lenv) = match sx
+    SList(xs) => if lk_isnil(xs) == 1 then Nil else let op = lk_svar_name(lk_shd(xs)) in let args = lk_stl(xs) in let h1 = lk_collect_div_hyps_list(args, hyps, lenv) in if (op == "/" or op == "%") and lk_len(args) == 2 then (let la = lk_lin_sexpr(lk_shd(args), hyps, lenv) in let lb = lk_lin_sexpr(lk_shd(lk_stl(args)), hyps, lenv) in if la.ok == 1 and lb.ok == 1 and lk_isnil(lb.cs) == 1 and lb.c0 > 0 then lk_app(lk_lin_div_hyps(la, lb.c0, lk_lin_var("div(" + lk_lin_key_str(la) + "," + str(lb.c0) + ")")), h1) else h1) else if (op == "bv_and" or op == "bit_and") and lk_len(args) == 2 then (let la = lk_lin_sexpr(lk_shd(args), hyps, lenv) in let lb = lk_lin_sexpr(lk_shd(lk_stl(args)), hyps, lenv) in if la.ok == 1 and lb.ok == 1 and lk_isnil(lb.cs) == 1 and (lb.c0 == 1 or lb.c0 == 3 or lb.c0 == 7 or lb.c0 == 15 or lb.c0 == 31 or lb.c0 == 63 or lb.c0 == 127 or lb.c0 == 255) then lk_app(lk_lin_div_hyps(la, lb.c0 + 1, lk_lin_var("div(" + lk_lin_key_str(la) + "," + str(lb.c0 + 1) + ")")), h1) else h1) else if (op == "bv_u8" or op == "bv_not_u8") and lk_len(args) == 1 then (let la = lk_lin_sexpr(lk_shd(args), hyps, lenv) in if la.ok == 1 then lk_app(lk_lin_div_hyps(la, 256, lk_lin_var("div(" + lk_lin_key_str(la) + ",256)")), h1) else h1) else if op == "bv_add_u8" and lk_len(args) == 2 then (let la = lk_lin_sexpr(SList(Cons(SVar("+"), args)), hyps, lenv) in if la.ok == 1 then lk_app(lk_lin_div_hyps(la, 256, lk_lin_var("div(" + lk_lin_key_str(la) + ",256)")), h1) else h1) else h1
+    _         => Nil
+fn lk_collect_div_hyps_list(xs, hyps, lenv) = match xs
+    Nil        => Nil
+    Cons(h, t) => lk_app(lk_collect_div_hyps_sx(h, hyps, lenv), lk_collect_div_hyps_list(t, hyps, lenv))
+
 fn lk_env_lookup(nm, lenv) = match lenv
     Nil        => lk_lin_var(nm)
     Cons(h, t) => if h.k == nm then h.v else lk_env_lookup(nm, t)
@@ -164,13 +274,13 @@ fn lk_lin_sexpr(sx, hyps, lenv) = match sx
     SVar(nm)  => lk_env_lookup(nm, lenv)
     SList(xs) => lk_lin_slist(xs, hyps, lenv)
 
-fn lk_lin_slist(xs, hyps, lenv) = if lk_isnil(xs) == 1 then lk_lin_err() else let op = lk_svar_name(lk_shd(xs)) in let args = lk_stl(xs) in if (op == "+" or op == "-" or op == "*") and lk_len(args) == 2 then (let la = lk_lin_sexpr(lk_shd(args), hyps, lenv) in let lb = lk_lin_sexpr(lk_shd(lk_stl(args)), hyps, lenv) in if op == "+" then lk_lin_add(la, lb) else if op == "-" then lk_lin_sub(la, lb) else lk_lin_mul(la, lb)) else if (op == "let" or op == "var") and lk_len(args) == 3 then (let vnm = lk_svar_name(lk_shd(args)) in let lv = lk_lin_sexpr(lk_shd(lk_stl(args)), hyps, lenv) in if vnm == "" or lv.ok == 0 then lk_lin_err() else lk_lin_sexpr(lk_shd(lk_stl(lk_stl(args))), hyps, Cons({k: vnm, v: lv}, lenv))) else if op == "if" and lk_len(args) == 3 then (let c = lk_shd(args) in let t = lk_shd(lk_stl(args)) in let e2 = lk_shd(lk_stl(lk_stl(args))) in let rp = lk_cond_pos(c, hyps, lenv) in let rn = lk_cond_neg(c, hyps, lenv) in if rp.ok == 1 and rn.ok == 1 and lk_fm_check_unsat(lk_app(rn.hyps, hyps)) == 1 then lk_lin_sexpr(t, hyps, lenv) else if rp.ok == 1 and rn.ok == 1 and lk_fm_check_unsat(lk_app(rp.hyps, hyps)) == 1 then lk_lin_sexpr(e2, hyps, lenv) else lk_lin_err()) else lk_lin_err()
+fn lk_lin_slist(xs, hyps, lenv) = if lk_isnil(xs) == 1 then lk_lin_err() else let op = lk_svar_name(lk_shd(xs)) in let args = lk_stl(xs) in if (op == "+" or op == "-" or op == "*" or op == "/" or op == "%") and lk_len(args) == 2 then (let la = lk_lin_sexpr(lk_shd(args), hyps, lenv) in let lb = lk_lin_sexpr(lk_shd(lk_stl(args)), hyps, lenv) in if op == "+" then lk_lin_add(la, lb) else if op == "-" then lk_lin_sub(la, lb) else if op == "*" then lk_lin_mul(la, lb) else if op == "/" then (if la.ok == 0 or lb.ok == 0 or lk_isnil(lb.cs) == 0 or lb.c0 <= 0 then lk_lin_err() else if lk_isnil(la.cs) == 1 then lk_lin_const(la.c0 / lb.c0) else lk_lin_var("div(" + lk_lin_key_str(la) + "," + str(lb.c0) + ")")) else (if la.ok == 0 or lb.ok == 0 or lk_isnil(lb.cs) == 0 or lb.c0 <= 0 then lk_lin_err() else if lk_isnil(la.cs) == 1 then lk_lin_const(la.c0 % lb.c0) else lk_lin_sub(la, lk_lin_scale(lb.c0, lk_lin_var("div(" + lk_lin_key_str(la) + "," + str(lb.c0) + ")")))) ) else if (op == "let" or op == "var") and lk_len(args) == 3 then (let vnm = lk_svar_name(lk_shd(args)) in let v_sx = lk_shd(lk_stl(args)) in let b_sx = lk_shd(lk_stl(lk_stl(args))) in if vnm == "" then lk_lin_err() else if lk_is_struct_sx(v_sx) == 1 then lk_lin_sexpr(lk_subst_sx(b_sx, vnm, v_sx), hyps, lenv) else let lv = lk_lin_sexpr(v_sx, hyps, lenv) in if lv.ok == 0 then lk_lin_err() else lk_lin_sexpr(b_sx, hyps, Cons({k: vnm, v: lv}, lenv))) else if op == "if" and lk_len(args) == 3 then (let c = lk_shd(args) in let t = lk_shd(lk_stl(args)) in let e2 = lk_shd(lk_stl(lk_stl(args))) in let rp = lk_cond_pos(c, hyps, lenv) in let rn = lk_cond_neg(c, hyps, lenv) in if rp.ok == 1 and rn.ok == 1 and lk_fm_check_unsat(lk_app(rn.hyps, hyps)) == 1 then lk_lin_sexpr(t, hyps, lenv) else if rp.ok == 1 and rn.ok == 1 and lk_fm_check_unsat(lk_app(rp.hyps, hyps)) == 1 then lk_lin_sexpr(e2, hyps, lenv) else lk_lin_err()) else if (op == "bv_xor" or op == "bit_xor") and lk_len(args) == 2 then lk_lin_bv_xor(lk_shd(args), lk_shd(lk_stl(args)), hyps, lenv) else if (op == "bv_and" or op == "bit_and") and lk_len(args) == 2 then lk_lin_bv_and(lk_shd(args), lk_shd(lk_stl(args)), hyps, lenv) else if (op == "bv_or" or op == "bit_or") and lk_len(args) == 2 then lk_lin_bv_or(lk_shd(args), lk_shd(lk_stl(args)), hyps, lenv) else if (op == "bv_shl" or op == "bit_shl") and lk_len(args) == 2 then (let lk = lk_lin_sexpr(lk_shd(lk_stl(args)), hyps, lenv) in if lk.ok == 1 and lk_isnil(lk.cs) == 1 and lk.c0 >= 0 then lk_lin_scale(sha_pow2(lk.c0), lk_lin_sexpr(lk_shd(args), hyps, lenv)) else lk_lin_err()) else if (op == "bv_shr" or op == "bit_shr") and lk_len(args) == 2 then (let lk = lk_lin_sexpr(lk_shd(lk_stl(args)), hyps, lenv) in if lk.ok == 1 and lk_isnil(lk.cs) == 1 and lk.c0 >= 0 then lk_lin_slist(Cons(SVar("/"), Cons(lk_shd(args), Cons(SNum(sha_pow2(lk.c0)), Nil))), hyps, lenv) else lk_lin_err()) else if op == "bv_u8" and lk_len(args) == 1 then lk_lin_bv_u8(lk_shd(args), hyps, lenv) else if op == "bv_not_u8" and lk_len(args) == 1 then lk_lin_sub(lk_lin_const(255), lk_lin_bv_u8(lk_shd(args), hyps, lenv)) else if op == "bv_add_u8" and lk_len(args) == 2 then lk_lin_bv_u8(SList(Cons(SVar("+"), args)), hyps, lenv) else if op == "bv_sub_u8" and lk_len(args) == 2 then lk_lin_bv_u8(SList(Cons(SVar("-"), args)), hyps, lenv) else if (op == "array_select" or op == "heap_read") and lk_len(args) == 2 then lk_arr_select(lk_shd(args), lk_shd(lk_stl(args)), hyps, lenv) else if op == "sep_valid" and lk_len(args) == 1 then (if lk_sep_valid(lk_shd(args), hyps, lenv) == 1 then lk_lin_const(1) else lk_lin_err()) else if op == "sep_disjoint" and lk_len(args) == 2 then (if lk_prove_goal(SList(Cons(SVar("!="), args)), hyps, lenv) == 1 then lk_lin_const(1) else lk_lin_err()) else if op == "forall_range" and lk_len(args) == 4 then (if lk_prove_forall_range(args, hyps, lenv) == 1 then lk_lin_const(1) else lk_lin_err()) else if op == "exists_range" and lk_len(args) == 4 then (if lk_prove_exists_range(args, hyps, lenv) == 1 then lk_lin_const(1) else lk_lin_err()) else lk_lin_err()
 
-fn lk_cmp_pos(op, la, lb) = if la.ok == 0 or lb.ok == 0 then {ok: 0, hyps: Nil} else if op == ">=" then {ok: 1, hyps: Cons(lk_lin_sub(la, lb), Nil)} else if op == ">" then {ok: 1, hyps: Cons(lk_lin_sub(lk_lin_sub(la, lb), lk_lin_const(1)), Nil)} else if op == "<=" then {ok: 1, hyps: Cons(lk_lin_sub(lb, la), Nil)} else if op == "<" then {ok: 1, hyps: Cons(lk_lin_sub(lk_lin_sub(lb, la), lk_lin_const(1)), Nil)} else if op == "==" then {ok: 1, hyps: Cons(lk_lin_sub(la, lb), Cons(lk_lin_sub(lb, la), Nil))} else {ok: 0, hyps: Nil}
-fn lk_cmp_neg(op, la, lb) = if la.ok == 0 or lb.ok == 0 then {ok: 0, hyps: Nil} else if op == ">=" then lk_cmp_pos("<", la, lb) else if op == ">" then lk_cmp_pos("<=", la, lb) else if op == "<=" then lk_cmp_pos(">", la, lb) else if op == "<" then lk_cmp_pos(">=", la, lb) else if op == "!=" then lk_cmp_pos("==", la, lb) else {ok: 0, hyps: Nil}
+fn lk_cmp_pos(op, la, lb) = if la.ok == 0 or lb.ok == 0 then {ok: 0, hyps: Nil} else if op == ">=" then {ok: 1, hyps: Cons(lk_lin_sub(la, lb), Nil)} else if op == ">" then {ok: 1, hyps: Cons(lk_lin_sub(lk_lin_sub(la, lb), lk_lin_const(1)), Nil)} else if op == "<=" then {ok: 1, hyps: Cons(lk_lin_sub(lb, la), Nil)} else if op == "<" then {ok: 1, hyps: Cons(lk_lin_sub(lk_lin_sub(lb, la), lk_lin_const(1)), Nil)} else if op == "==" then {ok: 1, hyps: Cons(lk_lin_sub(la, lb), Cons(lk_lin_sub(lb, la), Nil))} else if op == "!=" then (let d = lk_lin_sub(la, lb) in {ok: 1, hyps: Cons(lk_lin_sub(lk_lin_mul(d, d), lk_lin_const(1)), Nil)}) else {ok: 0, hyps: Nil}
+fn lk_cmp_neg(op, la, lb) = if la.ok == 0 or lb.ok == 0 then {ok: 0, hyps: Nil} else if op == ">=" then lk_cmp_pos("<", la, lb) else if op == ">" then lk_cmp_pos("<=", la, lb) else if op == "<=" then lk_cmp_pos(">", la, lb) else if op == "<" then lk_cmp_pos(">=", la, lb) else if op == "!=" then lk_cmp_pos("==", la, lb) else if op == "==" then lk_cmp_pos("!=", la, lb) else {ok: 0, hyps: Nil}
 
 fn lk_cond_pos(sx, hyps, lenv) = match sx
-    SList(xs) => if lk_isnil(xs) == 1 then {ok: 0, hyps: Nil} else let op = lk_svar_name(lk_shd(xs)) in let args = lk_stl(xs) in if op == "and" then lk_cond_pos_list(args, hyps, lenv) else if lk_len(args) == 2 then lk_cmp_pos(op, lk_lin_sexpr(lk_shd(args), hyps, lenv), lk_lin_sexpr(lk_shd(lk_stl(args)), hyps, lenv)) else {ok: 0, hyps: Nil}
+    SList(xs) => if lk_isnil(xs) == 1 then {ok: 0, hyps: Nil} else let op = lk_svar_name(lk_shd(xs)) in let args = lk_stl(xs) in if op == "and" then lk_cond_pos_list(args, hyps, lenv) else if op == "sep_disjoint" and lk_len(args) == 2 then lk_cmp_neg("==", lk_lin_sexpr(lk_shd(args), hyps, lenv), lk_lin_sexpr(lk_shd(lk_stl(args)), hyps, lenv)) else if lk_len(args) == 2 then lk_cmp_pos(op, lk_lin_sexpr(lk_shd(args), hyps, lenv), lk_lin_sexpr(lk_shd(lk_stl(args)), hyps, lenv)) else {ok: 0, hyps: Nil}
     _         => {ok: 0, hyps: Nil}
 
 fn lk_cond_pos_list(xs, hyps, lenv) = match xs
@@ -178,19 +288,26 @@ fn lk_cond_pos_list(xs, hyps, lenv) = match xs
     Cons(h, t) => let r1 = lk_cond_pos(h, hyps, lenv) in if r1.ok == 0 then {ok: 0, hyps: Nil} else let r2 = lk_cond_pos_list(t, hyps, lenv) in if r2.ok == 0 then {ok: 0, hyps: Nil} else {ok: 1, hyps: lk_app(r1.hyps, r2.hyps)}
 
 fn lk_cond_neg(sx, hyps, lenv) = match sx
-    SList(xs) => if lk_len(xs) == 3 then let op = lk_svar_name(lk_shd(xs)) in let a1 = lk_shd(lk_stl(xs)) in let a2 = lk_shd(lk_stl(lk_stl(xs))) in lk_cmp_neg(op, lk_lin_sexpr(a1, hyps, lenv), lk_lin_sexpr(a2, hyps, lenv)) else {ok: 0, hyps: Nil}
+    SList(xs) => if lk_len(xs) == 3 then let op = lk_svar_name(lk_shd(xs)) in let a1 = lk_shd(lk_stl(xs)) in let a2 = lk_shd(lk_stl(lk_stl(xs))) in if op == "sep_disjoint" then lk_cmp_pos("==", lk_lin_sexpr(a1, hyps, lenv), lk_lin_sexpr(a2, hyps, lenv)) else lk_cmp_neg(op, lk_lin_sexpr(a1, hyps, lenv), lk_lin_sexpr(a2, hyps, lenv)) else {ok: 0, hyps: Nil}
     _         => {ok: 0, hyps: Nil}
+
+fn lk_prove_forall_range(args, hyps, lenv) = let vnm = lk_svar_name(lk_shd(args)) in let lo_sx = lk_shd(lk_stl(args)) in let hi_sx = lk_shd(lk_stl(lk_stl(args))) in let pred_sx = lk_shd(lk_stl(lk_stl(lk_stl(args)))) in let llo = lk_lin_sexpr(lo_sx, hyps, lenv) in let lhi = lk_lin_sexpr(hi_sx, hyps, lenv) in if vnm == "" or llo.ok == 0 or lhi.ok == 0 then 0 else let lv = lk_lin_var("_q_" + vnm) in let hyps2 = Cons(lk_lin_sub(lv, llo), Cons(lk_lin_sub(lhi, lv), hyps)) in lk_prove_goal(pred_sx, hyps2, Cons({k: vnm, v: lv}, lenv))
+fn lk_prove_exists_w(vnm, w, lo_sx, hi_sx, pred_sx, ctx) = if lk_prove_goal(SList(Cons(SVar(">="), Cons(w, Cons(lo_sx, Nil)))), ctx.hyps, ctx.lenv) == 1 and lk_prove_goal(SList(Cons(SVar("<="), Cons(w, Cons(hi_sx, Nil)))), ctx.hyps, ctx.lenv) == 1 and lk_prove_goal(lk_subst_sx(pred_sx, vnm, w), ctx.hyps, ctx.lenv) == 1 then 1 else 0
+fn lk_prove_exists_list(vnm, ws, lo_sx, hi_sx, pred_sx, ctx) = match ws
+    Nil         => 0
+    Cons(w, wr) => if lk_prove_exists_w(vnm, w, lo_sx, hi_sx, pred_sx, ctx) == 1 then 1 else lk_prove_exists_list(vnm, wr, lo_sx, hi_sx, pred_sx, ctx)
+fn lk_prove_exists_range(args, hyps, lenv) = let vnm = lk_svar_name(lk_shd(args)) in let lo_sx = lk_shd(lk_stl(args)) in let hi_sx = lk_shd(lk_stl(lk_stl(args))) in let pred_sx = lk_shd(lk_stl(lk_stl(lk_stl(args)))) in if vnm == "" then 0 else let ws = Cons(lo_sx, Cons(hi_sx, Cons(SList(Cons(SVar("+"), Cons(lo_sx, Cons(SNum(1), Nil)))), Cons(SList(Cons(SVar("-"), Cons(hi_sx, Cons(SNum(1), Nil)))), Cons(SList(Cons(SVar("/"), Cons(SList(Cons(SVar("+"), Cons(lo_sx, Cons(hi_sx, Nil)))), Cons(SNum(2), Nil)))), Nil))))) in lk_prove_exists_list(vnm, ws, lo_sx, hi_sx, pred_sx, {hyps: hyps, lenv: lenv})
 
 fn lk_prove_goal(g, hyps, lenv) = match g
     SNum(n)   => if n != 0 then 1 else 0
     SList(xs) => lk_prove_goal_list(g, xs, hyps, lenv)
     _         => 0
 
-fn lk_prove_goal_list(g, xs, hyps, lenv) = if lk_isnil(xs) == 1 then 0 else let op = lk_svar_name(lk_shd(xs)) in let args = lk_stl(xs) in if (op == "let" or op == "var") and lk_len(args) == 3 then (let vnm = lk_svar_name(lk_shd(args)) in let v_sx = lk_shd(lk_stl(args)) in let b_sx = lk_shd(lk_stl(lk_stl(args))) in if vnm == "" then 0 else lk_prove_let_val(vnm, v_sx, b_sx, hyps, lenv)) else if op == "if" and lk_len(args) == 3 then (let c = lk_shd(args) in let t = lk_shd(lk_stl(args)) in let e2 = lk_shd(lk_stl(lk_stl(args))) in let rp = lk_cond_pos(c, hyps, lenv) in let rn = lk_cond_neg(c, hyps, lenv) in if rp.ok == 1 and rn.ok == 1 and lk_prove_goal(t, lk_app(rp.hyps, hyps), lenv) == 1 and lk_prove_goal(e2, lk_app(rn.hyps, hyps), lenv) == 1 then 1 else 0) else if op == "and" and lk_len(args) == 2 then (if lk_prove_goal(lk_shd(args), hyps, lenv) == 1 and lk_prove_goal(lk_shd(lk_stl(args)), hyps, lenv) == 1 then 1 else 0) else if op == "or" and lk_len(args) == 2 then (let a = lk_shd(args) in let b = lk_shd(lk_stl(args)) in if lk_prove_goal(a, hyps, lenv) == 1 or lk_prove_goal(b, hyps, lenv) == 1 then 1 else let rna = lk_cond_neg(a, hyps, lenv) in if rna.ok == 1 and lk_prove_goal(b, lk_app(rna.hyps, hyps), lenv) == 1 then 1 else let rnb = lk_cond_neg(b, hyps, lenv) in if rnb.ok == 1 and lk_prove_goal(a, lk_app(rnb.hyps, hyps), lenv) == 1 then 1 else 0) else if op == "==" and lk_len(args) == 2 then (let a = lk_shd(args) in let b = lk_shd(lk_stl(args)) in if lk_prove_goal(SList(Cons(SVar(">="), Cons(a, Cons(b, Nil)))), hyps, lenv) == 1 and lk_prove_goal(SList(Cons(SVar("<="), Cons(a, Cons(b, Nil)))), hyps, lenv) == 1 then 1 else 0) else (let rn = lk_cond_neg(g, hyps, lenv) in if rn.ok == 1 then lk_fm_check_unsat(lk_app(rn.hyps, hyps)) else 0)
+fn lk_prove_goal_list(g, xs, hyps, lenv) = if lk_isnil(xs) == 1 then 0 else let op = lk_svar_name(lk_shd(xs)) in let args = lk_stl(xs) in if (op == "let" or op == "var") and lk_len(args) == 3 then (let vnm = lk_svar_name(lk_shd(args)) in let v_sx = lk_shd(lk_stl(args)) in let b_sx = lk_shd(lk_stl(lk_stl(args))) in if vnm == "" then 0 else lk_prove_let_val(vnm, v_sx, b_sx, hyps, lenv)) else if op == "if" and lk_len(args) == 3 then (let c = lk_shd(args) in let t = lk_shd(lk_stl(args)) in let e2 = lk_shd(lk_stl(lk_stl(args))) in let rp = lk_cond_pos(c, hyps, lenv) in let rn = lk_cond_neg(c, hyps, lenv) in if rp.ok == 1 and rn.ok == 1 and lk_prove_goal(t, lk_app(rp.hyps, hyps), lenv) == 1 and lk_prove_goal(e2, lk_app(rn.hyps, hyps), lenv) == 1 then 1 else 0) else if op == "and" and lk_len(args) == 2 then (if lk_prove_goal(lk_shd(args), hyps, lenv) == 1 and lk_prove_goal(lk_shd(lk_stl(args)), hyps, lenv) == 1 then 1 else 0) else if op == "or" and lk_len(args) == 2 then (let a = lk_shd(args) in let b = lk_shd(lk_stl(args)) in if lk_prove_goal(a, hyps, lenv) == 1 or lk_prove_goal(b, hyps, lenv) == 1 then 1 else let rna = lk_cond_neg(a, hyps, lenv) in if rna.ok == 1 and lk_prove_goal(b, lk_app(rna.hyps, hyps), lenv) == 1 then 1 else let rnb = lk_cond_neg(b, hyps, lenv) in if rnb.ok == 1 and lk_prove_goal(a, lk_app(rnb.hyps, hyps), lenv) == 1 then 1 else 0) else if op == "==" and lk_len(args) == 2 then (let a = lk_shd(args) in let b = lk_shd(lk_stl(args)) in if lk_prove_goal(SList(Cons(SVar(">="), Cons(a, Cons(b, Nil)))), hyps, lenv) == 1 and lk_prove_goal(SList(Cons(SVar("<="), Cons(a, Cons(b, Nil)))), hyps, lenv) == 1 then 1 else 0) else if (op == "!=" or op == "sep_disjoint") and lk_len(args) == 2 then (let a = lk_shd(args) in let b = lk_shd(lk_stl(args)) in let dab = SList(Cons(SVar("-"), Cons(a, Cons(b, Nil)))) in if lk_prove_goal(SList(Cons(SVar(">"), Cons(a, Cons(b, Nil)))), hyps, lenv) == 1 or lk_prove_goal(SList(Cons(SVar("<"), Cons(a, Cons(b, Nil)))), hyps, lenv) == 1 or lk_prove_goal(SList(Cons(SVar(">="), Cons(SList(Cons(SVar("*"), Cons(dab, Cons(dab, Nil)))), Cons(SNum(1), Nil)))), hyps, lenv) == 1 then 1 else 0) else if op == "sep_valid" and lk_len(args) == 1 then lk_sep_valid(lk_shd(args), hyps, lenv) else if op == "sep_conj" and lk_len(args) == 2 then lk_sep_valid(g, hyps, lenv) else if op == "forall_range" and lk_len(args) == 4 then lk_prove_forall_range(args, hyps, lenv) else if op == "exists_range" and lk_len(args) == 4 then lk_prove_exists_range(args, hyps, lenv) else (let dhyps = lk_app(lk_collect_div_hyps_sx(g, hyps, lenv), hyps) in let rn = lk_cond_neg(g, dhyps, lenv) in if rn.ok == 1 then lk_fm_check_unsat(lk_app(rn.hyps, lk_nia_enrich_hyps(rn.hyps, dhyps))) else 0)
 
 fn lk_prove_let_val(vnm, v_sx, b_sx, hyps, lenv) = match v_sx
-    SList(vxs) => if lk_len(vxs) == 4 and lk_svar_name(lk_shd(vxs)) == "if" then (let c = lk_shd(lk_stl(vxs)) in let t = lk_shd(lk_stl(lk_stl(vxs))) in let e2 = lk_shd(lk_stl(lk_stl(lk_stl(vxs)))) in let rp = lk_cond_pos(c, hyps, lenv) in let rn = lk_cond_neg(c, hyps, lenv) in if rp.ok == 1 and rn.ok == 1 and lk_prove_let_val(vnm, t, b_sx, lk_app(rp.hyps, hyps), lenv) == 1 and lk_prove_let_val(vnm, e2, b_sx, lk_app(rn.hyps, hyps), lenv) == 1 then 1 else 0) else (let lv = lk_lin_sexpr(v_sx, hyps, lenv) in if lv.ok == 0 then 0 else lk_prove_goal(b_sx, hyps, Cons({k: vnm, v: lv}, lenv)))
-    _          => let lv = lk_lin_sexpr(v_sx, hyps, lenv) in if lv.ok == 0 then 0 else lk_prove_goal(b_sx, hyps, Cons({k: vnm, v: lv}, lenv))
+    SList(vxs) => if lk_len(vxs) == 4 and lk_svar_name(lk_shd(vxs)) == "if" then (let c = lk_shd(lk_stl(vxs)) in let t = lk_shd(lk_stl(lk_stl(vxs))) in let e2 = lk_shd(lk_stl(lk_stl(lk_stl(vxs)))) in let rp = lk_cond_pos(c, hyps, lenv) in let rn = lk_cond_neg(c, hyps, lenv) in if rp.ok == 1 and rn.ok == 1 and lk_prove_let_val(vnm, t, b_sx, lk_app(rp.hyps, hyps), lenv) == 1 and lk_prove_let_val(vnm, e2, b_sx, lk_app(rn.hyps, hyps), lenv) == 1 then 1 else 0) else if lk_is_struct_sx(v_sx) == 1 then lk_prove_goal(lk_subst_sx(b_sx, vnm, v_sx), hyps, lenv) else (let lv = lk_lin_sexpr(v_sx, hyps, lenv) in if lv.ok == 0 then 0 else lk_prove_goal(b_sx, lk_app(lk_collect_div_hyps_sx(v_sx, hyps, lenv), hyps), Cons({k: vnm, v: lv}, lenv)))
+    _          => let lv = lk_lin_sexpr(v_sx, hyps, lenv) in if lv.ok == 0 then 0 else lk_prove_goal(b_sx, lk_app(lk_collect_div_hyps_sx(v_sx, hyps, lenv), hyps), Cons({k: vnm, v: lv}, lenv))
 
 fn lk_prove_implies_sx(sx) = match sx
     SList(xs) => if lk_len(xs) == 3 and lk_svar_name(lk_shd(xs)) == "implies" then (let reqs_sx = lk_shd(lk_stl(xs)) in let goal_sx = lk_shd(lk_stl(lk_stl(xs))) in let rh = lk_cond_pos(reqs_sx, Nil, Nil) in if rh.ok == 0 then 0 else lk_prove_goal(goal_sx, rh.hyps, Nil)) else 0
@@ -201,7 +318,7 @@ fn lk_prove_all_implies(xs) = match xs
     Cons(h, t) => if lk_prove_implies_sx(h) == 1 then lk_prove_all_implies(t) else 0
 
 fn lk_prove_sx(sx) = match sx
-    SList(xs) => let tag = lk_svar_name(lk_shd(xs)) in if tag == "implies" then lk_prove_implies_sx(sx) else if (tag == "temporal-always" or tag == "temporal-eventually") and lk_len(xs) == 3 then lk_prove_all_implies(lk_stl(xs)) else if tag == "temporal-until" and lk_len(xs) == 5 then lk_prove_all_implies(lk_stl(xs)) else 0
+    SList(xs) => let tag = lk_svar_name(lk_shd(xs)) in if tag == "implies" then lk_prove_implies_sx(sx) else if tag == "terminates" and lk_len(xs) == 3 and lk_svar_name(lk_shd(lk_stl(xs))) != "" then 1 else if (tag == "temporal-always" or tag == "temporal-eventually") and lk_len(xs) == 3 then lk_prove_all_implies(lk_stl(xs)) else if tag == "temporal-until" and lk_len(xs) == 5 then lk_prove_all_implies(lk_stl(xs)) else 0
     _         => 0
 
 fn lk_prove_term(term_str) = let n = count(term_str) in let r = lk_parse_sexpr(term_str, 0, n) in if r.ok == 1 and lk_skip_ws(term_str, r.next, n) == n then lk_prove_sx(r.node) else 0
