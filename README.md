@@ -189,9 +189,14 @@ lume self verify      # checks MANIFEST.sha256
 ```
 
 Downloads the Lume-built toolchain from GitHub Releases and verifies its SHA-256 — no C compiler
-needed. Prebuilt binaries are published for **linux-x86_64** today; other platforms are on the way
-(see issue #262), and until then the installer points you to a from-source build. To build from
-source instead, see Quickstart below.
+needed. Prebuilt release archives (`lume-<tag>-<os>-<arch>.tar.gz` + `SHA256SUMS`) are built,
+run-verified on native runners (`ubuntu-latest`, `macos-latest`, `windows-latest`) or `qemu-user`
+(`qemu-aarch64`, `qemu-riscv64`), and published by [`.github/workflows/release.yml`](.github/workflows/release.yml)
+for **linux-x86_64**, **linux-aarch64**, **linux-riscv64**, **macos-aarch64**, **macos-x86_64**, and
+**windows-x86_64** (#262, #263). On `linux-x86_64` the archive includes the full self-hosted `lumec`,
+`lasm`, `lcli`, and `lume0` ELF64 binaries; on the other targets the archive ships the target-native
+`lume0` runtime + `compiler/stage1/*.src` + `ltarget.src` native target compiler (`lume build --target <triple>`)
++ pre-verified `lume-target-check` target executable. To build from source instead, see Quickstart below.
 
 ## Quickstart
 

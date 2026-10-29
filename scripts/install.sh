@@ -71,10 +71,11 @@ sha256_of() {
     fi
 }
 
-mkdir -p "$PREFIX/bin" "$PREFIX/compiler/stage1/lume" "$PREFIX/build/bin" "$PREFIX/evolve"
+mkdir -p "$PREFIX/bin" "$PREFIX/compiler/stage1/lume" "$PREFIX/build/bin" "$PREFIX/evolve" "$PREFIX/scripts" "$PREFIX/docs"
 cp "$FROM_LOCAL/lume" "$PREFIX/lume"
 chmod +x "$PREFIX/lume"
-ln -sf "$PREFIX/lume" "$PREFIX/bin/lume"
+cp "$FROM_LOCAL/lume" "$PREFIX/bin/lume"
+chmod +x "$PREFIX/bin/lume"
 
 for _f in "$FROM_LOCAL"/compiler/stage1/*.src "$FROM_LOCAL"/compiler/stage1/*.lume; do
     [ -f "$_f" ] && cp "$_f" "$PREFIX/compiler/stage1/"
@@ -85,30 +86,54 @@ done
 if [ -f "$FROM_LOCAL/evolve/maintainers.pub" ]; then
     cp "$FROM_LOCAL/evolve/maintainers.pub" "$PREFIX/evolve/maintainers.pub"
 fi
+if [ -f "$FROM_LOCAL/scripts/amalgamate.sh" ]; then
+    cp "$FROM_LOCAL/scripts/amalgamate.sh" "$PREFIX/scripts/amalgamate.sh"
+    chmod +x "$PREFIX/scripts/amalgamate.sh"
+fi
+if [ -f "$FROM_LOCAL/scripts/install.sh" ]; then
+    cp "$FROM_LOCAL/scripts/install.sh" "$PREFIX/scripts/install.sh"
+    chmod +x "$PREFIX/scripts/install.sh"
+fi
+if [ -f "$FROM_LOCAL/docs/install.sh" ]; then
+    cp "$FROM_LOCAL/docs/install.sh" "$PREFIX/docs/install.sh"
+    chmod +x "$PREFIX/docs/install.sh"
+fi
 
 SRC_BIN="${FROM_DIR:-${LUME_BIN_DIR:-$FROM_LOCAL/build/bin}}"
 if [ -d "$SRC_BIN" ]; then
     for _b in "$SRC_BIN"/*; do
         if [ -f "$_b" ] && [ -x "$_b" ]; then
-            cp "$_b" "$PREFIX/build/bin/"
-            chmod +x "$PREFIX/build/bin/$(basename -- "$_b")"
+            _bn=$(basename -- "$_b")
+            cp "$_b" "$PREFIX/build/bin/$_bn"
+            chmod +x "$PREFIX/build/bin/$_bn"
+            cp "$_b" "$PREFIX/bin/$_bn"
+            chmod +x "$PREFIX/bin/$_bn"
         fi
     done
     if [ -f "$PREFIX/build/bin/lc" ] && [ ! -f "$PREFIX/build/bin/lumec" ]; then
         cp "$PREFIX/build/bin/lc" "$PREFIX/build/bin/lumec"
         chmod +x "$PREFIX/build/bin/lumec"
+        cp "$PREFIX/build/bin/lc" "$PREFIX/bin/lumec"
+        chmod +x "$PREFIX/bin/lumec"
     fi
 fi
 
-if [ -x "$FROM_LOCAL/bootstrap/lume0/lume0" ]; then
-    mkdir -p "$PREFIX/bootstrap/lume0"
-    cp "$FROM_LOCAL/bootstrap/lume0/lume0" "$PREFIX/bootstrap/lume0/lume0"
-    chmod +x "$PREFIX/bootstrap/lume0/lume0"
-fi
+for _l0_cand in "$FROM_LOCAL/bootstrap/lume0/lume0" "$FROM_LOCAL/bootstrap/lume0/lume0.exe" "$SRC_BIN/lume0" "$SRC_BIN/lume0.exe"; do
+    if [ -f "$_l0_cand" ] && [ -x "$_l0_cand" ]; then
+        _l0_bn=$(basename -- "$_l0_cand")
+        mkdir -p "$PREFIX/bootstrap/lume0"
+        cp "$_l0_cand" "$PREFIX/bootstrap/lume0/$_l0_bn"
+        chmod +x "$PREFIX/bootstrap/lume0/$_l0_bn"
+        cp "$_l0_cand" "$PREFIX/bin/$_l0_bn"
+        chmod +x "$PREFIX/bin/$_l0_bn"
+        break
+    fi
+done
 
 MANIFEST="$PREFIX/MANIFEST.sha256"
 : > "$MANIFEST"
 printf '%s  lume\n' "$(sha256_of "$PREFIX/lume")" >> "$MANIFEST"
+printf '%s  bin/lume\n' "$(sha256_of "$PREFIX/bin/lume")" >> "$MANIFEST"
 for _b in "$PREFIX"/build/bin/*; do
     if [ -f "$_b" ]; then
         printf '%s  build/bin/%s\n' "$(sha256_of "$_b")" "$(basename -- "$_b")" >> "$MANIFEST"

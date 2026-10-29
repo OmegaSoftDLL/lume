@@ -1457,17 +1457,53 @@ print sq_not49(7)
 EOF
         ../../lume build --target aarch64-macos-macho "$_mac_d/ut_ok.src" -o "$_mac_d/ut_macos_ok" 2>/dev/null || true
         ../../lume build --target aarch64-macos-macho "$_mac_d/ut_trap.src" -o "$_mac_d/ut_macos_trap" 2>/dev/null || true
+        ../../lume build --target x86_64-macos-macho "$_mac_d/ut_ok.src" -o "$_mac_d/ut_macos_x64_ok" 2>/dev/null || true
         ../../lume build --target wasm32-wasi "$_mac_d/ut_ok.src" -o "$_mac_d/ut_ok.wasm" 2>/dev/null || true
         ../../lume build --target wasm32-wasi "$_mac_d/ut_trap.src" -o "$_mac_d/ut_trap.wasm" 2>/dev/null || true
         _mac_out=$("$_mac_d/ut_macos_ok" 2>/dev/null | tr '\n' ',' || true)
         _mac_trap_rc=0
         "$_mac_d/ut_macos_trap" >/dev/null 2>&1 || _mac_trap_rc=$?
+        _mac_x64_file=$(file "$_mac_d/ut_macos_x64_ok" 2>/dev/null || true)
         _mac_wasm_out=$(../../lume run "$_mac_d/ut_ok.wasm" 2>/dev/null | tr '\n' ',' || true)
         _mac_wasm_trap_rc=0
         ../../lume run "$_mac_d/ut_trap.wasm" >/dev/null 2>&1 || _mac_wasm_trap_rc=$?
         rm -rf "$_mac_d"
-        if [ "$_mac_out" = "55,42," ] && [ "$_mac_trap_rc" -eq 3 ] && [ "$_mac_wasm_out" = "55,42," ] && [ "$_mac_wasm_trap_rc" -eq 3 ]; then ok "phase-5 T2 (#206): native Apple Silicon Mach-O 64 (aarch64-macos-macho) & wasm32-wasi execution on Darwin arm64 (55,42 & exit-3 trap)"; else bad "phase-5 T2 (#206): native Apple Silicon Mach-O 64 execution (out='$_mac_out'/$_mac_trap_rc wasm='$_mac_wasm_out'/$_mac_wasm_trap_rc)"; fi
+        if [ "$_mac_out" = "55,42," ] && [ "$_mac_trap_rc" -eq 3 ] && printf '%s' "$_mac_x64_file" | grep -q "Mach-O 64-bit executable x86_64" && [ "$_mac_wasm_out" = "55,42," ] && [ "$_mac_wasm_trap_rc" -eq 3 ]; then ok "phase-5 T2 (#206, #262): native Apple Silicon Mach-O 64 (aarch64-macos-macho), x86_64-macos-macho & wasm32-wasi execution on Darwin (55,42 & exit-3 trap)"; else bad "phase-5 T2 (#206, #262): Mach-O 64 execution (out='$_mac_out'/$_mac_trap_rc x64='$_mac_x64_file' wasm='$_mac_wasm_out'/$_mac_wasm_trap_rc)"; fi
     fi
+
+    # Issue #262: Network installer (docs/install.sh) clean-runner install, self-verify, and SHA-256 tamper rejection
+    _ni_d=$(mktemp -d)
+    _ni_os=$(uname -s)
+    _ni_arch=$(uname -m)
+    case "$_ni_os" in
+        Linux)  _ni_plat_os="linux" ;;
+        Darwin) _ni_plat_os="macos" ;;
+        *)      _ni_plat_os="linux" ;;
+    esac
+    case "$_ni_arch" in
+        x86_64|amd64)  _ni_plat_arch="x86_64" ;;
+        aarch64|arm64) _ni_plat_arch="aarch64" ;;
+        riscv64)       _ni_plat_arch="riscv64" ;;
+        *)             _ni_plat_arch="x86_64" ;;
+    esac
+    _ni_pkg="lume-v0.2.0-${_ni_plat_os}-${_ni_plat_arch}"
+    mkdir -p "$_ni_d/stage" "$_ni_d/dist" "$_ni_d/tampered"
+    sh ../../scripts/install.sh --prefix "$_ni_d/stage/$_ni_pkg" --from-local "$(cd ../.. && pwd)" --from-dir "${ntmp:-$(cd ../../bootstrap/lume0 && pwd)}" >/dev/null 2>&1
+    tar -C "$_ni_d/stage" -czf "$_ni_d/dist/${_ni_pkg}.tar.gz" "$_ni_pkg"
+    if command -v sha256sum >/dev/null 2>&1; then
+        (cd "$_ni_d/dist" && sha256sum "${_ni_pkg}.tar.gz" > SHA256SUMS)
+    else
+        (cd "$_ni_d/dist" && shasum -a 256 "${_ni_pkg}.tar.gz" > SHA256SUMS)
+    fi
+    _ni_pos_log=$(LUME_PREFIX="$_ni_d/clean" LUME_RELEASE_TAG="v0.2.0" LUME_RELEASE_BASE_URL="file://$_ni_d/dist" sh ../../docs/install.sh 2>&1 || true)
+    _ni_ver=$("$_ni_d/clean/bin/lume" --version 2>/dev/null || true)
+    _ni_sv=$("$_ni_d/clean/bin/lume" self verify 2>/dev/null || true)
+    cp "$_ni_d/dist/${_ni_pkg}.tar.gz" "$_ni_d/tampered/"
+    printf '0000000000000000000000000000000000000000000000000000000000000000  %s.tar.gz\n' "$_ni_pkg" > "$_ni_d/tampered/SHA256SUMS"
+    _ni_bad_rc=0
+    _ni_bad_log=$(LUME_PREFIX="$_ni_d/bad" LUME_RELEASE_TAG="v0.2.0" LUME_RELEASE_BASE_URL="file://$_ni_d/tampered" sh ../../docs/install.sh 2>&1) || _ni_bad_rc=$?
+    rm -rf "$_ni_d"
+    if printf '%s' "$_ni_pos_log" | grep -q "SHA-256 verified" && printf '%s' "$_ni_ver" | grep -q "lume 0.2.0" && printf '%s' "$_ni_sv" | grep -q '"manifest_verified":true' && [ "$_ni_bad_rc" -ne 0 ] && printf '%s' "$_ni_bad_log" | grep -q "SHA-256 mismatch — refusing to install"; then ok "multi-platform release installer (#262, #263): docs/install.sh clean install + self-verify + SHA-256 tamper rejection"; else bad "multi-platform release installer (#262, #263)"; printf '%s\n' "$_ni_pos_log" "$_ni_ver" "$_ni_sv" "bad_rc=$_ni_bad_rc" "$_ni_bad_log"; fi
 else
     ok "cross-platform lcaas/lcert suite (skipped under ASan; covered in Step 4)"
 fi

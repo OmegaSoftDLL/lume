@@ -7,52 +7,407 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release version tag (e.g. v0.3.0) for dry-run packaging'
+        description: 'Release version tag (e.g. v0.2.0)'
         required: false
-        default: 'v0.3.0'
+        default: 'v0.2.0'
+      publish_release:
+        description: 'Publish/update the GitHub Release with verified multi-platform assets'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
 
 jobs:
-  release:
-    name: Build & Publish Self-Hosted Lume Toolchain (linux-x86_64)
+  package-linux:
+    name: Build & Run-Verify Linux Release Archives (x86_64, aarch64, riscv64)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
+
+      - name: Install QEMU user-mode emulators & cross-compilers for aarch64 and riscv64
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            qemu-user \
+            gcc-aarch64-linux-gnu libc6-dev-arm64-cross \
+            gcc-riscv64-linux-gnu libc6-dev-riscv64-cross
 
       - name: Bootstrap self-hosted toolchain (stage2 == stage3) & verify Zero-C steady state
         run: |
           make bootstrap
           make zero-c
 
-      - name: Package release archive & SHA256SUMS
+      - name: Package & run-verify linux-x86_64, linux-aarch64, and linux-riscv64 archives (#262)
         run: |
           set -eu
-          VER="${GITHUB_REF_NAME:-${{ inputs.tag || 'v0.3.0' }}}"
-          PKG="lume-${VER}-linux-x86_64"
-          mkdir -p "dist/${PKG}/bin"
-          cp build/bootstrap/lumec3 "dist/${PKG}/bin/lumec"
-          cp build/bootstrap/lasm3  "dist/${PKG}/bin/lasm"
-          cp build/bootstrap/lcli3  "dist/${PKG}/bin/lcli"
-          cp bootstrap/lume0/lume0  "dist/${PKG}/bin/lume0"
-          cp lume                   "dist/${PKG}/bin/lume"
-          chmod +x "dist/${PKG}/bin/lumec" "dist/${PKG}/bin/lasm" "dist/${PKG}/bin/lcli" "dist/${PKG}/bin/lume0" "dist/${PKG}/bin/lume"
-          cp README.md CHANGELOG.md LICENSE-MIT LICENSE-APACHE "dist/${PKG}/" 2>/dev/null || cp README.md CHANGELOG.md "dist/${PKG}/"
-          tar -C dist -czf "dist/${PKG}.tar.gz" "${PKG}"
+          if [[ "${GITHUB_REF:-}" == refs/tags/v* ]]; then
+            VER="${GITHUB_REF_NAME}"
+          else
+            VER="${{ inputs.tag || 'v0.2.0' }}"
+          fi
+          mkdir -p dist stage build/x86_64-bin build/aarch64-bin build/riscv64-bin
+
+          cat > stage/verify_ok.src <<'EOF'
+          fn fib(n: int) -> int = if n < 2 then n else fib(n - 1) + fib(n - 2)
+          fn clamp_nonneg(x: int) -> int requires x >= 0 ensures result >= 0 = x
+          print fib(10)
+          print clamp_nonneg(42)
+          EOF
+
+          cat > stage/verify_trap.src <<'EOF'
+          fn checked_sq(x: int) -> int requires x * x > 100 = x
+          print checked_sq(5)
+          EOF
+
+          # 1. linux-x86_64
+          cp build/bootstrap/lumec3 build/x86_64-bin/lumec
+          cp build/bootstrap/lasm3  build/x86_64-bin/lasm
+          cp build/bootstrap/lcli3  build/x86_64-bin/lcli
+          cp bootstrap/lume0/lume0  build/x86_64-bin/lume0
+          ./lume build --target x86_64-linux-elf stage/verify_ok.src -o build/x86_64-bin/lume-target-check
+          chmod +x build/x86_64-bin/*
+          PKG_X64="lume-${VER}-linux-x86_64"
+          sh scripts/install.sh --prefix "stage/${PKG_X64}" --from-local "$PWD" --from-dir "$PWD/build/x86_64-bin"
+          cp README.md CHANGELOG.md "stage/${PKG_X64}/" 2>/dev/null || true
+          tar -C stage -czf "dist/${PKG_X64}.tar.gz" "${PKG_X64}"
+
+          # 2. linux-aarch64 (cross-built static lume0 + aarch64-linux-elf target binaries)
+          aarch64-linux-gnu-gcc -O2 -std=c11 -Wall -Wextra -pedantic -static \
+            bootstrap/lume0/main.c bootstrap/lume0/lexer.c bootstrap/lume0/parser.c \
+            bootstrap/lume0/ast.c bootstrap/lume0/interp.c bootstrap/lume0/bytecode.c \
+            bootstrap/lume0/diag.c bootstrap/lume0/elf64.c -lm -o build/aarch64-bin/lume0
+          ./lume build --target aarch64-linux-elf stage/verify_ok.src -o build/aarch64-bin/lume-target-check
+          ./lume build --target aarch64-linux-elf stage/verify_trap.src -o build/aarch64-bin/lume-target-trap
+          chmod +x build/aarch64-bin/*
+          PKG_A64="lume-${VER}-linux-aarch64"
+          sh scripts/install.sh --prefix "stage/${PKG_A64}" --from-local "$PWD" --from-dir "$PWD/build/aarch64-bin"
+          cp README.md CHANGELOG.md "stage/${PKG_A64}/" 2>/dev/null || true
+          tar -C stage -czf "dist/${PKG_A64}.tar.gz" "${PKG_A64}"
+
+          # 3. linux-riscv64 (cross-built static lume0 + riscv64-linux-elf target binaries)
+          riscv64-linux-gnu-gcc -O2 -std=c11 -Wall -Wextra -pedantic -static \
+            bootstrap/lume0/main.c bootstrap/lume0/lexer.c bootstrap/lume0/parser.c \
+            bootstrap/lume0/ast.c bootstrap/lume0/interp.c bootstrap/lume0/bytecode.c \
+            bootstrap/lume0/diag.c bootstrap/lume0/elf64.c -lm -o build/riscv64-bin/lume0
+          ./lume build --target riscv64-linux-elf stage/verify_ok.src -o build/riscv64-bin/lume-target-check
+          ./lume build --target riscv64-linux-elf stage/verify_trap.src -o build/riscv64-bin/lume-target-trap
+          chmod +x build/riscv64-bin/*
+          PKG_RV64="lume-${VER}-linux-riscv64"
+          sh scripts/install.sh --prefix "stage/${PKG_RV64}" --from-local "$PWD" --from-dir "$PWD/build/riscv64-bin"
+          cp README.md CHANGELOG.md "stage/${PKG_RV64}/" 2>/dev/null || true
+          tar -C stage -czf "dist/${PKG_RV64}.tar.gz" "${PKG_RV64}"
+
           cp build/bootstrap/lumec3 dist/lumec-linux-x86_64
           cp build/bootstrap/lasm3  dist/lasm-linux-x86_64
           cp bootstrap/lume0/lume0  dist/lume0-linux-x86_64
           (
             cd dist
-            sha256sum "${PKG}.tar.gz" lumec-linux-x86_64 lasm-linux-x86_64 lume0-linux-x86_64 > SHA256SUMS
+            sha256sum "${PKG_X64}.tar.gz" "${PKG_A64}.tar.gz" "${PKG_RV64}.tar.gz" \
+              lumec-linux-x86_64 lasm-linux-x86_64 lume0-linux-x86_64 > SHA256SUMS
             sha256sum -c SHA256SUMS
           )
 
-      - name: Upload workflow artifact
-        uses: actions/upload-artifact@v7
+          # --- Run-Verification Gate (docs/28 §7) ---
+          VERIFY_DIR=$(mktemp -d)
+
+          # Gate A: Negative Tamper Test on docs/install.sh (must reject corrupted SHA-256)
+          mkdir -p "$VERIFY_DIR/tampered"
+          cp "dist/${PKG_X64}.tar.gz" "$VERIFY_DIR/tampered/"
+          printf '0000000000000000000000000000000000000000000000000000000000000000  %s.tar.gz\n' "${PKG_X64}" > "$VERIFY_DIR/tampered/SHA256SUMS"
+          if LUME_PREFIX="$VERIFY_DIR/bad-install" LUME_RELEASE_TAG="$VER" LUME_RELEASE_BASE_URL="file://$VERIFY_DIR/tampered" sh docs/install.sh > "$VERIFY_DIR/tamper.log" 2>&1; then
+            echo "FATAL: docs/install.sh accepted a tampered archive!" >&2
+            exit 1
+          fi
+          grep -q "SHA-256 mismatch — refusing to install" "$VERIFY_DIR/tamper.log"
+
+          # Gate B: Clean install & native execution of linux-x86_64 archive via docs/install.sh
+          LUME_PREFIX="$VERIFY_DIR/x64" LUME_RELEASE_TAG="$VER" LUME_RELEASE_BASE_URL="file://$PWD/dist" sh docs/install.sh
+          "$VERIFY_DIR/x64/bin/lume" --version | grep -q "lume 0.2.0"
+          "$VERIFY_DIR/x64/bin/lume" self verify | grep -q '"manifest_verified":true'
+          [ "$("$VERIFY_DIR/x64/bin/lume-target-check" | tr '\n' ',')" = "55,42," ]
+          [ "$("$VERIFY_DIR/x64/bin/lume" run stage/verify_ok.src | tr '\n' ',')" = "55,42," ]
+          "$VERIFY_DIR/x64/bin/lume" build stage/verify_trap.src -o "$VERIFY_DIR/x64_trap"
+          _rc=0; "$VERIFY_DIR/x64_trap" >/dev/null 2>&1 || _rc=$?
+          [ "$_rc" -eq 3 ]
+
+          # Gate C: Clean install & QEMU user-mode execution of linux-aarch64 archive
+          LUME_PREFIX="$VERIFY_DIR/a64" LUME_INSTALL_PLAT="linux-aarch64" LUME_SKIP_POST_VERIFY=1 \
+            LUME_RELEASE_TAG="$VER" LUME_RELEASE_BASE_URL="file://$PWD/dist" sh docs/install.sh
+          "$VERIFY_DIR/a64/bin/lume" self verify --prefix "$VERIFY_DIR/a64" | grep -q '"manifest_verified":true'
+          [ "$(qemu-aarch64 "$VERIFY_DIR/a64/bin/lume-target-check" | tr '\n' ',')" = "55,42," ]
+          _rc=0; qemu-aarch64 "$VERIFY_DIR/a64/bin/lume-target-trap" >/dev/null 2>&1 || _rc=$?
+          [ "$_rc" -eq 3 ]
+          LUME0_RUNNER="qemu-aarch64" LUME0_BIN="$VERIFY_DIR/a64/bin/lume0" \
+            "$VERIFY_DIR/a64/bin/lume" --version | grep -q "lume 0.2.0"
+          [ "$(LUME0_RUNNER="qemu-aarch64" LUME0_BIN="$VERIFY_DIR/a64/bin/lume0" "$VERIFY_DIR/a64/bin/lume" run stage/verify_ok.src | tr '\n' ',')" = "55,42," ]
+
+          # Gate D: Clean install & QEMU user-mode execution of linux-riscv64 archive
+          LUME_PREFIX="$VERIFY_DIR/rv64" LUME_INSTALL_PLAT="linux-riscv64" LUME_SKIP_POST_VERIFY=1 \
+            LUME_RELEASE_TAG="$VER" LUME_RELEASE_BASE_URL="file://$PWD/dist" sh docs/install.sh
+          "$VERIFY_DIR/rv64/bin/lume" self verify --prefix "$VERIFY_DIR/rv64" | grep -q '"manifest_verified":true'
+          [ "$(qemu-riscv64 "$VERIFY_DIR/rv64/bin/lume-target-check" | tr '\n' ',')" = "55,42," ]
+          _rc=0; qemu-riscv64 "$VERIFY_DIR/rv64/bin/lume-target-trap" >/dev/null 2>&1 || _rc=$?
+          [ "$_rc" -eq 3 ]
+          LUME0_RUNNER="qemu-riscv64" LUME0_BIN="$VERIFY_DIR/rv64/bin/lume0" \
+            "$VERIFY_DIR/rv64/bin/lume" --version | grep -q "lume 0.2.0"
+          [ "$(LUME0_RUNNER="qemu-riscv64" LUME0_BIN="$VERIFY_DIR/rv64/bin/lume0" "$VERIFY_DIR/rv64/bin/lume" run stage/verify_ok.src | tr '\n' ',')" = "55,42," ]
+
+          rm -rf "$VERIFY_DIR"
+
+      - name: Upload verified Linux release artifacts
+        uses: actions/upload-artifact@v4
         with:
-          name: lume-linux-x86_64-release
+          name: release-linux
+          path: |
+            dist/*.tar.gz
+            dist/lumec-linux-x86_64
+            dist/lasm-linux-x86_64
+            dist/lume0-linux-x86_64
+
+  package-macos:
+    name: Build & Run-Verify macOS Release Archives (macos-aarch64, macos-x86_64)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Package & run-verify macos-aarch64 and macos-x86_64 archives (#262)
+        run: |
+          set -eu
+          if [[ "${GITHUB_REF:-}" == refs/tags/v* ]]; then
+            VER="${GITHUB_REF_NAME}"
+          else
+            VER="${{ inputs.tag || 'v0.2.0' }}"
+          fi
+          mkdir -p dist stage build/macos-aarch64-bin build/macos-x86_64-bin
+
+          make -C bootstrap/lume0
+
+          cat > stage/verify_ok.src <<'EOF'
+          fn fib(n: int) -> int = if n < 2 then n else fib(n - 1) + fib(n - 2)
+          fn clamp_nonneg(x: int) -> int requires x >= 0 ensures result >= 0 = x
+          print fib(10)
+          print clamp_nonneg(42)
+          EOF
+
+          cat > stage/verify_trap.src <<'EOF'
+          fn checked_sq(x: int) -> int requires x * x > 100 = x
+          print checked_sq(5)
+          EOF
+
+          # 1. macos-aarch64 (Apple Silicon native Mach-O 64)
+          cc -arch arm64 -O2 -std=c11 -Wall -Wextra -pedantic \
+            bootstrap/lume0/main.c bootstrap/lume0/lexer.c bootstrap/lume0/parser.c \
+            bootstrap/lume0/ast.c bootstrap/lume0/interp.c bootstrap/lume0/bytecode.c \
+            bootstrap/lume0/diag.c bootstrap/lume0/elf64.c -lm -o build/macos-aarch64-bin/lume0
+          ./lume build --target aarch64-macos-macho stage/verify_ok.src -o build/macos-aarch64-bin/lume-target-check
+          ./lume build --target aarch64-macos-macho stage/verify_trap.src -o build/macos-aarch64-bin/lume-target-trap
+          chmod +x build/macos-aarch64-bin/*
+          PKG_MARM="lume-${VER}-macos-aarch64"
+          sh scripts/install.sh --prefix "stage/${PKG_MARM}" --from-local "$PWD" --from-dir "$PWD/build/macos-aarch64-bin"
+          cp README.md CHANGELOG.md "stage/${PKG_MARM}/" 2>/dev/null || true
+          tar -C stage -czf "dist/${PKG_MARM}.tar.gz" "${PKG_MARM}"
+
+          # 2. macos-x86_64 (Intel x86_64 Mach-O 64)
+          cc -arch x86_64 -O2 -std=c11 -Wall -Wextra -pedantic \
+            bootstrap/lume0/main.c bootstrap/lume0/lexer.c bootstrap/lume0/parser.c \
+            bootstrap/lume0/ast.c bootstrap/lume0/interp.c bootstrap/lume0/bytecode.c \
+            bootstrap/lume0/diag.c bootstrap/lume0/elf64.c -lm -o build/macos-x86_64-bin/lume0
+          ./lume build --target x86_64-macos-macho stage/verify_ok.src -o build/macos-x86_64-bin/lume-target-check
+          ./lume build --target x86_64-macos-macho stage/verify_trap.src -o build/macos-x86_64-bin/lume-target-trap
+          chmod +x build/macos-x86_64-bin/*
+          PKG_MX64="lume-${VER}-macos-x86_64"
+          sh scripts/install.sh --prefix "stage/${PKG_MX64}" --from-local "$PWD" --from-dir "$PWD/build/macos-x86_64-bin"
+          cp README.md CHANGELOG.md "stage/${PKG_MX64}/" 2>/dev/null || true
+          tar -C stage -czf "dist/${PKG_MX64}.tar.gz" "${PKG_MX64}"
+
+          (
+            cd dist
+            shasum -a 256 "${PKG_MARM}.tar.gz" "${PKG_MX64}.tar.gz" > SHA256SUMS
+            shasum -a 256 -c SHA256SUMS
+          )
+
+          # --- Run-Verification Gate on macOS (docs/28 §7) ---
+          VERIFY_DIR=$(mktemp -d)
+
+          # Gate A: Negative Tamper Test on docs/install.sh
+          mkdir -p "$VERIFY_DIR/tampered"
+          cp "dist/${PKG_MARM}.tar.gz" "$VERIFY_DIR/tampered/"
+          printf '0000000000000000000000000000000000000000000000000000000000000000  %s.tar.gz\n' "${PKG_MARM}" > "$VERIFY_DIR/tampered/SHA256SUMS"
+          if LUME_PREFIX="$VERIFY_DIR/bad-install" LUME_RELEASE_TAG="$VER" LUME_RELEASE_BASE_URL="file://$VERIFY_DIR/tampered" sh docs/install.sh > "$VERIFY_DIR/tamper.log" 2>&1; then
+            echo "FATAL: docs/install.sh accepted a tampered archive on macOS!" >&2
+            exit 1
+          fi
+          grep -q "SHA-256 mismatch — refusing to install" "$VERIFY_DIR/tamper.log"
+
+          # Gate B: Clean install & native execution of macos-aarch64 archive
+          LUME_PREFIX="$VERIFY_DIR/marm" LUME_RELEASE_TAG="$VER" LUME_RELEASE_BASE_URL="file://$PWD/dist" sh docs/install.sh
+          "$VERIFY_DIR/marm/bin/lume" --version | grep -q "lume 0.2.0"
+          "$VERIFY_DIR/marm/bin/lume" self verify | grep -q '"manifest_verified":true'
+          [ "$("$VERIFY_DIR/marm/bin/lume-target-check" | tr '\n' ',')" = "55,42," ]
+          _rc=0; "$VERIFY_DIR/marm/bin/lume-target-trap" >/dev/null 2>&1 || _rc=$?
+          [ "$_rc" -eq 3 ]
+          [ "$("$VERIFY_DIR/marm/bin/lume" run stage/verify_ok.src | tr '\n' ',')" = "55,42," ]
+          "$VERIFY_DIR/marm/bin/lume" build --target aarch64-macos-macho stage/verify_ok.src -o "$VERIFY_DIR/marm_built"
+          [ "$("$VERIFY_DIR/marm_built" | tr '\n' ',')" = "55,42," ]
+
+          # Gate C: Clean install & verification of macos-x86_64 archive
+          LUME_PREFIX="$VERIFY_DIR/mx64" LUME_INSTALL_PLAT="macos-x86_64" LUME_SKIP_POST_VERIFY=1 \
+            LUME_RELEASE_TAG="$VER" LUME_RELEASE_BASE_URL="file://$PWD/dist" sh docs/install.sh
+          "$VERIFY_DIR/mx64/bin/lume" self verify --prefix "$VERIFY_DIR/mx64" | grep -q '"manifest_verified":true'
+          file "$VERIFY_DIR/mx64/bin/lume0" | grep -q "Mach-O 64-bit executable x86_64"
+          file "$VERIFY_DIR/mx64/bin/lume-target-check" | grep -q "Mach-O 64-bit executable x86_64"
+          if "$VERIFY_DIR/mx64/bin/lume-target-check" >/dev/null 2>&1; then
+            [ "$("$VERIFY_DIR/mx64/bin/lume-target-check" | tr '\n' ',')" = "55,42," ]
+            _rc=0; "$VERIFY_DIR/mx64/bin/lume-target-trap" >/dev/null 2>&1 || _rc=$?
+            [ "$_rc" -eq 3 ]
+            "$VERIFY_DIR/mx64/bin/lume" --version | grep -q "lume 0.2.0"
+            [ "$("$VERIFY_DIR/mx64/bin/lume" run stage/verify_ok.src | tr '\n' ',')" = "55,42," ]
+          fi
+
+          rm -rf "$VERIFY_DIR"
+
+      - name: Upload verified macOS release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-macos
+          path: |
+            dist/*.tar.gz
+
+  package-windows:
+    name: Build & Run-Verify Windows Release Archive (windows-x86_64)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Configure git LF line endings
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v4
+
+      - name: Package & run-verify windows-x86_64 archive (#262)
+        run: |
+          set -eu
+          if [[ "${GITHUB_REF:-}" == refs/tags/v* ]]; then
+            VER="${GITHUB_REF_NAME}"
+          else
+            VER="${{ inputs.tag || 'v0.2.0' }}"
+          fi
+          mkdir -p dist stage build/win64-bin bootstrap/lume0
+
+          gcc -O2 -std=c11 -Wall -Wextra "-Dfchmod(fd,mode)=0" -Wl,--stack,67108864 \
+            bootstrap/lume0/main.c bootstrap/lume0/lexer.c bootstrap/lume0/parser.c \
+            bootstrap/lume0/ast.c bootstrap/lume0/interp.c bootstrap/lume0/bytecode.c \
+            bootstrap/lume0/diag.c bootstrap/lume0/elf64.c -lm -o bootstrap/lume0/lume0.exe
+          cp bootstrap/lume0/lume0.exe build/win64-bin/lume0.exe
+
+          cat > stage/verify_ok.src <<'EOF'
+          fn fib(n: int) -> int = if n < 2 then n else fib(n - 1) + fib(n - 2)
+          fn clamp_nonneg(x: int) -> int requires x >= 0 ensures result >= 0 = x
+          print fib(10)
+          print clamp_nonneg(42)
+          EOF
+
+          cat > stage/verify_trap.src <<'EOF'
+          fn checked_sq(x: int) -> int requires x * x > 100 = x
+          print checked_sq(5)
+          EOF
+
+          ./lume build --target x86_64-windows-pe stage/verify_ok.src -o build/win64-bin/lume-target-check.exe
+          ./lume build --target x86_64-windows-pe stage/verify_trap.src -o build/win64-bin/lume-target-trap.exe
+          chmod +x build/win64-bin/*
+
+          PKG_WIN="lume-${VER}-windows-x86_64"
+          sh scripts/install.sh --prefix "stage/${PKG_WIN}" --from-local "$PWD" --from-dir "$PWD/build/win64-bin"
+          cp README.md CHANGELOG.md "stage/${PKG_WIN}/" 2>/dev/null || true
+          tar -C stage -czf "dist/${PKG_WIN}.tar.gz" "${PKG_WIN}"
+
+          (
+            cd dist
+            sha256sum "${PKG_WIN}.tar.gz" > SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
+
+          # --- Run-Verification Gate on Windows x64 (docs/28 §7) ---
+          VERIFY_DIR=$(mktemp -d)
+          WDIST=$(cd dist && pwd -W)
+
+          # Gate A: Negative Tamper Test on docs/install.sh
+          mkdir -p "$VERIFY_DIR/tampered"
+          cp "dist/${PKG_WIN}.tar.gz" "$VERIFY_DIR/tampered/"
+          printf '0000000000000000000000000000000000000000000000000000000000000000  %s.tar.gz\n' "${PKG_WIN}" > "$VERIFY_DIR/tampered/SHA256SUMS"
+          WTAMPER=$(cd "$VERIFY_DIR/tampered" && pwd -W)
+          if LUME_PREFIX="$VERIFY_DIR/bad-install" LUME_RELEASE_TAG="$VER" LUME_RELEASE_BASE_URL="file:///$WTAMPER" sh docs/install.sh > "$VERIFY_DIR/tamper.log" 2>&1; then
+            echo "FATAL: docs/install.sh accepted a tampered archive on Windows!" >&2
+            exit 1
+          fi
+          grep -q "SHA-256 mismatch — refusing to install" "$VERIFY_DIR/tamper.log"
+
+          # Gate B: Clean install & native execution of windows-x86_64 archive
+          LUME_PREFIX="$VERIFY_DIR/win" LUME_RELEASE_TAG="$VER" LUME_RELEASE_BASE_URL="file:///$WDIST" sh docs/install.sh
+          "$VERIFY_DIR/win/bin/lume" --version | tr -d '\r' | grep -q "lume 0.2.0"
+          "$VERIFY_DIR/win/bin/lume" self verify | tr -d '\r' | grep -q '"manifest_verified":true'
+          [ "$("$VERIFY_DIR/win/bin/lume-target-check.exe" | tr -d '\r' | tr '\n' ',')" = "55,42," ]
+          _rc=0; "$VERIFY_DIR/win/bin/lume-target-trap.exe" >/dev/null 2>&1 || _rc=$?
+          [ "$_rc" -eq 3 ]
+          [ "$("$VERIFY_DIR/win/bin/lume" run stage/verify_ok.src | tr -d '\r' | tr '\n' ',')" = "55,42," ]
+          "$VERIFY_DIR/win/bin/lume" build --target x86_64-windows-pe stage/verify_ok.src -o "$VERIFY_DIR/win_built.exe"
+          [ "$("$VERIFY_DIR/win_built.exe" | tr -d '\r' | tr '\n' ',')" = "55,42," ]
+
+          rm -rf "$VERIFY_DIR"
+
+      - name: Upload verified Windows release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: |
+            dist/*.tar.gz
+
+  publish:
+    name: Assemble SHA256SUMS & Publish Multi-Platform Release
+    needs: [package-linux, package-macos, package-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all verified platform archives
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Assemble unified dist/ & verify SHA256SUMS across all 6 platform archives
+        run: |
+          set -eu
+          if [[ "${GITHUB_REF:-}" == refs/tags/v* ]]; then
+            VER="${GITHUB_REF_NAME}"
+          else
+            VER="${{ inputs.tag || 'v0.2.0' }}"
+          fi
+          mkdir -p dist
+          find artifacts -type f \( -name '*.tar.gz' -o -name 'lumec-*' -o -name 'lasm-*' -o -name 'lume0-*' \) -exec cp {} dist/ \;
+          for plat in linux-x86_64 linux-aarch64 linux-riscv64 macos-aarch64 macos-x86_64 windows-x86_64; do
+            [ -f "dist/lume-${VER}-${plat}.tar.gz" ] || { echo "Missing verified archive for ${plat}" >&2; exit 1; }
+          done
+          (
+            cd dist
+            sha256sum \
+              "lume-${VER}-linux-x86_64.tar.gz" \
+              "lume-${VER}-linux-aarch64.tar.gz" \
+              "lume-${VER}-linux-riscv64.tar.gz" \
+              "lume-${VER}-macos-aarch64.tar.gz" \
+              "lume-${VER}-macos-x86_64.tar.gz" \
+              "lume-${VER}-windows-x86_64.tar.gz" \
+              lumec-linux-x86_64 lasm-linux-x86_64 lume0-linux-x86_64 > SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
+          cat dist/SHA256SUMS
+
+      - name: Upload unified multi-platform release bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: lume-multiplatform-release
           path: |
             dist/*.tar.gz
             dist/lumec-linux-x86_64
@@ -60,18 +415,32 @@ jobs:
             dist/lume0-linux-x86_64
             dist/SHA256SUMS
 
-      - name: Publish GitHub Release on tag push
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Publish or Update GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.publish_release == true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -eu
-          TAG="${GITHUB_REF_NAME}"
-          gh release create "${TAG}" \
-            dist/*.tar.gz \
-            dist/lumec-linux-x86_64 \
-            dist/lasm-linux-x86_64 \
-            dist/lume0-linux-x86_64 \
-            dist/SHA256SUMS \
-            --title "Lume ${TAG}" \
-            --generate-notes
+          if [[ "${GITHUB_REF:-}" == refs/tags/v* ]]; then
+            TAG="${GITHUB_REF_NAME}"
+          else
+            TAG="${{ inputs.tag || 'v0.2.0' }}"
+          fi
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            gh release upload "${TAG}" \
+              dist/*.tar.gz \
+              dist/lumec-linux-x86_64 \
+              dist/lasm-linux-x86_64 \
+              dist/lume0-linux-x86_64 \
+              dist/SHA256SUMS \
+              --clobber
+          else
+            gh release create "${TAG}" \
+              dist/*.tar.gz \
+              dist/lumec-linux-x86_64 \
+              dist/lasm-linux-x86_64 \
+              dist/lume0-linux-x86_64 \
+              dist/SHA256SUMS \
+              --title "Lume ${TAG}" \
+              --generate-notes
+          fi
