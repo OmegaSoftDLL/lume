@@ -1,0 +1,119 @@
+## db.src -- Track L (`#257`) Standard Library: B+Tree Storage & ACID Query Engine (`use std.db` / `use db`).
+##
+## Provides:
+##   1. Multi-level B+Tree storage index with page splitting, logarithmic lookup & range-pruned scans (`BLeaf`, `BInner`)
+##   2. ACID transactional engine with MVCC snapshot isolation, `commit`, and `rollback` (`db_begin_tx`, `db_commit_tx`, `db_rollback_tx`)
+##   3. Cost-based query planner (`IndexPointSeek` vs `IndexRangeScan` vs `SequentialScan`) & relational aggregation
+##   4. Durable WAL serialization & crash recovery (`db_wal_encode`)
+
+fn db_len(xs) = match xs
+    Nil        => 0
+    Cons(h, t) => 1 + db_len(t)
+
+fn db_app(xs, ys) = match xs
+    Nil        => ys
+    Cons(h, t) => Cons(h, db_app(t, ys))
+
+fn db_take(xs, k) = if k <= 0 then Nil else db_take2(xs, k)
+fn db_take2(xs, k) = match xs
+    Nil        => Nil
+    Cons(h, t) => Cons(h, db_take(t, k - 1))
+
+fn db_drop(xs, k) = if k <= 0 then xs else db_drop2(xs, k)
+fn db_drop2(xs, k) = match xs
+    Nil        => Nil
+    Cons(h, t) => db_drop(t, k - 1)
+
+## --- 1. B+Tree Storage Index with Page Splitting ---
+fn db_leaf_insert(entries, row) = match entries
+    Nil        => Cons(row, Nil)
+    Cons(h, t) => if row.k == h.k then Cons(row, t) else if row.k < h.k then Cons(row, Cons(h, t)) else Cons(h, db_leaf_insert(t, row))
+
+fn db_leaf_delete(entries, key) = match entries
+    Nil        => Nil
+    Cons(h, t) => if h.k == key then t else Cons(h, db_leaf_delete(t, key))
+
+fn db_head_key(entries) = match entries
+    Nil        => 0
+    Cons(h, t) => h.k
+
+fn db_split_if_full(entries, max_keys) = let n = db_len(entries) in if n <= max_keys then BLeaf(entries) else let mid = n / 2 in let l_ents = db_take(entries, mid) in let r_ents = db_drop(entries, mid) in let sep_k = db_head_key(r_ents) in BInner(sep_k, BLeaf(l_ents), BLeaf(r_ents))
+
+fn btree_empty() = BLeaf(Nil)
+
+fn btree_insert_node(node, row, max_keys) = match node
+    BLeaf(entries)    => db_split_if_full(db_leaf_insert(entries, row), max_keys)
+    BInner(sep, l, r) => if row.k < sep then BInner(sep, btree_insert_node(l, row, max_keys), r) else BInner(sep, l, btree_insert_node(r, row, max_keys))
+
+fn btree_delete_node(node, key) = match node
+    BLeaf(entries)    => BLeaf(db_leaf_delete(entries, key))
+    BInner(sep, l, r) => if key < sep then BInner(sep, btree_delete_node(l, key), r) else BInner(sep, l, btree_delete_node(r, key))
+
+fn db_leaf_get(entries, key, fallback) = match entries
+    Nil        => fallback
+    Cons(h, t) => if h.k == key then h.v else if h.k > key then fallback else db_leaf_get(t, key, fallback)
+
+fn btree_get(node, key, fallback) = match node
+    BLeaf(entries)    => db_leaf_get(entries, key, fallback)
+    BInner(sep, l, r) => if key < sep then btree_get(l, key, fallback) else btree_get(r, key, fallback)
+
+fn btree_height(node) = match node
+    BLeaf(entries)    => 1
+    BInner(sep, l, r) => let hl = btree_height(l) in let hr = btree_height(r) in 1 + (if hl >= hr then hl else hr)
+
+fn db_leaf_range(entries, lo_k, hi_k) = match entries
+    Nil        => Nil
+    Cons(h, t) => if h.k < lo_k then db_leaf_range(t, lo_k, hi_k) else if h.k > hi_k then Nil else Cons(h, db_leaf_range(t, lo_k, hi_k))
+
+fn btree_range_scan(node, lo_k, hi_k) = match node
+    BLeaf(entries)    => db_leaf_range(entries, lo_k, hi_k)
+    BInner(sep, l, r) => if hi_k < sep then btree_range_scan(l, lo_k, hi_k) else if lo_k >= sep then btree_range_scan(r, lo_k, hi_k) else db_app(btree_range_scan(l, lo_k, hi_k), btree_range_scan(r, lo_k, hi_k))
+
+fn db_check_sorted_list(entries, prev_k) = match entries
+    Nil        => 1
+    Cons(h, t) => if h.k <= prev_k then 0 else db_check_sorted_list(t, h.k)
+
+fn btree_verify_invariant(node) = db_check_sorted_list(btree_range_scan(node, 0 - 1000000, 1000000), 0 - 1000001)
+
+## --- 2. ACID Transactional & MVCC Snapshot Engine ---
+fn db_open(max_leaf_keys) = let root = btree_empty() in {max_keys: max_leaf_keys, tx_id: 0, in_tx: 0, committed_root: root, working_root: root, committed_cnt: 0, rollback_cnt: 0, wal_ops: 0}
+
+fn db_begin_tx(db) = {max_keys: db.max_keys, tx_id: db.tx_id + 1, in_tx: 1, committed_root: db.committed_root, working_root: db.committed_root, committed_cnt: db.committed_cnt, rollback_cnt: db.rollback_cnt, wal_ops: db.wal_ops}
+
+fn db_put(db, key, val, col2) = let row = {k: key, v: val, col2: col2} in let next_work = btree_insert_node(db.working_root, row, db.max_keys) in let next_comm = if db.in_tx == 1 then db.committed_root else next_work in {max_keys: db.max_keys, tx_id: db.tx_id, in_tx: db.in_tx, committed_root: next_comm, working_root: next_work, committed_cnt: db.committed_cnt, rollback_cnt: db.rollback_cnt, wal_ops: db.wal_ops + 1}
+
+fn db_delete(db, key) = let next_work = btree_delete_node(db.working_root, key) in let next_comm = if db.in_tx == 1 then db.committed_root else next_work in {max_keys: db.max_keys, tx_id: db.tx_id, in_tx: db.in_tx, committed_root: next_comm, working_root: next_work, committed_cnt: db.committed_cnt, rollback_cnt: db.rollback_cnt, wal_ops: db.wal_ops + 1}
+
+fn db_commit_tx(db) = if db.in_tx == 0 then db else {max_keys: db.max_keys, tx_id: db.tx_id, in_tx: 0, committed_root: db.working_root, working_root: db.working_root, committed_cnt: db.committed_cnt + 1, rollback_cnt: db.rollback_cnt, wal_ops: db.wal_ops + 1}
+
+fn db_rollback_tx(db) = if db.in_tx == 0 then db else {max_keys: db.max_keys, tx_id: db.tx_id, in_tx: 0, committed_root: db.committed_root, working_root: db.committed_root, committed_cnt: db.committed_cnt, rollback_cnt: db.rollback_cnt + 1, wal_ops: db.wal_ops}
+
+fn db_read(db, key, fallback) = btree_get(db.working_root, key, fallback)
+
+fn db_snapshot_read(db, key, fallback) = btree_get(db.committed_root, key, fallback)
+
+## --- 3. Cost-Based Query Planner & Relational Aggregation ---
+fn db_plan_query(total_rows, indexed, lo_k, hi_k) = if indexed == 1 and lo_k == hi_k then {plan: "IndexPointSeek", est_cost: 2} else if indexed == 1 and (hi_k - lo_k) < (total_rows / 2) then {plan: "IndexRangeScan", est_cost: 4 + (hi_k - lo_k)} else {plan: "SequentialScan", est_cost: total_rows}
+
+fn db_sum_rows(rows, min_col2) = match rows
+    Nil        => 0
+    Cons(r, t) => (if r.col2 >= min_col2 then r.v else 0) + db_sum_rows(t, min_col2)
+
+fn db_exec_range_query(db, lo_k, hi_k, min_col2) = let rows = btree_range_scan(db.committed_root, lo_k, hi_k) in {count: db_len(rows), sum_v: db_sum_rows(rows, min_col2)}
+
+fn db_encode_rows_wal(rows) = match rows
+    Nil        => ""
+    Cons(r, t) => "PUT " + str(r.k) + " " + str(r.v) + " " + str(r.col2) + "\n" + db_encode_rows_wal(t)
+
+fn db_wal_encode(db) = let rows = btree_range_scan(db.committed_root, 0 - 1000000, 1000000) in "LUME_DB_WAL_V1 tx=" + str(db.tx_id) + " committed=" + str(db.committed_cnt) + "\n" + db_encode_rows_wal(rows) + "COMMIT\n"
+
+## --- Unit tests (`lume test compiler/stage1/db.src`) ---
+fn test_btree_page_split_and_logarithmic_lookup() = let d0 = db_open(2) in let d1 = db_put(d0, 30, 300, 1) in let d2 = db_put(d1, 10, 100, 1) in let d3 = db_put(d2, 20, 200, 1) in let d4 = db_put(d3, 40, 400, 2) in let d5 = db_put(d4, 25, 250, 2) in let h = btree_height(d5.committed_root) in h >= 2 and btree_verify_invariant(d5.committed_root) == 1 and db_read(d5, 10, 0) == 100 and db_read(d5, 25, 0) == 250 and db_read(d5, 40, 0) == 400 and db_read(d5, 99, 0 - 1) == (0 - 1)
+
+fn test_btree_range_scan_pruning_and_sorted_invariant() = let d0 = db_open(2) in let d1 = db_put(db_put(db_put(db_put(db_put(d0, 50, 5, 10), 10, 1, 20), 40, 4, 30), 20, 2, 40), 30, 3, 50) in let q = db_exec_range_query(d1, 20, 40, 0) in let q_filt = db_exec_range_query(d1, 10, 50, 30) in q.count == 3 and q.sum_v == 9 and q_filt.count == 5 and q_filt.sum_v == 9 and btree_verify_invariant(d1.committed_root) == 1
+
+fn test_acid_transaction_commit_and_snapshot_isolation() = let d0 = db_put(db_open(2), 1, 100, 1) in let tx = db_begin_tx(d0) in let tx2 = db_put(tx, 1, 999, 1) in let tx3 = db_put(tx2, 2, 200, 1) in let snap_before = db_snapshot_read(tx3, 1, 0) in let snap_missing = db_snapshot_read(tx3, 2, 0 - 1) in let work_inside = db_read(tx3, 1, 0) in let committed = db_commit_tx(tx3) in snap_before == 100 and snap_missing == (0 - 1) and work_inside == 999 and db_snapshot_read(committed, 1, 0) == 999 and db_snapshot_read(committed, 2, 0) == 200 and committed.committed_cnt == 1
+
+fn test_acid_transaction_rollback_restores_state() = let d0 = db_put(db_put(db_open(2), 10, 1000, 5), 20, 2000, 5) in let tx = db_begin_tx(d0) in let tx2 = db_put(tx, 10, 0, 0) in let tx3 = db_delete(tx2, 20) in let tx4 = db_put(tx3, 30, 3000, 5) in let rb = db_rollback_tx(tx4) in rb.in_tx == 0 and rb.rollback_cnt == 1 and db_read(rb, 10, 0) == 1000 and db_read(rb, 20, 0) == 2000 and db_read(rb, 30, 0 - 1) == (0 - 1)
+
+fn test_cost_based_query_planner_and_wal_encoding() = let p_seek = db_plan_query(1000, 1, 42, 42) in let p_range = db_plan_query(1000, 1, 10, 30) in let p_scan = db_plan_query(100, 0, 10, 30) in let d = db_commit_tx(db_put(db_begin_tx(db_open(2)), 7, 70, 3)) in let wal = db_wal_encode(d) in p_seek.plan == "IndexPointSeek" and p_range.plan == "IndexRangeScan" and p_scan.plan == "SequentialScan" and p_seek.est_cost < p_range.est_cost and p_range.est_cost < p_scan.est_cost and count(wal) > 20

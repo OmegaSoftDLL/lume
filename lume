@@ -759,7 +759,7 @@ cmd_compile() {
     _asm=$(mktemp)
     _diag=$(mktemp)
     _exit=0
-    if is_linux_x86_64 && [ -z "${LUME0_ASAN:-}" ]; then
+    if is_linux_x86_64 && { [ -x "$BIN_DIR/lc" ] || [ -x "$BIN_DIR/lumec" ] || [ -z "${LUME0_ASAN:-}" ]; }; then
         ensure_native_toolchain
         "$LUMEC" < "$_bundled" > "$_asm" 2> "$_diag" || _exit=$?
     else
@@ -773,7 +773,7 @@ cmd_compile() {
     _bin=$(mktemp)
     if [ "$_exit" -eq 0 ] && [ "$_run" -eq 1 ]; then
         _didrun=1
-        if is_linux_x86_64 && [ -z "${LUME0_ASAN:-}" ]; then
+        if is_linux_x86_64 && { [ -x "$BIN_DIR/lc" ] || [ -x "$BIN_DIR/lumec" ] || [ -z "${LUME0_ASAN:-}" ]; }; then
             ensure_native_toolchain
             "$LASM" < "$_asm" > "$_bin" 2>/dev/null; chmod +x "$_bin"
         else
@@ -937,7 +937,7 @@ cmd_check() {
                 rm -f "$_bundled"
                 exit 1
             fi
-            if is_linux_x86_64 && [ -z "${LUME0_ASAN:-}" ]; then
+            if is_linux_x86_64 && { [ -x "$BIN_DIR/lc" ] || [ -x "$BIN_DIR/lumec" ] || [ -z "${LUME0_ASAN:-}" ]; }; then
                 ensure_native_toolchain
                 "$LUMEC" < "$_bundled" > /dev/null
                 rm -f "$_bundled"

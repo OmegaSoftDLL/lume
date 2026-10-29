@@ -53,6 +53,17 @@ fn infer_smc_loop(i, n_part, post_a, post_b, max_ll, acc) = if i >= n_part then 
 ## SMC particle filter posterior mean in milliscale (`0..1000`), varying with `particles`
 fn infer_smc(prior, heads, tails, particles) = let prior_m = prior.a * 1000 / (prior.a + prior.b) in if particles <= 1 then prior_m else let post_a = prior.a + heads in let post_b = prior.b + tails in let max_ll = infer_smc_max(0, particles, post_a, post_b, 0) in infer_smc_loop(0, particles, post_a, post_b, max_ll, {w: 0, wx: 0})
 
+## Analytical score / gradient of log-posterior `d/d(theta) [post_a * ln(theta) + post_b * ln(1 - theta)]`
+fn prob_grad_log_lik(p, post_a, post_b) = let pc = if p < 5 then 5 else if p > 995 then 995 else p in (post_a * 1000000) / pc - (post_b * 1000000) / (1000 - pc)
+
+## Symplectic leapfrog integrator step over `(theta, momentum)` for Hamiltonian Monte Carlo (HMC)
+fn hmc_leapfrog(q, mom, post_a, post_b, eps, l_rem) = if l_rem <= 0 then {q: q, mom: mom} else let g1 = prob_grad_log_lik(q, post_a, post_b) in let mom_half = mom + (eps * g1) / 200000 in let q_raw = q + (eps * mom_half) / 1000 in let q_next = if q_raw < 5 then 5 else if q_raw > 995 then 995 else q_raw in let g2 = prob_grad_log_lik(q_next, post_a, post_b) in let mom_next = mom_half + (eps * g2) / 200000 in hmc_leapfrog(q_next, mom_next, post_a, post_b, eps, l_rem - 1)
+
+fn infer_hmc_loop(cur, post_a, post_b, step, max_steps, seed) = if step >= max_steps then cur else let r = prob_rng_next(seed) in let mom0 = ((r % 201) - 100) * 10 in let lf = hmc_leapfrog(cur, mom0, post_a, post_b, 4, 5) in let h_cur = (mom0 * mom0) / 2 - prob_log_lik(cur, post_a, post_b) / 1000 in let h_prop = (lf.mom * lf.mom) / 2 - prob_log_lik(lf.q, post_a, post_b) / 1000 in let next_cur = if h_prop <= h_cur or prob_log_lik(lf.q, post_a, post_b) >= prob_log_lik(cur, post_a, post_b) then lf.q else cur in infer_hmc_loop(next_cur, post_a, post_b, step + 1, max_steps, r)
+
+## Hamiltonian Monte Carlo (HMC) sampler with symplectic leapfrog trajectories and Metropolis energy acceptance
+fn infer_hmc(prior, heads, tails, steps) = let prior_m = prior.a * 1000 / (prior.a + prior.b) in if steps <= 0 then prior_m else infer_hmc_loop(prior_m, prior.a + heads, prior.b + tails, 0, steps, 4242 + steps)
+
 ## ============================================================================================================
 ## 2. Semi-Naive Datalog Engine (`std.rules`) over Edges & General Named Relations
 ## ============================================================================================================
@@ -139,7 +150,7 @@ fn lif_run_Currents(n, currents, tick) = match currents
     Cons(c, r) => lif_run_Currents(lif_step(n, c, tick), r, tick + 1)
 
 ## Unit tests for `lume test compiler/stage1/ai_runtime.src`
-fn test_prob_mcmc_svi_smc_posteriors() = let prior = dist_beta(2, 2) in let p0 = infer_mcmc(prior, 6, 2, 0) in let s0 = infer_svi(prior, 6, 2, 0) in let s1 = infer_svi(prior, 6, 2, 1) in let sm1 = infer_smc(prior, 6, 2, 1) in let p_mcmc = infer_mcmc(prior, 6, 2, 100) in let p_svi = infer_svi(prior, 6, 2, 100) in let p_smc = infer_smc(prior, 6, 2, 100) in let p_smc_fine = infer_smc(prior, 6, 2, 999) in let sb = sample_bernoulli(800, 42) in if p0 == 500 and s0 == 500 and s1 == 625 and sm1 == 500 and p_mcmc == 666 and p_svi == 666 and p_smc == 662 and p_smc_fine == 666 and (sb.val == 0 or sb.val == 1) then 1 else 0
+fn test_prob_mcmc_svi_smc_posteriors() = let prior = dist_beta(2, 2) in let p0 = infer_mcmc(prior, 6, 2, 0) in let s0 = infer_svi(prior, 6, 2, 0) in let s1 = infer_svi(prior, 6, 2, 1) in let sm1 = infer_smc(prior, 6, 2, 1) in let p_mcmc = infer_mcmc(prior, 6, 2, 100) in let p_hmc = infer_hmc(prior, 6, 2, 40) in let p_svi = infer_svi(prior, 6, 2, 100) in let p_smc = infer_smc(prior, 6, 2, 100) in let p_smc_fine = infer_smc(prior, 6, 2, 999) in let sb = sample_bernoulli(800, 42) in if p0 == 500 and s0 == 500 and s1 == 625 and sm1 == 500 and p_mcmc == 666 and p_hmc >= 655 and p_hmc <= 675 and p_svi == 666 and p_smc == 662 and p_smc_fine == 666 and (sb.val == 0 or sb.val == 1) then 1 else 0
 
 fn test_rules_seminaive_datalog_fixpoint() = let e0 = Cons(dl_edge("n1", "n2"), Cons(dl_edge("n2", "n3"), Cons(dl_edge("n3", "n4"), Nil))) in let cl = datalog_closure(e0, 5) in let f0 = Cons(dl_fact("parent", "a", "b"), Cons(dl_fact("parent", "b", "c"), Nil)) in let f1 = dl_seminaive_rel(f0, "ancestor", "parent", "parent", 3) in if dl_len(cl) == 6 and datalog_query_from("n1", cl) == 3 and dl_query_rel("ancestor", "a", f1) == 1 then 1 else 0
 

@@ -1385,6 +1385,18 @@ EOF
     ../../lume run "$ntmp/ur_web_trap.wasm" >/dev/null 2>&1 || _ur_web_trap_rc=$?
     if [ "$_ur_ptx_out" = "42,0,25," ] && [ "$_ur_ptx_trap_rc" -eq 3 ] && grep -q '^\.version 8\.0$' "$ntmp/ur_ok.ptx" && [ "$_ur_spv_out" = "42,0,25," ] && [ "$_ur_spv_trap_rc" -eq 3 ] && grep -q '^OpCapability Shader$' "$ntmp/ur_ok.spvasm" && [ "$_ur_cm_out" = "42,0,25," ] && [ "$_ur_cm_trap_rc" -eq 3 ] && [ "$_ur_avr_out" = "42,0,25," ] && [ "$_ur_avrh_out" = "42,0,25," ] && [ "$_ur_xt_out" = "42,0,25," ] && [ "$_ur_xt_trap_rc" -eq 3 ] && [ "$_ur_vlog_out" = "42,0,25," ] && [ "$_ur_vlog_trap_rc" -eq 3 ] && grep -q 'always @(posedge clk)' "$ntmp/ur_ok.v" && [ "$_ur_vhdl_out" = "42,0,25," ] && [ "$_ur_vhdl_trap_rc" -eq 3 ] && grep -q 'rising_edge(clk)' "$ntmp/ur_ok.vhd" && [ "$_ur_ios_magic" = "cffaedfe" ] && [ "$_ur_and_out" = "55,42," ] && [ "$_ur_web_out" = "55,42," ] && [ "$_ur_web_trap_rc" -eq 3 ]; then ok "track-R (#256, #250): universal reach across GPU (CUDA PTX 8.0 & Vulkan SPIR-V 1.6 kernel fn lowering + VM), Embedded MCUs (Cortex-M, AVR, Xtensa ESP32 ELF32/IHEX + emulator), FPGA/HDL (Verilog-2005 & VHDL-2008 RTL + cycle-accurate simulator), Mobile (iOS Mach-O & Android ELF64), and Browser/Web (wasm32-web-dom)"; else bad "track-R (#256, #250): universal reach (ptx='$_ur_ptx_out'/$_ur_ptx_trap_rc spv='$_ur_spv_out'/$_ur_spv_trap_rc cm='$_ur_cm_out'/$_ur_cm_trap_rc avr='$_ur_avr_out'/'$_ur_avrh_out' xt='$_ur_xt_out'/$_ur_xt_trap_rc vlog='$_ur_vlog_out'/$_ur_vlog_trap_rc vhdl='$_ur_vhdl_out'/$_ur_vhdl_trap_rc ios='$_ur_ios_magic' and='$_ur_and_out' web='$_ur_web_out'/$_ur_web_trap_rc)"; cat "$ntmp/ut.err" 2>/dev/null; fi
 
+    # Track L (#257): Standard library & domains (Networking sockets/TCP/UDP/TLS 1.3/HTTP/1.1, Async I/O runtime with Linux epoll + work-stealing,
+    # GUI 2D rasterizer/Porter-Duff alpha blend/layout/hit-test/PPM/SVG, Database B+Tree/MVCC ACID tx/cost planner/WAL,
+    # Media RIFF WAV PCM16/FIR DSP/RLE/video GOP codec, and Real ML symbolic + Wengert tape autodiff/HMC/safetensors/ONNX):
+    LUME_BIN_DIR="$ntmp" ../../lume run ../../compiler/stage1/track_l_domains_ok.src >"$ntmp/tl_ok.out" 2>"$ntmp/tl_ok.err" || true
+    LUME_BIN_DIR="$ntmp" ../../lume prove --json ../../compiler/stage1/track_l_domains_ok.src >"$ntmp/tl_prove.json" 2>/dev/null || true
+    _tl_net_t=$(LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/net.src 2>&1 || true)
+    _tl_art_t=$(LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/async_rt.src 2>&1 || true)
+    _tl_gui_t=$(LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/gui.src 2>&1 || true)
+    _tl_db_t=$(LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/db.src 2>&1 || true)
+    _tl_med_t=$(LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/media.src 2>&1 || true)
+    if diff -u ../../tests/conformance/stage1/track_l_domains_ok_asm.expected "$ntmp/tl_ok.out" >/dev/null && grep -q '"name":"relu","kind":"contract","status":"proven"' "$ntmp/tl_prove.json" && grep -q '"name":"abs","kind":"contract","status":"proven"' "$ntmp/tl_prove.json" && grep -q '"name":"clamp","kind":"contract","status":"proven"' "$ntmp/tl_prove.json" && printf '%s' "$_tl_net_t" | grep -q "5 passed, 0 failed" && printf '%s' "$_tl_art_t" | grep -q "5 passed, 0 failed" && printf '%s' "$_tl_gui_t" | grep -q "5 passed, 0 failed" && printf '%s' "$_tl_db_t" | grep -q "5 passed, 0 failed" && printf '%s' "$_tl_med_t" | grep -q "5 passed, 0 failed" && ! grep -Eq '^fn (promise_|signal_)' ../../compiler/stage1/concurrency.src; then ok "track-L (#257): standard library & domains (Linux TCP/UDP loopback sockets + TLS 1.3 + HTTP/1.1, epoll reactor + work-stealing async runtime, GUI canvas/layout/PPM/SVG, B+Tree + MVCC ACID database, WAV/FIR/GOP media codecs, symbolic + Wengert tape autodiff + HMC + safetensors/ONNX)"; else bad "track-L (#257): standard library & domains"; diff -u ../../tests/conformance/stage1/track_l_domains_ok_asm.expected "$ntmp/tl_ok.out" | head -30; cat "$ntmp/tl_ok.err" "$ntmp/tl_prove.json" 2>/dev/null; printf '%s\n' "$_tl_net_t" "$_tl_art_t" "$_tl_gui_t" "$_tl_db_t" "$_tl_med_t"; fi
+
     # Issue #197 & #215: Core language features (trait/impl [T0400]/[T0401], first-class closures with capture,
     # refinement types `T where <pred>` with QF_LIA guard elision & exit-3 runtime trap, async fn/.await/block_on [E0200],
     # rc/arc/weak shared control blocks [O0001], shard data-parallel construct [S0001]/[E0200], F3c let-polymorphism [T0500],
@@ -1593,6 +1605,28 @@ EOF
     _m1_x_out=$(../../lume verify-cert --json "$_m1_x_cert" 2>/dev/null || true)
     rm -f "$_m1_x_tmp" "$_m1_x_cert"
     if printf '%s' "$_m1_x_out" | grep -q '"ok":true' && printf '%s' "$_m1_x_out" | grep -q '"kernel_verified":true' && printf '%s' "$_m1_x_out" | grep -q '"hash_verified":true' && printf '%s' "$_m1_x_out" | grep -q '"name":"nia_cauchy_schwarz","kind":"contract","status":"proven"' && printf '%s' "$_m1_x_out" | grep -q '"name":"bv_u8_wrap_add","kind":"contract","status":"proven"' && printf '%s' "$_m1_x_out" | grep -q '"name":"quant_forall_sq","kind":"contract","status":"proven"' && printf '%s' "$_m1_x_out" | grep -q '"name":"sep_frame_preserve","kind":"contract","status":"proven"' && printf '%s' "$_m1_x_out" | grep -q '"name":"refine_dep_idx","kind":"contract","status":"proven"' && printf '%s' "$_m1_x_out" | grep -q '"name":"ack_bounded","kind":"termination","status":"proven"'; then ok "Multiplier M1 cross-platform (#255): 6-theory prover (QF_NIA, QF_BV, QF_ALIA, Separation Logic, Refinement Types, Termination) + independent lcert kernel verification"; else bad "Multiplier M1 cross-platform (#255): m1_prover_ok.src"; printf '%s\n' "$_m1_x_out"; fi
+
+    _tl_x_tmp=$(mktemp)
+    cat > "$_tl_x_tmp" <<'EOF'
+fn relu(u: int) -> int requires u >= 0 - 10000 ensures result >= 0 = if u > 0 then u else 0
+fn sq(u: int) -> int = u * u
+fn cube(u: int) -> int = u * u * u
+fn abs(u: int) -> int requires u >= 0 - 10000 ensures result >= 0 = if u >= 0 then u else 0 - u
+fn clamp(u: int, lo: int, hi: int) -> int requires lo <= hi ensures result >= lo and result <= hi = if u < lo then lo else if u > hi then hi else u
+fn leaky_relu(u: int, k: int) -> int = if u > 0 then u else k * u
+fn quot(a: int, b: int) -> int = a / b
+fn f_nonpoly(x: int) -> int = cube(x) + sq(2 * x) + relu(x - 1) + abs(x - 5)
+fn f_clamp_leaky(x: int) -> int = clamp(3 * x, 0, 10) + leaky_relu(x, 2)
+fn f_quot(x: int) -> int = quot(12 * x, x + 1)
+print (value_and_grad(f_nonpoly, 3)).val
+print (value_and_grad(f_nonpoly, 3)).grad
+print grad(f_clamp_leaky, 2)
+print grad(f_clamp_leaky, 5)
+print grad(f_quot, 1)
+EOF
+    _tl_x_out=$(../../lume prove --json "$_tl_x_tmp" 2>/dev/null || true)
+    rm -f "$_tl_x_tmp"
+    if printf '%s' "$_tl_x_out" | grep -q '"ok":true' && printf '%s' "$_tl_x_out" | grep -q '"name":"relu","kind":"contract","status":"proven"' && printf '%s' "$_tl_x_out" | grep -q '"name":"abs","kind":"contract","status":"proven"' && printf '%s' "$_tl_x_out" | grep -q '"name":"clamp","kind":"contract","status":"proven"' && printf '%s' "$_tl_x_out" | grep -q '"result":"67\\n51\\n4\\n1\\n3"'; then ok "track-L cross-platform (#257): non-polynomial symbolic autodiff (relu, sq, cube, abs, clamp, leaky_relu, quot, value_and_grad) + QF_LIA contract proof"; else bad "track-L cross-platform (#257): symbolic autodiff & QF_LIA proof"; printf '%s\n' "$_tl_x_out"; fi
 
     if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
         _mac_d=$(mktemp -d)

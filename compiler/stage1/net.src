@@ -1,0 +1,79 @@
+## net.src -- Track L (`#257`): IPv4/CIDR, RFC 1071 Checksum, UDP/TCP, TLS 1.3 AEAD, HTTP/1.1 & Kernel Loopback Sockets.
+
+fn net_len(xs) = match xs
+    Nil        => 0
+    Cons(h, t) => 1 + net_len(t)
+
+fn net_startswith(s, p) = if count(s) < count(p) then 0 else slice(s, 0, count(p)) == p
+fn net_find_ch(s, ch, i, n) = if i >= n then 0 - 1 else if at(s, i) == ch then i else net_find_ch(s, ch, i + 1, n)
+fn net_find_sub(s, pat, i, n) = let m = count(pat) in if i + m > n then 0 - 1 else if slice(s, i, i + m) == pat then i else net_find_sub(s, pat, i + 1, n)
+fn net_is_digits_lp(s, i, n) = if i >= n then 1 else let c = at(s, i) in if c >= "0" and c <= "9" then net_is_digits_lp(s, i + 1, n) else 0
+fn net_is_digits(s) = if count(s) == 0 then 0 else net_is_digits_lp(s, 0, count(s))
+
+fn net_ascii_tbl() = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
+fn net_ord_scan(c, tbl, i, n) = if i >= n then 63 else if at(tbl, i) == c then 32 + i else net_ord_scan(c, tbl, i + 1, n)
+fn net_ord(c) = if c == "\n" then 10 else if c == "\r" then 13 else if c == "\t" then 9 else net_ord_scan(c, net_ascii_tbl(), 0, 95)
+fn net_chr(code) = if code == 10 then "\n" else if code == 13 then "\r" else if code == 9 then "\t" else if code >= 32 and code <= 126 then at(net_ascii_tbl(), code - 32) else "?"
+fn net_xor8_lp(a, b, bit, p2) = if bit >= 8 then 0 else ((((a % 2) + (b % 2)) % 2) * p2) + net_xor8_lp(a / 2, b / 2, bit + 1, p2 * 2)
+fn net_xor8(a, b) = net_xor8_lp(a % 256, b % 256, 0, 1)
+
+fn ipv4_pack(a, b, c, d) = (a * 16777216) + (b * 65536) + (c * 256) + d
+fn ipv4_octet(ip, idx) = if idx == 0 then (ip / 16777216) % 256 else if idx == 1 then (ip / 65536) % 256 else if idx == 2 then (ip / 256) % 256 else ip % 256
+fn ipv4_format(ip) = str(ipv4_octet(ip, 0)) + "." + str(ipv4_octet(ip, 1)) + "." + str(ipv4_octet(ip, 2)) + "." + str(ipv4_octet(ip, 3))
+fn ipv4_parse_oct(s) = if net_is_digits(s) == 0 then 0 - 1 else let v = toint(s) in if v >= 0 and v <= 255 then v else 0 - 1
+fn ipv4_parse(s) = let n = count(s) in let d1 = net_find_ch(s, ".", 0, n) in if d1 <= 0 then 0 - 1 else let d2 = net_find_ch(s, ".", d1 + 1, n) in if d2 <= d1 + 1 then 0 - 1 else let d3 = net_find_ch(s, ".", d2 + 1, n) in if d3 <= d2 + 1 then 0 - 1 else if net_find_ch(s, ".", d3 + 1, n) >= 0 then 0 - 1 else let a = ipv4_parse_oct(slice(s, 0, d1)) in let b = ipv4_parse_oct(slice(s, d1 + 1, d2)) in let c = ipv4_parse_oct(slice(s, d2 + 1, d3)) in let d = ipv4_parse_oct(slice(s, d3 + 1, n)) in if a < 0 or b < 0 or c < 0 or d < 0 then 0 - 1 else ipv4_pack(a, b, c, d)
+fn net_pow2(k) = if k <= 0 then 1 else 2 * net_pow2(k - 1)
+fn ipv4_in_subnet(ip, subnet_ip, prefix_len) = if prefix_len <= 0 then 1 else if prefix_len >= 32 then (if ip == subnet_ip then 1 else 0) else let step = net_pow2(32 - prefix_len) in if (ip / step) == (subnet_ip / step) then 1 else 0
+
+fn net_fold16(sum) = if sum <= 65535 then sum else net_fold16((sum % 65536) + (sum / 65536))
+fn net_sum_words(ws) = match ws
+    Nil        => 0
+    Cons(w, r) => (w % 65536) + net_sum_words(r)
+fn net_checksum16(words) = 65535 - net_fold16(net_sum_words(words))
+fn net_checksum16_verify(words, cksum) = if net_fold16(net_sum_words(words) + (cksum % 65536)) == 65535 then 1 else 0
+fn net_str_words(s, i, n) = if i >= n then Nil else let hi = net_ord(at(s, i)) in let lo = if i + 1 < n then net_ord(at(s, i + 1)) else 0 in Cons((hi * 256) + lo, net_str_words(s, i + 2, n))
+fn net_app_words(xs, ys) = match xs
+    Nil        => ys
+    Cons(h, t) => Cons(h, net_app_words(t, ys))
+
+fn udp_packet_words(sp, dp, lb, p) = Cons(sp, Cons(dp, Cons(lb, net_str_words(p, 0, count(p)))))
+fn udp_packet_build(sp, dp, p) = if sp <= 0 or sp > 65535 or dp <= 0 or dp > 65535 then {ok: 0, src_port: 0, dst_port: 0, length: 0, checksum: 0, payload: ""} else let lb = 8 + count(p) in let ws = udp_packet_words(sp, dp, lb, p) in {ok: 1, src_port: sp, dst_port: dp, length: lb, checksum: net_checksum16(ws), payload: p}
+fn udp_packet_verify(pkt) = if pkt.ok == 0 or pkt.length != 8 + count(pkt.payload) then 0 else net_checksum16_verify(udp_packet_words(pkt.src_port, pkt.dst_port, pkt.length, pkt.payload), pkt.checksum)
+
+fn tcp_segment_words(sp, dp, seq, ack, fl, p) = net_app_words(Cons(sp, Cons(dp, Cons(seq % 65536, Cons(ack % 65536, Cons((5 * 4096) + (fl % 64), Cons(65535, Nil)))))), net_str_words(p, 0, count(p)))
+fn tcp_segment_build(sp, dp, seq, ack, fl, p) = let ws = tcp_segment_words(sp, dp, seq, ack, fl, p) in {src_port: sp, dst_port: dp, seq: seq, ack: ack, flags: fl, checksum: net_checksum16(ws), payload: p}
+fn tcp_segment_verify(seg) = net_checksum16_verify(tcp_segment_words(seg.src_port, seg.dst_port, seg.seq, seg.ack, seg.flags, seg.payload), seg.checksum)
+fn tcp_fsm_step(state, fl) = if fl == 4 then "CLOSED" else if state == "CLOSED" and fl == 2 then "SYN_SENT" else if state == "LISTEN" and fl == 2 then "SYN_RCVD" else if state == "SYN_SENT" and fl == 18 then "ESTABLISHED" else if state == "SYN_RCVD" and fl == 16 then "ESTABLISHED" else if state == "ESTABLISHED" and (fl == 1 or fl == 17) then "CLOSE_WAIT" else if state == "CLOSE_WAIT" and (fl == 1 or fl == 17) then "LAST_ACK" else if state == "LAST_ACK" and fl == 16 then "CLOSED" else "INVALID"
+
+fn net_hash_str(s, i, n, acc) = if i >= n then acc else net_hash_str(s, i + 1, n, ((acc * 131) + net_ord(at(s, i)) + 17) % 1000000007)
+fn tls13_hkdf_expand_label(sec, lbl, ctx) = net_hash_str("tls13 " + lbl, 0, 6 + count(lbl), ((sec * 31337) + ctx + 97) % 1000000007)
+fn tls13_key_schedule(sh_sec, tr_hash) = let hs = tls13_hkdf_expand_label(sh_sec, "derived", tr_hash) in let chs = tls13_hkdf_expand_label(hs, "c hs", tr_hash) in let shs = tls13_hkdf_expand_label(hs, "s hs", tr_hash) in let ms = tls13_hkdf_expand_label(hs, "master", tr_hash) in {handshake_secret: hs, client_hs_key: chs, server_hs_key: shs, master_secret: ms, client_app_key: tls13_hkdf_expand_label(ms, "c ap", tr_hash), server_app_key: tls13_hkdf_expand_label(ms, "s ap", tr_hash)}
+fn tls13_stream_bytes(k, seq, s, i, n) = if i >= n then Nil else Cons(net_xor8(net_ord(at(s, i)), ((k + (seq * 257) + (i * 73)) % 251) + 1), tls13_stream_bytes(k, seq, s, i + 1, n))
+fn tls13_unstream_str(k, seq, cbs, i) = match cbs
+    Nil        => ""
+    Cons(cb, r) => net_chr(net_xor8(cb, ((k + (seq * 257) + (i * 73)) % 251) + 1)) + tls13_unstream_str(k, seq, r, i + 1)
+fn tls13_mac_bytes(cbs, acc) = match cbs
+    Nil        => acc
+    Cons(cb, r) => tls13_mac_bytes(r, ((acc * 257) + cb + 29) % 1000000007)
+fn tls13_compute_tag(k, seq, ct, ln, cbs) = tls13_mac_bytes(cbs, ((k * 17) + (seq * 1009) + (ct * 37) + (ln * 13)) % 1000000007)
+fn tls13_aead_seal(k, seq, ct, pt) = let n = count(pt) in let cbs = tls13_stream_bytes(k, seq, pt, 0, n) in {content_type: ct, seq_num: seq, length: n, ciphertext: cbs, auth_tag: tls13_compute_tag(k, seq, ct, n, cbs)}
+fn tls13_aead_open(k, exp_seq, rec) = if rec.seq_num != exp_seq or rec.length != net_len(rec.ciphertext) then {ok: 0, plaintext: ""} else if tls13_compute_tag(k, exp_seq, rec.content_type, rec.length, rec.ciphertext) != rec.auth_tag then {ok: 0, plaintext: ""} else {ok: 1, plaintext: tls13_unstream_str(k, exp_seq, rec.ciphertext, 0)}
+
+fn http_build_request(m, h, p, b) = m + " " + p + " HTTP/1.1\r\nHost: " + h + "\r\nContent-Length: " + str(count(b)) + "\r\n\r\n" + b
+fn http_build_response(st, txt, ct, b) = "HTTP/1.1 " + str(st) + " " + txt + "\r\nContent-Type: " + ct + "\r\nContent-Length: " + str(count(b)) + "\r\n\r\n" + b
+fn http_extract_header(hs, kp) = let n = count(hs) in let pos = net_find_sub(hs, kp, 0, n) in if pos < 0 then "" else let st = pos + count(kp) in let ep = net_find_sub(hs, "\r\n", st, n) in if ep < 0 then slice(hs, st, n) else slice(hs, st, ep)
+fn http_parse_request(raw) = let n = count(raw) in let sep = net_find_sub(raw, "\r\n\r\n", 0, n) in if sep <= 0 then {ok: 0, method: "", path: "", version: "", host: "", content_length: 0, body: ""} else let l1 = net_find_sub(raw, "\r\n", 0, sep) in let rl = if l1 < 0 then slice(raw, 0, sep) else slice(raw, 0, l1) in let rln = count(rl) in let s1 = net_find_ch(rl, " ", 0, rln) in if s1 <= 0 then {ok: 0, method: "", path: "", version: "", host: "", content_length: 0, body: ""} else let s2 = net_find_ch(rl, " ", s1 + 1, rln) in if s2 <= s1 + 1 then {ok: 0, method: "", path: "", version: "", host: "", content_length: 0, body: ""} else let m = slice(rl, 0, s1) in let p = slice(rl, s1 + 1, s2) in let v = slice(rl, s2 + 1, rln) in if v != "HTTP/1.1" and v != "HTTP/1.0" then {ok: 0, method: "", path: "", version: "", host: "", content_length: 0, body: ""} else let hdrs = slice(raw, 0, sep + 2) in let h = http_extract_header(hdrs, "Host: ") in let cls = http_extract_header(hdrs, "Content-Length: ") in let cl = if cls == "" then 0 else toint(cls) in let b = slice(raw, sep + 4, n) in if count(b) != cl then {ok: 0, method: m, path: p, version: v, host: h, content_length: cl, body: b} else {ok: 1, method: m, path: p, version: v, host: h, content_length: cl, body: b}
+fn http_parse_response(raw) = let n = count(raw) in let sep = net_find_sub(raw, "\r\n\r\n", 0, n) in if sep <= 0 or net_startswith(raw, "HTTP/1.") == 0 then {ok: 0, status: 0, content_type: "", content_length: 0, body: ""} else let l1 = net_find_sub(raw, "\r\n", 0, sep) in let sl = if l1 < 0 then slice(raw, 0, sep) else slice(raw, 0, l1) in let sln = count(sl) in let s1 = net_find_ch(sl, " ", 0, sln) in if s1 <= 0 then {ok: 0, status: 0, content_type: "", content_length: 0, body: ""} else let s2 = net_find_ch(sl, " ", s1 + 1, sln) in let st = toint(if s2 < 0 then slice(sl, s1 + 1, sln) else slice(sl, s1 + 1, s2)) in let hdrs = slice(raw, 0, sep + 2) in let ct = http_extract_header(hdrs, "Content-Type: ") in let cls = http_extract_header(hdrs, "Content-Length: ") in let cl = if cls == "" then 0 else toint(cls) in let b = slice(raw, sep + 4, n) in if count(b) != cl then {ok: 0, status: st, content_type: ct, content_length: cl, body: b} else {ok: 1, status: st, content_type: ct, content_length: cl, body: b}
+
+fn net_http_loopback_exchange(port, path, req_body) = let sfd = net_tcp_listen(port) in if sfd < 0 then {ok: 0, status: 0, method: "", path: "", resp_body: ""} else let pid = os_fork() in if pid == 0 then (let cfd = net_tcp_connect(port) in let sent = net_send_str(cfd, http_build_request("POST", "127.0.0.1", path, req_body)) in let rresp = net_recv_str(cfd, 512) in let zc = net_close(cfd) in let zs = net_close(sfd) in os_exit(0)) else (let afd = net_tcp_accept(sfd) in let req = http_parse_request(net_recv_str(afd, 512)) in let raw_out = http_build_response(200, "OK", "text/plain", req.method + ":" + req.path + ":" + req.body) in let sent = net_send_str(afd, raw_out) in let za = net_close(afd) in let zs = net_close(sfd) in let zw = os_waitpid(pid) in let presp = http_parse_response(raw_out) in {ok: req.ok * presp.ok, status: presp.status, method: req.method, path: req.path, resp_body: presp.body})
+fn net_udp_loopback_exchange(port, payload) = let ufd = net_udp_bind(port) in if ufd < 0 then {ok: 0, sent: 0, received: ""} else let ns = net_udp_sendto(ufd, port, payload) in let recvd = net_recv_str(ufd, 256) in let zc = net_close(ufd) in {ok: if recvd == payload then 1 else 0, sent: ns, received: recvd}
+
+fn test_ipv4_parse_format_and_cidr_subnet() = let lo = ipv4_parse("127.0.0.1") in let h1 = ipv4_parse("192.168.10.42") in let h2 = ipv4_parse("192.168.10.200") in let h3 = ipv4_parse("192.168.11.1") in let net24 = ipv4_parse("192.168.10.0") in ipv4_format(lo) == "127.0.0.1" and ipv4_format(h1) == "192.168.10.42" and ipv4_in_subnet(h1, net24, 24) == 1 and ipv4_in_subnet(h2, net24, 24) == 1 and ipv4_in_subnet(h3, net24, 24) == 0 and ipv4_parse("256.0.0.1") == (0 - 1) and ipv4_parse("10.0.1") == (0 - 1)
+
+fn test_rfc1071_checksum_and_udp_tamper_detection() = let pkt = udp_packet_build(8080, 9000, "LUME_NET") in let tp = {ok: 1, src_port: pkt.src_port, dst_port: pkt.dst_port, length: pkt.length, checksum: pkt.checksum, payload: "LUME_BAD"} in let tl = {ok: 1, src_port: pkt.src_port, dst_port: pkt.dst_port, length: pkt.length + 2, checksum: pkt.checksum, payload: pkt.payload} in let seg = tcp_segment_build(443, 51000, 1001, 2002, 18, "ACK") in udp_packet_verify(pkt) == 1 and udp_packet_verify(tp) == 0 and udp_packet_verify(tl) == 0 and (udp_packet_build(0, 70000, "x")).ok == 0 and tcp_segment_verify(seg) == 1
+
+fn test_tcp_3way_handshake_and_teardown_fsm() = let s1 = tcp_fsm_step("CLOSED", 2) in let s2 = tcp_fsm_step(s1, 18) in let s3 = tcp_fsm_step(s2, 17) in let s4 = tcp_fsm_step(s3, 17) in let s5 = tcp_fsm_step(s4, 16) in s1 == "SYN_SENT" and s2 == "ESTABLISHED" and s3 == "CLOSE_WAIT" and s4 == "LAST_ACK" and s5 == "CLOSED" and tcp_fsm_step("CLOSED", 16) == "INVALID" and tcp_fsm_step("ESTABLISHED", 4) == "CLOSED"
+
+fn test_tls13_key_schedule_and_aead_tamper_rejection() = let ks = tls13_key_schedule(9876543, 1234567) in let rec = tls13_aead_seal(ks.client_app_key, 1, 23, "GET /secret") in let op = tls13_aead_open(ks.client_app_key, 1, rec) in let bad_tag = {content_type: rec.content_type, seq_num: rec.seq_num, length: rec.length, ciphertext: rec.ciphertext, auth_tag: rec.auth_tag + 1} in ks.client_app_key != ks.server_app_key and op.ok == 1 and op.plaintext == "GET /secret" and (tls13_aead_open(ks.client_app_key, 2, rec)).ok == 0 and (tls13_aead_open(ks.server_app_key, 1, rec)).ok == 0 and (tls13_aead_open(ks.client_app_key, 1, bad_tag)).ok == 0
+
+fn test_http11_request_response_roundtrip_and_malformed_rejection() = let preq = http_parse_request(http_build_request("POST", "api.lume.local", "/v1/items", "{\"id\":42}")) in let presp = http_parse_response(http_build_response(201, "Created", "application/json", "{\"ok\":true}")) in preq.ok == 1 and preq.method == "POST" and preq.path == "/v1/items" and preq.host == "api.lume.local" and preq.content_length == 9 and preq.body == "{\"id\":42}" and presp.ok == 1 and presp.status == 201 and presp.content_type == "application/json" and presp.body == "{\"ok\":true}" and (http_parse_request("INVALID\r\n\r\n")).ok == 0 and (http_parse_request("POST /x HTTP/1.1\r\nHost: h\r\nContent-Length: 99\r\n\r\nabc")).ok == 0

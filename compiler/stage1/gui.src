@@ -1,0 +1,103 @@
+## gui.src -- Track L (`#257`) Standard Library: GUI / Graphics & Windowing (`use std.gui` / `use gui`).
+##
+## Provides:
+##   1. 2D software framebuffer rasterizer (`canvas_new`, `canvas_set_px`, `canvas_get_px`, `canvas_fill_rect`)
+##   2. Porter-Duff source-over RGB alpha blending (`canvas_blend_channel`, `canvas_blend_rgb`)
+##   3. Flexbox-style `vbox` / `hbox` layout solver (`ui_vbox_layout`, `ui_hbox_layout`)
+##   4. Spatial hit-testing & input event dispatch (`ui_hit_test`, `ui_dispatch_click`, `ui_render_widgets`)
+##   5. Deterministic Netpbm P3 `.ppm` & `.svg` vector frame encoders (`canvas_to_ppm`, `ui_to_svg`)
+
+fn gui_repeat(n, v) = if n <= 0 then Nil else Cons(v, gui_repeat(n - 1, v))
+
+fn gui_list_get(xs, idx) = match xs
+    Nil        => 0 - 1
+    Cons(h, t) => if idx == 0 then h else gui_list_get(t, idx - 1)
+
+fn gui_list_set(xs, idx, v) = match xs
+    Nil        => Nil
+    Cons(h, t) => if idx == 0 then Cons(v, t) else Cons(h, gui_list_set(t, idx - 1, v))
+
+fn gui_startswith(s, p) = if count(s) < count(p) then 0 else slice(s, 0, count(p)) == p
+
+## --- 1. 2D Software Framebuffer & Clipping ---
+fn rgb_pack(r, g, b) = (r * 65536) + (g * 256) + b
+
+fn rgb_r(rgb) = (rgb / 65536) % 256
+fn rgb_g(rgb) = (rgb / 256) % 256
+fn rgb_b(rgb) = rgb % 256
+
+fn canvas_new(w, h, bg_rgb) = {w: w, h: h, bg: bg_rgb, pixels: gui_repeat(w * h, bg_rgb)}
+
+fn canvas_in_bounds(c, x, y) = if x >= 0 and x < c.w and y >= 0 and y < c.h then 1 else 0
+
+fn canvas_set_px(c, x, y, rgb) = if canvas_in_bounds(c, x, y) == 0 then c else {w: c.w, h: c.h, bg: c.bg, pixels: gui_list_set(c.pixels, (y * c.w) + x, rgb)}
+
+fn canvas_get_px(c, x, y) = if canvas_in_bounds(c, x, y) == 0 then 0 - 1 else gui_list_get(c.pixels, (y * c.w) + x)
+
+fn canvas_fill_row(c, x, x_end, y, rgb) = if x >= x_end then c else canvas_fill_row(canvas_set_px(c, x, y, rgb), x + 1, x_end, y, rgb)
+
+fn canvas_fill_rows(c, rx, x_end, y, y_end, rgb) = if y >= y_end then c else canvas_fill_rows(canvas_fill_row(c, rx, x_end, y, rgb), rx, x_end, y + 1, y_end, rgb)
+
+fn canvas_fill_rect(c, rx, ry, rw, rh, rgb) = if rw <= 0 or rh <= 0 then c else canvas_fill_rows(c, rx, rx + rw, ry, ry + rh, rgb)
+
+## --- 2. Porter-Duff Source-Over Alpha Blending ---
+fn canvas_blend_channel(dst_c, src_c, alpha) = ((src_c * alpha) + (dst_c * (255 - alpha))) / 255
+
+fn canvas_blend_rgb(dst_rgb, src_rgb, alpha) = rgb_pack(canvas_blend_channel(rgb_r(dst_rgb), rgb_r(src_rgb), alpha), canvas_blend_channel(rgb_g(dst_rgb), rgb_g(src_rgb), alpha), canvas_blend_channel(rgb_b(dst_rgb), rgb_b(src_rgb), alpha))
+
+## --- 3. Layout Engine (`vbox` / `hbox`), Hit-Testing & Event Dispatch ---
+fn ui_widget(id, w, h, rgb, delta, label) = {id: id, x: 0, y: 0, w: w, h: h, rgb: rgb, delta: delta, label: label}
+
+fn ui_vbox_layout(widgets, x0, y0, gap) = match widgets
+    Nil        => Nil
+    Cons(w, r) => Cons({id: w.id, x: x0, y: y0, w: w.w, h: w.h, rgb: w.rgb, delta: w.delta, label: w.label}, ui_vbox_layout(r, x0, y0 + w.h + gap, gap))
+
+fn ui_hbox_layout(widgets, x0, y0, gap) = match widgets
+    Nil        => Nil
+    Cons(w, r) => Cons({id: w.id, x: x0, y: y0, w: w.w, h: w.h, rgb: w.rgb, delta: w.delta, label: w.label}, ui_hbox_layout(r, x0 + w.w + gap, y0, gap))
+
+fn ui_point_in_widget(w, mx, my) = if mx >= w.x and mx < (w.x + w.w) and my >= w.y and my < (w.y + w.h) then 1 else 0
+
+fn ui_hit_test(widgets, mx, my) = match widgets
+    Nil        => 0 - 1
+    Cons(w, r) => let sub = ui_hit_test(r, mx, my) in if sub >= 0 then sub else if ui_point_in_widget(w, mx, my) == 1 then w.id else 0 - 1
+
+fn ui_find_delta(widgets, hit_id) = match widgets
+    Nil        => 0
+    Cons(w, r) => if w.id == hit_id then w.delta else ui_find_delta(r, hit_id)
+
+fn ui_dispatch_click(state, widgets, mx, my) = let hit = ui_hit_test(widgets, mx, my) in if hit < 0 then {hit_id: 0 - 1, state: state} else {hit_id: hit, state: state + ui_find_delta(widgets, hit)}
+
+fn ui_render_widgets(canvas, widgets) = match widgets
+    Nil        => canvas
+    Cons(w, r) => ui_render_widgets(canvas_fill_rect(canvas, w.x, w.y, w.w, w.h, w.rgb), r)
+
+## --- 4. Netpbm P3 `.ppm` & `.svg` Serialization + Frame Checksum ---
+fn gui_ppm_pixels(pixels) = match pixels
+    Nil         => ""
+    Cons(px, r) => str(rgb_r(px)) + " " + str(rgb_g(px)) + " " + str(rgb_b(px)) + "\n" + gui_ppm_pixels(r)
+
+fn canvas_to_ppm(c) = "P3\n" + str(c.w) + " " + str(c.h) + "\n255\n" + gui_ppm_pixels(c.pixels)
+
+fn gui_svg_rects(widgets) = match widgets
+    Nil        => ""
+    Cons(w, r) => "<rect id=\"" + str(w.id) + "\" x=\"" + str(w.x) + "\" y=\"" + str(w.y) + "\" width=\"" + str(w.w) + "\" height=\"" + str(w.h) + "\"/>" + gui_svg_rects(r)
+
+fn ui_to_svg(w, h, widgets) = "<svg width=\"" + str(w) + "\" height=\"" + str(h) + "\">" + gui_svg_rects(widgets) + "</svg>"
+
+fn gui_sum_px(pixels, idx) = match pixels
+    Nil         => 0
+    Cons(px, r) => ((px * (idx + 1)) % 1000000007) + gui_sum_px(r, idx + 1)
+
+fn canvas_checksum(c) = gui_sum_px(c.pixels, 0) % 1000000007
+
+## --- Unit tests (`lume test compiler/stage1/gui.src`) ---
+fn test_canvas_pixel_clipping_and_fill_rect() = let c0 = canvas_new(4, 4, 0) in let c1 = canvas_fill_rect(c0, 1, 1, 2, 2, 255) in let c2 = canvas_set_px(c1, 99, 99, 100) in let c3 = canvas_set_px(c2, 0 - 5, 2, 100) in canvas_get_px(c3, 0, 0) == 0 and canvas_get_px(c3, 1, 1) == 255 and canvas_get_px(c3, 2, 2) == 255 and canvas_get_px(c3, 3, 3) == 0 and canvas_get_px(c3, 99, 99) == (0 - 1)
+
+fn test_alpha_blending_endpoints_and_midpoint() = let red = rgb_pack(200, 0, 0) in let blue = rgb_pack(0, 0, 100) in let b0 = canvas_blend_rgb(red, blue, 0) in let b255 = canvas_blend_rgb(red, blue, 255) in let b_mid = canvas_blend_channel(100, 200, 128) in b0 == red and b255 == blue and b_mid == 150
+
+fn test_vbox_hbox_layout_and_hit_testing() = let ws = Cons(ui_widget(1, 10, 4, 100, 10, "A"), Cons(ui_widget(2, 10, 6, 200, 25, "B"), Nil)) in let vlaid = ui_vbox_layout(ws, 2, 3, 2) in let hlaid = ui_hbox_layout(ws, 2, 3, 5) in let hit_w1 = ui_hit_test(vlaid, 5, 5) in let hit_gap = ui_hit_test(vlaid, 5, 8) in let hit_w2 = ui_hit_test(vlaid, 5, 11) in let hit_h2 = ui_hit_test(hlaid, 19, 5) in hit_w1 == 1 and hit_gap == (0 - 1) and hit_w2 == 2 and hit_h2 == 2
+
+fn test_event_dispatch_and_scene_rasterization() = let ws = Cons(ui_widget(10, 2, 2, 111, 5, "btn1"), Cons(ui_widget(20, 2, 2, 222, 15, "btn2"), Nil)) in let laid = ui_vbox_layout(ws, 0, 0, 1) in let d1 = ui_dispatch_click(100, laid, 1, 1) in let d2 = ui_dispatch_click(d1.state, laid, 1, 4) in let d_miss = ui_dispatch_click(d2.state, laid, 3, 3) in let c = ui_render_widgets(canvas_new(4, 6, 0), laid) in d1.hit_id == 10 and d1.state == 105 and d2.hit_id == 20 and d2.state == 120 and d_miss.hit_id == (0 - 1) and d_miss.state == 120 and canvas_get_px(c, 1, 1) == 111 and canvas_get_px(c, 1, 2) == 0 and canvas_get_px(c, 1, 3) == 222
+
+fn test_ppm_and_svg_frame_serialization() = let c = canvas_fill_rect(canvas_new(2, 2, rgb_pack(10, 20, 30)), 0, 0, 1, 1, rgb_pack(255, 128, 64)) in let ppm = canvas_to_ppm(c) in let ws = ui_vbox_layout(Cons(ui_widget(7, 20, 10, 255, 1, "ok"), Nil), 4, 8, 0) in let svg = ui_to_svg(100, 50, ws) in gui_startswith(ppm, "P3\n2 2\n255\n255 128 64\n10 20 30\n") == 1 and svg == "<svg width=\"100\" height=\"50\"><rect id=\"7\" x=\"4\" y=\"8\" width=\"20\" height=\"10\"/></svg>" and canvas_checksum(c) > 0
