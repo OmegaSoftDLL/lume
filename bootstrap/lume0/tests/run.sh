@@ -1526,7 +1526,22 @@ else
     ok "no-toolchain ELF pipeline (skipped: not linux/x86_64, or under ASan)"
 fi
 
-if ../../lume --version | grep -q "^lume " && ../../lume describe | grep -q '"stage": "self-hosted (lumec + lasm + lcli)"' && ../../lume check ../../examples/01_hello.lume >/dev/null 2>&1 && ../../lume test ../../examples/01_hello.lume | grep -q "1 passed, 0 failed"; then ok "phase-2 T1 (#204): lume CLI (--version, describe, check, test via self-hosted lcli.src)"; else bad "phase-2 T1 (#204): lume CLI (--version, describe, check, test via self-hosted lcli.src)"; fi
+_st_dir=$(mktemp -d)
+printf 'fn test_math() = 2 + 2 == 4\nfn test_bool() = true\n' >"$_st_dir/pass.lume"
+printf 'fn test_failure() = false\n' >"$_st_dir/fail.lume"
+printf 'let x =\n' >"$_st_dir/invalid.lume"
+printf 'fn broken() -> int\n    missing_name\n' >"$_st_dir/undefined.lume"
+_st_pass=$(../../lume test "$_st_dir/pass.lume" 2>/dev/null || true)
+_st_none=$( (../../lume test ../../examples/01_hello.lume 2>/dev/null || true) | tail -n 1)
+_st_json=$(../../lume check --json "$_st_dir/pass.lume" 2>/dev/null || true)
+_st_fail_rc=0
+../../lume test "$_st_dir/fail.lume" >/dev/null 2>&1 || _st_fail_rc=$?
+_st_invalid_rc=0
+../../lume check "$_st_dir/invalid.lume" >/dev/null 2>&1 || _st_invalid_rc=$?
+_st_undefined_rc=0
+../../lume check "$_st_dir/undefined.lume" >/dev/null 2>&1 || _st_undefined_rc=$?
+if ../../lume --version | grep -q "^lume " && ../../lume describe | grep -q '"stage": "self-hosted (lumec + lasm + lcli)"' && [ "$_st_pass" = "2 passed, 0 failed" ] && [ "$_st_none" = "0 passed, 0 failed" ] && [ "$_st_fail_rc" -ne 0 ] && [ "$_st_invalid_rc" -ne 0 ] && [ "$_st_undefined_rc" -ne 0 ] && printf '%s' "$_st_json" | grep -q '"ok":true'; then ok "phase-2 T1 (#204, #316): real surface check/test discovery, execution, JSON and negative regressions"; else bad "phase-2 T1 (#204, #316): surface CLI validation"; printf '%s\n' "$_st_pass" "$_st_none" "$_st_json" "fail=$_st_fail_rc invalid=$_st_invalid_rc undefined=$_st_undefined_rc"; fi
+rm -rf "$_st_dir"
 
 if [ -z "${LUME0_ASAN:-}" ]; then
     _p35_tmp=$(mktemp)
