@@ -159,3 +159,27 @@ jobs:
           }
           $global:LASTEXITCODE = 0
           exit 0
+      - name: Verify docs/install.sh clean install & SHA-256 tamper rejection on Windows (#262)
+        shell: bash
+        run: |
+          set -eu
+          tmp=$(mktemp -d)
+          pkg="lume-v0.2.0-windows-x86_64"
+          mkdir -p "$tmp/win-bin" "$tmp/stage" "$tmp/dist" "$tmp/tampered"
+          cp bootstrap/lume0/lume0.exe "$tmp/win-bin/lume0.exe"
+          sh scripts/install.sh --prefix "$tmp/stage/$pkg" --from-local "$PWD" --from-dir "$tmp/win-bin"
+          tar -C "$tmp/stage" -czf "$tmp/dist/${pkg}.tar.gz" "$pkg"
+          (cd "$tmp/dist" && sha256sum "${pkg}.tar.gz" > SHA256SUMS)
+          wdist=$(cd "$tmp/dist" && pwd -W)
+          LUME_PREFIX="$tmp/clean" LUME_RELEASE_TAG="v0.2.0" LUME_RELEASE_BASE_URL="file:///$wdist" sh docs/install.sh
+          "$tmp/clean/bin/lume" --version | tr -d '\r' | grep -q "lume 0.2.0"
+          "$tmp/clean/bin/lume" self verify | tr -d '\r' | grep -q '"manifest_verified":true'
+          cp "$tmp/dist/${pkg}.tar.gz" "$tmp/tampered/"
+          printf '0000000000000000000000000000000000000000000000000000000000000000  %s.tar.gz\n' "$pkg" > "$tmp/tampered/SHA256SUMS"
+          wtamper=$(cd "$tmp/tampered" && pwd -W)
+          if LUME_PREFIX="$tmp/bad" LUME_RELEASE_TAG="v0.2.0" LUME_RELEASE_BASE_URL="file:///$wtamper" sh docs/install.sh > "$tmp/tamper.log" 2>&1; then
+            echo "FATAL: docs/install.sh accepted a tampered archive on Windows!" >&2
+            exit 1
+          fi
+          grep -q "SHA-256 mismatch — refusing to install" "$tmp/tamper.log"
+          rm -rf "$tmp"
