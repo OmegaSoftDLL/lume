@@ -1,1 +1,2 @@
-fn broken( = print 42
+fn must_increase(x: int) -> int ensures result > x = x
+print must_increase(1)
