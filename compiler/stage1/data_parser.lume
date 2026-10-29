@@ -7,15 +7,6 @@ type DP = record
     toks: [Token]
     pos:  int
     decimals: [str]
-    has_decimals: bool
-
-fn dtoks_have_decimal(toks: [Token]) -> bool
-    for t in toks
-        if t.kind == Decimal
-            return true
-        if t.kind == Ident and (t.text == "decimal" or t.text == "decimal_make" or t.text == "decimal_parse" or t.text == "decimal_cast" or t.text == "decimal_div_exact" or t.text == "decimal_add" or t.text == "decimal_sub" or t.text == "decimal_mul" or t.text == "decimal_div")
-            return true
-    false
 
 type DDecimalParts = record
     coefficient: int
@@ -69,8 +60,6 @@ fn ddecimal_name(names: [str], name: str) -> bool
     false
 
 fn ddecimal_remove(names: [str], name: str) -> [str]
-    if names.len() == 0
-        return names
     var kept = []
     for item in names
         if item != name
@@ -134,8 +123,7 @@ fn datom(p: mut DP) -> DExpr
         deat(p)                          # =
         let lval = dexpr(p, 0)
         let old_decimals = p.decimals
-        if p.has_decimals
-            p.decimals = if ddecimal_expr(lval, old_decimals) then [lname, ..ddecimal_remove(old_decimals, lname)] else ddecimal_remove(old_decimals, lname)
+        p.decimals = if ddecimal_expr(lval, old_decimals) then [lname, ..ddecimal_remove(old_decimals, lname)] else ddecimal_remove(old_decimals, lname)
         deat(p)                          # in
         let lbody = dexpr(p, 0)
         p.decimals = old_decimals
@@ -276,7 +264,7 @@ fn dexpr(p: mut DP, min_bp: int) -> DExpr
             break
         deat(p)
         let right = dexpr(p, bp + 1)
-        if p.has_decimals and ddecimal_expr(left, p.decimals) and ddecimal_expr(right, p.decimals)
+        if ddecimal_expr(left, p.decimals) and ddecimal_expr(right, p.decimals)
             left = ddecimal_operator(t.text, left, right)
         else
             left = DBin(op: t.text, l: left, r: right)
@@ -362,8 +350,7 @@ fn dstmt(p: mut DP) -> DStmt
         let name = deat(p).text
         deat(p)                          # =
         let value = dexpr(p, 0)
-        if p.has_decimals
-            p.decimals = if ddecimal_expr(value, p.decimals) then [name, ..ddecimal_remove(p.decimals, name)] else ddecimal_remove(p.decimals, name)
+        p.decimals = if ddecimal_expr(value, p.decimals) then [name, ..ddecimal_remove(p.decimals, name)] else ddecimal_remove(p.decimals, name)
         DLet(name: name, value: value)
     elif t.text == "print"
         deat(p)                          # `print`
@@ -374,8 +361,7 @@ fn dstmt(p: mut DP) -> DStmt
         DExprS(value: dexpr(p, 0))
 
 fn parse_data_program(src: str) -> [DStmt]
-    let tks = lex_layout(src)
-    var p = DP(toks: tks, pos: 0, decimals: [], has_decimals: dtoks_have_decimal(tks))
+    var p = DP(toks: lex_layout(src), pos: 0, decimals: [])
     var prog = []
     dnl(p)
     while dcur(p).kind != End

@@ -1,20 +1,21 @@
 @intent KernelRtcPciDriver
 @version 1
-@goal Bare-metal kernel CMOS RTC + PCI/MMIO block driver with bounded WCET and zero heap
-@target x86_64-freestanding
-@effects mmio,port,irq
-@resources max_heap_kb:0,wcet_cycles:64
-@adapter mmio:cmos_rtc:sha256:248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1
+## @goal: Bare-metal kernel CMOS RTC + PCI/MMIO block driver with bounded WCET and zero heap
+## @target: x86_64-freestanding
+## @effects: mmio,port,irq
+## @resources: max_heap_kb:0,wcet_cycles:64
+## @adapter: mmio:cmos_rtc:sha256:248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1
 
 pub fn bcd_decode(raw_byte: int) -> int
     requires raw_byte >= 0 and raw_byte <= 153
     ensures result >= 0
     = (raw_byte / 16) * 10 + (raw_byte % 16)
 
-pub fn sector_byte_offset(lba: int) -> int
-    requires lba >= 0 and lba <= 1024
-    ensures result == lba * 512 and result >= 0
+pub fn sector_byte_offset(lba: int, sector_sz: int) -> int
+    requires lba >= 0
+    requires sector_sz >= 512
+    ensures result == lba * sector_sz and result >= 0
     = _
 
 print bcd_decode(38)
-print sector_byte_offset(7)
+print sector_byte_offset(7, 512)

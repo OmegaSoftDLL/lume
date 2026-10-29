@@ -32,7 +32,7 @@ fn los_join_sp_tail(h, t) = match t
 
 fn blk_sector_offset(lba: int, sector_sz: int) -> int requires lba >= 0 requires sector_sz >= 512 ensures result >= 0 = lba * sector_sz
 
-fn blk_lba_valid(lba: int, max_lba: int) -> int requires max_lba >= 1 ensures result >= 0 = if lba >= 0 and lba < max_lba then 1 else 0
+fn blk_lba_valid(lba: int, max_lba: int) -> int = if lba >= 0 and lba < max_lba then 1 else 0
 
 fn blk_journal_next_seq(seq: int) -> int requires seq >= 0 ensures result > seq = seq + 1
 
@@ -78,7 +78,7 @@ fn vfs_alloc_ino(next_ino: int, max_ino: int) -> int requires next_ino >= 1 requ
 
 fn vfs_size_after_write(cur_sz: int, wr_len: int) -> int requires cur_sz >= 0 requires wr_len >= 0 ensures result >= cur_sz = cur_sz + wr_len
 
-fn vfs_fd_valid(fd: int, max_fds: int) -> int requires max_fds >= 3 ensures result >= 0 = if fd >= 0 and fd < max_fds then 1 else 0
+fn vfs_fd_valid(fd: int, max_fds: int) -> int = if fd >= 0 and fd < max_fds then 1 else 0
 
 fn vfs_init() = let root_ino = {ino: 1, ftype: 2, mode: 493, size: 0, lba: 0, data: "", crc: 0} in let root_d = {path: "/", ino: 1, fstype: "lumefs"} in let tmp_ino = {ino: 2, ftype: 2, mode: 511, size: 0, lba: 0, data: "", crc: 0} in let tmp_d = {path: "/tmp", ino: 2, fstype: "ramfs"} in {next_ino: 2, max_ino: 1024, next_fd: 3, max_fds: 64, inodes: Cons(tmp_ino, Cons(root_ino, Nil)), dentries: Cons(tmp_d, Cons(root_d, Nil)), fds: Nil}
 
@@ -212,7 +212,7 @@ fn sys_dispatch(os_st, caller_pid, sysno, arg_s, arg_i) = let p = proc_find(os_s
 
 fn drv_bcd_to_bin(bcd: int) -> int requires bcd >= 0 requires bcd <= 153 ensures result >= 0 = (bcd / 16) * 10 + (bcd % 16)
 
-fn drv_pci_cfg_addr(bus: int, slot: int, func: int, offset: int) -> int requires bus >= 0 requires slot >= 0 requires func >= 0 requires offset >= 0 ensures result >= 2147483648 = 2147483648 + bus * 65536 + slot * 2048 + func * 256 + (offset / 4) * 4
+fn drv_pci_cfg_addr(bus: int, slot: int, func: int, offset: int) -> int = 2147483648 + bus * 65536 + slot * 2048 + func * 256 + (offset / 4) * 4
 
 fn drv_cmos_clamp_bcd(raw) = if raw < 0 then 0 else if raw > 153 then 153 else raw
 

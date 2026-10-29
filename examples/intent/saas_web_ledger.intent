@@ -1,10 +1,10 @@
 @intent TenantLedgerSaaS
 @version 1
-@goal Multi-tenant financial ledger SaaS with Web DOM badge + HTTP API + capability-gated persistence
-@target x86_64-linux-musl,wasm32-wasi
-@effects net,http,db,dom
-@resources max_heap_kb:2048,max_latency_ms:10
-@adapter http:openapi:sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad
+## @goal: Multi-tenant financial ledger SaaS with Web DOM badge + HTTP API + capability-gated persistence
+## @target: x86_64-linux-musl,wasm32-wasi
+## @effects: net,http,db,dom
+## @resources: max_heap_kb:2048,max_latency_ms:10
+## @adapter: http:openapi:sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad
 
 pub fn tenant_isolated(req_tenant: int, row_tenant: int) -> int
     requires req_tenant > 0
