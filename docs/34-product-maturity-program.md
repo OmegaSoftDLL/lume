@@ -36,6 +36,9 @@ silently weaken memory ownership, provenance, capability, or evidence requiremen
   larger browser and application platform in **#333**.
 - `std.wasm` is a reference model, not real module isolation. Production interop and real WASM hosting
   are tracked in **#334**.
+- `lume agent bind` has a fail-closed scalar/borrowed-string C adapter subset with explicit foreign
+  provenance. General foreign-pointer ownership, callback lifetimes, and arbitrary real-world headers
+  remain open in **#334**; rejected declarations do not produce a partial generated adapter.
 - The bootable microkernel is not a general-purpose OS. Filesystems, userspace, drivers, networking,
   and userland remain in **#241**.
 

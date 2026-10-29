@@ -56,6 +56,9 @@ rule (`docs/28`): no brick is "done" until the real thing runs, with its guarant
    every product track. **[HARD for claim promotion]** Missing runnable evidence remains `UNKNOWN`.
 5. **`#257` + `#334` — real domains and universal adapters.** TLS/TCP, HTTP, async, storage, FFI,
    generated bindings, and real WASM hosting proceed in focused parallel PRs under the P0 protocol.
+   The shipped binding subset is limited to `int64_t` scalars and borrowed `const char *` parameters,
+   preserves foreign returns as `unverified[int]`, and rejects unsupported ownership/callback boundaries
+   with `[I0003]`; broader adapter maturity and real WASM hosting remain open.
 6. **`#332` — production SaaS capstone.** **[HARD]** Requires the applicable secure-networking,
    concurrent-runtime, data, and interop increments from `#257`/`#334`.
 7. **`#333` — real Web applications.** Real browsers, DOM/events/fetch, application architecture, and
