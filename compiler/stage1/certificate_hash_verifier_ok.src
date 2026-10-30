@@ -1,0 +1,6 @@
+## Full-content SHA-256 verifier regression (#340): NIST 56-byte vector and long distinct inputs.
+
+use lcert
+
+print lc_sha256("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq")
+print lc_sha256("0123456789abcdefAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAsuffix-two")
