@@ -41,6 +41,9 @@ silently weaken memory ownership, provenance, capability, or evidence requiremen
   remain open in **#334**; rejected declarations do not produce a partial generated adapter.
 - The bootable microkernel is not a general-purpose OS. Filesystems, userspace, drivers, networking,
   and userland remain in **#241**.
+- The P0 real capstone slices in `docs/36` now provide independent HTTP/WAL and QEMU RTC evidence.
+  They are deliberately bounded: TLS, browser DOM, production SaaS acceptance, PCI/block drivers,
+  and the remaining OS acceptance stay open; the older arithmetic-only mesh models are not evidence.
 
 ## Track registry
 

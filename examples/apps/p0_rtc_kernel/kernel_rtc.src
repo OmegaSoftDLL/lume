@@ -1,0 +1,22 @@
+## P0 real acceptance slice (#337/#241/#297): freestanding CMOS RTC driver.
+## The RTC values below come from MC146818 registers through x86 port I/O.
+## This is not the arithmetic-only hosted model from the semantic-mesh increment.
+
+@freestanding
+fn kernel_boot_entry() -> int = 1
+
+fn rtc_wait_ready() = let selecting = port_out8(112, 10) in let status = port_in8(113) in if status >= 128 then rtc_wait_ready() else status
+
+fn rtc_read_reg(reg) = let selecting = port_out8(112, reg) in port_in8(113)
+
+fn rtc_bcd_decode(raw) = (raw / 16) * 10 + (raw % 16)
+
+fn rtc_decode(raw, status_b) = if status_b >= 4 and (status_b % 8) >= 4 then raw else rtc_bcd_decode(raw)
+
+fn rtc_hour(raw, status_b) = let pm = if raw >= 128 then 1 else 0 in let value = raw % 128 in let decoded = rtc_decode(value, status_b) in if (status_b % 4) >= 2 then decoded else if pm == 1 and decoded < 12 then decoded + 12 else if pm == 0 and decoded == 12 then 0 else decoded
+
+fn rtc_snapshot() = let ready = rtc_wait_ready() in let status_b = rtc_read_reg(11) in let second_raw = rtc_read_reg(0) in let minute_raw = rtc_read_reg(2) in let hour_raw = rtc_read_reg(4) in let day_raw = rtc_read_reg(7) in let month_raw = rtc_read_reg(8) in let year_raw = rtc_read_reg(9) in {status_b: status_b, second: rtc_decode(second_raw, status_b), minute: rtc_decode(minute_raw, status_b), hour: rtc_hour(hour_raw, status_b), day: rtc_decode(day_raw, status_b), month: rtc_decode(month_raw, status_b), year: 2000 + rtc_decode(year_raw, status_b)}
+
+fn p0_rtc_kernel_main() = let entry = kernel_boot_entry() in let rtc = rtc_snapshot() in "p0_rtc_kernel=ok year=" + str(rtc.year) + " month=" + str(rtc.month) + " day=" + str(rtc.day) + " hour=" + str(rtc.hour) + " minute=" + str(rtc.minute) + " second=" + str(rtc.second) + " status_b=" + str(rtc.status_b)
+
+print p0_rtc_kernel_main()

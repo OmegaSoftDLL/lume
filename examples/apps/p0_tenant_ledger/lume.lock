@@ -1,0 +1,5 @@
+# lume.lock — deterministic content-addressed lockfile (P26, P32)
+version = 1
+manifest = {"name":"p0_tenant_ledger","version":"0.1.0","edition":"2026","capabilities":"io"}
+manifest_sha256 = "ea055284121ac2e524bc16753fde37cccb7342c0e3da745cab0dad9feea45ac4"
+module "ledger_server.src" sha256 = "eef17f7feff4c8431310b3a5b150a4f2c7a605677edf9a0b6233127353fa8337"
