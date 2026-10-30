@@ -3,6 +3,8 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 LUME=${LUME_CLI:-$ROOT/lume}
+LUME_BIN_DIR=${LUME_BIN_DIR:-$ROOT/build/bin}
+export LUME_BIN_DIR
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 STORE="$TMP/store"
