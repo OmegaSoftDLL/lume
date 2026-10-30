@@ -8,8 +8,8 @@ serves JSON over plain HTTP/1.1 on `127.0.0.1:18737`.
 
 - `GET /health` returns process health.
 - `GET /v1/balance` returns only the authenticated tenant's computed balance.
-- `POST /v1/debit` and `POST /v1/credit` take an integer body and atomically append a WAL snapshot
-  through the existing `persist_tx_insert_row` primitive (`flock`, `write`, `fsync`, `close`).
+- `POST /v1/debit` and `POST /v1/credit` take an integer body and append a WAL snapshot through the
+  existing `persist_tx_insert_row` primitive (`flock`, `write`, `fsync`, `close`).
 - The demonstration bearer token must match `X-Tenant-ID`: tenant `101` uses
   `Bearer ledger-101-token`; tenant `202` uses `Bearer ledger-202-token`.
 - Missing/invalid credentials, cross-tenant reads and writes, duplicate `Content-Length`,

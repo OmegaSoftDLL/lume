@@ -3,7 +3,7 @@
 This is a real x86-64 bare-metal acceptance increment for #337/#241/#297. It is not the hosted
 arithmetic model shipped by the semantic-mesh increment. The Lume source uses `@freestanding` and
 reads MC146818 CMOS RTC registers through ports `0x70`/`0x71`; serial output comes from the existing
-kernel runtime. BCD and binary register formats and 12/24-hour mode are decoded in the driver.
+kernel runtime. Acceptance covers the register format selected by QEMU in the two runs below.
 
 ## Build and run
 

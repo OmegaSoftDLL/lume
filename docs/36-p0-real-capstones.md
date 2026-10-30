@@ -31,8 +31,8 @@ observability, or deployment acceptance. Those criteria remain open in #332/#333
 
 `examples/apps/p0_rtc_kernel/kernel_rtc.src` is a freestanding Lume kernel with a CMOS RTC driver.
 The build emits a raw MBR/Long Mode image, not a hosted ELF. The guest waits for the RTC update
-cycle, reads hardware registers through ports `0x70`/`0x71`, handles BCD/binary and 12/24-hour
-formats, and reports the observed values through the existing COM1 runtime.
+cycle, reads hardware registers through ports `0x70`/`0x71`, and reports the observed values through
+the existing COM1 runtime. Acceptance covers the register format selected by QEMU in these runs.
 
 `tests/capstones/test_rtc_qemu.py` rejects hosted syscalls and invalid boot images, then runs
 `qemu-system-x86_64` twice with different `-rtc base=` values. It requires the guest timestamps to

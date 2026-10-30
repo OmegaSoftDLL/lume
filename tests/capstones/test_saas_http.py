@@ -31,21 +31,35 @@ def request(method, path, body=None, tenant=None, token=None):
     return response.status, json.loads(payload)
 
 
-def raw_request(payload):
-    with socket.create_connection((HOST, PORT), timeout=3) as client:
-        client.sendall(payload)
-        client.shutdown(socket.SHUT_WR)
-        chunks = []
-        while True:
-            chunk = client.recv(4096)
-            if not chunk:
-                break
-            chunks.append(chunk)
+def receive_response(client):
+    chunks = []
+    while True:
+        chunk = client.recv(4096)
+        if not chunk:
+            break
+        chunks.append(chunk)
     response = b"".join(chunks)
     assert response.startswith(b"HTTP/1.1 "), response
     status = int(response.split(b" ", 2)[1])
     body = response.split(b"\r\n\r\n", 1)[1]
     return status, json.loads(body)
+
+
+def raw_request(payload):
+    with socket.create_connection((HOST, PORT), timeout=3) as client:
+        client.sendall(payload)
+        client.shutdown(socket.SHUT_WR)
+        return receive_response(client)
+
+
+def raw_request_parts(headers, *body_parts):
+    with socket.create_connection((HOST, PORT), timeout=3) as client:
+        client.sendall(headers)
+        for part in body_parts:
+            time.sleep(0.1)
+            client.sendall(part)
+        client.shutdown(socket.SHUT_WR)
+        return receive_response(client)
 
 
 class Server:
@@ -123,21 +137,23 @@ def main():
             expect(raw_request(common + b"Content-Length: 1\r\nContent-Length: 1\r\n\r\n1"), 400, error="invalid_http_framing")
             expect(raw_request(common + b"Transfer-Encoding: chunked\r\nContent-Length: 1\r\n\r\n1"), 400, error="invalid_http_framing")
             expect(raw_request(common + b"Content-Length: 2048\r\n\r\n" + b"1" * 2048), 400, error="invalid_http_framing")
+            expect(raw_request(common + b"Content-Length: 2\r\n\r\n1"), 400, error="invalid_http_framing")
             expect(raw_request(b"GET /v1/balance HTTP/1.1\r\nAuthorization: Bearer ledger-101-token\r\nX-Tenant-ID: 101\r\n\r\n"), 400, error="invalid_http_framing")
+            expect(raw_request_parts(common + b"Content-Length: 2\r\n\r\n", b"1", b"5"), 200, tenant=101, balance=50, version=4)
 
         assert wal.is_file() and wal.stat().st_size > 0
-        assert wal.read_text().count("@tx|") == 3
+        assert wal.read_text().count("@tx|") == 4
         with wal.open("a", encoding="utf-8") as stream:
-            stream.write("@tx|4|0|torn|tenant,delta~n999,999|@endtx\n")
+            stream.write("@tx|5|0|torn|tenant,delta~n999,999|@endtx\n")
 
         with Server(binary, temp_dir):
-            expect(request("GET", "/v1/balance", tenant=101, token="ledger-101-token"), 200, balance=65, version=3)
-            expect(request("GET", "/v1/balance", tenant=202, token="ledger-202-token"), 200, balance=125, version=3)
-            expect(request("POST", "/v1/debit", "5", 101, "ledger-101-token"), 200, balance=60, version=4)
-
-        with Server(binary, temp_dir):
-            expect(request("GET", "/v1/balance", tenant=101, token="ledger-101-token"), 200, balance=60, version=4)
+            expect(request("GET", "/v1/balance", tenant=101, token="ledger-101-token"), 200, balance=50, version=4)
             expect(request("GET", "/v1/balance", tenant=202, token="ledger-202-token"), 200, balance=125, version=4)
+            expect(request("POST", "/v1/debit", "5", 101, "ledger-101-token"), 200, balance=45, version=5)
+
+        with Server(binary, temp_dir):
+            expect(request("GET", "/v1/balance", tenant=101, token="ledger-101-token"), 200, balance=45, version=5)
+            expect(request("GET", "/v1/balance", tenant=202, token="ledger-202-token"), 200, balance=125, version=5)
 
     print("PASS: independent HTTP, tenant isolation, malformed input, WAL restart and torn-frame recovery")
 

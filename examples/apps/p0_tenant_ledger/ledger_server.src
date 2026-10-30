@@ -25,7 +25,15 @@ fn ledger_header_count_from(headers, key, start) = let found = net_find_sub(head
 
 fn ledger_header_count(headers, key) = ledger_header_count_from(headers, key, 0)
 
-fn ledger_valid_framing(raw, req) = let sep = net_find_sub(raw, "\r\n\r\n", 0, count(raw)) in if sep < 0 or req.ok == 0 or count(req.host) == 0 or count(raw) > 4096 or count(req.body) > 1024 then 0 else let headers = slice(raw, 0, sep + 2) in let length_text = http_extract_header(headers, "Content-Length: ") in let length_count = ledger_header_count(headers, "Content-Length: ") in if net_find_sub(headers, "Transfer-Encoding:", 0, count(headers)) >= 0 then 0 else if length_count > 1 or (length_count == 1 and length_text == "") then 0 else if length_count == 1 and (net_is_digits(length_text) == 0 or count(length_text) > 4 or toint(length_text) > 1024) then 0 else 1
+fn ledger_declared_length(headers) = let length_text = http_extract_header(headers, "Content-Length: ") in let length_count = ledger_header_count(headers, "Content-Length: ") in if length_count == 0 then 0 else if length_count != 1 or length_text == "" or net_is_digits(length_text) == 0 or count(length_text) > 4 then 0 - 1 else let declared = toint(length_text) in if declared > 1024 then 0 - 1 else declared
+
+fn ledger_read_headers(client, raw) = if count(raw) > 4096 then raw else if net_find_sub(raw, "\r\n\r\n", 0, count(raw)) >= 0 then raw else let chunk = net_recv_str(client, 4096) in if count(chunk) == 0 then raw else ledger_read_headers(client, raw + chunk)
+
+fn ledger_read_body(client, raw) = let sep = net_find_sub(raw, "\r\n\r\n", 0, count(raw)) in if sep < 0 or count(raw) > 4096 then raw else let headers = slice(raw, 0, sep + 2) in let declared = ledger_declared_length(headers) in let body = slice(raw, sep + 4, count(raw)) in if declared < 0 or net_find_sub(headers, "Transfer-Encoding:", 0, count(headers)) >= 0 or count(body) >= declared then raw else let chunk = net_recv_str(client, 4096) in if count(chunk) == 0 then raw else ledger_read_body(client, raw + chunk)
+
+fn ledger_read_request(client) = let headers_and_body = ledger_read_headers(client, "") in ledger_read_body(client, headers_and_body)
+
+fn ledger_valid_framing(raw, req) = let sep = net_find_sub(raw, "\r\n\r\n", 0, count(raw)) in if sep < 0 or req.ok == 0 or count(req.host) == 0 or count(raw) > 4096 or count(req.body) > 1024 then 0 else let headers = slice(raw, 0, sep + 2) in if net_find_sub(headers, "Transfer-Encoding:", 0, count(headers)) >= 0 or ledger_declared_length(headers) < 0 then 0 else 1
 
 fn ledger_token_tenant(authorization) = if authorization == "Bearer ledger-101-token" then 101 else if authorization == "Bearer ledger-202-token" then 202 else 0
 
@@ -45,7 +53,7 @@ fn ledger_route(raw, req) = if req.path == "/health" then (if req.method == "GET
 
 fn ledger_handle(raw) = let req = http_parse_request(raw) in if ledger_valid_framing(raw, req) == 0 then ledger_error(400, "Bad Request", "invalid_http_framing") else ledger_route(raw, req)
 
-fn ledger_accept_loop(listener) = let client = net_tcp_accept(listener) in if client < 0 then 1 else let raw = net_recv_str(client, 4096) in let response = ledger_handle(raw) in let sent = net_send_str(client, response) in let closed = net_close(client) in ledger_accept_loop(listener)
+fn ledger_accept_loop(listener) = let client = net_tcp_accept(listener) in if client < 0 then 1 else let raw = ledger_read_request(client) in let response = ledger_handle(raw) in let sent = net_send_str(client, response) in let closed = net_close(client) in ledger_accept_loop(listener)
 
 fn ledger_main() = let store = ledger_open_store() in if store.ok == 0 then 2 else let listener = net_tcp_listen(18737) in if listener < 0 then 3 else ledger_accept_loop(listener)
 
