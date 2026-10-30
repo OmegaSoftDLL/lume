@@ -38,6 +38,16 @@ jobs:
       - name: Run real compilation, proof, native execution, and negative gates
         run: sh scripts/check-economic-benchmark.sh
 
+  verified-registry:
+    name: Verified component registry and adversarial evidence (#337)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build seed
+        run: make -C bootstrap/lume0
+      - name: Verify real publication, resolution, discovery, and adversarial rejection
+        run: sh scripts/check-verified-registry.sh
+
   docs:
     name: Documentation & examples
     runs-on: ubuntu-latest

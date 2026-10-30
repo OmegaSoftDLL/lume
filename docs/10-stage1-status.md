@@ -88,4 +88,10 @@ Each of these is a real body of work. The staged, test-first approach here delib
       when the input length is already known (PR #112). This removes that repeated scan from the
       assembler hot path; it does not make arbitrary substring copying constant-time.
 
+- [x] **Verified registry P0 increment (#337).** `lregistry.src` and `lume registry` publish and
+      resolve real adapter/source/proof/test artifacts only after fresh independent proof and native
+      test verification. Capability and contract-signature discovery is AST-derived; stale evidence,
+      tampering, malicious CID recomputation, and target/toolchain incompatibility are rejected.
+      Execution coverage is currently limited to `x86_64-linux-elf` (see `docs/36`).
+
 This file is updated as the inventory grows.
