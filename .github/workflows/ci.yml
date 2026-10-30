@@ -43,12 +43,21 @@ jobs:
   economic-benchmark:
     name: Economic benchmark real-execution protocol (#337)
     runs-on: ubuntu-latest
+    env:
+      ECONOMIC_DEBUG_DIR: ${{ runner.temp }}/economic-debug
     steps:
       - uses: actions/checkout@v7
       - name: Build seed
         run: make -C bootstrap/lume0
       - name: Run real compilation, proof, native execution, and negative gates
         run: sh scripts/check-economic-benchmark.sh
+      - name: Preserve report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: economic-report-${{ github.run_id }}
+          path: ${{ runner.temp }}/economic-debug
+          retention-days: 3
 
   verified-registry:
     name: Verified component registry and adversarial evidence (#337)
