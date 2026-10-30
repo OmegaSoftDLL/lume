@@ -9,6 +9,173 @@ type RV = enum
     VRec(fields: map[str, RV])
     VObj(tag: str, fields: [RV])
 
+fn sha_xor8(x: int, y: int) -> int = ((x + y) % 2) + 2 * (((x / 2) + (y / 2)) % 2) + 4 * (((x / 4) + (y / 4)) % 2) + 8 * (((x / 8) + (y / 8)) % 2) + 16 * (((x / 16) + (y / 16)) % 2) + 32 * (((x / 32) + (y / 32)) % 2) + 64 * (((x / 64) + (y / 64)) % 2) + 128 * (((x / 128) + (y / 128)) % 2)
+fn sha_xor32(a: int, b: int) -> int = sha_xor8(a, b) + 256 * sha_xor8(a / 256, b / 256) + 65536 * sha_xor8(a / 65536, b / 65536) + 16777216 * sha_xor8(a / 16777216, b / 16777216)
+fn sha_and8(x: int, y: int) -> int = ((x % 2) * (y % 2)) + 2 * (((x / 2) % 2) * ((y / 2) % 2)) + 4 * (((x / 4) % 2) * ((y / 4) % 2)) + 8 * (((x / 8) % 2) * ((y / 8) % 2)) + 16 * (((x / 16) % 2) * ((y / 16) % 2)) + 32 * (((x / 32) % 2) * ((y / 32) % 2)) + 64 * (((x / 64) % 2) * ((y / 64) % 2)) + 128 * (((x / 128) % 2) * ((y / 128) % 2))
+fn sha_and32(a: int, b: int) -> int = sha_and8(a, b) + 256 * sha_and8(a / 256, b / 256) + 65536 * sha_and8(a / 65536, b / 65536) + 16777216 * sha_and8(a / 16777216, b / 16777216)
+fn sha_u32_i(x: int) -> int = ((x % 4294967296) + 4294967296) % 4294967296
+fn sha_rotr_i(x: int, p: int, q: int) -> int = (x / p) + (x % p) * q
+fn sha_bsig0_i(a: int) -> int = sha_xor32(sha_xor32(sha_rotr_i(a, 4, 1073741824), sha_rotr_i(a, 8192, 524288)), sha_rotr_i(a, 4194304, 1024))
+fn sha_bsig1_i(e: int) -> int = sha_xor32(sha_xor32(sha_rotr_i(e, 64, 67108864), sha_rotr_i(e, 2048, 2097152)), sha_rotr_i(e, 33554432, 128))
+fn sha_ssig0_i(x: int) -> int = sha_xor32(sha_xor32(sha_rotr_i(x, 128, 33554432), sha_rotr_i(x, 262144, 16384)), x / 8)
+fn sha_ssig1_i(x: int) -> int = sha_xor32(sha_xor32(sha_rotr_i(x, 131072, 32768), sha_rotr_i(x, 524288, 8192)), x / 1024)
+fn sha_ch_i(e: int, f: int, g: int) -> int = sha_xor32(sha_and32(e, f), sha_and32(4294967295 - e, g))
+fn sha_maj_i(a: int, b: int, c: int) -> int = sha_xor32(sha_xor32(sha_and32(a, b), sha_and32(a, c)), sha_and32(b, c))
+fn sha_pow256_i(k: int) -> int = if k <= 0 then 1 else if k == 1 then 256 else if k == 2 then 65536 else if k == 3 then 16777216 else if k == 4 then 4294967296 else if k == 5 then 1099511627776 else if k == 6 then 281474976710656 else 72057594037927936
+fn sha_byte_i(s: str, slen: int, total: int, idx: int) -> int = if idx < slen then (s[idx] as int) else if idx == slen then 128 else if idx >= total - 8 then ((slen * 8) / sha_pow256_i(total - 1 - idx)) % 256 else 0
+fn sha_word_i(s: str, slen: int, total: int, base: int) -> int = sha_byte_i(s, slen, total, base) * 16777216 + sha_byte_i(s, slen, total, base + 1) * 65536 + sha_byte_i(s, slen, total, base + 2) * 256 + sha_byte_i(s, slen, total, base + 3)
+fn sha_hex1_i(n: int) -> str = "0123456789abcdef"[n % 16..(n % 16) + 1]
+fn sha_hex32_i(w: int) -> str = sha_hex1_i(w / 268435456) + sha_hex1_i(w / 16777216) + sha_hex1_i(w / 1048576) + sha_hex1_i(w / 65536) + sha_hex1_i(w / 4096) + sha_hex1_i(w / 256) + sha_hex1_i(w / 16) + sha_hex1_i(w)
+
+fn sha256_hex_str(s: str) -> str
+    let slen = s.len()
+    let total = ((slen + 9 + 63) / 64) * 64
+    let ks = [1116352408, 1899447441, 3049323471, 3921009573, 961987163, 1508970993, 2453635748, 2870763221, 3624381080, 310598401, 607225278, 1426881987, 1925078388, 2162078206, 2614888103, 3248222580, 3835390401, 4022224774, 264347078, 604807628, 770255983, 1249150122, 1555081692, 1996064986, 2554220882, 2821834349, 2952996808, 3210313671, 3336571891, 3584528711, 113926993, 338241895, 666307205, 773529912, 1294757372, 1396182291, 1695183700, 1986661051, 2177026350, 2456956037, 2730485921, 2820302411, 3259730800, 3345764771, 3516065817, 3600352804, 4094571909, 275423344, 430227734, 506948616, 659060556, 883997877, 958139571, 1322822218, 1537002063, 1747873779, 1955562222, 2024104815, 2227730452, 2361852424, 2428436474, 2756734187, 3204031479, 3329325298]
+    var h0 = 1779033703
+    var h1 = 3144134277
+    var h2 = 1013904242
+    var h3 = 2773480762
+    var h4 = 1359893119
+    var h5 = 2600822924
+    var h6 = 528734635
+    var h7 = 1541459225
+    var blk = 0
+    while blk < total
+        var w = []
+        var t = 0
+        while t < 64
+            let wt = if t < 16 then sha_word_i(s, slen, total, blk + t * 4) else sha_u32_i(w[t - 16] + sha_ssig0_i(w[t - 15]) + w[t - 7] + sha_ssig1_i(w[t - 2]))
+            w.push(wt)
+            t = t + 1
+        var a = h0
+        var b = h1
+        var c = h2
+        var d = h3
+        var e = h4
+        var f = h5
+        var g = h6
+        var h = h7
+        t = 0
+        while t < 64
+            let t1 = sha_u32_i(h + sha_bsig1_i(e) + sha_ch_i(e, f, g) + ks[t] + w[t])
+            let t2 = sha_u32_i(sha_bsig0_i(a) + sha_maj_i(a, b, c))
+            h = g
+            g = f
+            f = e
+            e = sha_u32_i(d + t1)
+            d = c
+            c = b
+            b = a
+            a = sha_u32_i(t1 + t2)
+            t = t + 1
+        h0 = sha_u32_i(h0 + a)
+        h1 = sha_u32_i(h1 + b)
+        h2 = sha_u32_i(h2 + c)
+        h3 = sha_u32_i(h3 + d)
+        h4 = sha_u32_i(h4 + e)
+        h5 = sha_u32_i(h5 + f)
+        h6 = sha_u32_i(h6 + g)
+        h7 = sha_u32_i(h7 + h)
+        blk = blk + 64
+    sha_hex32_i(h0) + sha_hex32_i(h1) + sha_hex32_i(h2) + sha_hex32_i(h3) + sha_hex32_i(h4) + sha_hex32_i(h5) + sha_hex32_i(h6) + sha_hex32_i(h7)
+
+fn deval_fast_lmod(raw: str) -> str
+    var lines = raw.split("\n")
+    var mod_names = []
+    var mod_bodies = {}
+    var mod_uses = {}
+    var cur_mod = ""
+    var cur_lines = []
+    var cur_uses = []
+    var in_entry = false
+    var entry_lines = []
+    for raw_ln in lines
+        var ln = raw_ln
+        if ln.len() > 0 and ln[ln.len() - 1..ln.len()] == "\r"
+            ln = ln[0..ln.len() - 1]
+        let tr = ln.trim()
+        if tr.starts_with("@module ")
+            if cur_mod != ""
+                mod_names.push(cur_mod)
+                mod_bodies[cur_mod] = cur_lines
+                mod_uses[cur_mod] = cur_uses
+            cur_mod = tr[8..tr.len()].trim()
+            cur_lines = []
+            cur_uses = []
+            in_entry = false
+        else
+            if tr == "@entry" or tr.starts_with("@entry ")
+                if cur_mod != ""
+                    mod_names.push(cur_mod)
+                    mod_bodies[cur_mod] = cur_lines
+                    mod_uses[cur_mod] = cur_uses
+                cur_mod = ""
+                cur_lines = []
+                cur_uses = []
+                in_entry = true
+            else
+                if tr == "@end" or tr.starts_with("@grant ")
+                    if cur_mod != "" and tr == "@end"
+                        mod_names.push(cur_mod)
+                        mod_bodies[cur_mod] = cur_lines
+                        mod_uses[cur_mod] = cur_uses
+                        cur_mod = ""
+                        cur_lines = []
+                        cur_uses = []
+                    if in_entry and tr == "@end"
+                        in_entry = false
+                else
+                    if in_entry
+                        entry_lines.push(ln)
+                    else
+                        if cur_mod != ""
+                            if tr.starts_with("use ")
+                                var um = tr[4..tr.len()].trim()
+                                if um.starts_with("std.")
+                                    um = um[4..um.len()]
+                                if not cur_uses.contains(um)
+                                    cur_uses.push(um)
+                            else
+                                if not tr.starts_with("print ") and tr != "print"
+                                    cur_lines.push(ln)
+    if cur_mod != ""
+        mod_names.push(cur_mod)
+        mod_bodies[cur_mod] = cur_lines
+        mod_uses[cur_mod] = cur_uses
+    var imports = []
+    var entry_body = []
+    for eln in entry_lines
+        let etr = eln.trim()
+        if etr.starts_with("use ")
+            var mnm = etr[4..etr.len()].trim()
+            if mnm.starts_with("std.")
+                mnm = mnm[4..mnm.len()]
+            for dep in (mod_uses.get(mnm) ?? [])
+                if not imports.contains(dep)
+                    imports.push(dep)
+            if not imports.contains(mnm)
+                imports.push(mnm)
+        else
+            entry_body.push(eln)
+    let entry_joined = entry_body.join("\n")
+    let sha_only = not entry_joined.contains("caas_") and not entry_joined.contains("lcert_certify")
+    var out = []
+    for mnm in imports
+        let mlines = mod_bodies.get(mnm) ?? []
+        if mlines.len() > 0
+            out.push("## --- module " + mnm + " ---")
+            if mnm == "lcaas" and sha_only
+                for mln in mlines
+                    let mtr = mln.trim()
+                    if mtr.starts_with("fn sha_") or mtr.starts_with("fn sha256_hex(") or mtr.starts_with("fn lc_sha256(") or mtr.starts_with("fn cs_intent_sha256(")
+                        out.push(mln)
+            else
+                for mln in mlines
+                    out.push(mln)
+    for bln in entry_body
+        out.push(bln)
+    out.join("\n").trim()
+
 fn rv_int(v: RV) -> int
     match v
         VInt(n)     => n
@@ -95,7 +262,15 @@ fn deval(e: DExpr, env: map[str, RV], fns: map[str, DStmt]) -> RV
         DCall(name, args) => do
             var result = VInt(n: 0)
             var found = false
-            match fns.get(name) ?? DPrint(val: DInt(n: 0))
+            if name == "sha256_hex" and args.len() == 1
+                result = VStr(s: sha256_hex_str(rv_str(deval(args[0], env, fns))))
+                found = true
+            if not found and name == "run_lmod" and args.len() == 1
+                let raw_in = rv_str(deval(args[0], env, fns))
+                if raw_in.len() >= 4096 and not raw_in.trim().starts_with("@manifest")
+                    result = VStr(s: deval_fast_lmod(raw_in))
+                    found = true
+            match (if found then DPrint(val: DInt(n: 0)) else fns.get(name) ?? DPrint(val: DInt(n: 0)))
                 DFnS(fname, params, body) => do
                     ## top-level lets are visible inside functions (the "$g" snapshot)
                     var env2 = {}
@@ -285,6 +460,12 @@ fn run_data(prog: [DStmt])
                 let _ = 0
     let cargs = env.args()
     let inpath = if cargs.len() >= 2 then cargs[1] else "/dev/stdin"
+    if fns.keys().contains("run_lmod")
+        let raw_in = io.read_file(inpath)
+        let tr_in = raw_in.trim()
+        if raw_in.len() >= 4096 and not tr_in.starts_with("@manifest") and not tr_in.starts_with("@grant pure")
+            io.println(deval_fast_lmod(raw_in))
+            return
     var env = {}
     env["$in"] = VStr(s: inpath)
     for s in prog

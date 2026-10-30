@@ -1672,6 +1672,19 @@ EOF
     awk '/^synth_abs:/{p=1} p{print} p&&/^    ret$/{exit}' "$ntmp/ti_ok.s" >"$ntmp/ti_fn5.s"
     cp ../../examples/intent/verified_specs.intent "$ntmp/spec.intent"
     LUME_BIN_DIR="$ntmp" ../../lume intent build --json "$ntmp/spec.intent" -o "$ntmp/spec.elf" >"$ntmp/ti_b1.json" 2>/dev/null || true
+    if LUME_BIN_DIR="$ntmp" ../../lume run ../../compiler/stage1/intent_hash_ok.src >"$ntmp/ti_hash.out" 2>"$ntmp/ti_hash.err" && diff -u ../../tests/conformance/stage1/intent_hash_ok_asm.expected "$ntmp/ti_hash.out" >/dev/null; then ok "Track I (#259): intent content identities pass official FIPS 180-4 SHA-256 vectors"; else bad "Track I (#259): official intent SHA-256 vectors"; cat "$ntmp/ti_hash.err" "$ntmp/ti_hash.out"; fi
+    if python3 - "$ntmp/spec.intent" "$ntmp/ti_b1.json" <<'PY' >/dev/null 2>&1
+import hashlib, json, pathlib, sys
+raw = pathlib.Path(sys.argv[1]).read_bytes().rstrip(b"\r\n ")
+result = json.loads(pathlib.Path(sys.argv[2]).read_text())
+expected_intent = "sha256:" + hashlib.sha256(raw).hexdigest()
+body = "\n".join(line for line in result["cached_source"].splitlines() if not line.startswith("## @")).rstrip("\r\n ")
+expected_code = "sha256:" + hashlib.sha256(body.encode()).hexdigest()
+assert result["intent_sha256"] == expected_intent
+assert result["code_sha256"] == expected_code
+assert result["certificate"]["source_hash"] == expected_code
+PY
+    then ok "Track I (#259): real CLI intent/code hashes agree with independent hashlib computation"; else bad "Track I (#259): independent hashlib intent/code identity verification"; cat "$ntmp/ti_b1.json"; fi
     LUME_BIN_DIR="$ntmp" ../../lume intent build --json "$ntmp/spec.intent" >"$ntmp/ti_b2.json" 2>/dev/null || true
     LUME_BIN_DIR="$ntmp" ../../lume intent verify --json "$ntmp/spec.intent" >"$ntmp/ti_v1.json" 2>/dev/null || true
     sed 's/print bbox_area(5, 6)/print bbox_area(6, 7)/' "$ntmp/spec.intent" >"$ntmp/spec_mod.intent"
@@ -1796,6 +1809,10 @@ EOF
     rm -f "$_tl_x_tmp"
     if printf '%s' "$_tl_x_out" | grep -q '"ok":true' && printf '%s' "$_tl_x_out" | grep -q '"name":"relu","kind":"contract","status":"proven"' && printf '%s' "$_tl_x_out" | grep -q '"name":"abs","kind":"contract","status":"proven"' && printf '%s' "$_tl_x_out" | grep -q '"name":"clamp","kind":"contract","status":"proven"' && printf '%s' "$_tl_x_out" | grep -q '"result":"67\\n51\\n4\\n1\\n3"'; then ok "track-L cross-platform (#257): non-polynomial symbolic autodiff (relu, sq, cube, abs, clamp, leaky_relu, quot, value_and_grad) + QF_LIA contract proof"; else bad "track-L cross-platform (#257): symbolic autodiff & QF_LIA proof"; printf '%s\n' "$_tl_x_out"; fi
 
+    _ti_x_hash_err=$(mktemp)
+    if ../../lume run ../../compiler/stage1/intent_hash_ok.src >"$_ti_x_hash_err.out" 2>"$_ti_x_hash_err" && diff -u ../../tests/conformance/stage1/intent_hash_ok_asm.expected "$_ti_x_hash_err.out" >/dev/null; then ok "Track I cross-platform (#259): interpreted intent identities pass official FIPS 180-4 vectors"; else bad "Track I cross-platform (#259): interpreted intent SHA-256 vectors"; cat "$_ti_x_hash_err" "$_ti_x_hash_err.out"; fi
+    rm -f "$_ti_x_hash_err" "$_ti_x_hash_err.out"
+
     _ti_x_d=$(mktemp -d)
     cat > "$_ti_x_d/spec.intent" <<'EOF'
 @intent CrossPlatformTreasury
@@ -1811,12 +1828,13 @@ pub fn sq_dist(target: int, actual: int) -> int
 print safe_withdraw(100, 35)
 print sq_dist(10, 4)
 EOF
-    _ti_x_b1=$(../../lume intent build --json "$_ti_x_d/spec.intent" 2>/dev/null || true)
+    _ti_x_b1=$(../../lume intent build --json "$_ti_x_d/spec.intent" 2>"$_ti_x_d/build.err" || true)
     printf '\nprint 999\n' >>"$_ti_x_d/spec.intent.cache.src"
     _ti_x_t_rc=0
     _ti_x_vt=$(../../lume intent verify --json "$_ti_x_d/spec.intent" 2>/dev/null) || _ti_x_t_rc=$?
+    _ti_x_build_err=$(cat "$_ti_x_d/build.err")
     rm -rf "$_ti_x_d"
-    if printf '%s' "$_ti_x_b1" | grep -q '"ok":true' && printf '%s' "$_ti_x_b1" | grep -q '"cache_status":"regenerated_cache_missing"' && printf '%s' "$_ti_x_b1" | grep -q '"theory":"QF_NIA"' && printf '%s' "$_ti_x_b1" | grep -q '"result":"65\\n36"' && [ "$_ti_x_t_rc" -ne 0 ] && printf '%s' "$_ti_x_vt" | grep -q '"cache_tampered":true' && printf '%s' "$_ti_x_vt" | grep -q '"code":"V0005"'; then ok "Track I cross-platform (#259, docs/19 §1): .intent QF_LIA/QF_NIA synthesis, SHA-256 proven cache & V0005 tamper detection"; else bad "Track I cross-platform (#259, docs/19 §1)"; printf '%s\n' "$_ti_x_b1" "t_rc=$_ti_x_t_rc" "$_ti_x_vt"; fi
+    if printf '%s' "$_ti_x_b1" | grep -q '"ok":true' && printf '%s' "$_ti_x_b1" | grep -q '"cache_status":"regenerated_cache_missing"' && printf '%s' "$_ti_x_b1" | grep -q '"theory":"QF_NIA"' && printf '%s' "$_ti_x_b1" | grep -q '"result":"65\\n36"' && [ "$_ti_x_t_rc" -ne 0 ] && printf '%s' "$_ti_x_vt" | grep -q '"cache_tampered":true' && printf '%s' "$_ti_x_vt" | grep -q '"code":"V0005"'; then ok "Track I cross-platform (#259, docs/19 §1): .intent QF_LIA/QF_NIA synthesis, SHA-256 proven cache & V0005 tamper detection"; else bad "Track I cross-platform (#259, docs/19 §1)"; printf '%s\n' "$_ti_x_build_err" "$_ti_x_b1" "t_rc=$_ti_x_t_rc" "$_ti_x_vt"; fi
 
     if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
         _mac_d=$(mktemp -d)
