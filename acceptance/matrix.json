@@ -1,0 +1,356 @@
+{
+  "schema": "lume-acceptance-matrix/0.1",
+  "repository": "OmegaSoftDLL/lume",
+  "scope": {
+    "track": "L",
+    "issue": 257,
+    "source": "docs/33-build-anything-plan.md",
+    "boundary": "Track L claims only. A PASS applies to the exact scoped behavior and cited command; it does not accept the umbrella issue or imply production readiness, independent verification, or coverage of another claim."
+  },
+  "claims": [
+    {
+      "id": "L.ASYNC.EPOLL_READINESS",
+      "claim": "Linux epoll readiness and pipe wakeup exchange values through the native runtime.",
+      "implementation_state": "partial",
+      "result": "PASS",
+      "issues": [{"number": 257, "expected_state": "OPEN"}],
+      "pull_requests": [{"number": 318, "expected_state": "MERGED"}],
+      "source": ["compiler/stage1/async_rt.src", "compiler/stage1/track_l_domains_ok.src"],
+      "evidence": [{
+        "id": "track-l-async-native",
+        "command": "make -C bootstrap/lume0 test",
+        "artifacts": ["bootstrap/lume0/tests/run.sh", "compiler/stage1/track_l_domains_ok.src", "tests/conformance/stage1/track_l_domains_ok_asm.expected"],
+        "expected": "The native conformance output contains the pinned epoll pipe values and the async_rt unit tests pass."
+      }],
+      "notes": "This is a Linux readiness increment, not a claim of multi-worker execution."
+    },
+    {
+      "id": "L.ASYNC.MULTIWORKER_EXECUTION",
+      "claim": "Multiple actual workers execute async work concurrently with work stealing.",
+      "implementation_state": "partial",
+      "result": "UNKNOWN",
+      "issues": [{"number": 257, "expected_state": "OPEN"}],
+      "pull_requests": [{"number": 318, "expected_state": "MERGED"}],
+      "source": ["compiler/stage1/async_rt.src"],
+      "evidence": [],
+      "notes": "The existing scheduler processes list state sequentially. No runnable evidence demonstrates actual concurrent workers."
+    },
+    {
+      "id": "L.ASYNC.TIMERS_BACKPRESSURE",
+      "claim": "The in-language reactor model orders timer deadlines and rejects work beyond its bounded in-flight limit.",
+      "implementation_state": "model",
+      "result": "PASS",
+      "issues": [{"number": 257, "expected_state": "OPEN"}],
+      "pull_requests": [{"number": 318, "expected_state": "MERGED"}],
+      "source": ["compiler/stage1/async_rt.src", "compiler/stage1/track_l_domains_ok.src"],
+      "evidence": [{
+        "id": "track-l-async-native",
+        "command": "make -C bootstrap/lume0 test",
+        "artifacts": ["bootstrap/lume0/tests/run.sh", "compiler/stage1/track_l_domains_ok.src", "tests/conformance/stage1/track_l_domains_ok_asm.expected"],
+        "expected": "The pinned timer result and rejected submission count match, and async_rt unit tests pass."
+      }],
+      "notes": "PASS covers the tested reactor model only."
+    },
+    {
+      "id": "L.DB.BTREE_RECURSIVE_SPLIT",
+      "claim": "B+Tree insertion recursively splits full internal nodes and propagates separators through arbitrary tree heights.",
+      "implementation_state": "partial",
+      "result": "UNKNOWN",
+      "issues": [{"number": 257, "expected_state": "OPEN"}],
+      "pull_requests": [{"number": 318, "expected_state": "MERGED"}],
+      "source": ["compiler/stage1/db.src"],
+      "evidence": [],
+      "notes": "The current two-child node split does not establish recursive internal-node splitting. Existing shallow tests are insufficient."
+    },
+    {
+      "id": "L.DB.BTREE_SHALLOW_MODEL",
+      "claim": "The in-memory two-child index model inserts ordered rows, performs a shallow split, and returns range-scan results.",
+      "implementation_state": "model",
+      "result": "PASS",
+      "issues": [{"number": 257, "expected_state": "OPEN"}],
+      "pull_requests": [{"number": 318, "expected_state": "MERGED"}],
+      "source": ["compiler/stage1/db.src", "compiler/stage1/track_l_domains_ok.src"],
+      "evidence": [{
+        "id": "track-l-db-native",
+        "command": "make -C bootstrap/lume0 test",
+        "artifacts": ["bootstrap/lume0/tests/run.sh", "compiler/stage1/db.src", "compiler/stage1/track_l_domains_ok.src", "tests/conformance/stage1/track_l_domains_ok_asm.expected"],
+        "expected": "The db unit tests and pinned height, point-read, and range-sum observations pass."
+      }],
+      "notes": "This scoped model PASS does not establish recursive splits, durable pages, or a complete B+Tree."
+    },
+    {
+      "id": "L.DB.DURABLE_ACID_RECOVERY",
+      "claim": "Transactions provide durable ACID behavior with a persistent WAL and correct recovery after process crashes.",
+      "implementation_state": "partial",
+      "result": "UNKNOWN",
+      "issues": [{"number": 257, "expected_state": "OPEN"}],
+      "pull_requests": [{"number": 318, "expected_state": "MERGED"}],
+      "source": ["compiler/stage1/db.src"],
+      "evidence": [],
+      "notes": "In-memory transaction state and WAL string serialization are not durable storage or crash-recovery evidence."
+    },
+    {
+      "id": "L.DB.INMEMORY_MVCC",
+      "claim": "The in-memory database model preserves snapshot reads and rolls back uncommitted changes.",
+      "implementation_state": "model",
+      "result": "PASS",
+      "issues": [{"number": 257, "expected_state": "OPEN"}],
+      "pull_requests": [{"number": 318, "expected_state": "MERGED"}],
+      "source": ["compiler/stage1/db.src", "compiler/stage1/track_l_domains_ok.src"],
+      "evidence": [{
+        "id": "track-l-db-native",
+        "command": "make -C bootstrap/lume0 test",
+        "artifacts": ["bootstrap/lume0/tests/run.sh", "compiler/stage1/db.src", "compiler/stage1/track_l_domains_ok.src", "tests/conformance/stage1/track_l_domains_ok_asm.expected"],
+        "expected": "The pinned snapshot, committed value, and rollback observations match, and db unit tests pass."
+      }],
+      "notes": "PASS is limited to in-memory snapshot and rollback behavior; it is not durable ACID acceptance."
+    },
+    {
+      "id": "L.DB.QUERY_PLANNER",
+      "claim": "The cost-based query planner selects the pinned point-seek and range-scan plans for the tested statistics.",
+      "implementation_state": "partial",
+      "result": "PASS",
+      "issues": [{"number": 257, "expected_state": "OPEN"}],
+      "pull_requests": [{"number": 318, "expected_state": "MERGED"}],
+      "source": ["compiler/stage1/db.src", "compiler/stage1/track_l_domains_ok.src"],
+      "evidence": [{
+        "id": "track-l-db-native",
+        "command": "make -C bootstrap/lume0 test",
+        "artifacts": ["bootstrap/lume0/tests/run.sh", "compiler/stage1/track_l_domains_ok.src", "tests/conformance/stage1/track_l_domains_ok_asm.expected"],
+        "expected": "The native output selects IndexPointSeek and IndexRangeScan for the tested queries."
+      }],
+      "notes": "PASS covers only the tested plan choices."
+    },
+    {
+      "id": "L.GUI.NATIVE_WINDOWING",
+      "claim": "Applications create native OS windows and deliver real window events to Lume code.",
+      "implementation_state": "planned",
+      "result": "UNKNOWN",
+      "issues": [{"number": 257, "expected_state": "OPEN"}],
+      "pull_requests": [{"number": 318, "expected_state": "MERGED"}],
+      "source": ["compiler/stage1/gui.src"],
+      "evidence": [],
+      "notes": "Software framebuffers and SVG/PPM encoders do not create native windows. No runnable native-window evidence exists."
+    },
+    {
+      "id": "L.GUI.SOFTWARE_RENDERING",
+      "claim": "The software GUI model rasterizes RGBA canvases, blends pixels, solves tested layouts, dispatches hit-tested clicks, and encodes PPM/SVG frames.",
+      "implementation_state": "partial",
+      "result": "PASS",
+      "issues": [{"number": 257, "expected_state": "OPEN"}],
+      "pull_requests": [{"number": 318, "expected_state": "MERGED"}],
+      "source": ["compiler/stage1/gui.src", "compiler/stage1/track_l_domains_ok.src"],
+      "evidence": [{
+        "id": "track-l-gui-native",
+        "command": "make -C bootstrap/lume0 test",
+        "artifacts": ["bootstrap/lume0/tests/run.sh", "compiler/stage1/gui.src", "compiler/stage1/track_l_domains_ok.src", "tests/conformance/stage1/track_l_domains_ok_asm.expected"],
+        "expected": "The gui unit tests and pinned pixel, blend, click, and serialization observations pass."
+      }],
+      "notes": "PASS does not include native window creation or OS event integration."
+    },
+    {
+      "id": "L.MEDIA.RLE_GOP",
+      "claim": "The custom media codec round-trips the tested lossless RLE data and I/P-frame GOP residuals.",
+      "implementation_state": "partial",
+      "result": "PASS",
+      "issues": [{"number": 257, "expected_state": "OPEN"}],
+      "pull_requests": [{"number": 318, "expected_state": "MERGED"}],
+      "source": ["compiler/stage1/media.src", "compiler/stage1/track_l_domains_ok.src"],
+      "evidence": [{
+        "id": "track-l-media-native",
+        "command": "make -C bootstrap/lume0 test",
+        "artifacts": ["bootstrap/lume0/tests/run.sh", "compiler/stage1/media.src", "compiler/stage1/track_l_domains_ok.src", "tests/conformance/stage1/track_l_domains_ok_asm.expected"],
+        "expected": "The media unit tests and pinned GOP run count and decoded frame pass."
+      }],
+      "notes": "PASS is limited to Lume's custom codec and does not claim standards-based video interoperability."
+    },
+    {
+      "id": "L.MEDIA.WAV_FIR",
+      "claim": "The RIFF/WAV PCM16 codec round-trips the tested samples and the three-tap FIR filter produces the pinned output.",
+      "implementation_state": "partial",
+      "result": "PASS",
+      "issues": [{"number": 257, "expected_state": "OPEN"}],
+      "pull_requests": [{"number": 318, "expected_state": "MERGED"}],
+      "source": ["compiler/stage1/media.src", "compiler/stage1/track_l_domains_ok.src"],
+      "evidence": [{
+        "id": "track-l-media-native",
+        "command": "make -C bootstrap/lume0 test",
+        "artifacts": ["bootstrap/lume0/tests/run.sh", "compiler/stage1/media.src", "compiler/stage1/track_l_domains_ok.src", "tests/conformance/stage1/track_l_domains_ok_asm.expected"],
+        "expected": "The media unit tests and pinned WAV decode, sample-rate, and FIR observations pass."
+      }],
+      "notes": "PASS covers the tested PCM16 and FIR behavior only."
+    },
+    {
+      "id": "L.ML.HMC",
+      "claim": "Hamiltonian Monte Carlo with leapfrog integration returns the pinned posterior summary for the tested Beta-Bernoulli model.",
+      "implementation_state": "partial",
+      "result": "PASS",
+      "issues": [{"number": 257, "expected_state": "OPEN"}],
+      "pull_requests": [{"number": 318, "expected_state": "MERGED"}],
+      "source": ["compiler/stage1/ai_runtime.src", "compiler/stage1/track_l_domains_ok.src"],
+      "evidence": [{
+        "id": "track-l-ml-native",
+        "command": "make -C bootstrap/lume0 test",
+        "artifacts": ["bootstrap/lume0/tests/run.sh", "compiler/stage1/track_l_domains_ok.src", "tests/conformance/stage1/track_l_domains_ok_asm.expected"],
+        "expected": "The native HMC observation falls within the pinned tested range."
+      }],
+      "notes": "PASS covers one tested inference path, not general probabilistic-programming correctness."
+    },
+    {
+      "id": "L.ML.ONNX_BINARY",
+      "claim": "ONNX export and import produce valid binary ONNX files verified by an independent parser, including adversarial malformed inputs.",
+      "implementation_state": "partial",
+      "result": "UNKNOWN",
+      "issues": [{"number": 257, "expected_state": "OPEN"}],
+      "pull_requests": [{"number": 318, "expected_state": "MERGED"}],
+      "source": ["compiler/stage1/nn.src", "compiler/stage1/track_l_domains_ok.src"],
+      "evidence": [],
+      "notes": "Existing descriptors and self-verification do not provide independent binary ONNX parser acceptance."
+    },
+    {
+      "id": "L.ML.SAFETENSORS_BINARY",
+      "claim": "SafeTensors export and import produce valid binary SafeTensors files verified by an independent parser, including adversarial malformed inputs.",
+      "implementation_state": "partial",
+      "result": "UNKNOWN",
+      "issues": [{"number": 257, "expected_state": "OPEN"}],
+      "pull_requests": [{"number": 318, "expected_state": "MERGED"}],
+      "source": ["compiler/stage1/nn.src", "compiler/stage1/track_l_domains_ok.src"],
+      "evidence": [],
+      "notes": "Existing descriptors and substring checks do not provide independent binary SafeTensors parser acceptance."
+    },
+    {
+      "id": "L.ML.SYMBOLIC_AUTODIFF",
+      "claim": "Compiler symbolic differentiation handles the documented polynomial and relu/sq/cube/abs/clamp/leaky_relu/quotient fragment with the tested values and gradients.",
+      "implementation_state": "partial",
+      "result": "PASS",
+      "issues": [{"number": 257, "expected_state": "OPEN"}],
+      "pull_requests": [{"number": 318, "expected_state": "MERGED"}],
+      "source": ["compiler/stage1/lume/06b_phase3.src", "compiler/stage1/lcaas.src", "compiler/stage1/track_l_domains_ok.src"],
+      "evidence": [{
+        "id": "track-l-ml-native",
+        "command": "make -C bootstrap/lume0 test",
+        "artifacts": ["bootstrap/lume0/tests/run.sh", "compiler/stage1/track_l_domains_ok.src", "tests/conformance/stage1/track_l_domains_ok_asm.expected"],
+        "expected": "The pinned values and gradients match, and the tested contracts are reported proven."
+      }],
+      "notes": "PASS is restricted to the documented fragment and test observations."
+    },
+    {
+      "id": "L.ML.WENGERT_AUTODIFF",
+      "claim": "Reverse-mode Wengert-tape differentiation produces the pinned values and gradients for the tested tanh/sigmoid/exp graph.",
+      "implementation_state": "partial",
+      "result": "PASS",
+      "issues": [{"number": 257, "expected_state": "OPEN"}],
+      "pull_requests": [{"number": 318, "expected_state": "MERGED"}],
+      "source": ["compiler/stage1/nn.src", "compiler/stage1/track_l_domains_ok.src"],
+      "evidence": [{
+        "id": "track-l-ml-native",
+        "command": "make -C bootstrap/lume0 test",
+        "artifacts": ["bootstrap/lume0/tests/run.sh", "compiler/stage1/track_l_domains_ok.src", "tests/conformance/stage1/track_l_domains_ok_asm.expected"],
+        "expected": "The native output matches the pinned tape values and both gradients."
+      }],
+      "notes": "PASS covers the tested graph, not arbitrary tensor programs."
+    },
+    {
+      "id": "L.NET.HTTP11_LOOPBACK",
+      "claim": "The HTTP/1.1 parser/serializer and native Linux loopback client/server exchange the pinned request and response.",
+      "implementation_state": "partial",
+      "result": "PASS",
+      "issues": [{"number": 257, "expected_state": "OPEN"}],
+      "pull_requests": [{"number": 318, "expected_state": "MERGED"}],
+      "source": ["compiler/stage1/net.src", "compiler/stage1/track_l_domains_ok.src"],
+      "evidence": [{
+        "id": "track-l-net-native",
+        "command": "make -C bootstrap/lume0 test",
+        "artifacts": ["bootstrap/lume0/tests/run.sh", "compiler/stage1/net.src", "compiler/stage1/track_l_domains_ok.src", "tests/conformance/stage1/track_l_domains_ok_asm.expected"],
+        "expected": "The net unit tests and pinned native HTTP status, method, path, and response body pass."
+      }],
+      "notes": "This loopback increment is not evidence of a production HTTP service or TLS interoperability."
+    },
+    {
+      "id": "L.NET.IPV4_CIDR",
+      "claim": "The native networking helpers handle the tested IPv4 and CIDR routing cases.",
+      "implementation_state": "partial",
+      "result": "PASS",
+      "issues": [{"number": 257, "expected_state": "OPEN"}],
+      "pull_requests": [{"number": 318, "expected_state": "MERGED"}],
+      "source": ["compiler/stage1/net.src"],
+      "evidence": [{
+        "id": "track-l-net-native",
+        "command": "make -C bootstrap/lume0 test",
+        "artifacts": ["bootstrap/lume0/tests/run.sh", "compiler/stage1/net.src"],
+        "expected": "The net.src unit tests, including IPv4/CIDR cases, pass in the full suite."
+      }],
+      "notes": "PASS covers existing unit cases only."
+    },
+    {
+      "id": "L.NET.TCP_CHECKSUM_COMPLETE",
+      "claim": "TCP checksum generation and verification cover the complete TCP pseudo-header, header, payload, odd-byte padding, and carry rules with independent vectors.",
+      "implementation_state": "partial",
+      "result": "UNKNOWN",
+      "issues": [{"number": 257, "expected_state": "OPEN"}],
+      "pull_requests": [{"number": 318, "expected_state": "MERGED"}],
+      "source": ["compiler/stage1/net.src"],
+      "evidence": [],
+      "notes": "The current segment-word helper is not complete TCP checksum evidence and lacks independent vectors for the full requirements."
+    },
+    {
+      "id": "L.NET.TCP_FSM_MODEL",
+      "claim": "The in-language TCP state model reaches ESTABLISHED through the tested handshake transitions.",
+      "implementation_state": "model",
+      "result": "PASS",
+      "issues": [{"number": 257, "expected_state": "OPEN"}],
+      "pull_requests": [{"number": 318, "expected_state": "MERGED"}],
+      "source": ["compiler/stage1/net.src", "compiler/stage1/track_l_domains_ok.src"],
+      "evidence": [{
+        "id": "track-l-net-native",
+        "command": "make -C bootstrap/lume0 test",
+        "artifacts": ["bootstrap/lume0/tests/run.sh", "compiler/stage1/track_l_domains_ok.src", "tests/conformance/stage1/track_l_domains_ok_asm.expected"],
+        "expected": "The pinned handshake observation reaches ESTABLISHED."
+      }],
+      "notes": "PASS is for a state model only, not complete TCP behavior."
+    },
+    {
+      "id": "L.NET.TLS13_INTEROP",
+      "claim": "TLS 1.3 clients and servers interoperate with an independent implementation using standard cryptography, certificate handling, and adversarial protocol tests.",
+      "implementation_state": "partial",
+      "result": "UNKNOWN",
+      "issues": [{"number": 257, "expected_state": "OPEN"}],
+      "pull_requests": [{"number": 318, "expected_state": "MERGED"}],
+      "source": ["compiler/stage1/net.src", "compiler/stage1/track_l_domains_ok.src"],
+      "evidence": [],
+      "notes": "Custom key-schedule and record routines tested only against Lume itself are not interoperable TLS 1.3 evidence."
+    },
+    {
+      "id": "L.NET.UDP_CHECKSUM",
+      "claim": "The tested UDP packet helper computes an RFC 1071-style checksum and rejects modified payloads and lengths.",
+      "implementation_state": "partial",
+      "result": "PASS",
+      "issues": [{"number": 257, "expected_state": "OPEN"}],
+      "pull_requests": [{"number": 318, "expected_state": "MERGED"}],
+      "source": ["compiler/stage1/net.src"],
+      "evidence": [{
+        "id": "track-l-net-native",
+        "command": "make -C bootstrap/lume0 test",
+        "artifacts": ["bootstrap/lume0/tests/run.sh", "compiler/stage1/net.src"],
+        "expected": "The net.src RFC 1071 checksum and UDP tamper-detection unit test passes."
+      }],
+      "notes": "PASS does not promote the incomplete TCP checksum or establish full UDP interoperability."
+    },
+    {
+      "id": "L.NET.UDP_LOOPBACK",
+      "claim": "Native Linux UDP loopback sends and receives the pinned datagram.",
+      "implementation_state": "partial",
+      "result": "PASS",
+      "issues": [{"number": 257, "expected_state": "OPEN"}],
+      "pull_requests": [{"number": 318, "expected_state": "MERGED"}],
+      "source": ["compiler/stage1/net.src", "compiler/stage1/track_l_domains_ok.src"],
+      "evidence": [{
+        "id": "track-l-net-native",
+        "command": "make -C bootstrap/lume0 test",
+        "artifacts": ["bootstrap/lume0/tests/run.sh", "compiler/stage1/track_l_domains_ok.src", "tests/conformance/stage1/track_l_domains_ok_asm.expected"],
+        "expected": "The native output contains the pinned UDP loopback payload."
+      }],
+      "notes": "PASS is limited to the tested Linux loopback exchange."
+    }
+  ]
+}
