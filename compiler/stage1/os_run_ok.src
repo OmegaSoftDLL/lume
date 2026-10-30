@@ -7,3 +7,7 @@ fn test_os_run_accepts_native_argument_list() = os_run(fs_read_file("os_run_prob
 fn test_os_run_capture_writes_process_streams() = let status = os_run_capture(fs_read_file("os_run_probe_path"), Nil, "os_run_capture_stdout", "os_run_capture_stderr") in status == 0 and fs_read_file("os_run_capture_stdout") == "1\n" and fs_read_file("os_run_capture_stderr") == ""
 
 fn test_os_monotonic_ns_is_nondecreasing() = let first = os_monotonic_ns() in let second = os_monotonic_ns() in first >= 0 and second >= first
+
+fn test_os_run_capture_timeout_allows_fast_process() = let status = os_run_capture_timeout(fs_read_file("os_run_probe_path"), Nil, "os_run_timeout_stdout", "os_run_timeout_stderr", 1000) in status == 0 and os_last_timed_out() == 0 and fs_read_file("os_run_timeout_stdout") == "1\n"
+
+fn test_os_run_capture_timeout_kills_slow_process() = let status = os_run_capture_timeout(fs_read_file("os_run_slow_probe_path"), Nil, "os_run_timeout_stdout", "os_run_timeout_stderr", 10) in status != 0 and os_last_timed_out() == 1
