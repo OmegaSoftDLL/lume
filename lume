@@ -2853,6 +2853,11 @@ cmd_registry() {
                 return 1
             fi
             rm -f "$_rc_input"
+            if ! grep -q '^{"schema":"lume-verified-component/0.1"' "$_rc_tmp/manifest.json"; then
+                rm -rf "$_rc_tmp"
+                registry_error publish R0003 "manifest kernel rejected the derived artifact evidence"
+                return 1
+            fi
             _rc_dest="$_rc_store/components/$REG_CID"
             if [ -e "$_rc_dest" ]; then
                 rm -rf "$_rc_tmp"
