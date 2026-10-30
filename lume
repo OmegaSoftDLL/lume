@@ -17,6 +17,7 @@
 #   lume compile [--json] [--run] <file.src>  compile-as-a-service: {ok, diagnostics, asm, stdout} (E1, AI-first)
 #   lume describe [--json]                    emit machine-readable language self-description (AI-first)
 #   lume economy --output <results.json>      run real-execution economic benchmark evidence harness
+#   lume mesh [--json] [request.mesh]         negotiate intent and run validated AST transactions (P0, partial)
 #   lume --version | --help
 set -eu
 
@@ -150,10 +151,14 @@ run_core_tool() {
         if [ "$1" = "lmod" ] || ! grep -Eq '^[ \t]*use[ \t]+' "$SRC_DIR/$1.src"; then
             run_l0 run "$SRC_DIR/compiler_in_core.lume" "$SRC_DIR/$1.src" "$2"
         else
-            _rct_bun=$(mktemp)
-            bundle_src_if_needed "$SRC_DIR/$1.src" "$_rct_bun"
+            _rct_ck=$(cksum "$SRC_DIR/$1.src" 2>/dev/null | awk '{print $1"_"$2}')
+            _rct_bun="${TMPDIR:-/tmp}/lume_bun_${1}_${_rct_ck}.src"
+            if [ ! -s "$_rct_bun" ]; then
+                _rct_tmp=$(mktemp)
+                bundle_src_if_needed "$SRC_DIR/$1.src" "$_rct_tmp"
+                mv "$_rct_tmp" "$_rct_bun"
+            fi
             run_l0 run "$SRC_DIR/compiler_in_core.lume" "$_rct_bun" "$2"
-            rm -f "$_rct_bun"
         fi
     fi
 }
@@ -2669,6 +2674,7 @@ registry_toolchain_id() {
     ensure_core_tool lcert
     ensure_core_tool ltest
     ensure_core_tool lregistry
+    ensure_core_tool lregistry_cid
     {
         printf 'cli=%s\n' "$(sha256_file "$ROOT/lume")"
         printf 'lumec=%s\n' "$(sha256_file "$LUMEC")"
@@ -2966,29 +2972,40 @@ cmd_registry() {
 }
 
 cmd_mesh() {
-    _mmode="capstone"
+    _mfile=""
     while [ $# -gt 0 ]; do
         case "$1" in
-            schema)    _mmode="schema"; shift ;;
-            negotiate) _mmode="negotiate"; shift ;;
-            transact)  _mmode="transact"; shift ;;
-            adapter)   _mmode="adapter"; shift ;;
-            evidence)  _mmode="evidence"; shift ;;
-            registry)  _mmode="registry"; shift ;;
             bench)
                 echo "lume mesh bench: removed; use 'lume economy' for real-execution evidence" >&2
                 return 64
                 ;;
-            capstone)  _mmode="capstone"; shift ;;
-            --json)    shift ;;
-            *)         shift ;;
+            --json) shift ;;
+            -*) usage ;;
+            *)
+                [ -z "$_mfile" ] || usage
+                _mfile=$1
+                shift
+                ;;
         esac
     done
-    _mtmp=$(mktemp)
-    printf '@mode %s\n' "$_mmode" > "$_mtmp"
-    _mout=$(run_core_tool lmesh "$_mtmp")
-    rm -f "$_mtmp"
-    printf '%s\n' "$_mout"
+    _min=$(mktemp)
+    if [ -n "$_mfile" ]; then
+        if [ ! -f "$_mfile" ]; then
+            rm -f "$_min"
+            echo "lume mesh: cannot read $_mfile" >&2
+            exit 66
+        fi
+        cp "$_mfile" "$_min"
+    else
+        cat > "$_min"
+    fi
+    _mjson=$(run_core_tool lmesh "$_min")
+    rm -f "$_min"
+    printf '%s\n' "$_mjson"
+    case "$_mjson" in
+        *'"ok":true'*) return 0 ;;
+        *) return 1 ;;
+    esac
 }
 
 cmd_economy() {

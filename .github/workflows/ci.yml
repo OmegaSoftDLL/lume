@@ -28,6 +28,18 @@ jobs:
       - name: Test under ASan/UBSan
         run: make -C bootstrap/lume0 asan
 
+  semantic-mesh:
+    name: Semantic intent protocol (#337)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build seed
+        run: make -C bootstrap/lume0
+      - name: Test real semantic protocol requests
+        run: LUME_MESH_ONLY=1 bootstrap/lume0/tests/run.sh
+      - name: Test semantic protocol under ASan/UBSan
+        run: LUME_MESH_ONLY=1 make -C bootstrap/lume0 asan
+
   process-runtime:
     name: Native process execution (#337)
     runs-on: ubuntu-latest
