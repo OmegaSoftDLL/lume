@@ -1075,7 +1075,7 @@ EOF
     LUME_BIN_DIR="$ntmp" ../../lume agent bind "$ntmp/p5_bad_hdr.h" >"$ntmp/p5_bad_bind.json" 2>/dev/null || true
     printf '/* no declarations */\n' >"$ntmp/p5_empty_hdr.h"
     LUME_BIN_DIR="$ntmp" ../../lume agent bind "$ntmp/p5_empty_hdr.h" >"$ntmp/p5_empty_bind.json" 2>/dev/null || true
-    LUME_BIN_DIR="$ntmp" ../../lume build ../../tests/fixtures/c_adapter/assertions.src -o "$ntmp/c_adapter_assert" >"$ntmp/p5_bind_assert.out" 2>"$ntmp/p5_bind_assert.err"
+    LUME_BIN_DIR="$ntmp" ../../lume build ../../tests/harness/c_adapter_assertions.src -o "$ntmp/c_adapter_assert" >"$ntmp/p5_bind_assert.out" 2>"$ntmp/p5_bind_assert.err"
     printf '@mode stage0\n@path %s\n@header %s\n@output %s\n@generated %s\n' "$ntmp/p5_bind.json" "$ntmp/p5_bad_bind.json" "$ntmp/p5_empty_bind.json" "$ntmp/p5_bind_generated.src" | "$ntmp/c_adapter_assert" >/dev/null 2>&1
     p5_bind_contract=$?
     LUME_BIN_DIR="$ntmp" ../../lume agent check "$ntmp/p5_bind_generated.src" >"$ntmp/p5_bind_check.json" 2>/dev/null || true

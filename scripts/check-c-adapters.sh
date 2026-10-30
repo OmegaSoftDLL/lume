@@ -21,7 +21,7 @@ if [ -z "${LUME_BIN_DIR:-}" ]; then
     export LUME_BIN_DIR
 fi
 
-"$LUME" build "$FIXTURES/assertions.src" -o "$TMP/c_adapter_assert"
+"$LUME" build "$ROOT/tests/harness/c_adapter_assertions.src" -o "$TMP/c_adapter_assert"
 "${CC:-cc}" -shared -fPIC "$FIXTURES/buffer_math.c" -o "$TMP/libc_adapter_fixture.so"
 "$LUME" adapt c --json "$FIXTURES/buffer_math.h" > "$TMP/adapter.json"
 printf '@mode manifest\n@path %s\n@header %s\n@output %s\n' "$TMP/adapter.json" "$FIXTURES/buffer_math.h" "$TMP/generated.src" | "$TMP/c_adapter_assert"
