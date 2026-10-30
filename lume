@@ -10,6 +10,7 @@
 #   lume pkg   <init|check|lock|verify|tree>  package manager: lume.toml manifest, capabilities & SHA-256 lume.lock
 #   lume agent [check|compile|ast|...] <file> in-process compiler-as-a-service JSON protocol (E1b)
 #   lume prove [--json] <file.src>            static QF_LIA contract, invariant & law verification (V2/V3)
+#   lume registry <publish|resolve|discover> verify and resolve content-addressed components
 #   lume evolve <verify|approve|goals|...>    self-evolution & governance loop (E3)
 #   lume check [--json] <file.lume|file.src>  static lexical, parse, name, type and contract checks
 #   lume compile [--json] [--run] <file.src>  compile-as-a-service: {ok, diagnostics, asm, stdout} (E1, AI-first)
@@ -2564,6 +2565,337 @@ cmd_evolve() {
     esac
 }
 
+registry_error() {
+    printf '{"ok":false,"action":"%s","error":{"code":"%s","message":"%s"}}\n' "$1" "$2" "$3"
+    return 1
+}
+
+registry_sha_text() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        printf 'sha256:'
+        sha256sum | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        printf 'sha256:'
+        shasum -a 256 | awk '{print $1}'
+    elif command -v openssl >/dev/null 2>&1; then
+        printf 'sha256:'
+        openssl dgst -sha256 | awk '{print $NF}'
+    else
+        echo "lume registry: SHA-256 requires sha256sum, shasum, or openssl" >&2
+        return 1
+    fi
+}
+
+registry_file_sha() {
+    printf 'sha256:%s' "$(sha256_file "$1")"
+}
+
+registry_valid_cid() {
+    [ "${#1}" -eq 71 ] || return 1
+    case "$1" in
+        sha256:*) ;;
+        *) return 1 ;;
+    esac
+    _rv_hex=${1#sha256:}
+    [ -z "$(printf '%s' "$_rv_hex" | tr -d '0-9a-f')" ]
+}
+
+registry_toolchain_id() {
+    ensure_native_toolchain
+    ensure_core_tool lcaas
+    ensure_core_tool lcert
+    ensure_core_tool ltest
+    ensure_core_tool lregistry
+    {
+        printf 'lumec=%s\n' "$(sha256_file "$LUMEC")"
+        printf 'lasm=%s\n' "$(sha256_file "$LASM")"
+        printf 'lcaas=%s\n' "$(sha256_file "$BIN_DIR/lcaas")"
+        printf 'lcert=%s\n' "$(sha256_file "$BIN_DIR/lcert")"
+        printf 'ltest=%s\n' "$(sha256_file "$BIN_DIR/ltest")"
+        printf 'lregistry=%s\n' "$(sha256_file "$BIN_DIR/lregistry")"
+    } | registry_sha_text
+}
+
+registry_make_component() {
+    _rmc_dir=$1
+    {
+        cat "$_rmc_dir/adapter.src"
+        printf '\n'
+        cat "$_rmc_dir/source.src"
+        printf '\n'
+    } > "$_rmc_dir/component.src"
+    {
+        cat "$_rmc_dir/component.src"
+        cat "$_rmc_dir/tests.src"
+        printf '\n'
+    } > "$_rmc_dir/test-component.src"
+}
+
+registry_derive_interface() {
+    _rdi_input=$(mktemp)
+    printf '@mode registry-interface\n' > "$_rdi_input"
+    cat "$1" >> "$_rdi_input"
+    _rdi_json=$(run_core_tool lcaas "$_rdi_input")
+    rm -f "$_rdi_input"
+    case "$_rdi_json" in
+        *'"ok":true'*) ;;
+        *) registry_error "$REG_ACTION" R0002 "parsed public interface derivation failed"; return 1 ;;
+    esac
+    REG_CAPABILITIES=$(jsonrpc_extract_str "$_rdi_json" "capabilities")
+    REG_CONTRACT_SIGNATURE=$(jsonrpc_extract_str "$_rdi_json" "contract_signature")
+    REG_PUBLIC_CONTRACTS=$(printf '%s' "$_rdi_json" | sed -n 's/.*"public_contracts":\([0-9][0-9]*\).*/\1/p')
+    registry_valid_cid "$REG_CONTRACT_SIGNATURE" || { registry_error "$REG_ACTION" R0002 "invalid derived contract signature"; return 1; }
+    case "$REG_PUBLIC_CONTRACTS" in
+        ''|*[!0-9]*) registry_error "$REG_ACTION" R0002 "invalid public contract count"; return 1 ;;
+    esac
+    [ "$REG_PUBLIC_CONTRACTS" -gt 0 ] || { registry_error "$REG_ACTION" R0002 "component needs at least one public contract"; return 1; }
+}
+
+registry_verify_proof() {
+    _rvp_dir=$1
+    if [ -f "$_rvp_dir/proof.cert.json" ]; then
+        _rvp_supplied=$(run_core_tool lcert "$_rvp_dir/proof.cert.json")
+        case "$_rvp_supplied" in
+            *'"kernel_verified":true'*'"hash_verified":true'*) ;;
+            *) registry_error "$REG_ACTION" R0002 "independent proof kernel rejected supplied certificate"; return 1 ;;
+        esac
+    fi
+    _rvp_fresh=$(mktemp)
+    if ! cmd_certify "$_rvp_dir/component.src" > "$_rvp_fresh"; then
+        rm -f "$_rvp_fresh"
+        registry_error "$REG_ACTION" R0002 "source and adapter failed proof certification"
+        return 1
+    fi
+    _rvp_kernel=$(run_core_tool lcert "$_rvp_fresh")
+    case "$_rvp_kernel" in
+        *'"kernel_verified":true'*'"hash_verified":true'*) ;;
+        *) rm -f "$_rvp_fresh"; registry_error "$REG_ACTION" R0002 "independent proof kernel rejected fresh certificate"; return 1 ;;
+    esac
+    if [ -f "$_rvp_dir/proof.cert.json" ] && ! cmp -s "$_rvp_dir/proof.cert.json" "$_rvp_fresh"; then
+        rm -f "$_rvp_fresh"
+        registry_error "$REG_ACTION" R0002 "proof certificate is stale or does not bind the actual source and adapter"
+        return 1
+    fi
+    cp "$_rvp_fresh" "$_rvp_dir/proof.cert.json"
+    rm -f "$_rvp_fresh"
+    REG_PROOF_KERNEL=$(jsonrpc_extract_str "$_rvp_kernel" "kernel_id")
+    [ -n "$REG_PROOF_KERNEL" ] || { registry_error "$REG_ACTION" R0002 "proof kernel identity is missing"; return 1; }
+}
+
+registry_execute_tests() {
+    _ret_dir=$1
+    _ret_fresh=$(mktemp)
+    if ! cmd_test "$_ret_dir/test-component.src" > "$_ret_fresh" 2>&1; then
+        rm -f "$_ret_fresh"
+        registry_error "$REG_ACTION" R0005 "component test execution failed"
+        return 1
+    fi
+    if ! grep -Eq '[1-9][0-9]* passed, 0 failed' "$_ret_fresh"; then
+        rm -f "$_ret_fresh"
+        registry_error "$REG_ACTION" R0005 "component must execute at least one passing test with zero failures"
+        return 1
+    fi
+    if [ -f "$_ret_dir/test-output.txt" ] && ! cmp -s "$_ret_dir/test-output.txt" "$_ret_fresh"; then
+        rm -f "$_ret_fresh"
+        registry_error "$REG_ACTION" R0005 "stored test evidence is stale or tampered"
+        return 1
+    fi
+    cp "$_ret_fresh" "$_ret_dir/test-output.txt"
+    rm -f "$_ret_fresh"
+}
+
+registry_cid_material() {
+    printf 'lume-verified-component/0.1\n'
+    printf 'adapter_sha256=%s\nsource_sha256=%s\nproof_sha256=%s\ntests_sha256=%s\ntest_output_sha256=%s\n' "$REG_ADAPTER_SHA" "$REG_SOURCE_SHA" "$REG_PROOF_SHA" "$REG_TESTS_SHA" "$REG_TEST_OUTPUT_SHA"
+    printf 'target=%s\ntoolchain_sha256=%s\ncapabilities=%s\ncontract_signature=%s\npublic_contracts=%s\nproof_kernel=%s\n' "$REG_TARGET" "$REG_TOOLCHAIN_SHA" "$REG_CAPABILITIES" "$REG_CONTRACT_SIGNATURE" "$REG_PUBLIC_CONTRACTS" "$REG_PROOF_KERNEL"
+}
+
+registry_evaluate() {
+    _re_dir=$1
+    REG_TARGET=$2
+    if ! is_linux_x86_64 || [ "$REG_TARGET" != "x86_64-linux-elf" ]; then
+        registry_error "$REG_ACTION" R0004 "this increment publishes and resolves only on the x86_64-linux-elf execution target"
+        return 1
+    fi
+    for _re_file in adapter.src source.src tests.src; do
+        if [ ! -s "$_re_dir/$_re_file" ]; then
+            registry_error "$REG_ACTION" R0001 "missing or empty artifact: $_re_file"
+            return 1
+        fi
+    done
+    registry_make_component "$_re_dir"
+    registry_verify_proof "$_re_dir" || return 1
+    registry_execute_tests "$_re_dir" || return 1
+    registry_derive_interface "$_re_dir/component.src" || return 1
+    REG_ADAPTER_SHA=$(registry_file_sha "$_re_dir/adapter.src")
+    REG_SOURCE_SHA=$(registry_file_sha "$_re_dir/source.src")
+    REG_PROOF_SHA=$(registry_file_sha "$_re_dir/proof.cert.json")
+    REG_TESTS_SHA=$(registry_file_sha "$_re_dir/tests.src")
+    REG_TEST_OUTPUT_SHA=$(registry_file_sha "$_re_dir/test-output.txt")
+    REG_TOOLCHAIN_SHA=$(registry_toolchain_id) || return 1
+    REG_CID=$(registry_cid_material | registry_sha_text) || return 1
+}
+
+registry_manifest_input() {
+    _rmi_mode=$1
+    _rmi_dir=$2
+    _rmi_out=$3
+    printf '@mode %s\n@cid %s\n@adapter-sha256 %s\n@source-sha256 %s\n@proof-sha256 %s\n@tests-sha256 %s\n@test-output-sha256 %s\n' "$_rmi_mode" "$REG_CID" "$REG_ADAPTER_SHA" "$REG_SOURCE_SHA" "$REG_PROOF_SHA" "$REG_TESTS_SHA" "$REG_TEST_OUTPUT_SHA" > "$_rmi_out"
+    printf '@target %s\n@toolchain-sha256 %s\n@capabilities %s\n@contract-signature %s\n@public-contracts %s\n@proof-kernel %s\n' "$REG_TARGET" "$REG_TOOLCHAIN_SHA" "$REG_CAPABILITIES" "$REG_CONTRACT_SIGNATURE" "$REG_PUBLIC_CONTRACTS" "$REG_PROOF_KERNEL" >> "$_rmi_out"
+    if [ "$_rmi_mode" = "verify" ]; then
+        printf '@manifest\n' >> "$_rmi_out"
+        cat "$_rmi_dir/manifest.json" >> "$_rmi_out"
+        printf '\n@end\n' >> "$_rmi_out"
+    fi
+}
+
+registry_verify_entry() {
+    _rve_dir=$1
+    _rve_cid=$2
+    _rve_target=$3
+    registry_valid_cid "$_rve_cid" || { registry_error "$REG_ACTION" R0001 "invalid content identifier"; return 1; }
+    for _rve_file in manifest.json adapter.src source.src proof.cert.json tests.src test-output.txt; do
+        if [ ! -s "$_rve_dir/$_rve_file" ]; then
+            registry_error "$REG_ACTION" R0003 "registry entry is incomplete: $_rve_file"
+            return 1
+        fi
+    done
+    _rve_manifest=$(cat "$_rve_dir/manifest.json")
+    _rve_stored_target=$(jsonrpc_extract_str "$_rve_manifest" "target")
+    if [ "$_rve_stored_target" != "$_rve_target" ]; then
+        registry_error "$REG_ACTION" R0004 "component target is incompatible with the requested target"
+        return 1
+    fi
+    registry_evaluate "$_rve_dir" "$_rve_target" || return 1
+    _rve_stored_toolchain=$(jsonrpc_extract_str "$_rve_manifest" "toolchain_sha256")
+    if [ "$_rve_stored_toolchain" != "$REG_TOOLCHAIN_SHA" ]; then
+        registry_error "$REG_ACTION" R0004 "component evidence is stale for the current toolchain"
+        return 1
+    fi
+    _rve_input=$(mktemp)
+    registry_manifest_input verify "$_rve_dir" "$_rve_input"
+    _rve_result=$(run_core_tool lregistry "$_rve_input")
+    rm -f "$_rve_input"
+    case "$_rve_result" in
+        *'"ok":true'*) ;;
+        *) registry_error "$REG_ACTION" R0003 "artifact hashes, interface, CID, or manifest do not match fresh derivation"; return 1 ;;
+    esac
+    cat "$_rve_dir/manifest.json"
+}
+
+registry_capability_matches() {
+    [ -n "$2" ] || return 0
+    if [ "$2" = "pure" ] && [ -z "$1" ]; then
+        return 0
+    fi
+    case ",$1," in
+        *",$2,"*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+cmd_registry() {
+    [ $# -ge 1 ] || usage
+    REG_ACTION=$1
+    shift
+    _rc_store="${LUME_REGISTRY_DIR:-${TMPDIR:-/tmp}/lume_verified_registry}"
+    _rc_target="x86_64-linux-elf"
+    _rc_adapter=""
+    _rc_source=""
+    _rc_proof=""
+    _rc_tests=""
+    _rc_cid=""
+    _rc_capability=""
+    _rc_contract=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --store) [ $# -ge 2 ] || usage; _rc_store=$2; shift 2 ;;
+            --target) [ $# -ge 2 ] || usage; _rc_target=$2; shift 2 ;;
+            --adapter) [ $# -ge 2 ] || usage; _rc_adapter=$2; shift 2 ;;
+            --source) [ $# -ge 2 ] || usage; _rc_source=$2; shift 2 ;;
+            --proof) [ $# -ge 2 ] || usage; _rc_proof=$2; shift 2 ;;
+            --tests) [ $# -ge 2 ] || usage; _rc_tests=$2; shift 2 ;;
+            --cid) [ $# -ge 2 ] || usage; _rc_cid=$2; shift 2 ;;
+            --capability) [ $# -ge 2 ] || usage; _rc_capability=$2; shift 2 ;;
+            --contract-signature) [ $# -ge 2 ] || usage; _rc_contract=$2; shift 2 ;;
+            --json) shift ;;
+            *) usage ;;
+        esac
+    done
+    case "$REG_ACTION" in
+        publish)
+            [ -n "$_rc_adapter" ] && [ -n "$_rc_source" ] && [ -n "$_rc_tests" ] || usage
+            for _rc_input in "$_rc_adapter" "$_rc_source" "$_rc_tests"; do
+                [ -s "$_rc_input" ] || { registry_error publish R0001 "input artifact is missing or empty"; return 1; }
+            done
+            if [ -n "$_rc_proof" ] && [ ! -s "$_rc_proof" ]; then
+                registry_error publish R0001 "proof artifact is missing or empty"
+                return 1
+            fi
+            mkdir -p "$_rc_store/components"
+            _rc_tmp=$(mktemp -d "$_rc_store/components/.publish.XXXXXX")
+            cp "$_rc_adapter" "$_rc_tmp/adapter.src"
+            cp "$_rc_source" "$_rc_tmp/source.src"
+            cp "$_rc_tests" "$_rc_tmp/tests.src"
+            if [ -n "$_rc_proof" ]; then
+                cp "$_rc_proof" "$_rc_tmp/proof.cert.json"
+            fi
+            if ! registry_evaluate "$_rc_tmp" "$_rc_target"; then
+                rm -rf "$_rc_tmp"
+                return 1
+            fi
+            _rc_input=$(mktemp)
+            registry_manifest_input emit "$_rc_tmp" "$_rc_input"
+            if ! run_core_tool lregistry "$_rc_input" > "$_rc_tmp/manifest.json"; then
+                rm -f "$_rc_input"
+                rm -rf "$_rc_tmp"
+                registry_error publish R0003 "manifest generation failed"
+                return 1
+            fi
+            rm -f "$_rc_input"
+            _rc_dest="$_rc_store/components/$REG_CID"
+            if [ -e "$_rc_dest" ]; then
+                rm -rf "$_rc_tmp"
+                registry_error publish R0003 "content identifier already exists; resolve it instead of overwriting"
+                return 1
+            fi
+            mv "$_rc_tmp" "$_rc_dest"
+            cat "$_rc_dest/manifest.json"
+            ;;
+        resolve)
+            [ -n "$_rc_cid" ] || usage
+            registry_verify_entry "$_rc_store/components/$_rc_cid" "$_rc_cid" "$_rc_target"
+            ;;
+        discover)
+            _rc_matches=$(mktemp)
+            : > "$_rc_matches"
+            for _rc_dir in "$_rc_store"/components/sha256:*; do
+                [ -d "$_rc_dir" ] || continue
+                [ -f "$_rc_dir/manifest.json" ] || { rm -f "$_rc_matches"; registry_error discover R0003 "registry entry has no manifest"; return 1; }
+                _rc_manifest=$(cat "$_rc_dir/manifest.json")
+                _rc_stored_target=$(jsonrpc_extract_str "$_rc_manifest" "target")
+                [ "$_rc_stored_target" = "$_rc_target" ] || continue
+                _rc_stored_contract=$(jsonrpc_extract_str "$_rc_manifest" "contract_signature")
+                if [ -n "$_rc_contract" ] && [ "$_rc_stored_contract" != "$_rc_contract" ]; then
+                    continue
+                fi
+                if ! registry_verify_entry "$_rc_dir" "${_rc_dir##*/}" "$_rc_target" >/dev/null; then
+                    rm -f "$_rc_matches"
+                    return 1
+                fi
+                if registry_capability_matches "$REG_CAPABILITIES" "$_rc_capability"; then
+                    cat "$_rc_dir/manifest.json" >> "$_rc_matches"
+                    printf '\n' >> "$_rc_matches"
+                fi
+            done
+            _rc_items=$(awk 'NF { if (n++) printf ","; printf "%s", $0 }' "$_rc_matches")
+            rm -f "$_rc_matches"
+            printf '{"ok":true,"action":"discover","target":"%s","components":[%s]}\n' "$_rc_target" "$_rc_items"
+            ;;
+        *) usage ;;
+    esac
+}
+
 cmd_mesh() {
     _mmode="capstone"
     while [ $# -gt 0 ]; do
@@ -2645,6 +2977,9 @@ case "$_sub" in
         ;;
     mcp)
         cmd_mcp "$@"
+        ;;
+    registry)
+        cmd_registry "$@"
         ;;
     mesh)
         cmd_mesh "$@"

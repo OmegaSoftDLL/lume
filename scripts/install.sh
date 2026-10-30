@@ -106,7 +106,7 @@ if [ -d "$SRC_BIN" ]; then
         if [ -f "$_b" ] && [ -x "$_b" ]; then
             _bn=$(basename -- "$_b")
             case "$_bn" in
-                lc|lumec*|lasm*|lcli*|lmod*|lcaas*|lcert*|levolve*|ldoc*|ltest*|lfmt*|lprotect*|ltarget*|lmesh*|los*|lume0*|lume-target-*)
+                lc|lumec*|lasm*|lcli*|lmod*|lcaas*|lcert*|levolve*|ldoc*|ltest*|lfmt*|lprotect*|ltarget*|lregistry*|lmesh*|los*|lume0*|lume-target-*)
                     cp "$_b" "$PREFIX/build/bin/$_bn"
                     chmod +x "$PREFIX/build/bin/$_bn"
                     cp "$_b" "$PREFIX/bin/$_bn"
@@ -144,7 +144,7 @@ for _b in "$PREFIX"/build/bin/*; do
         printf '%s  build/bin/%s\n' "$(sha256_of "$_b")" "$(basename -- "$_b")" >> "$MANIFEST"
     fi
 done
-for _s in "$PREFIX"/compiler/stage1/lcli.src "$PREFIX"/compiler/stage1/lasm.src "$PREFIX"/compiler/stage1/lcaas.src "$PREFIX"/compiler/stage1/lcert.src "$PREFIX"/compiler/stage1/lmod.src "$PREFIX"/compiler/stage1/ltarget.src "$PREFIX"/compiler/stage1/lmesh.src "$PREFIX"/compiler/stage1/los.src; do
+for _s in "$PREFIX"/compiler/stage1/lcli.src "$PREFIX"/compiler/stage1/lasm.src "$PREFIX"/compiler/stage1/lcaas.src "$PREFIX"/compiler/stage1/lcert.src "$PREFIX"/compiler/stage1/lmod.src "$PREFIX"/compiler/stage1/ltarget.src "$PREFIX"/compiler/stage1/lregistry.src "$PREFIX"/compiler/stage1/lmesh.src "$PREFIX"/compiler/stage1/los.src; do
     if [ -f "$_s" ]; then
         printf '%s  compiler/stage1/%s\n' "$(sha256_of "$_s")" "$(basename -- "$_s")" >> "$MANIFEST"
     fi

@@ -1,0 +1,58 @@
+## Verified content-addressed component registry manifest kernel.
+## The CLI supplies hashes and interface metadata re-derived from real artifacts.
+## This tool emits a deterministic manifest and rejects any stored representation
+## that differs from a fresh derivation during resolution.
+
+fn rg_isnil(xs) = match xs
+    Nil        => 1
+    Cons(h, t) => 0
+
+fn rg_startswith(s, p) = let n = count(p) in if count(s) < n then 0 else slice(s, 0, n) == p
+
+fn rg_lineend(s, i, n) = if i >= n then n else if at(s, i) == "\n" then i + 1 else rg_lineend(s, i + 1, n)
+
+fn rg_chomp(s) = let n = count(s) in if n == 0 then "" else if at(s, n - 1) == "\n" then (if n > 1 and at(s, n - 2) == "\r" then slice(s, 0, n - 2) else slice(s, 0, n - 1)) else if at(s, n - 1) == "\r" then slice(s, 0, n - 1) else s
+
+fn rg_lines(s, i, n) = if i >= n then Nil else let e = rg_lineend(s, i, n) in Cons(rg_chomp(slice(s, i, e)), rg_lines(s, e, n))
+
+fn rg_find_space(s, i, n) = if i >= n then n else if at(s, i) == " " then i else rg_find_space(s, i + 1, n)
+
+fn rg_header(line, rest) = let p = rg_find_space(line, 0, count(line)) in if p >= count(line) then rest else Cons({key: slice(line, 1, p), value: slice(line, p + 1, count(line))}, rest)
+
+fn rg_collect_manifest(ls) = match ls
+    Nil        => {lines: Nil, rest: Nil}
+    Cons(h, t) => if h == "@end" then {lines: Nil, rest: t} else let r = rg_collect_manifest(t) in {lines: Cons(h, r.lines), rest: r.rest}
+
+fn rg_join(lines, sep) = match lines
+    Nil        => ""
+    Cons(h, t) => if rg_isnil(t) == 1 then h else h + sep + rg_join(t, sep)
+
+fn rg_parse_lines(ls, headers) = match ls
+    Nil        => {headers: headers, manifest: ""}
+    Cons(h, t) => if h == "@manifest" then let block = rg_collect_manifest(t) in {headers: headers, manifest: rg_join(block.lines, "\n")} else if rg_startswith(h, "@") == 1 then rg_parse_lines(t, rg_header(h, headers)) else rg_parse_lines(t, headers)
+
+fn rg_parse(input) = rg_parse_lines(rg_lines(input, 0, count(input)), Nil)
+
+fn rg_get(headers, key) = match headers
+    Nil        => ""
+    Cons(h, t) => if h.key == key then h.value else rg_get(t, key)
+
+fn rg_jesc_loop(s, i, n) = if i >= n then "" else let c = at(s, i) in let e = if c == "\"" then "\\\"" else if c == "\\" then "\\\\" else if c == "\n" then "\\n" else if c == "\r" then "\\r" else if c == "\t" then "\\t" else c in e + rg_jesc_loop(s, i + 1, n)
+
+fn rg_jesc(s) = rg_jesc_loop(s, 0, count(s))
+
+fn rg_caps_json(s, i, n) = if i >= n then "" else let e = rg_cap_end(s, i, n) in "\"" + rg_jesc(slice(s, i, e)) + "\"" + (if e >= n then "" else "," + rg_caps_json(s, e + 1, n))
+
+fn rg_cap_end(s, i, n) = if i >= n then n else if at(s, i) == "," then i else rg_cap_end(s, i + 1, n)
+
+fn rg_valid_sha(s) = count(s) == 71 and rg_startswith(s, "sha256:") == 1
+
+fn rg_required(h) = if rg_valid_sha(rg_get(h, "cid")) == 0 or rg_valid_sha(rg_get(h, "adapter-sha256")) == 0 or rg_valid_sha(rg_get(h, "source-sha256")) == 0 or rg_valid_sha(rg_get(h, "proof-sha256")) == 0 or rg_valid_sha(rg_get(h, "tests-sha256")) == 0 or rg_valid_sha(rg_get(h, "test-output-sha256")) == 0 or rg_valid_sha(rg_get(h, "toolchain-sha256")) == 0 or rg_valid_sha(rg_get(h, "contract-signature")) == 0 or rg_get(h, "target") != "x86_64-linux-elf" or rg_get(h, "proof-kernel") == "" or toint(rg_get(h, "public-contracts")) <= 0 then 0 else 1
+
+fn rg_manifest(h) = let caps = rg_get(h, "capabilities") in "{\"schema\":\"lume-verified-component/0.1\",\"cid\":\"" + rg_jesc(rg_get(h, "cid")) + "\",\"target\":\"" + rg_jesc(rg_get(h, "target")) + "\",\"toolchain_sha256\":\"" + rg_jesc(rg_get(h, "toolchain-sha256")) + "\",\"capabilities\":[" + (if caps == "" then "" else rg_caps_json(caps, 0, count(caps))) + "],\"contract_signature\":\"" + rg_jesc(rg_get(h, "contract-signature")) + "\",\"public_contracts\":" + rg_get(h, "public-contracts") + ",\"artifacts\":{\"adapter_sha256\":\"" + rg_jesc(rg_get(h, "adapter-sha256")) + "\",\"source_sha256\":\"" + rg_jesc(rg_get(h, "source-sha256")) + "\",\"proof_sha256\":\"" + rg_jesc(rg_get(h, "proof-sha256")) + "\",\"tests_sha256\":\"" + rg_jesc(rg_get(h, "tests-sha256")) + "\",\"test_output_sha256\":\"" + rg_jesc(rg_get(h, "test-output-sha256")) + "\"},\"evidence\":{\"status\":\"PASS\",\"proof_kernel\":\"" + rg_jesc(rg_get(h, "proof-kernel")) + "\",\"proof_rederived\":true,\"tests_reexecuted\":true}}"
+
+fn rg_error(reason) = "{\"ok\":false,\"error\":\"" + rg_jesc(reason) + "\"}"
+
+fn rg_dispatch(input) = let p = rg_parse(input) in let mode = rg_get(p.headers, "mode") in if (mode != "emit" and mode != "verify") or rg_required(p.headers) == 0 then rg_error("invalid registry manifest request") else let expected = rg_manifest(p.headers) in if mode == "emit" then expected else if rg_chomp(p.manifest) == expected then "{\"ok\":true,\"cid\":\"" + rg_jesc(rg_get(p.headers, "cid")) + "\"}" else rg_error("stored manifest does not match freshly derived artifacts and evidence")
+
+print rg_dispatch(readall())

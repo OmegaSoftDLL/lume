@@ -1550,6 +1550,12 @@ EOF
     if LUME_BIN_DIR="$ntmp" sh ../../tests/capstones/run.sh >"$_p0_real_log" 2>&1; then ok "priority-0 real capstone slices (#337/#332/#241): independent HTTP/WAL tenant tests and freestanding RTC in QEMU"; else bad "priority-0 real capstone slices (#337/#332/#241)"; cat "$_p0_real_log"; fi
     rm -f "$_p0_real_log"
 
+    if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ]; then
+        if LUME_CLI=../../lume LUME_BIN_DIR="$ntmp" sh ../../scripts/check-verified-registry.sh >"$ntmp/verified_registry.out" 2>&1; then ok "verified registry (#337): real artifact CIDs, independent proofs, native tests, discovery, freshness, target checks & adversarial rejection"; else bad "verified registry (#337): publication/resolution adversarial checks"; cat "$ntmp/verified_registry.out"; fi
+    else
+        ok "verified registry (#337): x86_64-linux-elf execution coverage not applicable on this host"
+    fi
+
     # Issue #197 & #215: Core language features (trait/impl [T0400]/[T0401], first-class closures with capture,
     # refinement types `T where <pred>` with QF_LIA guard elision & exit-3 runtime trap, async fn/.await/block_on [E0200],
     # rc/arc/weak shared control blocks [O0001], shard data-parallel construct [S0001]/[E0200], F3c let-polymorphism [T0500],

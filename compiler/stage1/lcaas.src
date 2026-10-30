@@ -2313,6 +2313,46 @@ fn lc_split_lines(s, i, n) = if i >= n then Nil else let le = cs_lineend(s, i, n
 
 fn lcert_bind(hdr_text) = let r = lc_bind_lines(lc_split_lines(hdr_text, 0, count(hdr_text))) in let empty_diags = if cs_isnil(r.exts) == 1 and cs_isnil(r.diags) == 1 then Cons(cs_mkdiag("I0003", "interop", "binding error: header contains no supported C function declarations", "declare int64_t functions with int64_t or borrowed const char* parameters"), Nil) else Nil in let diags = cs_app(r.diags, empty_diags) in let ok = if cs_isnil(r.exts) == 0 and cs_isnil(diags) == 1 then 1 else 0 in let gen = if ok == 1 then cs_joinsep(cs_app(r.exts, r.wraps), "\n") else "" in "{\"ok\":" + (if ok == 1 then "true" else "false") + ",\"mode\":\"bind\",\"adapter_contract\":\"c_abi_foreign_v1\",\"bridge\":\"c_abi\",\"ownership\":\"borrowed_const_cstr_parameters_only\",\"provenance_guard\":\"A0003\",\"return_provenance\":\"unverified\",\"effect\":\"ffi\",\"diagnostics\":[" + cs_diags_json(diags) + "],\"extern_decls\":[" + cs_strlist_json(r.exts) + "],\"foreign_wrappers\":[" + cs_strlist_json(r.wraps) + "],\"generated_lume\":\"" + cs_jesc(gen) + "\"}"
 
+## --- Verified component registry: derive discovery identity from the parsed public interface ---
+fn cs_reg_cap_insert(x, xs) = match xs
+    Nil        => Cons(x, Nil)
+    Cons(h, t) => if x < h then Cons(x, Cons(h, t)) else Cons(h, cs_reg_cap_insert(x, t))
+
+fn cs_reg_cap_add(x, xs) = if x == "" or cs_omem(x, xs) == 1 then xs else cs_reg_cap_insert(x, xs)
+
+fn cs_reg_cap_list(effs, acc) = match effs
+    Nil        => acc
+    Cons(h, t) => cs_reg_cap_list(t, cs_reg_cap_add(h, acc))
+
+fn cs_reg_caps_prog(prog) = match prog
+    Nil        => Nil
+    Cons(h, t) => cs_reg_caps_stmt(h, cs_reg_caps_prog(t))
+
+fn cs_reg_caps_stmt(st, rest) = match st
+    KCapGrant(effs)   => cs_reg_cap_list(effs, rest)
+    KEffSig(nm, effs) => cs_reg_cap_list(effs, rest)
+    _                 => rest
+
+fn cs_reg_params(ps) = match ps
+    Nil        => ""
+    Cons(h, t) => h.k + ":" + h.v + (if cs_isnil(t) == 1 then "" else "," + cs_reg_params(t))
+
+fn cs_reg_reqs(vs) = match vs
+    Nil       => ""
+    Cons(v,_) => cs_joinsep(cs_exprs_surface_list(v.reqs), " && ")
+
+fn cs_reg_enss(vs) = match vs
+    Nil       => ""
+    Cons(v,_) => cs_joinsep(cs_exprs_surface_list(v.enss), " && ")
+
+fn cs_reg_public_item(osg, sigs, vsigs, ksigs) = let msig = cs_siglookup(osg.nm, sigs) in let reqs = cs_reg_reqs(cs_vsiglookup(osg.nm, vsigs)) in let enss = cs_reg_enss(cs_vsiglookup(osg.nm, vsigs)) in let params = cs_reg_params(cs_fn_lenv(msig)) in let rty = cs_fn_rty(msig, Cons(osg, Nil)) in let effs = cs_fn_eff_str(osg.nm, ksigs) in let origin = if osg.fromp == "" then "" else " from " + osg.fromp in let req_s = if reqs == "" then "" else " requires " + reqs in let ens_s = if enss == "" then "" else " ensures " + enss in {canonical: "pub fn " + osg.nm + "(" + params + ") -> " + rty + origin + " / {" + effs + "}" + req_s + ens_s, contracted: if reqs == "" and enss == "" then 0 else 1}
+
+fn cs_reg_public_items(osigs, sigs, vsigs, ksigs) = match osigs
+    Nil        => {canonical: "", count: 0}
+    Cons(h, t) => let rest = cs_reg_public_items(t, sigs, vsigs, ksigs) in if h.pubf == 0 then rest else let item = cs_reg_public_item(h, sigs, vsigs, ksigs) in {canonical: item.canonical + (if rest.canonical == "" then "" else "\n" + rest.canonical), count: item.contracted + rest.count}
+
+fn caas_registry_interface_json(src) = let ast = cs_parse(src) in let sigs = (cs_tcollect(ast)).sigs in let osigs = cs_ocollects(ast) in let vsigs = cs_vcollect_vsigs(ast) in let ksigs = cs_kcollect_effsigs(ast) in let items = cs_reg_public_items(osigs, sigs, vsigs, ksigs) in let caps = cs_reg_caps_prog(ast) in let signature = lc_sha256("lume-registry-contracts/0.1\n" + items.canonical) in "{\"ok\":true,\"mode\":\"registry-interface\",\"capabilities\":\"" + cs_jesc(cs_joinsep(caps, ",")) + "\",\"contract_signature\":\"" + cs_jesc(signature) + "\",\"public_contracts\":" + str(items.count) + "}"
+
 ## --- Oracle Queries (`docs/19-intent-as-source.md` §2, #195): `witness`, `repair`, `impact` ---
 fn cs_witness_items(ps) = match ps
     Nil        => Nil
@@ -2829,6 +2869,6 @@ fn cs_intent_first_err(ds) = match ds
 
 fn caas_intent_code_out(body) = let ic = cs_intent_core(body) in if ic.ok == 1 then cs_chomp(ic.cache_src) else ctfail(cs_intent_first_err(ic.diags))
 
-fn caas_entry_dispatch(input) = if cs_startswith(input, "@mode certify\n") == 1 then lcert_certify(slice(input, 14, count(input))) else if cs_startswith(input, "@mode bind\n") == 1 then lcert_bind(slice(input, 11, count(input))) else if cs_startswith(input, "@mode witness\n") == 1 then caas_witness_json(slice(input, 14, count(input))) else if cs_startswith(input, "@mode repair\n") == 1 then caas_repair_json(slice(input, 13, count(input))) else if cs_startswith(input, "@mode impact\n") == 1 then caas_impact_json(slice(input, 13, count(input))) else if cs_startswith(input, "@mode hashes\n") == 1 then caas_hashes_json(slice(input, 13, count(input))) else if cs_startswith(input, "@mode grammar\n") == 1 then caas_grammar_json(slice(input, 14, count(input))) else if cs_startswith(input, "@mode project\n") == 1 then caas_project_json(slice(input, 14, count(input))) else if cs_startswith(input, "@mode c-export\n") == 1 then caas_cexport_json(slice(input, 15, count(input))) else if cs_startswith(input, "@mode kernel\n") == 1 then caas_kernel_json(slice(input, 13, count(input))) else if cs_startswith(input, "@mode proof-diff\n") == 1 then caas_proof_diff_json(slice(input, 17, count(input))) else if cs_startswith(input, "@mode check-rot\n") == 1 then caas_check_rot_json(slice(input, 16, count(input))) else if cs_startswith(input, "@mode share\n") == 1 then caas_share_json(slice(input, 12, count(input))) else if cs_startswith(input, "@mode patch\n") == 1 then caas_patch_json(slice(input, 12, count(input))) else if cs_startswith(input, "@mode replay\n") == 1 then caas_replay_json(slice(input, 13, count(input))) else if cs_startswith(input, "@mode lineage\n") == 1 then caas_lineage_json(slice(input, 14, count(input))) else if cs_startswith(input, "@mode compose\n") == 1 then caas_compose_json(slice(input, 14, count(input))) else if cs_startswith(input, "@mode intent-build\n") == 1 then caas_intent_build_json(slice(input, 19, count(input))) else if cs_startswith(input, "@mode intent-verify\n") == 1 then caas_intent_verify_json(slice(input, 20, count(input))) else if cs_startswith(input, "@mode intent-code\n") == 1 then caas_intent_code_out(slice(input, 18, count(input))) else if cs_startswith(input, "@mode lsp\n") == 1 then caas_lsp_json(slice(input, 10, count(input))) else if cs_startswith(input, "@mode dap\n") == 1 then caas_dap_json(slice(input, 10, count(input))) else if cs_startswith(input, "@mode repl\n") == 1 then caas_repl_json(slice(input, 11, count(input))) else if cs_startswith(input, "@mode mcp\n") == 1 then lcert_mcp(slice(input, 10, count(input))) else caas_json(caas_compile(input))
+fn caas_entry_dispatch(input) = if cs_startswith(input, "@mode certify\n") == 1 then lcert_certify(slice(input, 14, count(input))) else if cs_startswith(input, "@mode bind\n") == 1 then lcert_bind(slice(input, 11, count(input))) else if cs_startswith(input, "@mode registry-interface\n") == 1 then caas_registry_interface_json(slice(input, 25, count(input))) else if cs_startswith(input, "@mode witness\n") == 1 then caas_witness_json(slice(input, 14, count(input))) else if cs_startswith(input, "@mode repair\n") == 1 then caas_repair_json(slice(input, 13, count(input))) else if cs_startswith(input, "@mode impact\n") == 1 then caas_impact_json(slice(input, 13, count(input))) else if cs_startswith(input, "@mode hashes\n") == 1 then caas_hashes_json(slice(input, 13, count(input))) else if cs_startswith(input, "@mode grammar\n") == 1 then caas_grammar_json(slice(input, 14, count(input))) else if cs_startswith(input, "@mode project\n") == 1 then caas_project_json(slice(input, 14, count(input))) else if cs_startswith(input, "@mode c-export\n") == 1 then caas_cexport_json(slice(input, 15, count(input))) else if cs_startswith(input, "@mode kernel\n") == 1 then caas_kernel_json(slice(input, 13, count(input))) else if cs_startswith(input, "@mode proof-diff\n") == 1 then caas_proof_diff_json(slice(input, 17, count(input))) else if cs_startswith(input, "@mode check-rot\n") == 1 then caas_check_rot_json(slice(input, 16, count(input))) else if cs_startswith(input, "@mode share\n") == 1 then caas_share_json(slice(input, 12, count(input))) else if cs_startswith(input, "@mode patch\n") == 1 then caas_patch_json(slice(input, 12, count(input))) else if cs_startswith(input, "@mode replay\n") == 1 then caas_replay_json(slice(input, 13, count(input))) else if cs_startswith(input, "@mode lineage\n") == 1 then caas_lineage_json(slice(input, 14, count(input))) else if cs_startswith(input, "@mode compose\n") == 1 then caas_compose_json(slice(input, 14, count(input))) else if cs_startswith(input, "@mode intent-build\n") == 1 then caas_intent_build_json(slice(input, 19, count(input))) else if cs_startswith(input, "@mode intent-verify\n") == 1 then caas_intent_verify_json(slice(input, 20, count(input))) else if cs_startswith(input, "@mode intent-code\n") == 1 then caas_intent_code_out(slice(input, 18, count(input))) else if cs_startswith(input, "@mode lsp\n") == 1 then caas_lsp_json(slice(input, 10, count(input))) else if cs_startswith(input, "@mode dap\n") == 1 then caas_dap_json(slice(input, 10, count(input))) else if cs_startswith(input, "@mode repl\n") == 1 then caas_repl_json(slice(input, 11, count(input))) else if cs_startswith(input, "@mode mcp\n") == 1 then lcert_mcp(slice(input, 10, count(input))) else caas_json(caas_compile(input))
 
 print caas_entry_dispatch(readall())
