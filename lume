@@ -9,6 +9,7 @@
 #   lume fmt   [--check] <file.src|file.lume> format source to canonical layout (or check with --check)
 #   lume pkg   <init|check|lock|verify|tree>  package manager: lume.toml manifest, capabilities & SHA-256 lume.lock
 #   lume agent [check|compile|ast|...] <file> in-process compiler-as-a-service JSON protocol (E1b)
+#   lume adapt c [--json] <header.h> [-o <out.src>] generate fail-closed C ABI adapters
 #   lume prove [--json] <file.src>            static QF_LIA contract, invariant & law verification (V2/V3)
 #   lume registry <publish|resolve|discover> verify and resolve content-addressed components
 #   lume evolve <verify|approve|goals|...>    self-evolution & governance loop (E3)
@@ -1299,6 +1300,71 @@ cmd_pkg() {
     esac
 }
 
+cmd_adapt() {
+    [ $# -ge 1 ] || usage
+    _akind=$1
+    shift
+    if [ "$_akind" != "c" ]; then
+        echo "lume adapt: unsupported adapter '$_akind' (only 'c' is implemented)" >&2
+        return 64
+    fi
+    _afile=""
+    _aoutput=""
+    _ajson=0
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --json) _ajson=1; shift ;;
+            -o|--output)
+                [ $# -ge 2 ] || usage
+                _aoutput=$2
+                shift 2
+                ;;
+            -*) usage ;;
+            *)
+                [ -z "$_afile" ] || usage
+                _afile=$1
+                shift
+                ;;
+        esac
+    done
+    [ -n "$_afile" ] || usage
+    if [ ! -f "$_afile" ]; then
+        echo "lume adapt: cannot read $_afile" >&2
+        return 66
+    fi
+    if [ "$_ajson" -eq 1 ] && [ -n "$_aoutput" ]; then
+        echo "lume adapt: --json and --output are mutually exclusive" >&2
+        return 64
+    fi
+    _ain=$(mktemp)
+    printf '@mode bind\n' > "$_ain"
+    cat "$_afile" >> "$_ain"
+    _aout=$(run_core_tool lcaas "$_ain")
+    case "$_aout" in
+        *'"ok":true'*) ;;
+        *)
+            printf '%s\n' "$_aout"
+            rm -f "$_ain"
+            return 1
+            ;;
+    esac
+    if [ "$_ajson" -eq 1 ]; then
+        printf '%s\n' "$_aout"
+        rm -f "$_ain"
+        return 0
+    fi
+    printf '@mode bind-source\n' > "$_ain"
+    cat "$_afile" >> "$_ain"
+    if [ -n "$_aoutput" ]; then
+        _atmp=$(mktemp)
+        run_core_tool lcaas "$_ain" > "$_atmp"
+        mv "$_atmp" "$_aoutput"
+    else
+        run_core_tool lcaas "$_ain"
+    fi
+    rm -f "$_ain"
+}
+
 cmd_agent() {
     [ $# -ge 1 ] || usage
     _afile=""
@@ -1346,12 +1412,8 @@ cmd_agent() {
         exit 66
     fi
     if [ "$_amode" = "bind" ]; then
-        _btmp=$(mktemp)
-        printf '@mode bind\n' > "$_btmp"
-        cat "$_afile" >> "$_btmp"
-        run_core_tool lcaas "$_btmp"
-        rm -f "$_btmp"
-        return 0
+        cmd_adapt c --json "$_afile"
+        return $?
     fi
     if [ "$_amode" = "proof-diff" ] || [ "$_amode" = "compose" ]; then
         [ -n "$_afile2" ] && [ -f "$_afile2" ] || usage
@@ -2956,6 +3018,9 @@ case "$_sub" in
         ;;
     pkg)
         cmd_pkg "$@"
+        ;;
+    adapt)
+        cmd_adapt "$@"
         ;;
     agent|service)
         cmd_agent "$@"
