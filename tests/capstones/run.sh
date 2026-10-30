@@ -49,7 +49,7 @@ stop_server
 "$BIN_DIR/lasm" <"$TMP/kernel_rtc.s" >"$TMP/kernel_rtc.img"
 ./lume build tests/capstones/rtc_assertions.src -o "$TMP/rtc_assert"
 ./lume test tests/capstones/rtc_assertions.src | tee "$TMP/rtc-native-tests.out"
-grep -q "4 passed, 0 failed" "$TMP/rtc-native-tests.out"
+grep -q "7 passed, 0 failed" "$TMP/rtc-native-tests.out"
 command -v qemu-system-x86_64 >/dev/null 2>&1
 
 first_rc=0

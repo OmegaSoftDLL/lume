@@ -34,7 +34,8 @@ cycle, reads hardware registers through ports `0x70`/`0x71`, and reports the obs
 the existing COM1 runtime. Acceptance covers the register format selected by QEMU in these runs.
 
 `tests/capstones/rtc_assertions.src` rejects hosted syscalls and invalid boot images in Lume. Native
-regressions also reject ELF images, impossible dates, and timestamps before the requested clock base.
+regressions also reject ELF images, impossible dates, nonexistent month days, non-leap February 29,
+and timestamps before the requested clock base, while accepting a valid leap day.
 The runner executes `qemu-system-x86_64` twice with different `-rtc base=` values, and the Lume oracle
 requires the guest timestamps to match the independent emulated clock settings; a fixed arithmetic
 result cannot pass.

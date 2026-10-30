@@ -2,7 +2,7 @@ use lcaas
 
 fn rt_number(serial, key) = let marker = key + "=" in let p = cs_find_substr(serial, marker, 0, count(serial), count(marker)) in if p >= count(serial) then 0 - 1 else toint(slice(serial, p + count(marker), count(serial)))
 
-fn rt_serial(serial) = let year = rt_number(serial, "year") in let month = rt_number(serial, "month") in let day = rt_number(serial, "day") in let hour = rt_number(serial, "hour") in let minute = rt_number(serial, "minute") in let second = rt_number(serial, "second") in let status = rt_number(serial, "status_b") in let valid = if cs_has_substr(serial, "p0_rtc_kernel=ok year=") == 1 and year >= 2000 and month >= 1 and month <= 12 and day >= 1 and day <= 31 and hour >= 0 and hour <= 23 and minute >= 0 and minute <= 59 and second >= 0 and second <= 59 and status >= 0 and status <= 255 then 1 else 0 in {valid: valid, year: year, month: month, day: day, hour: hour, minute: minute, second: second, status_b: status}
+fn rt_serial(serial) = let year = rt_number(serial, "year") in let month = rt_number(serial, "month") in let day = rt_number(serial, "day") in let hour = rt_number(serial, "hour") in let minute = rt_number(serial, "minute") in let second = rt_number(serial, "second") in let status = rt_number(serial, "status_b") in let valid = if cs_has_substr(serial, "p0_rtc_kernel=ok year=") == 1 and year >= 2000 and month >= 1 and month <= 12 and day >= 1 and day <= rt_month_days(year, month) and hour >= 0 and hour <= 23 and minute >= 0 and minute <= 59 and second >= 0 and second <= 59 and status >= 0 and status <= 255 then 1 else 0 in {valid: valid, year: year, month: month, day: day, hour: hour, minute: minute, second: second, status_b: status}
 
 fn rt_base(text) = {valid: 1, year: toint(slice(text, 0, 4)), month: toint(slice(text, 5, 7)), day: toint(slice(text, 8, 10)), hour: toint(slice(text, 11, 13)), minute: toint(slice(text, 14, 16)), second: toint(slice(text, 17, 19)), status_b: 0}
 
@@ -41,6 +41,12 @@ fn test_rtc_rejects_elf_image() = rt_image_valid("../../bootstrap/lume0/lume0", 
 fn test_rtc_rejects_hosted_syscall() = rt_no_syscall(lc_split_lines("cli\nsyscall\n", 0, 12)) == 0
 
 fn test_rtc_rejects_impossible_date() = rt_serial("p0_rtc_kernel=ok year=2024 month=13 day=1 hour=0 minute=0 second=0 status_b=0\n").valid == 0
+
+fn test_rtc_rejects_nonexistent_calendar_day() = rt_serial("p0_rtc_kernel=ok year=2024 month=2 day=30 hour=0 minute=0 second=0 status_b=0\n").valid == 0
+
+fn test_rtc_rejects_non_leap_day() = rt_serial("p0_rtc_kernel=ok year=2023 month=2 day=29 hour=0 minute=0 second=0 status_b=0\n").valid == 0
+
+fn test_rtc_accepts_leap_day() = rt_serial("p0_rtc_kernel=ok year=2024 month=2 day=29 hour=0 minute=0 second=0 status_b=0\n").valid == 1
 
 fn test_rtc_rejects_time_before_base() = rt_within(rt_base("2023-06-15T12:34:56"), rt_base("2024-06-15T12:34:56")) == 0
 
