@@ -74,7 +74,7 @@ fn ej_legacy_absent(source, fields) = match fields
     Nil => 1
     Cons(h, t) => if cs_has_substr(source, h) == 0 then ej_legacy_absent(source, t) else 0
 
-fn ej_summary_ok(report, attempts) = if ej_number(report, "attempts_total") == 9 and ej_number(report, "attempts_passed") == 4 and ej_number(report, "attempts_failed") == 5 and ej_number(report, "defects_observed") == 5 and ej_defect_sum(attempts) == 5 and ej_outcome_count(attempts, "PASS") == 4 and ej_outcome_count(attempts, "FAIL") == 5 then 1 else 0
+fn ej_summary_ok(report, attempts) = if ej_number(report, "tasks_total") == 6 and ej_number(report, "tasks_passed") == 3 and ej_number(report, "tasks_failed") == 3 and ej_number(report, "attempts_total") == 9 and ej_number(report, "attempts_passed") == 4 and ej_number(report, "attempts_failed") == 5 and ej_number(report, "defects_observed") == 5 and ej_defect_sum(attempts) == 5 and ej_outcome_count(attempts, "PASS") == 4 and ej_outcome_count(attempts, "FAIL") == 5 then 1 else 0
 
 fn ej_attempt_text(attempt) = "valid=" + str(attempt.valid) + ",outcome=" + attempt.outcome + ",failed=" + attempt.failed + ",compile=" + attempt.compile + ",proof=" + attempt.proof + ",execution=" + attempt.execution
 
