@@ -4,7 +4,7 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 TMP=$(mktemp -d)
-trap 'if [ -n "${ECONOMIC_DEBUG_DIR:-}" ]; then mkdir -p "$ECONOMIC_DEBUG_DIR"; cp -R "$TMP"/. "$ECONOMIC_DEBUG_DIR"/; fi; rm -rf "$TMP"' EXIT HUP INT TERM
+trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 
 "$ROOT/lume" build "$ROOT/tests/economic_benchmark/assertions.src" -o "$TMP/economic_assert"
 
