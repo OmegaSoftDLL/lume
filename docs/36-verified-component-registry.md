@@ -95,10 +95,11 @@ test verification.
 
 ## Validation and limits
 
-`scripts/check-verified-registry.sh` exercises real publication/resolution and currently uses
-Python's `hashlib` as an independent CID oracle. `compiler/stage1/lregistry_cid.src` is a candidate
-Lume-native replacement that reconstructs the same versioned material and rejects incomplete or
-wrong-schema manifests; it is not accepted until its native regressions and the registry gate pass.
+`scripts/check-verified-registry.sh` exercises real publication/resolution and uses
+`compiler/stage1/lregistry_cid.src` as the independent CID oracle. The remaining adversarial
+mutations still use Python and are being migrated to Lume. The Lume oracle reconstructs the same
+versioned material and rejects incomplete or wrong-schema manifests; it is not accepted until its
+native regressions and the registry gate pass.
 Adversarial coverage includes a false proof with a maliciously recomputed certificate hash,
 mismatched adapter hash, source/proof staleness, test-output tampering with a recomputed component
 CID, stale toolchain identity, failing tests, capability and contract-signature discovery, and target
