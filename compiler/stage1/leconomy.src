@@ -21,7 +21,9 @@ fn ec_log_json(stdout_path, stderr_path, base) = "{\"stdout\":\"" + cs_jesc(ec_r
 
 fn ec_hash_json(stdout_path, stderr_path) = "{\"stdout\":\"" + ec_sha(stdout_path) + "\",\"stderr\":\"" + ec_sha(stderr_path) + "\"}"
 
-fn ec_run(req) = let started = os_monotonic_ns() in let raw = os_run_capture_timeout(req.path, req.args, req.stdout_path, req.stderr_path, req.timeout_ms) in let timed_out = os_last_timed_out() in let finished = os_monotonic_ns() in let status = if raw == 0 and timed_out == 0 then "PASS" else "FAIL" in {status: status, exit_code: (if timed_out == 1 then "UNKNOWN" else str(raw)), timed_out: timed_out, wall: (finished - started) / 1000000, stdout_path: req.stdout_path, stderr_path: req.stderr_path}
+fn ec_exit_code(raw, timed_out) = if timed_out == 1 or raw < 0 or raw % 256 == 127 then "UNKNOWN" else if raw % 256 == 0 then str(raw / 256) else str(0 - (raw % 128))
+
+fn ec_run(req) = let started = os_monotonic_ns() in let raw = os_run_capture_timeout(req.path, req.args, req.stdout_path, req.stderr_path, req.timeout_ms) in let timed_out = os_last_timed_out() in let finished = os_monotonic_ns() in let status = if raw == 0 and timed_out == 0 then "PASS" else "FAIL" in {status: status, exit_code: ec_exit_code(raw, timed_out), timed_out: timed_out, wall: (finished - started) / 1000000, stdout_path: req.stdout_path, stderr_path: req.stderr_path}
 
 fn ec_stage_json(stage, base, extra) = if stage.status == "NOT_RUN" then "{\"status\":\"NOT_RUN\",\"wall_time_ms\":0}" else "{\"status\":\"" + stage.status + "\",\"exit_code\":" + (if stage.exit_code == "UNKNOWN" then "\"UNKNOWN\"" else stage.exit_code) + ",\"timed_out\":" + ec_bool(stage.timed_out) + ",\"wall_time_ms\":" + str(stage.wall) + ",\"logs\":" + ec_log_json(stage.stdout_path, stage.stderr_path, base) + ",\"log_sha256\":" + ec_hash_json(stage.stdout_path, stage.stderr_path) + extra + "}"
 
