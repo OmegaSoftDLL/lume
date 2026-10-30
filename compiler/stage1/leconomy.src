@@ -1,0 +1,119 @@
+use lcaas
+
+fn ec_parent_i(path, i, last) = if i >= count(path) then last else let next = if at(path, i) == "/" then i else last in ec_parent_i(path, i + 1, next)
+
+fn ec_parent(path) = let slash = ec_parent_i(path, 0, 0 - 1) in if slash < 0 then "" else if slash == 0 then "/" else slice(path, 0, slash)
+
+fn ec_at(xs, idx) = match xs
+    Nil => {path: "", expected_outcome: "FAIL", expected_failed: ""}
+    Cons(h, t) => if idx == 0 then h else ec_at(t, idx - 1)
+
+fn ec_mkdirs(path) = if path == "" or fs_path_exists(path) == 1 then 1 else let parent = ec_parent(path) in if ec_mkdirs(parent) == 1 then fs_mkdir(path) else 0
+
+fn ec_rel(base, path) = let prefix = base + "/" in if cs_startswith(path, prefix) == 1 then slice(path, count(prefix), count(path)) else path
+
+fn ec_sha(path) = sha256_hex(fs_read_file(path))
+
+fn ec_bool(value) = if value == 1 then "true" else "false"
+
+fn ec_log_json(stdout_path, stderr_path, base) = "{\"stdout\":\"" + cs_jesc(ec_rel(base, stdout_path)) + "\",\"stderr\":\"" + cs_jesc(ec_rel(base, stderr_path)) + "\"}"
+
+fn ec_hash_json(stdout_path, stderr_path) = "{\"stdout\":\"" + ec_sha(stdout_path) + "\",\"stderr\":\"" + ec_sha(stderr_path) + "\"}"
+
+fn ec_run(req) = let started = os_monotonic_ns() in let raw = os_run_capture_timeout(req.path, req.args, req.stdout_path, req.stderr_path, req.timeout_ms) in let timed_out = os_last_timed_out() in let finished = os_monotonic_ns() in let status = if raw == 0 and timed_out == 0 then "PASS" else "FAIL" in {status: status, exit_code: (if timed_out == 1 then "UNKNOWN" else str(raw)), timed_out: timed_out, wall: (finished - started) / 1000000, stdout_path: req.stdout_path, stderr_path: req.stderr_path}
+
+fn ec_stage_json(stage, base, extra) = "{\"status\":\"" + stage.status + "\",\"exit_code\":" + (if stage.exit_code == "UNKNOWN" then "\"UNKNOWN\"" else stage.exit_code) + ",\"timed_out\":" + ec_bool(stage.timed_out) + ",\"wall_time_ms\":" + str(stage.wall) + ",\"logs\":" + ec_log_json(stage.stdout_path, stage.stderr_path, base) + ",\"log_sha256\":" + ec_hash_json(stage.stdout_path, stage.stderr_path) + extra + "}"
+
+fn ec_not_run() = {status: "NOT_RUN", exit_code: "UNKNOWN", timed_out: 0, wall: 0, stdout_path: "", stderr_path: ""}
+
+fn ec_stage_or_not_run(stage, base) = if stage.status == "NOT_RUN" then "{\"status\":\"NOT_RUN\",\"wall_time_ms\":0}" else stage.json
+
+fn ec_text(s, key) = let marker = "\"" + key + "\":" in let p = cs_find_substr(s, marker, 0, count(s), count(marker)) in if p >= count(s) then "" else let start = p + count(marker) in let start2 = if at(s, start) == " " then start + 1 else start in if at(s, start2) == "\"" then let finish = lc_find_ch(s, start2 + 1, count(s), "\"") in slice(s, start2 + 1, finish) else let finish = lc_find_ch(s, start2, count(s), ",") in let end_brace = lc_find_ch(s, start2, count(s), "}") in let stop = if finish < end_brace then finish else end_brace in lc_trim(slice(s, start2, stop))
+
+fn ec_objects(text) = if text == "" then Nil else let p = cs_find_substr(text, "},{", 0, count(text), 3) in let raw = if p >= count(text) then text else slice(text, 0, p + 1) in let rest = if p >= count(text) then "" else slice(text, p + 2, count(text)) in Cons(raw, ec_objects(rest))
+
+fn ec_proofs_proven(raws) = match raws
+    Nil => 1
+    Cons(h, t) => if ec_text(h, "status") == "proven" then ec_proofs_proven(t) else 0
+
+fn ec_proof_ok(text) = let proofs = ec_between(text, "\"proofs\":[", "]") in if cs_has_substr(text, "\"ok\":true") == 0 or proofs.ok == 0 or proofs.text == "" then 0 else ec_proofs_proven(ec_objects(proofs.text))
+
+fn ec_between(s, open, close) = let n = count(s) in let a = cs_find_substr(s, open, 0, n, count(open)) in if a >= n then {ok: 0, text: ""} else let start = a + count(open) in let b = cs_find_substr(s, close, start, n, count(close)) in if b >= n then {ok: 0, text: ""} else {ok: 1, text: slice(s, start, b)}
+
+fn ec_defect(stage, kind) = "{\"stage\":\"" + stage + "\",\"kind\":\"" + kind + "\"}"
+
+fn ec_attempt_json(req) = "{\"attempt\":" + str(req.number) + ",\"candidate\":\"" + cs_jesc(req.candidate) + "\",\"candidate_sha256\":\"" + req.candidate_sha + "\",\"defects\":[" + req.defects + "],\"failed_stage\":" + (if req.failed == "" then "null" else "\"" + req.failed + "\"") + ",\"outcome\":\"" + req.outcome + "\"," + (if req.revision == "" then "" else "\"revision\":\"" + cs_jesc(req.revision) + "\",") + "\"stages\":{\"compile\":" + ec_stage_or_not_run(req.compile, req.base) + ",\"execution\":" + ec_stage_or_not_run(req.execution, req.base) + ",\"proof\":" + ec_stage_or_not_run(req.proof, req.base) + "},\"wall_time_ms\":" + str(req.wall) + "}"
+
+fn ec_attempt(req) = let source = req.root + "/tests/economic_benchmark/" + req.candidate in let dir = req.artifacts + "/" + req.task + (if req.revision == "" then "" else "/" + req.revision) + "/attempt-" + str(req.number) in let made = ec_mkdirs(dir) in let binary = dir + "/program" in let compile_out = dir + "/compile.stdout" in let compile_err = dir + "/compile.stderr" in let started = os_monotonic_ns() in let compile = ec_run({path: req.root + "/lume", args: ["build", "--target", "x86_64-linux-elf", source, "-o", binary], stdout_path: compile_out, stderr_path: compile_err, timeout_ms: req.compile_timeout}) in let compile_extra = if fs_path_exists(binary) == 1 then ",\"artifact_sha256\":\"UNKNOWN\"" else ",\"artifact_missing\":true" in let compile2 = {status: compile.status, exit_code: compile.exit_code, timed_out: compile.timed_out, wall: compile.wall, stdout_path: compile.stdout_path, stderr_path: compile.stderr_path, extra: compile_extra} in let proof = if compile.status == "PASS" then ec_run({path: req.root + "/lume", args: ["prove", "--json", source], stdout_path: dir + "/proof.stdout", stderr_path: dir + "/proof.stderr", timeout_ms: req.proof_timeout}) else ec_not_run() in let proof_status = if compile.status == "PASS" and ec_proof_ok(fs_read_file(dir + "/proof.stdout")) == 1 then "PASS" else if compile.status == "PASS" then "FAIL" else "NOT_RUN" in let proof2 = {status: proof_status, exit_code: proof.exit_code, timed_out: proof.timed_out, wall: proof.wall, stdout_path: proof.stdout_path, stderr_path: proof.stderr_path} in let execution = if proof_status == "PASS" then ec_run({path: binary, args: [], stdout_path: dir + "/execution.stdout", stderr_path: dir + "/execution.stderr", timeout_ms: req.execution_timeout}) else ec_not_run() in let actual = if proof_status == "PASS" then fs_read_file(dir + "/execution.stdout") else "" in let execution_status = if proof_status != "PASS" then "NOT_RUN" else if execution.status == "PASS" and actual == req.expected_stdout then "PASS" else "FAIL" in let execution2 = {status: execution_status, exit_code: execution.exit_code, timed_out: execution.timed_out, wall: execution.wall, stdout_path: execution.stdout_path, stderr_path: execution.stderr_path} in let compile_defects = if compile.status == "FAIL" then Cons(ec_defect("compile", if compile.timed_out == 1 then "timeout" else if fs_path_exists(binary) == 0 then "artifact_missing" else "nonzero_exit"), Nil) else Nil in let proof_defects = if compile.status == "PASS" and proof_status == "FAIL" then Cons(ec_defect("proof", if proof.timed_out == 1 then "timeout" else if proof.exit_code == "0" then "protocol_error" else "refuted_or_rejected"), Nil) else Nil in let execution_defects = if proof_status == "PASS" and execution_status == "FAIL" then Cons(ec_defect("execution", if execution.timed_out == 1 then "timeout" else if execution.exit_code == "0" then "stdout_mismatch" else "nonzero_exit"), Nil) else Nil in let defects = cs_app(compile_defects, cs_app(proof_defects, execution_defects)) in let outcome = if compile.status == "PASS" and proof_status == "PASS" and execution_status == "PASS" then "PASS" else "FAIL" in let failed = if compile.status == "FAIL" then "compile" else if proof_status == "FAIL" then "proof" else if execution_status == "FAIL" then "execution" else "" in let wall = compile.wall + proof2.wall + execution2.wall in let candidate_sha = ec_sha(source) in let defects_json = ec_defects_json(defects) in let compile_json = ec_stage_json(compile2, req.base, compile_extra) in let proof_json = ec_stage_json(proof2, req.base, "") in let execution_json = ec_stage_json(execution2, req.base, ",\"expected_stdout_sha256\":\"" + sha256_hex(req.expected_stdout) + "\",\"actual_stdout_sha256\":\"" + sha256_hex(actual) + "\"" + (if execution_status == "FAIL" and execution.exit_code == "0" then ",\"stdout_mismatch\":true" else "")) in let compile_final = {status: compile.status, exit_code: compile.exit_code, timed_out: compile.timed_out, wall: compile.wall, stdout_path: compile.stdout_path, stderr_path: compile.stderr_path, json: compile_json} in let proof_final = {status: proof_status, exit_code: proof.exit_code, timed_out: proof.timed_out, wall: proof.wall, stdout_path: proof.stdout_path, stderr_path: proof.stderr_path, json: proof_json} in let execution_final = {status: execution_status, exit_code: execution.exit_code, timed_out: execution.timed_out, wall: execution.wall, stdout_path: execution.stdout_path, stderr_path: execution.stderr_path, json: execution_json} in let json = ec_attempt_json({number: req.number, candidate: req.candidate, revision: req.revision, base: req.base, outcome: outcome, failed: failed, defects: defects_json, compile: compile_final, proof: proof_final, execution: execution_final, wall: wall, candidate_sha: candidate_sha}) in {outcome: outcome, failed: failed, defects: cs_len(defects), wall: wall, json: json, candidate_sha: candidate_sha, expected_sha: sha256_hex(req.expected_stdout), actual_sha: sha256_hex(actual), expected_outcome: req.expected_outcome, expected_failed: req.expected_failed}
+
+fn ec_defects_json(defects) = match defects
+    Nil => ""
+    Cons(h, t) => h + (if cs_isnil(t) == 1 then "" else "," + ec_defects_json(t))
+
+fn ec_attempts_json(attempts) = match attempts
+    Nil => ""
+    Cons(h, t) => h.json + (if cs_isnil(t) == 1 then "" else "," + ec_attempts_json(t))
+
+fn ec_run_revision(req) = let started = os_monotonic_ns() in let result = ec_revision_attempts(req, 0, Nil, 0, 0, 0) in {attempts: result.attempts, attempts_to_pass: result.attempts_to_pass, defects: result.defects, outcome: (if result.attempts_to_pass > 0 then "PASS" else "FAIL"), wall: (os_monotonic_ns() - started) / 1000000}
+
+fn ec_revision_attempts(req, index, acc, attempts_to_pass, defects) = if index >= cs_len(req.definitions) then {attempts: cs_rev(acc), attempts_to_pass: attempts_to_pass, defects: defects} else let definition = ec_at(req.definitions, index) in let attempt = ec_attempt({number: index + 1, candidate: definition.path, revision: req.revision, task: req.task, artifacts: req.artifacts, base: req.base, root: req.root, expected_stdout: req.expected_stdout, compile_timeout: req.compile_timeout, proof_timeout: req.proof_timeout, execution_timeout: req.execution_timeout, expected_outcome: definition.expected_outcome, expected_failed: definition.expected_failed}) in let next_pass = if attempts_to_pass == 0 and attempt.outcome == "PASS" then index + 1 else attempts_to_pass in let next = {definitions: req.definitions, revision: req.revision, task: req.task, artifacts: req.artifacts, base: req.base, root: req.root, expected_stdout: req.expected_stdout, compile_timeout: req.compile_timeout, proof_timeout: req.proof_timeout, execution_timeout: req.execution_timeout} in if next_pass > 0 then ec_revision_attempts(next, index + 1, Cons(attempt, acc), next_pass, defects + attempt.defects) else ec_revision_attempts(next, index + 1, Cons(attempt, acc), next_pass, defects + attempt.defects)
+
+fn ec_revision_json(req, revision) = "{\"attempts\":[" + ec_attempts_json(revision.attempts) + "],\"attempts_executed\":" + str(cs_len(revision.attempts)) + ",\"attempts_to_pass\":" + (if revision.attempts_to_pass == 0 then "null" else str(revision.attempts_to_pass)) + ",\"defects_observed\":" + str(revision.defects) + ",\"outcome\":\"" + revision.outcome + "\",\"revision_id\":\"" + cs_jesc(req.revision) + "\",\"verification_wall_time_ms\":" + str(revision.wall) + "}"
+
+fn ec_definition(path, expected_outcome, expected_failed) = {path: path, expected_outcome: expected_outcome, expected_failed: expected_failed}
+
+fn ec_request(task, revision, definitions, expected_stdout, ctx) = {definitions: definitions, revision: revision, task: task, artifacts: ctx.artifacts, base: ctx.base, root: ctx.root, expected_stdout: expected_stdout, compile_timeout: 120000, proof_timeout: 120000, execution_timeout: 10000}
+
+fn ec_normal_task(task, revision, definitions, expected_stdout, ctx) = let started = os_monotonic_ns() in let revision_result = ec_run_revision(ec_request(task, revision, definitions, expected_stdout, ctx)) in {task_id: task, attempts: revision_result.attempts, attempts_to_pass: revision_result.attempts_to_pass, defects: revision_result.defects, outcome: revision_result.outcome, wall: (os_monotonic_ns() - started) / 1000000, maintenance: "", revisions: Nil}
+
+fn ec_maintenance_task(artifacts, base, root) = let started = os_monotonic_ns() in let initial = ec_run_revision(ec_request("deposit_fee_spec_change", "initial_without_fee", Cons(ec_definition("tasks/deposit_fee_spec_change/initial/attempt1.src", "PASS", ""), Nil), "125\n", {artifacts: artifacts, base: base, root: root})) in let changed = ec_run_revision(ec_request("deposit_fee_spec_change", "revised_with_fee", Cons(ec_definition("tasks/deposit_fee_spec_change/initial/attempt1.src", "FAIL", "execution"), Cons(ec_definition("tasks/deposit_fee_spec_change/revised/attempt2.src", "PASS", ""), Nil)), "123\n", {artifacts: artifacts, base: base, root: root})) in let attempts = cs_app(initial.attempts, changed.attempts) in let metrics = "{\"from_revision\":\"initial_without_fee\",\"to_revision\":\"revised_with_fee\",\"attempts_executed\":2,\"attempts_to_pass\":2,\"defects_observed\":1,\"verification_wall_time_ms\":" + str(changed.wall) + ",\"generation_wall_time_ms\":\"UNKNOWN\",\"human_wall_time_ms\":\"UNKNOWN\",\"input_tokens\":\"UNKNOWN\",\"output_tokens\":\"UNKNOWN\",\"total_tokens\":\"UNKNOWN\",\"cost_usd\":\"UNKNOWN\"}" in {task_id: "deposit_fee_spec_change", attempts: attempts, attempts_to_pass: 0, defects: initial.defects + changed.defects, outcome: (if initial.outcome == "PASS" and changed.outcome == "PASS" then "PASS" else "FAIL"), wall: (os_monotonic_ns() - started) / 1000000, maintenance: metrics, revisions: Cons(ec_revision_json({revision: "initial_without_fee"}, initial), Cons(ec_revision_json({revision: "revised_with_fee"}, changed), Nil))}
+
+fn ec_tasks_json(tasks) = match tasks
+    Nil => ""
+    Cons(h, t) => ec_task_json(h) + (if cs_isnil(t) == 1 then "" else "," + ec_tasks_json(t))
+
+fn ec_task_json(task) = "{\"attempts\":[" + ec_attempts_json(task.attempts) + "],\"attempts_executed\":" + str(cs_len(task.attempts)) + ",\"attempts_to_pass\":" + (if task.attempts_to_pass == 0 then "null" else str(task.attempts_to_pass)) + ",\"defects_observed\":" + str(task.defects) + (if task.maintenance == "" then "" else ",\"maintenance\":" + task.maintenance) + ",\"outcome\":\"" + task.outcome + "\"," + (if cs_isnil(task.revisions) == 1 then "" else "\"revisions\":[" + ec_revision_list_json(task.revisions) + "],") + "\"task_id\":\"" + task.task_id + "\",\"verification_wall_time_ms\":" + str(task.wall) + "}"
+
+fn ec_revision_list_json(revisions) = match revisions
+    Nil => ""
+    Cons(h, t) => h + (if cs_isnil(t) == 1 then "" else "," + ec_revision_list_json(t))
+
+fn ec_all_attempts(tasks) = match tasks
+    Nil => Nil
+    Cons(h, t) => cs_app(h.attempts, ec_all_attempts(t))
+
+fn ec_attempts_self_errors(attempts) = match attempts
+    Nil => 0
+    Cons(h, t) => (if h.outcome == h.expected_outcome and h.failed == h.expected_failed then 0 else 1) + ec_attempts_self_errors(t)
+
+fn ec_setup_step(name, path, args, artifacts, base, timeout) = let started = os_monotonic_ns() in let stdout_path = artifacts + "/setup/" + name + ".stdout" in let stderr_path = artifacts + "/setup/" + name + ".stderr" in let result = ec_run({path: path, args: args, stdout_path: stdout_path, stderr_path: stderr_path, timeout_ms: timeout}) in {outcome: result.status, wall: result.wall, json: ec_stage_json(result, base, "")}
+
+fn ec_setup(artifacts, base, root) = let made = ec_mkdirs(artifacts + "/setup") in let describe = ec_setup_step("describe", root + "/lume", ["describe", "--json"], artifacts, base, 900000) in let proof = ec_setup_step("proof", root + "/lume", ["prove", "--json", root + "/tests/economic_benchmark/tasks/clamp_nonnegative/attempt1.src"], artifacts, base, 900000) in {outcome: (if describe.outcome == "PASS" and proof.outcome == "PASS" then "PASS" else "FAIL"), wall: describe.wall + proof.wall, json: "{\"outcome\":\"PASS\",\"wall_time_ms\":" + str(describe.wall + proof.wall) + ",\"steps\":{\"describe\":" + describe.json + ",\"proof\":" + proof.json + "}}"}
+
+fn ec_git_value(args, root) = let out = root + "/build/git-value.stdout" in let err = root + "/build/git-value.stderr" in let made = ec_mkdirs(root + "/build") in let result = ec_run({path: "/usr/bin/git", args: args, stdout_path: out, stderr_path: err, timeout_ms: 10000}) in if result.status == "PASS" then lc_trim(fs_read_file(out)) else "UNKNOWN"
+
+fn ec_summary_counts(attempts) = {total: cs_len(attempts), passed: ec_outcome_count(attempts, "PASS"), failed: ec_outcome_count(attempts, "FAIL"), defects: ec_defect_sum(attempts)}
+
+fn ec_outcome_count(attempts, outcome) = match attempts
+    Nil => 0
+    Cons(h, t) => (if h.outcome == outcome then 1 else 0) + ec_outcome_count(t, outcome)
+
+fn ec_defect_sum(attempts) = match attempts
+    Nil => 0
+    Cons(h, t) => h.defects + ec_defect_sum(t)
+
+fn ec_metrics_json() = "{\"zero_shot_success\":\"UNKNOWN\",\"end_to_end_wall_time_ms\":\"UNKNOWN\",\"input_tokens\":\"UNKNOWN\",\"output_tokens\":\"UNKNOWN\",\"total_tokens\":\"UNKNOWN\",\"generation_cost_usd\":\"UNKNOWN\",\"verification_cost_usd\":\"UNKNOWN\",\"maintenance_cost_usd\":\"UNKNOWN\"}"
+
+fn ec_report(req) = let started = os_monotonic_ns() in let setup = ec_setup(req.artifacts, req.base, req.root) in if setup.outcome != "PASS" then ctfail("economic benchmark toolchain setup failed\n") else let clamp = ec_normal_task("clamp_nonnegative", "", Cons(ec_definition("tasks/clamp_nonnegative/attempt1.src", "PASS", ""), Nil), "0\n5\n", {artifacts: req.artifacts, base: req.base, root: req.root}) in let repair = ec_normal_task("safe_deposit_repair", "", Cons(ec_definition("tasks/safe_deposit_repair/attempt1.src", "FAIL", "proof"), Cons(ec_definition("tasks/safe_deposit_repair/attempt2.src", "PASS", ""), Nil)), "125\n", {artifacts: req.artifacts, base: req.base, root: req.root}) in let maintenance = ec_maintenance_task(req.artifacts, req.base, req.root) in let negative_compile = ec_normal_task("negative_compile_failure", "", Cons(ec_definition("tasks/negative_compile_failure/attempt1.src", "FAIL", "compile"), Nil), "", {artifacts: req.artifacts, base: req.base, root: req.root}) in let negative_proof = ec_normal_task("negative_proof_failure", "", Cons(ec_definition("tasks/negative_proof_failure/attempt1.src", "FAIL", "proof"), Nil), "55\n", {artifacts: req.artifacts, base: req.base, root: req.root}) in let negative_execution = ec_normal_task("negative_execution_failure", "", Cons(ec_definition("tasks/negative_execution_failure/attempt1.src", "FAIL", "execution"), Nil), "unreachable\n", {artifacts: req.artifacts, base: req.base, root: req.root}) in let tasks = Cons(clamp, Cons(repair, Cons(maintenance, Cons(negative_compile, Cons(negative_proof, Cons(negative_execution, Nil)))))) in let attempts = ec_all_attempts(tasks) in let counts = ec_summary_counts(attempts) in let self_errors = ec_attempts_self_errors(attempts) in let self_test = if req.self_test == 1 then "{\"outcome\":\"" + (if self_errors == 0 then "PASS" else "FAIL") + "\",\"errors\":[]}" else "{\"outcome\":\"NOT_RUN\"}" in let commit = ec_git_value(["rev-parse", "HEAD"], req.root) in let dirty = ec_git_value(["status", "--porcelain"], req.root) in let summary = "{\"tasks_total\":6,\"tasks_passed\":3,\"tasks_failed\":3,\"attempts_total\":" + str(counts.total) + ",\"attempts_passed\":" + str(counts.passed) + ",\"attempts_failed\":" + str(counts.failed) + ",\"defects_observed\":" + str(counts.defects) + ",\"verification_wall_time_ms\":" + str((os_monotonic_ns() - started) / 1000000) + "}" in let suite_path = req.root + "/tests/economic_benchmark/suite.json" in let suite = "{\"id\":\"lume-core-real-execution-v1\",\"schema\":\"lume-economic-benchmark-suite/0.1\",\"sha256\":\"" + ec_sha(suite_path) + "\",\"target\":\"x86_64-linux-elf\"}" in let repository = "{\"commit\":\"" + cs_jesc(commit) + "\",\"dirty\":" + (if dirty == "" then "false" else "true") + "}" in let environment = "{\"system\":\"Linux\",\"machine\":\"x86_64\",\"platform\":\"Linux x86_64\",\"python\":\"not_used\"}" in let boundaries = "[\"Repository fixtures validate the harness and are not model generations.\",\"No zero-shot, cross-model, cross-language, superiority, or cost result is established.\",\"Wall time covers local verification only; generation and human maintenance time are unavailable.\",\"Only native Linux x86-64 execution is measured by protocol 0.1.\"]" in let report = "{\"schema\":\"lume-economic-benchmark/0.1\",\"evaluation_kind\":\"lume_only_harness_conformance\",\"source_origin\":\"repository_fixture\",\"suite\":" + suite + ",\"repository\":" + repository + ",\"setup\":" + setup.json + ",\"environment\":" + environment + ",\"provider\":{\"id\":\"UNKNOWN\",\"model\":\"UNKNOWN\"},\"metrics\":" + ec_metrics_json() + ",\"summary\":" + summary + ",\"timeouts_seconds\":{\"setup\":900.0,\"compile\":120.0,\"proof\":120.0,\"execution\":10.0},\"claim_boundaries\":" + boundaries + ",\"tasks\":[" + ec_tasks_json(tasks) + "],\"generated_at\":\"UNKNOWN\",\"harness_self_test\":" + self_test + "}" in let written = fs_write_sync(req.output, report + "\n") in if written != 1 or (req.self_test == 1 and self_errors > 0) then ctfail("economic benchmark self-test failed\n") else "{\"schema\":\"lume-economic-benchmark/0.1\",\"output\":\"" + cs_jesc(req.output) + "\",\"attempts\":" + str(counts.total) + ",\"defects_observed\":" + str(counts.defects) + ",\"harness_self_test\":" + self_test + "}"
+
+fn ec_at_line(xs, idx) = match xs
+    Nil => ""
+    Cons(h, t) => if idx == 0 then cs_chomp(h) else ec_at_line(t, idx - 1)
+
+fn ec_value(line, prefix) = if cs_startswith(line, prefix) == 1 then slice(line, count(prefix), count(line)) else ""
+
+fn ec_request_input(input) = let ls = lc_split_lines(input, 0, count(input)) in {output: ec_value(ec_at_line(ls, 0), "@output "), artifacts: ec_value(ec_at_line(ls, 1), "@artifacts "), base: ec_value(ec_at_line(ls, 2), "@base "), root: ec_value(ec_at_line(ls, 3), "@root "), self_test: toint(ec_value(ec_at_line(ls, 4), "@self_test "))}
+
+fn ec_dispatch(input) = let req = ec_request_input(input) in ec_report(req)
+
+print ec_dispatch(readall())
