@@ -10,6 +10,6 @@ fn test_fs_read_byte_missing() = fs_read_byte("../../compiler/stage1/definitely_
 
 fn test_fs_read_byte_negative_offset() = fs_read_byte("../../bootstrap/lume0/lume0", 0 - 1) == 0 - 1
 
-fn test_fs_read_byte_native_nul() = fs_read_byte("../../bootstrap/lume0/lume0", 4) == 0
+fn test_fs_read_byte_native_nul() = fs_read_byte("../../bootstrap/lume0/lume0", 7) == 0
 
 fn test_fs_read_byte_native_header() = fs_read_byte("../../bootstrap/lume0/lume0", 0) == 127
