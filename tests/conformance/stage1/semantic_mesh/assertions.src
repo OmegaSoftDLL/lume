@@ -16,7 +16,7 @@ fn ma_field(s, key) = ma_between(s, "\"" + key + "\":\"", "\"")
 
 fn ma_number_end(s, i, n) = if i >= n then n else if at(s, i) == "," or at(s, i) == "}" then i else ma_number_end(s, i + 1, n)
 
-fn ma_number(s, key) = let marker = "\"" + key + "\":" in let p = cs_find_substr(s, marker, 0, count(s), count(marker)) in if p >= count(s) then {ok: 0, value: 0} else let start = p + count(marker) in let finish = ma_number_end(s, start, count(s)) in let text = slice(s, start, finish) in let value = toint(text) in {ok: 1, value: (if cs_startswith(text, "-") == 1 then 0 - value else value)}
+fn ma_number(s, key) = let marker = "\"" + key + "\":" in let p = cs_find_substr(s, marker, 0, count(s), count(marker)) in if p >= count(s) then {ok: 0, value: 0} else let start = p + count(marker) in let finish = ma_number_end(s, start, count(s)) in let text = slice(s, start, finish) in let negative = cs_startswith(text, "-") in let value = toint(if negative == 1 then slice(text, 1, count(text)) else text) in {ok: 1, value: (if negative == 1 then 0 - value else value)}
 
 fn ma_unescape(s, i, acc) = if i >= count(s) then {ok: 1, text: acc} else let c = at(s, i) in if c != "\\" then ma_unescape(s, i + 1, acc + c) else if i + 1 >= count(s) then {ok: 0, text: ""} else let e = at(s, i + 1) in let decoded = if e == "n" then "\n" else if e == "r" then "\r" else if e == "t" then "\t" else if e == "\\" then "\\" else if e == "\"" then "\"" else if e == "/" then "/" else "" in if count(decoded) == 0 then {ok: 0, text: ""} else ma_unescape(s, i + 2, acc + decoded)
 
