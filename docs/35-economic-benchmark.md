@@ -7,30 +7,37 @@ harness fixtures, not recorded model successes and not public benchmark scores.
 
 ## What protocol 0.1 measures
 
-`scripts/economic_benchmark.py` reads a `lume-economic-benchmark-suite/0.1` manifest and executes each
-candidate attempt in order. It stops a task after its first `PASS`. An attempt is `PASS` only when all
-of these checks succeed on the current checkout:
+`lume economy` calls `scripts/economic_benchmark.py`, which reads a
+`lume-economic-benchmark-suite/0.1` manifest and executes each candidate attempt in order. It stops a
+task or revision after its first `PASS`. An attempt is `PASS` only when all of these checks succeed on
+the current checkout:
 
 1. `lume build --target x86_64-linux-elf` exits zero and creates a native artifact;
 2. `lume prove --json` exits zero, returns valid JSON with at least one obligation, and every
    obligation has status `proven` (`runtime_checked`, `refuted`, missing, and malformed results fail);
-3. the native artifact exits zero before the timeout and its stdout exactly matches the task's
-   expected UTF-8 bytes.
+3. the native artifact exits zero before the timeout and its stdout exactly matches the task or
+   revision's expected UTF-8 bytes.
 
 A failed or timed-out stage makes the attempt `FAIL`; later stages are `NOT_RUN`. There is no path from
-a candidate-declared result, a recorded transcript, or compilation alone to `PASS`.
+a candidate-declared result, a recorded transcript, fixed metrics, or compilation alone to `PASS`.
 
 The `lume-economic-benchmark/0.1` report records, for every actual attempt:
 
 - candidate SHA-256, attempt number, outcome, failed stage, and observed defects;
 - per-stage and per-attempt wall time in milliseconds, measured with a monotonic clock;
-- exit codes, timeout flags, proof-status counts, artifact/stdout hashes, and raw log paths;
+- exit codes, timeout flags, proof-status counts, artifact/stdout hashes, raw log paths, and log SHA-256;
 - attempts to first pass, defects, verification time, suite/repository identities, and environment.
 
-Generation latency, provider identity, zero-shot success, tokens, and all monetary costs are
-`UNKNOWN` in this repository-fixture path. Verification wall time excludes generation and human repair
-time. In particular, `safe_deposit_repair` measures two real verification attempts and one observed
-proof defect; it does **not** claim a total maintenance cost.
+A maintenance task has exactly two revisions, each with its own expected stdout and ordered attempts.
+The report preserves both revision results and derives maintenance attempts, defects, and verification
+wall time from the changed revision. Generation and human maintenance time, tokens, and monetary cost
+remain `UNKNOWN`.
+
+Generation latency, provider identity, zero-shot success, tokens, and all monetary costs are `UNKNOWN`
+in this repository-fixture path because no real provider interface or usage receipt is available.
+Verification wall time excludes generation and human repair time. In particular, `safe_deposit_repair`
+measures two real verification attempts and one observed proof defect; it does **not** claim a total
+maintenance cost.
 
 ## Reproduce the harness self-test
 
@@ -45,11 +52,14 @@ sh scripts/check-economic-benchmark.sh
 
 The check first prepares the self-hosted tools through the existing `./lume` wrapper. This one-time
 setup has its own timeout and is reported separately, so cold toolchain construction is neither
-repeated nor counted as candidate compilation time. It then runs six attempts and verifies the report
-independently. The expected fixture outcomes are:
+repeated nor counted as candidate compilation time. It then runs nine attempts through `lume economy`
+and independently re-derives every attempt outcome from its stages, recomputes aggregate counts, and
+verifies raw-log hashes. The expected fixture outcomes are:
 
 - `clamp_nonnegative`: first-attempt `PASS`;
 - `safe_deposit_repair`: proof failure followed by a second-attempt `PASS`;
+- `deposit_fee_spec_change`: the initial candidate passes the no-fee revision; that exact candidate
+  then fails execution under the fee revision, and a fee-aware second candidate passes;
 - `negative_compile_failure`: compilation `FAIL`;
 - `negative_proof_failure`: compilation succeeds, missing proof obligations cause `FAIL`;
 - `negative_execution_failure`: compilation and proof succeed, native division by zero causes `FAIL`.
@@ -57,7 +67,7 @@ independently. The expected fixture outcomes are:
 To retain a report and its raw artifacts, run:
 
 ```sh
-sh scripts/run-economic-benchmark.sh \
+./lume economy \
   --output build/economic-benchmark/results.json \
   --artifacts build/economic-benchmark/artifacts \
   --self-test
@@ -71,9 +81,12 @@ JSON report and logs so another operator can inspect failures and rerun the same
 
 ## Adding candidates
 
-Each task declares an exact expected stdout and an ordered list of `.src` candidates relative to the
-manifest. Candidate paths must remain inside the suite directory. The `self_test` expectation is used
-only by `--self-test` to detect harness regressions; it never determines an attempt outcome.
+Each ordinary task declares an exact expected stdout and an ordered list of `.src` candidates relative
+to the manifest. A spec-change maintenance task instead declares two `revisions`, each with an `id`,
+expected stdout, and attempts. Candidate paths must remain inside the suite directory. The `self_test`
+expectation is used only by `--self-test` to detect harness regressions; it never determines an attempt
+outcome. The check also rejects the removed `lume mesh bench` path and fails if its legacy fixed-metric
+fields reappear in `lmesh.src`.
 
 For a future externally generated run, preserve the complete candidate for every attempt and generate
 attempt one without diagnostics, compiler feedback, repairs, or task-specific exemplars. Only that

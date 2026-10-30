@@ -1680,19 +1680,18 @@ EOF
     ev330_ev_sha=$(sed -n 's/.*"claim_boundary":"implementation_evidence_only","candidate_sha256":"\([0-9a-f]*\)".*/\1/p' "$ntmp/ev330_proven.json")
     if [ -n "$ev330_top_sha" ] && [ "$ev330_top_sha" = "$ev330_ev_sha" ] && grep -q '"schema":"lume.evolve.evidence.v1","version":1,"claim_boundary":"implementation_evidence_only"' "$ntmp/ev330_proven.json" && grep -q '"aggregate_verdict":"PASS","proof_assurance":{"verdict":"PASS","obligations_total":1,"proven":1,"runtime_checked":0,"refuted":0}' "$ntmp/ev330_proven.json" && grep -q '"aggregate_verdict":"UNKNOWN","proof_assurance":{"verdict":"UNKNOWN","obligations_total":1,"proven":0,"runtime_checked":1,"refuted":0}' "$ntmp/ev330_rt.json" && grep -q '"aggregate_verdict":"UNKNOWN","proof_assurance":{"verdict":"UNKNOWN","obligations_total":0,"proven":0,"runtime_checked":0,"refuted":0},"merge_eligibility":{"gates_ok":true,"human_approved":true,"signature_verified":true,"can_merge":true}' "$ntmp/ev330_none.json" && grep -q '"aggregate_verdict":"FAIL","proof_assurance":{"verdict":"FAIL","obligations_total":1,"proven":0,"runtime_checked":0,"refuted":1},"merge_eligibility":{"gates_ok":false,"human_approved":false,"signature_verified":false,"can_merge":false}' "$ntmp/ev330_refuted.json" && grep -q '"aggregate_verdict":"FAIL","proof_assurance":{"verdict":"PASS","obligations_total":1,"proven":1,"runtime_checked":0,"refuted":0},"merge_eligibility":{"gates_ok":false' "$ntmp/ev330_fail_dom.json"; then ok "evolve versioned evidence (#330): lume.evolve.evidence.v1 schema, FAIL > UNKNOWN > PASS aggregation, proven/runtime_checked/refuted/absent distinction, candidate SHA-256 binding, and separate proof_assurance vs merge_eligibility"; else bad "evolve versioned evidence (#330)"; cat "$ntmp/ev330_proven.json" "$ntmp/ev330_rt.json" "$ntmp/ev330_none.json" "$ntmp/ev330_refuted.json" "$ntmp/ev330_fail_dom.json" 2>/dev/null; fi
 
-    # Priority 0 (#337 + #334 + #335 + #332 + #333 + #230):
+    # Priority 0 (#337 + #334 + #335 + #332 + #333):
     # 1. Semantic Intent Protocol (lume-intent-protocol/1.0): negotiate, transact, rollback, replay, fixit_tx
     # 2. Verifiable Universal Adapters ("Chameleon"): C-ABI, MMIO/port/irq, HTTP/OpenAPI preserving own/ref/caps/provenance
     # 3. Portable & Renewable Evidence (lume-evidence-bundle/1.0): FIPS 180-4 SHA-256 + material-change invalidation
     # 4. Global Machine-Native Component Registry (lume-component-registry/1.0): content-addressed capability + contract lookup
-    # 5. Publicly Measured Economic Benchmark (lume-economy-benchmark/1.0): zero-shot, tokens, attempts, defects, maintenance
-    # 6. Reproducible Killer Capstones: TenantLedgerSaaS (SaaS+Web+Backend) & KernelRtcPciDriver (Kernel+Driver)
+    # 5. Reproducible Killer Capstones: TenantLedgerSaaS (SaaS+Web+Backend) & KernelRtcPciDriver (Kernel+Driver)
+    # Economic benchmark evidence is validated separately by scripts/check-economic-benchmark.sh.
     LUME_BIN_DIR="$ntmp" ../../lume compile ../../compiler/stage1/track_n_p0_mesh_ok.src >"$ntmp/p0_mesh.s" 2>"$ntmp/p0_mesh.err" || true
     "$ntmp/lasm" <"$ntmp/p0_mesh.s" >"$ntmp/p0_mesh.elf" 2>/dev/null || true
     chmod +x "$ntmp/p0_mesh.elf" 2>/dev/null || true
     LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/lmesh.src >"$ntmp/p0_unit.out" 2>&1 || true
     LUME_BIN_DIR="$ntmp" ../../lume mesh schema >"$ntmp/p0_schema.json" 2>/dev/null || true
-    LUME_BIN_DIR="$ntmp" ../../lume mesh bench >"$ntmp/p0_bench.json" 2>/dev/null || true
     LUME_BIN_DIR="$ntmp" ../../lume mesh capstone >"$ntmp/p0_capstone.json" 2>/dev/null || true
     cp ../../examples/intent/saas_web_ledger.intent "$ntmp/saas_web_ledger.intent"
     cp ../../examples/intent/kernel_rtc_driver.intent "$ntmp/kernel_rtc_driver.intent"
@@ -1700,7 +1699,7 @@ EOF
     LUME_BIN_DIR="$ntmp" ../../lume intent build --json "$ntmp/kernel_rtc_driver.intent" -o "$ntmp/kern_intent.elf" >"$ntmp/p0_kern_intent.json" 2>/dev/null || true
     p0_saas_elf_out=$("$ntmp/saas_intent.elf" 2>/dev/null | tr '\n' ',' || true)
     p0_kern_elf_out=$("$ntmp/kern_intent.elf" 2>/dev/null | tr '\n' ',' || true)
-    if [ -x "$ntmp/p0_mesh.elf" ] && "$ntmp/p0_mesh.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/track_n_p0_mesh_ok_asm.expected - >/dev/null && grep -q "5 passed, 0 failed" "$ntmp/p0_unit.out" && grep -q '"protocol":"lume-intent-protocol/1.0"' "$ntmp/p0_schema.json" && grep -q '"schema":"lume-economy-benchmark/1.0"' "$ntmp/p0_bench.json" && grep -q '"token_saving_pct":76' "$ntmp/p0_bench.json" && grep -q '"same_semantic_mesh":true' "$ntmp/p0_capstone.json" && [ "$p0_saas_elf_out" = "1,65,90," ] && [ "$p0_kern_elf_out" = "26,3584," ]; then ok "Priority 0 (#337, #334, #335, #332, #333, #230): semantic intent protocol, universal Chameleon adapters, FIPS SHA-256 renewable evidence, component registry, economic benchmark & dual SaaS/Kernel killer capstones"; else bad "Priority 0 (#337): semantic intent mesh & killer capstones"; cat "$ntmp/p0_mesh.err" "$ntmp/p0_unit.out" "$ntmp/p0_schema.json" "$ntmp/p0_bench.json" "$ntmp/p0_capstone.json" "$ntmp/p0_saas_intent.json" "$ntmp/p0_kern_intent.json" 2>/dev/null; printf 'saas_elf=%s kern_elf=%s\n' "$p0_saas_elf_out" "$p0_kern_elf_out"; fi
+    if [ -x "$ntmp/p0_mesh.elf" ] && "$ntmp/p0_mesh.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/track_n_p0_mesh_ok_asm.expected - >/dev/null && grep -q "5 passed, 0 failed" "$ntmp/p0_unit.out" && grep -q '"protocol":"lume-intent-protocol/1.0"' "$ntmp/p0_schema.json" && grep -q '"same_semantic_mesh":true' "$ntmp/p0_capstone.json" && [ "$p0_saas_elf_out" = "1,65,90," ] && [ "$p0_kern_elf_out" = "26,3584," ]; then ok "Priority 0 (#337, #334, #335, #332, #333): semantic intent protocol, universal Chameleon adapters, FIPS SHA-256 renewable evidence, component registry & dual SaaS/Kernel killer capstones"; else bad "Priority 0 (#337): semantic intent mesh & killer capstones"; cat "$ntmp/p0_mesh.err" "$ntmp/p0_unit.out" "$ntmp/p0_schema.json" "$ntmp/p0_capstone.json" "$ntmp/p0_saas_intent.json" "$ntmp/p0_kern_intent.json" 2>/dev/null; printf 'saas_elf=%s kern_elf=%s\n' "$p0_saas_elf_out" "$p0_kern_elf_out"; fi
 else
     ok "no-toolchain ELF pipeline (skipped: not linux/x86_64, or under ASan)"
 fi
@@ -1820,8 +1819,7 @@ EOF
     if ../../lume run ../../compiler/stage1/track_o_os_ok.src 2>/dev/null | diff -u ../../tests/conformance/stage1/track_o_os_ok_asm.expected - >/dev/null; then ok "Track O cross-platform (#241, docs/27): general-purpose OS stack (storage WAL/CRC-32, VFS lumefs+ramfs, TCP/IP/ARP/ICMP, Ring-3 syscalls, shell pipelines, and CMOS RTC / PCI / PS2 drivers)"; else bad "Track O cross-platform (#241, docs/27)"; fi
 
     _p0_x_cap=$(../../lume mesh capstone 2>/dev/null || true)
-    _p0_x_ben=$(../../lume mesh bench 2>/dev/null || true)
-    if printf '%s' "$_p0_x_cap" | grep -q '"same_semantic_mesh":true' && printf '%s' "$_p0_x_cap" | grep -q '"dom_output":"div.tenant-badge\[data-tenant=101\]:65"' && printf '%s' "$_p0_x_cap" | grep -q '"rtc_year":2026' && printf '%s' "$_p0_x_ben" | grep -q '"schema":"lume-economy-benchmark/1.0"' && printf '%s' "$_p0_x_ben" | grep -q '"token_saving_pct":76'; then ok "Priority 0 cross-platform (#337, #334, #335, #332, #333, #230): semantic intent mesh, Chameleon adapters, FIPS SHA-256 renewable evidence, component registry, economic benchmark & dual SaaS/Kernel killer capstones"; else bad "Priority 0 cross-platform (#337)"; printf '%s\n%s\n' "$_p0_x_cap" "$_p0_x_ben"; fi
+    if printf '%s' "$_p0_x_cap" | grep -q '"same_semantic_mesh":true' && printf '%s' "$_p0_x_cap" | grep -q '"dom_output":"div.tenant-badge\[data-tenant=101\]:65"' && printf '%s' "$_p0_x_cap" | grep -q '"rtc_year":2026'; then ok "Priority 0 cross-platform (#337, #334, #335, #332, #333): semantic intent mesh, Chameleon adapters, FIPS SHA-256 renewable evidence, component registry & dual SaaS/Kernel killer capstones"; else bad "Priority 0 cross-platform (#337)"; printf '%s\n' "$_p0_x_cap"; fi
 
     if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
         _mac_d=$(mktemp -d)

@@ -140,6 +140,17 @@ def not_run_stage():
     return {"status": "NOT_RUN", "wall_time_ms": 0}
 
 
+def add_log_evidence(result, stdout_path, stderr_path, report_base):
+    result["logs"] = {
+        "stdout": relative_display(stdout_path, report_base),
+        "stderr": relative_display(stderr_path, report_base),
+    }
+    result["log_sha256"] = {
+        "stdout": sha256_file(stdout_path),
+        "stderr": sha256_file(stderr_path),
+    }
+
+
 def proof_summary(stdout_path):
     try:
         data = json.loads(stdout_path.read_text(encoding="utf-8"))
@@ -196,7 +207,7 @@ def defect_for(stage, stage_result, proof_errors, stdout, stderr):
     return defect
 
 
-def run_attempt(suite_dir, task, attempt, attempt_number, args, attempt_dir, report_base):
+def run_attempt(suite_dir, revision, attempt, attempt_number, args, attempt_dir, report_base):
     source = (suite_dir / attempt["path"]).resolve()
     try:
         source.relative_to(suite_dir)
@@ -223,10 +234,7 @@ def run_attempt(suite_dir, task, attempt, attempt_number, args, attempt_dir, rep
     compile_result["command"] = [
         "lume", "build", "--target", SUPPORTED_TARGET, source_rel, "-o", "<artifact>"
     ]
-    compile_result["logs"] = {
-        "stdout": relative_display(compile_stdout, report_base),
-        "stderr": relative_display(compile_stderr, report_base),
-    }
+    add_log_evidence(compile_result, compile_stdout, compile_stderr, report_base)
     if compile_result["status"] == "PASS" and not binary.is_file():
         compile_result["status"] = "FAIL"
         compile_result["artifact_missing"] = True
@@ -250,10 +258,7 @@ def run_attempt(suite_dir, task, attempt, attempt_number, args, attempt_dir, rep
         if proof_result["status"] == "PASS" and not proof_ok:
             proof_result["status"] = "FAIL"
         proof_result["command"] = ["lume", "prove", "--json", source_rel]
-        proof_result["logs"] = {
-            "stdout": relative_display(proof_stdout, report_base),
-            "stderr": relative_display(proof_stderr, report_base),
-        }
+        add_log_evidence(proof_result, proof_stdout, proof_stderr, report_base)
         stages["proof"] = proof_result
     else:
         stages["proof"] = not_run_stage()
@@ -273,7 +278,7 @@ def run_attempt(suite_dir, task, attempt, attempt_number, args, attempt_dir, rep
         execution_result = run_process(
             [str(binary)], args.execution_timeout, execution_stdout, execution_stderr
         )
-        expected_stdout = task["expected_stdout"].encode("utf-8")
+        expected_stdout = revision["expected_stdout"].encode("utf-8")
         actual_stdout = execution_stdout.read_bytes()
         execution_result["expected_stdout_sha256"] = hashlib.sha256(expected_stdout).hexdigest()
         execution_result["actual_stdout_sha256"] = hashlib.sha256(actual_stdout).hexdigest()
@@ -281,10 +286,7 @@ def run_attempt(suite_dir, task, attempt, attempt_number, args, attempt_dir, rep
             execution_result["status"] = "FAIL"
             execution_result["stdout_mismatch"] = True
         execution_result["command"] = ["<artifact>"]
-        execution_result["logs"] = {
-            "stdout": relative_display(execution_stdout, report_base),
-            "stderr": relative_display(execution_stderr, report_base),
-        }
+        add_log_evidence(execution_result, execution_stdout, execution_stderr, report_base)
         stages["execution"] = execution_result
         if execution_result["status"] != "PASS":
             defects.append(
@@ -328,32 +330,78 @@ def run_attempt(suite_dir, task, attempt, attempt_number, args, attempt_dir, rep
     }
 
 
+def check_attempt_self_test(task_id, expected_attempts, actual_attempts):
+    errors = []
+    if len(expected_attempts) != len(actual_attempts):
+        return ["%s: attempt count differed from self-test expectation" % task_id]
+    for expected, actual in zip(expected_attempts, actual_attempts):
+        expectation = expected["self_test"]
+        if actual["outcome"] != expectation["outcome"]:
+            errors.append(
+                "%s attempt %d: expected %s, got %s"
+                % (task_id, actual["attempt"], expectation["outcome"], actual["outcome"])
+            )
+        if actual["failed_stage"] != expectation["failed_stage"]:
+            errors.append(
+                "%s attempt %d: expected failed_stage %s, got %s"
+                % (
+                    task_id,
+                    actual["attempt"],
+                    expectation["failed_stage"],
+                    actual["failed_stage"],
+                )
+            )
+    return errors
+
+
 def check_self_test(tasks):
     errors = []
     for task in tasks:
-        expected_attempts = task["definition"]["attempts"]
-        actual_attempts = task["attempts"]
-        if len(expected_attempts) != len(actual_attempts):
-            errors.append("%s: attempt count differed from self-test expectation" % task["task_id"])
-            continue
-        for expected, actual in zip(expected_attempts, actual_attempts):
-            expectation = expected["self_test"]
-            if actual["outcome"] != expectation["outcome"]:
-                errors.append(
-                    "%s attempt %d: expected %s, got %s"
-                    % (task["task_id"], actual["attempt"], expectation["outcome"], actual["outcome"])
-                )
-            if actual["failed_stage"] != expectation["failed_stage"]:
-                errors.append(
-                    "%s attempt %d: expected failed_stage %s, got %s"
-                    % (
-                        task["task_id"],
-                        actual["attempt"],
-                        expectation["failed_stage"],
-                        actual["failed_stage"],
+        definition = task["definition"]
+        if "revisions" in definition:
+            for expected_revision, actual_revision in zip(
+                definition["revisions"], task["revisions"]
+            ):
+                errors.extend(
+                    check_attempt_self_test(
+                        task["task_id"] + "/" + actual_revision["revision_id"],
+                        expected_revision["attempts"],
+                        actual_revision["attempts"],
                     )
                 )
+        else:
+            errors.extend(
+                check_attempt_self_test(task["task_id"], definition["attempts"], task["attempts"])
+            )
     return errors
+
+
+def run_revision(suite_dir, task, revision, args, report_base, revision_id=None):
+    started = time.monotonic_ns()
+    result = {"attempts": []}
+    first_pass = None
+    for index, attempt in enumerate(revision["attempts"], 1):
+        attempt_dir = args.artifacts / task["id"]
+        if revision_id is not None:
+            attempt_dir = attempt_dir / revision_id
+        attempt_dir = attempt_dir / ("attempt-%d" % index)
+        attempt_result = run_attempt(
+            suite_dir, revision, attempt, index, args, attempt_dir, report_base
+        )
+        if revision_id is not None:
+            attempt_result["revision"] = revision_id
+        result["attempts"].append(attempt_result)
+        if attempt_result["outcome"] == "PASS":
+            first_pass = index
+            break
+    result["attempts_executed"] = len(result["attempts"])
+    result["attempts_to_pass"] = first_pass
+    result["defects_observed"] = sum(
+        len(attempt["defects"]) for attempt in result["attempts"]
+    )
+    result["verification_wall_time_ms"] = (time.monotonic_ns() - started) // 1000000
+    result["outcome"] = "PASS" if first_pass is not None else "FAIL"
+    return result
 
 
 def prepare_toolchain(args, report_base):
@@ -376,10 +424,7 @@ def prepare_toolchain(args, report_base):
         stdout_path = setup_dir / (name + ".stdout")
         stderr_path = setup_dir / (name + ".stderr")
         result = run_process(command, args.setup_timeout, stdout_path, stderr_path)
-        result["logs"] = {
-            "stdout": relative_display(stdout_path, report_base),
-            "stderr": relative_display(stderr_path, report_base),
-        }
+        add_log_evidence(result, stdout_path, stderr_path, report_base)
         steps[name] = result
         if result["status"] != "PASS":
             diagnostics = stderr_path.read_text(encoding="utf-8", errors="replace")
@@ -424,30 +469,54 @@ def main():
     tasks = []
     for task in suite["tasks"]:
         task_started = time.monotonic_ns()
-        task_result = {
-            "task_id": task["id"],
-            "attempts": [],
-            "definition": task,
-        }
-        first_pass = None
-        for index, attempt in enumerate(task["attempts"], 1):
-            attempt_dir = args.artifacts / task["id"] / ("attempt-%d" % index)
-            result = run_attempt(
-                suite_dir, task, attempt, index, args, attempt_dir, report_base
+        if "revisions" in task:
+            if len(task["revisions"]) != 2:
+                raise SystemExit("spec-change maintenance tasks require exactly two revisions")
+            task_result = {
+                "task_id": task["id"],
+                "attempts": [],
+                "revisions": [],
+                "definition": task,
+            }
+            for revision in task["revisions"]:
+                revision_result = run_revision(
+                    suite_dir, task, revision, args, report_base, revision["id"]
+                )
+                revision_result["revision_id"] = revision["id"]
+                task_result["revisions"].append(revision_result)
+                task_result["attempts"].extend(revision_result["attempts"])
+            initial, changed = task_result["revisions"]
+            task_result["attempts_executed"] = len(task_result["attempts"])
+            task_result["attempts_to_pass"] = None
+            task_result["defects_observed"] = sum(
+                len(attempt["defects"]) for attempt in task_result["attempts"]
             )
-            task_result["attempts"].append(result)
-            if result["outcome"] == "PASS":
-                first_pass = index
-                break
-        task_result["attempts_executed"] = len(task_result["attempts"])
-        task_result["attempts_to_pass"] = first_pass
-        task_result["defects_observed"] = sum(
-            len(attempt["defects"]) for attempt in task_result["attempts"]
-        )
+            task_result["maintenance"] = {
+                "from_revision": initial["revision_id"],
+                "to_revision": changed["revision_id"],
+                "attempts_executed": changed["attempts_executed"],
+                "attempts_to_pass": changed["attempts_to_pass"],
+                "defects_observed": changed["defects_observed"],
+                "verification_wall_time_ms": changed["verification_wall_time_ms"],
+                "generation_wall_time_ms": "UNKNOWN",
+                "human_wall_time_ms": "UNKNOWN",
+                "input_tokens": "UNKNOWN",
+                "output_tokens": "UNKNOWN",
+                "total_tokens": "UNKNOWN",
+                "cost_usd": "UNKNOWN",
+            }
+            task_result["outcome"] = (
+                "PASS"
+                if all(revision["outcome"] == "PASS" for revision in task_result["revisions"])
+                else "FAIL"
+            )
+        else:
+            task_result = run_revision(suite_dir, task, task, args, report_base)
+            task_result["task_id"] = task["id"]
+            task_result["definition"] = task
         task_result["verification_wall_time_ms"] = (
             time.monotonic_ns() - task_started
         ) // 1000000
-        task_result["outcome"] = "PASS" if first_pass is not None else "FAIL"
         tasks.append(task_result)
 
     attempts = [attempt for task in tasks for attempt in task["attempts"]]
@@ -515,8 +584,10 @@ def main():
     for task in report["tasks"]:
         definition = task.pop("definition")
         if not args.self_test:
-            for attempt in definition["attempts"]:
-                attempt.pop("self_test", None)
+            revisions = definition.get("revisions", [definition])
+            for revision in revisions:
+                for attempt in revision["attempts"]:
+                    attempt.pop("self_test", None)
     temporary = args.output.with_name(args.output.name + ".tmp")
     temporary.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     os.replace(str(temporary), str(args.output))

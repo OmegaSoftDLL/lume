@@ -16,6 +16,7 @@
 #   lume check [--json] <file.lume|file.src>  static lexical, parse, name, type and contract checks
 #   lume compile [--json] [--run] <file.src>  compile-as-a-service: {ok, diagnostics, asm, stdout} (E1, AI-first)
 #   lume describe [--json]                    emit machine-readable language self-description (AI-first)
+#   lume economy --output <results.json>      run real-execution economic benchmark evidence harness
 #   lume --version | --help
 set -eu
 
@@ -2974,7 +2975,10 @@ cmd_mesh() {
             adapter)   _mmode="adapter"; shift ;;
             evidence)  _mmode="evidence"; shift ;;
             registry)  _mmode="registry"; shift ;;
-            bench)     _mmode="bench"; shift ;;
+            bench)
+                echo "lume mesh bench: removed; use 'lume economy' for real-execution evidence" >&2
+                return 64
+                ;;
             capstone)  _mmode="capstone"; shift ;;
             --json)    shift ;;
             *)         shift ;;
@@ -2985,6 +2989,10 @@ cmd_mesh() {
     _mout=$(run_core_tool lmesh "$_mtmp")
     rm -f "$_mtmp"
     printf '%s\n' "$_mout"
+}
+
+cmd_economy() {
+    sh "$ROOT/scripts/run-economic-benchmark.sh" "$@"
 }
 
 [ $# -ge 1 ] || usage
@@ -3054,6 +3062,9 @@ case "$_sub" in
         ;;
     mesh)
         cmd_mesh "$@"
+        ;;
+    economy)
+        cmd_economy "$@"
         ;;
     evolve)
         cmd_evolve "$@"
