@@ -1,0 +1,5 @@
+# lume.lock — deterministic content-addressed lockfile (P26, P32)
+version = 1
+manifest = {"name":"p0_rtc_kernel","version":"0.1.0","edition":"2026","capabilities":"io"}
+manifest_sha256 = "1b4ffa3a9a289717887b26fdc291669a2d41af1098ca892a7c8142407f3522b7"
+module "kernel_rtc.src" sha256 = "456b4af279cec1ac9823e9c382031b4591c940ccebab4c0788518a30a84d6ec1"

@@ -1,0 +1,8 @@
+[package]
+name = "p0_rtc_kernel"
+version = "0.1.0"
+edition = "2026"
+entry = "kernel_rtc.src"
+
+[capabilities]
+allow = ["io", "interrupt", "realtime"]

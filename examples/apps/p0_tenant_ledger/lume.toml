@@ -1,0 +1,8 @@
+[package]
+name = "p0_tenant_ledger"
+version = "0.1.0"
+edition = "2026"
+entry = "ledger_server.src"
+
+[capabilities]
+allow = ["io", "net", "fs", "db"]
