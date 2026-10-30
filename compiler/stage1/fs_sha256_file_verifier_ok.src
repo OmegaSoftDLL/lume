@@ -12,6 +12,6 @@ fn fv_sha_blocks(msg, total, blk_off, st) = if blk_off >= total then st else let
 
 fn fv_sha256_file(path) = let len = fv_file_size(path, 0) in let total = ((len + 9 + 63) / 64) * 64 in let msg = {path: path, len: len} in let init = {a: 1779033703, b: 3144134277, c: 1013904242, d: 2773480762, e: 1359893119, f: 2600822924, g: 528734635, h: 1541459225} in let fin = fv_sha_blocks(msg, total, 0, init) in sha_hex32(fin.a) + sha_hex32(fin.b) + sha_hex32(fin.c) + sha_hex32(fin.d) + sha_hex32(fin.e) + sha_hex32(fin.f) + sha_hex32(fin.g) + sha_hex32(fin.h)
 
-fn fv_probe() = let path = "../../bootstrap/lume0/lume0" in if fs_read_byte(path, 0) == 127 and fs_read_byte(path, 4) == 0 and fs_read_byte(path, 18) == 183 then fv_sha256_file(path) else ctfail("binary SHA-256 verifier requires a real x86-64 ELF input")
+fn fv_probe() = let path = "../../bootstrap/lume0/lume0" in if fs_read_byte(path, 0) == 127 and fs_read_byte(path, 7) == 0 and fs_read_byte(path, 18) == 183 then fv_sha256_file(path) else ctfail("binary SHA-256 verifier requires a real x86-64 ELF input")
 
 print fv_probe()
