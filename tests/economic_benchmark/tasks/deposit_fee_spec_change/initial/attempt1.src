@@ -1,0 +1,2 @@
+fn safe_deposit(bal: int, amt: int) -> int requires bal >= 0 requires amt > 0 ensures result > bal = bal + amt
+print safe_deposit(100, 25)

@@ -28,6 +28,35 @@
       ]
     },
     {
+      "id": "deposit_fee_spec_change",
+      "revisions": [
+        {
+          "id": "initial_without_fee",
+          "expected_stdout": "125\n",
+          "attempts": [
+            {
+              "path": "tasks/deposit_fee_spec_change/initial/attempt1.src",
+              "self_test": {"outcome": "PASS", "failed_stage": null}
+            }
+          ]
+        },
+        {
+          "id": "revised_with_fee",
+          "expected_stdout": "123\n",
+          "attempts": [
+            {
+              "path": "tasks/deposit_fee_spec_change/initial/attempt1.src",
+              "self_test": {"outcome": "FAIL", "failed_stage": "execution"}
+            },
+            {
+              "path": "tasks/deposit_fee_spec_change/revised/attempt2.src",
+              "self_test": {"outcome": "PASS", "failed_stage": null}
+            }
+          ]
+        }
+      ]
+    },
+    {
       "id": "negative_compile_failure",
       "expected_stdout": "",
       "attempts": [
