@@ -135,13 +135,34 @@ fn resitem(h, t, cs) = match h
 fn resdef(nm, ro, t, cs) = if isnumlbl(nm) then Cons(mklabel(ro, locname(nm, cntget(cs, nm))), reslocals(t, cntinc(cs, nm))) else Cons(mklabel(ro, nm), reslocals(t, cs))
 fn mklabel(ro, nm) = if ro == 1 then RL(nm) else TL(nm)
 
-## --- symbol table (association list name -> virtual address) ---
-fn symaddr(syms, nm) = match syms
+## --- symbol table (256 hash buckets; each bucket preserves the association-list fallback) ---
+fn sym_ord_lo(c) = if c < "0" then (if c < "(" then (if c == " " then 32 else if c == "!" then 33 else if c == "\"" then 34 else if c == "#" then 35 else if c == "$" then 36 else if c == "%" then 37 else if c == "&" then 38 else 39) else (if c == "(" then 40 else if c == ")" then 41 else if c == "*" then 42 else if c == "+" then 43 else if c == "," then 44 else if c == "-" then 45 else if c == "." then 46 else 47)) else (if c < ":" then 48 + toint(c) else (if c == ":" then 58 else if c == ";" then 59 else if c == "<" then 60 else if c == "=" then 61 else if c == ">" then 62 else if c == "?" then 63 else 64))
+fn sym_ord_up(c) = if c < "N" then (if c < "G" then (if c == "A" then 65 else if c == "B" then 66 else if c == "C" then 67 else if c == "D" then 68 else if c == "E" then 69 else 70) else (if c == "G" then 71 else if c == "H" then 72 else if c == "I" then 73 else if c == "J" then 74 else if c == "K" then 75 else if c == "L" then 76 else 77)) else (if c < "U" then (if c == "N" then 78 else if c == "O" then 79 else if c == "P" then 80 else if c == "Q" then 81 else if c == "R" then 82 else if c == "S" then 83 else 84) else (if c == "U" then 85 else if c == "V" then 86 else if c == "W" then 87 else if c == "X" then 88 else if c == "Y" then 89 else if c == "Z" then 90 else if c == "[" then 91 else if c == "\\" then 92 else if c == "]" then 93 else if c == "^" then 94 else if c == "_" then 95 else 96))
+fn sym_ord_az(c) = if c < "n" then (if c < "g" then (if c == "a" then 97 else if c == "b" then 98 else if c == "c" then 99 else if c == "d" then 100 else if c == "e" then 101 else 102) else (if c == "g" then 103 else if c == "h" then 104 else if c == "i" then 105 else if c == "j" then 106 else if c == "k" then 107 else if c == "l" then 108 else 109)) else (if c < "u" then (if c == "n" then 110 else if c == "o" then 111 else if c == "p" then 112 else if c == "q" then 113 else if c == "r" then 114 else if c == "s" then 115 else 116) else (if c == "u" then 117 else if c == "v" then 118 else if c == "w" then 119 else if c == "x" then 120 else if c == "y" then 121 else if c == "z" then 122 else if c == "|" then 124 else if c == "~" then 126 else if c > "z" and c < "|" then 123 else 125))
+fn sym_ord(c) = if c == "\n" then 10 else if c == "\r" then 13 else if c == "\t" then 9 else if c < "A" then sym_ord_lo(c) else if c < "a" then sym_ord_up(c) else sym_ord_az(c)
+
+fn symhash_i(s, i, n, acc) = if i >= n then acc else symhash_i(s, i + 1, n, (acc * 31 + sym_ord(at(s, i))) % 256)
+fn symhash(s) = symhash_i(s, 0, count(s), 0)
+
+fn symbucket_put(e, bs) = let hash = symhash(e.nm) in match bs
+    Nil        => Cons({bucket: hash, entries: Cons(e, Nil)}, Nil)
+    Cons(b, t) => if b.bucket == hash then Cons({bucket: hash, entries: Cons(e, b.entries)}, t) else Cons(b, symbucket_put(e, t))
+
+fn symbucket_map(xs, base, bs) = match xs
+    Nil        => bs
+    Cons(h, t) => symbucket_map(t, base, symbucket_put({nm: h.nm, v: base + h.o}, bs))
+
+fn mapsym(xs, base) = symbucket_map(xs, base, Nil)
+
+fn symaddr_bucket(entries, nm) = match entries
+    Nil        => 0 - 1
+    Cons(h, t) => if h.nm == nm then h.v else symaddr_bucket(t, nm)
+
+fn symaddr_h(syms, nm, hash) = match syms
     Nil        => 0
-    Cons(h, t) => if h.nm == nm then h.v else symaddr(t, nm)
-fn mapsym(xs, base) = match xs
-    Nil        => Nil
-    Cons(h, t) => Cons({nm: h.nm, v: base + h.o}, mapsym(t, base))
+    Cons(b, t) => if b.bucket == hash then let v = symaddr_bucket(b.entries, nm) in if v >= 0 then v else symaddr_h(t, nm, hash) else symaddr_h(t, nm, hash)
+
+fn symaddr(syms, nm) = symaddr_h(syms, nm, symhash(nm))
 
 ## --- encoder: ModRM/SIB/REX + displacement (port of emit_rm) ---
 fn scalebits(x) = if x == 2 then 1 else if x == 4 then 2 else if x == 8 then 3 else 0

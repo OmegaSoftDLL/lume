@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Replaced the self-hosted assembler's linear symbol scan with 256 hash buckets while preserving
+  byte-identical ELF output, colliding-label behavior, native execution, and the assembler fixpoint.
+
 ### Added
 - **Stage 5 (Phase 5 — `docs/25-phase5-plan.md`, `docs/20-interop.md`, `docs/22-adoption.md`, `docs/23-horizon.md`): Systems, Interop, Realtime, Proof Certificates & `lume-os` Microkernel:**
   - **Track M5 / Interop (`04_parser_decls.src`, `06b_phase3.src`, `lcaas.src`, `interop.src`):** Added `@repr(c)`, `@packed`, `@bits`, `@mmio`, `@export("C")`, `extern "c" fn` (requiring `"ffi"` effect `[E0200]` and enforcing foreign provenance taint `[A0003]` until verified via `verify(...)` or `ensures`), `pub extern "c" fn` reverse C-ABI & WAT export (`ffi_export_c_header`, `wasm_export_wat`), `lume agent bind <header.h>` AI C-header binding generator, and `std.wasm` reference sandbox model (`wasm_module_new`, `wasm_grant_cap`, `wasm_call_add`, `wasm_store32`, `wasm_load32`, `wasm_call_host_fs` requiring both `"wasm"` and `"fs"` capabilities `[E0200]`).
