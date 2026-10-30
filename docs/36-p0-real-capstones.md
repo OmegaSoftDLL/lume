@@ -34,9 +34,10 @@ The build emits a raw MBR/Long Mode image, not a hosted ELF. The guest waits for
 cycle, reads hardware registers through ports `0x70`/`0x71`, and reports the observed values through
 the existing COM1 runtime. Acceptance covers the register format selected by QEMU in these runs.
 
-`tests/capstones/test_rtc_qemu.py` rejects hosted syscalls and invalid boot images, then runs
-`qemu-system-x86_64` twice with different `-rtc base=` values. It requires the guest timestamps to
-match the independent emulated clock settings; a fixed arithmetic result cannot pass.
+`tests/capstones/rtc_assertions.src` rejects hosted syscalls and invalid boot images in Lume. The
+runner executes `qemu-system-x86_64` twice with different `-rtc base=` values, and the Lume oracle
+requires the guest timestamps to match the independent emulated clock settings; a fixed arithmetic
+result cannot pass.
 
 This is **not complete OS or driver-ecosystem acceptance**. PCI, MMIO/block storage, interrupts in
 this minimal driver, physical hardware, measured WCET, zero allocation, and the remaining #241/#297
