@@ -424,7 +424,7 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_
     LUME_BIN_DIR="$ntmp" ../../lume build "$ntmp/merr/miss.src" -o "$ntmp/merr/miss.elf" 2>"$ntmp/merr/miss.err"; miss_rc=$?
     if [ "$cyc_rc" != 0 ] && grep -q "circular module dependency" "$ntmp/merr/cyc.err" && [ "$miss_rc" != 0 ] && grep -q "module 'no_such_mod' not found" "$ntmp/merr/miss.err"; then ok "phase-2 T3: native lmod.src rejects circular 'use' chains and missing modules"; else bad "phase-2 T3: native lmod.src cycle & missing-module errors"; fi
     LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/fs_read_byte_ok.src >"$ntmp/fs_read_byte.out" 2>"$ntmp/fs_read_byte.err"
-    if grep -q "4 passed, 0 failed" "$ntmp/fs_read_byte.out"; then ok "phase-2 binary filesystem evidence: fs_read_byte returns exact bytes and rejects missing paths and offsets"; else bad "phase-2 binary filesystem evidence: fs_read_byte"; cat "$ntmp/fs_read_byte.out" "$ntmp/fs_read_byte.err"; fi
+    if grep -q "7 passed, 0 failed" "$ntmp/fs_read_byte.out"; then ok "phase-2 binary filesystem evidence: fs_read_byte returns exact bytes and rejects missing paths and offsets"; else bad "phase-2 binary filesystem evidence: fs_read_byte"; cat "$ntmp/fs_read_byte.out" "$ntmp/fs_read_byte.err"; fi
     rm -f fs_read_byte_probe
     LUME_BIN_DIR="$ntmp" ../../lume pkg init "$ntmp/pkgdemo" >/dev/null 2>&1
     LUME_BIN_DIR="$ntmp" ../../lume pkg lock "$ntmp/pkgdemo" >/dev/null 2>&1
