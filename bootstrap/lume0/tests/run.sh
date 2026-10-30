@@ -424,6 +424,9 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_
     LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/fs_read_byte_ok.src >"$ntmp/fs_read_byte.out" 2>"$ntmp/fs_read_byte.err"
     if grep -q "4 passed, 0 failed" "$ntmp/fs_read_byte.out"; then ok "phase-2 binary filesystem evidence: fs_read_byte returns exact bytes and rejects missing paths and offsets"; else bad "phase-2 binary filesystem evidence: fs_read_byte"; cat "$ntmp/fs_read_byte.out" "$ntmp/fs_read_byte.err"; fi
     rm -f fs_read_byte_probe
+    LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/fs_mkdir_ok.src >"$ntmp/fs_mkdir.out" 2>"$ntmp/fs_mkdir.err"
+    if grep -q "3 passed, 0 failed" "$ntmp/fs_mkdir.out"; then ok "phase-2 artifact filesystem: fs_mkdir creates, reuses, and validates artifact directories"; else bad "phase-2 artifact filesystem: fs_mkdir"; cat "$ntmp/fs_mkdir.out" "$ntmp/fs_mkdir.err"; fi
+    rm -rf fs_mkdir_probe fs_mkdir_nested_probe definitely_missing_parent
     LUME_BIN_DIR="$ntmp" ../../lume pkg init "$ntmp/pkgdemo" >/dev/null 2>&1
     LUME_BIN_DIR="$ntmp" ../../lume pkg lock "$ntmp/pkgdemo" >/dev/null 2>&1
     pkg_ok=1
