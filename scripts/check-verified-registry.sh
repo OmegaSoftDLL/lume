@@ -23,6 +23,7 @@ fn test_component_clamp_inner() = component_clamp(4, 0, 10) == 4
 EOF
 
 "$LUME" registry publish --adapter "$TMP/input/adapter.src" --source "$TMP/input/source.src" --tests "$TMP/input/tests.src" > "$TMP/publish.json"
+cat "$TMP/publish.json"
 python3 - "$TMP/publish.json" "$TMP/input" "$STORE" <<'PY'
 import hashlib
 import json
