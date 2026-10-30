@@ -1,0 +1,81 @@
+use lcaas
+
+fn ma_len(xs) = match xs
+    Nil => 0
+    Cons(h, t) => 1 + ma_len(t)
+
+fn ma_at_line(xs, idx) = match xs
+    Nil => ""
+    Cons(h, t) => if idx == 0 then cs_chomp(h) else ma_at_line(t, idx - 1)
+
+fn ma_value(line, prefix) = if cs_startswith(line, prefix) == 1 then slice(line, count(prefix), count(line)) else ""
+
+fn ma_between(s, open, close) = let n = count(s) in let a = cs_find_substr(s, open, 0, n, count(open)) in if a >= n then {ok: 0, text: ""} else let start = a + count(open) in let b = cs_find_substr(s, close, start, n, count(close)) in if b >= n then {ok: 0, text: ""} else {ok: 1, text: slice(s, start, b)}
+
+fn ma_field(s, key) = ma_between(s, "\"" + key + "\":\"", "\"")
+
+fn ma_number_end(s, i, n) = if i >= n then n else if at(s, i) == "," or at(s, i) == "}" then i else ma_number_end(s, i + 1, n)
+
+fn ma_number(s, key) = let marker = "\"" + key + "\":" in let p = cs_find_substr(s, marker, 0, count(s), count(marker)) in if p >= count(s) then {ok: 0, value: 0} else let start = p + count(marker) in let finish = ma_number_end(s, start, count(s)) in let text = slice(s, start, finish) in let value = toint(text) in {ok: 1, value: (if cs_startswith(text, "-") == 1 then 0 - value else value)}
+
+fn ma_unescape(s, i, acc) = if i >= count(s) then {ok: 1, text: acc} else let c = at(s, i) in if c != "\\" then ma_unescape(s, i + 1, acc + c) else if i + 1 >= count(s) then {ok: 0, text: ""} else let e = at(s, i + 1) in let decoded = if e == "n" then "\n" else if e == "r" then "\r" else if e == "t" then "\t" else if e == "\\" then "\\" else if e == "\"" then "\"" else if e == "/" then "/" else "" in if count(decoded) == 0 then {ok: 0, text: ""} else ma_unescape(s, i + 2, acc + decoded)
+
+fn ma_without_quotes(s, i, acc) = if i >= count(s) then acc else let c = at(s, i) in if c == "\"" then ma_without_quotes(s, i + 1, acc) else ma_without_quotes(s, i + 1, acc + c)
+
+fn ma_field_canon(value) = str(count(value)) + ":" + value
+
+fn ma_state(result) = let raw = ma_between(result, ",\"state\":{", "},\"validation\":") in let goal = ma_field(raw.text, "goal") in let target = ma_field(raw.text, "target") in let caps = ma_between(raw.text, "\"capabilities\":[", "],\"resources\":") in let max_source = ma_number(raw.text, "max_source_bytes") in let max_tx = ma_number(raw.text, "max_transactions") in let acceptance = ma_field(raw.text, "acceptance") in let ast = ma_field(raw.text, "ast") in let source = ma_field(raw.text, "source") in let sha = ma_field(raw.text, "state_sha256") in {ok: raw.ok, goal: goal.text, target: target.text, caps: caps.text, max_source: max_source.value, max_tx: max_tx.value, acceptance: acceptance.text, ast: ast.text, source: source.text, sha: sha.text}
+
+fn ma_state_valid(result) = let st = ma_state(result) in let goal = ma_unescape(st.goal, 0, "") in let target = ma_unescape(st.target, 0, "") in let acceptance = ma_unescape(st.acceptance, 0, "") in let ast = ma_unescape(st.ast, 0, "") in let source = ma_unescape(st.source, 0, "") in let caps = if st.caps == "" then "pure" else ma_without_quotes(st.caps, 0, "") in let resources = "max_source_bytes=" + str(st.max_source) + ",max_transactions=" + str(st.max_tx) in let canonical = ma_field_canon("lume-semantic-intent-state/0.1") + ma_field_canon(goal.text) + ma_field_canon(target.text) + ma_field_canon(caps) + ma_field_canon(resources) + ma_field_canon(acceptance.text) + ma_field_canon(ast.text) + ma_field_canon(source.text) in st.ok == 1 and goal.ok == 1 and target.ok == 1 and acceptance.ok == 1 and ast.ok == 1 and source.ok == 1 and st.sha == lc_sha256(canonical)
+
+fn ma_objects(text) = if text == "" then Nil else let p = cs_find_substr(text, "},{", 0, count(text), 3) in let raw = if p >= count(text) then text else slice(text, 0, p + 1) in let rest = if p >= count(text) then "" else slice(text, p + 2, count(text)) in Cons(raw, ma_objects(rest))
+
+fn ma_nullable_string(raw) = if raw == "null" then "" else if count(raw) >= 2 and at(raw, 0) == "\"" and at(raw, count(raw) - 1) == "\"" then slice(raw, 1, count(raw) - 1) else "invalid"
+
+fn ma_node(raw) = let idx = ma_number(raw, "index") in let id = ma_field(raw, "id") in let parent_idx = ma_number(raw, "parent_index") in let parent = ma_between(raw, ",\"parent_id\":", ",\"op\":") in let op = ma_field(raw, "op") in let sha = ma_field(raw, "state_sha256") in let affected = ma_between(raw, "\"affected_symbols\":[", "],\"invalidated_symbols\":") in let invalidated = ma_between(raw, "\"invalidated_symbols\":[", "]}") in {index: idx.value, id: id.text, parent_index: parent_idx.value, parent_id: ma_nullable_string(parent.text), op: op.text, sha: sha.text, affected: affected.text, invalidated: invalidated.text}
+
+fn ma_nodes(result) = let raw = ma_between(result, ",\"lineage\":[", "],\"active_branch\":") in if raw.ok == 0 or raw.text == "" then Nil else ma_objects(raw.text)
+
+fn ma_node_at(idx, raws) = match raws
+    Nil => {index: 0 - 1, id: "", parent_index: 0 - 1, parent_id: "", op: "", sha: "", affected: "", invalidated: ""}
+    Cons(h, t) => let n = ma_node(h) in if n.index == idx then n else ma_node_at(idx, t)
+
+fn ma_lineage_valid(raws, all, idx) = match raws
+    Nil => 1
+    Cons(h, t) => let n = ma_node(h) in let canonical = ma_field_canon("lume-semantic-intent-node/0.1") + ma_field_canon(n.parent_id) + ma_field_canon(n.op) + ma_field_canon(n.sha) in let hash_ok = if n.id == lc_sha256(canonical) then 1 else 0 in let parent_ok = if idx == 0 then if n.parent_index == 0 - 1 and n.parent_id == "" then 1 else 0 else if n.parent_index >= 0 and n.parent_index < idx and n.parent_id == (ma_node_at(n.parent_index, all)).id then 1 else 0 in if n.index == idx and hash_ok == 1 and parent_ok == 1 then ma_lineage_valid(t, all, idx + 1) else 0
+
+fn ma_common_valid(result) = cs_startswith(result, "{\"ok\":true,\"protocol\":\"lume-semantic-intent/0.1\"") == 1 and ma_state_valid(result) == 1 and ma_lineage_valid(ma_nodes(result), ma_nodes(result), 0) == 1
+
+fn ma_validation(result) = ma_between(result, ",\"validation\":{", "},\"lineage\":")
+
+fn ma_proofs(validation) = let raw = ma_between(validation, "\"proofs\":[", "]") in if raw.ok == 0 then Nil else ma_objects(raw.text)
+
+fn ma_proofs_proven(raws) = match raws
+    Nil => 1
+    Cons(h, t) => if (ma_field(h, "status")).text == "proven" then ma_proofs_proven(t) else 0
+
+fn ma_named_proof_count(raws, name) = match raws
+    Nil => 0
+    Cons(h, t) => (if (ma_field(h, "name")).text == name then 1 else 0) + ma_named_proof_count(t, name)
+
+fn ma_named_proof_status(raws, name) = match raws
+    Nil => ""
+    Cons(h, t) => if (ma_field(h, "name")).text == name then (ma_field(h, "status")).text else ma_named_proof_status(t, name)
+
+fn ma_negotiate(result) = let st = ma_state(result) in let validation = ma_validation(result) in let nodes = ma_nodes(result) in let current = ma_field(result, "current") in let branch = ma_between(result, "\"active_branch\":[", "],\"diagnostics\":") in let proofs = ma_proofs(validation.text) in ma_common_valid(result) == 1 and (ma_field(result, "mode")).text == "negotiate" and st.target == "x86_64-linux-elf" and cs_has_substr(validation.text, "\"compiler_ok\":true") == 1 and cs_has_substr(validation.text, "\"target_supported\":true") == 1 and (ma_field(validation.text, "proof_status")).text == "proven" and (ma_field(validation.text, "result")).text == "42" and ma_len(proofs) > 0 and ma_proofs_proven(proofs) == 1 and ma_len(nodes) == 1 and branch.text == "\"" + current.text + "\""
+
+fn ma_pair_set(raw, a, b) = raw == "\"" + a + "\",\"" + b + "\"" or raw == "\"" + b + "\",\"" + a + "\""
+
+fn ma_transact(result) = let st = ma_state(result) in let validation = ma_validation(result) in let raws = ma_nodes(result) in let n0 = ma_node_at(0, raws) in let n1 = ma_node_at(1, raws) in let n2 = ma_node_at(2, raws) in let n3 = ma_node_at(3, raws) in let n4 = ma_node_at(4, raws) in let n5 = ma_node_at(5, raws) in let n6 = ma_node_at(6, raws) in let branch = ma_between(result, "\"active_branch\":[", "],\"diagnostics\":") in let expected_branch = "\"" + n0.id + "\",\"" + n1.id + "\",\"" + n4.id + "\",\"" + n5.id + "\",\"" + n6.id + "\"" in let unique_states = if n0.sha != n1.sha and n0.sha != n2.sha and n0.sha != n3.sha and n1.sha != n2.sha and n1.sha != n3.sha and n2.sha != n3.sha then 1 else 0 in let edits_ok = if n1.affected == "\"inc\"" and n2.affected == "\"inc\"" and n5.affected == "\"inc\"" and ma_pair_set(n1.invalidated, "inc", "caller") == 1 and ma_pair_set(n2.invalidated, "inc", "caller") == 1 and ma_pair_set(n5.invalidated, "inc", "caller") == 1 and ma_pair_set(n4.affected, "inc", "caller") == 1 and ma_pair_set(n4.invalidated, "inc", "caller") == 1 and ma_pair_set(n3.invalidated, "inc", "caller") == 1 and ma_pair_set(n6.invalidated, "inc", "caller") == 1 then 1 else 0 in ma_common_valid(result) == 1 and (ma_field(result, "mode")).text == "transact" and ma_len(raws) == 7 and st.target == "lumb" and cs_has_substr(validation.text, "\"compiler_ok\":true") == 1 and cs_has_substr(validation.text, "\"target_supported\":true") == 1 and (ma_field(validation.text, "proof_status")).text == "proven" and unique_states == 1 and n4.sha == n1.sha and n5.sha == n2.sha and n3.sha == n6.sha and n3.id != n6.id and cs_startswith(n4.op, "rollback:") == 1 and n4.parent_index == 3 and n5.parent_index == 4 and n6.parent_index == 5 and cs_startswith(n5.op, "replay:" + n2.id + ":") == 1 and cs_startswith(n6.op, "replay:" + n3.id + ":") == 1 and branch.text == expected_branch and edits_ok == 1 and cs_has_substr(st.source, "ensures ((result - x) == 1)") == 1
+
+fn ma_out_of_fragment(result) = let validation = ma_validation(result) in let proofs = ma_proofs(validation.text) in ma_common_valid(result) == 1 and cs_has_substr(validation.text, "\"compiler_ok\":true") == 1 and cs_has_substr(validation.text, "\"target_supported\":true") == 1 and (ma_field(validation.text, "proof_status")).text == "runtime_checked" and ma_named_proof_count(proofs, "cube_abs") == 1 and ma_named_proof_status(proofs, "cube_abs") == "runtime_checked"
+
+fn ma_error(result, code) = let diagnostics = ma_between(result, "\"diagnostics\":[", "]}") in cs_startswith(result, "{\"ok\":false,\"protocol\":\"lume-semantic-intent/0.1\"") == 1 and diagnostics.ok == 1 and diagnostics.text != "" and (ma_field(diagnostics.text, "code")).text == code and cs_has_substr(result, "\"state\":") == 0 and cs_has_substr(result, "\"current\":") == 0
+
+fn ma_canonical(a, b) = let state_a = ma_state(a) in let state_b = ma_state(b) in ma_common_valid(a) == 1 and ma_common_valid(b) == 1 and state_a.goal != state_b.goal and state_a.sha != state_b.sha and (ma_field(a, "current")).text != (ma_field(b, "current")).text
+
+fn ma_request(input) = let ls = lc_split_lines(input, 0, count(input)) in {mode: ma_value(ma_at_line(ls, 0), "@mode "), path: ma_value(ma_at_line(ls, 1), "@path "), other: ma_value(ma_at_line(ls, 2), "@other "), code: ma_value(ma_at_line(ls, 3), "@code ")}
+
+fn ma_dispatch(input) = let req = ma_request(input) in let result = fs_read_file(req.path) in let ok = if req.mode == "error" then ma_error(result, req.code) else if req.mode == "canonical" then ma_canonical(result, fs_read_file(req.other)) else if req.mode == "negotiate" then ma_negotiate(result) else if req.mode == "transact" then ma_transact(result) else if req.mode == "out_of_fragment" then ma_out_of_fragment(result) else 0 in if ok == 1 then "{\"ok\":true}" else ctfail("semantic mesh assertion failed: " + req.mode)
+
+print ma_dispatch(readall())

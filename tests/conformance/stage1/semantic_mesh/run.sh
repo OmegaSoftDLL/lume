@@ -14,6 +14,11 @@ fail=0
 ok() { pass=$((pass + 1)); printf '  ok   %s\n' "$1"; }
 bad() { fail=$((fail + 1)); printf '  FAIL %s\n' "$1"; }
 
+"$ROOT/lume" build "$FIX/assertions.src" -o "$OUT/lmesh_assert" >"$OUT/assertions-build.out" 2>"$OUT/assertions-build.err" || {
+    cat "$OUT/assertions-build.out" "$OUT/assertions-build.err"
+    exit 1
+}
+
 _mesh_invoke() {
     _mesh_name=$1
     _mesh_rc=0
@@ -21,11 +26,11 @@ _mesh_invoke() {
 }
 _mesh_ok() {
     _mesh_invoke "$1"
-    [ "$_mesh_rc" -eq 0 ] && python3 "$FIX/assertions.py" "$2" "$OUT/$1.json"
+    [ "$_mesh_rc" -eq 0 ] && printf '@mode %s\n@path %s\n' "$2" "$OUT/$1.json" | "$OUT/lmesh_assert"
 }
 _mesh_err() {
     _mesh_invoke "$1"
-    [ "$_mesh_rc" -ne 0 ] && python3 "$FIX/assertions.py" error "$OUT/$1.json" "$2"
+    [ "$_mesh_rc" -ne 0 ] && printf '@mode error\n@path %s\n@other \n@code %s\n' "$OUT/$1.json" "$2" | "$OUT/lmesh_assert"
 }
 
 if _mesh_ok negotiate negotiate; then ok "P0 mesh (#337): negotiate goal/contracts/effects/resources/target with real compiler, target, and prover"; else bad "P0 mesh negotiation"; cat "$OUT/negotiate.json" "$OUT/negotiate.err" 2>/dev/null; fi
@@ -50,7 +55,7 @@ if [ -z "${LUME0_ASAN:-}" ]; then
     _mesh_ca_rc=$_mesh_rc
     _mesh_invoke canonical_b
     _mesh_cb_rc=$_mesh_rc
-    if [ "$_mesh_ca_rc" -eq 0 ] && [ "$_mesh_cb_rc" -eq 0 ] && python3 "$FIX/assertions.py" canonical "$OUT/canonical_a.json" "$OUT/canonical_b.json"; then ok "P0 mesh canonicalization: independent length-prefixed state and parent/node hashes resist delimiter adversaries"; else bad "P0 mesh canonicalization adversaries"; cat "$OUT/canonical_a.json" "$OUT/canonical_b.json" 2>/dev/null; fi
+    if [ "$_mesh_ca_rc" -eq 0 ] && [ "$_mesh_cb_rc" -eq 0 ] && printf '@mode canonical\n@path %s\n@other %s\n' "$OUT/canonical_a.json" "$OUT/canonical_b.json" | "$OUT/lmesh_assert"; then ok "P0 mesh canonicalization: independent length-prefixed state and parent/node hashes resist delimiter adversaries"; else bad "P0 mesh canonicalization adversaries"; cat "$OUT/canonical_a.json" "$OUT/canonical_b.json" 2>/dev/null; fi
 fi
 _mesh_cli_rc=0
 "$ROOT/lume" mesh --fixed-success >"$OUT/cli_bad.out" 2>"$OUT/cli_bad.err" || _mesh_cli_rc=$?
