@@ -847,8 +847,7 @@ PY
     if [ -x "$ntmp/conc.elf" ] && "$ntmp/conc.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/concurrency_ok_asm.expected - >/dev/null; then ok "phase-3 S1: structured 'scope'/'spawn' with 'arc[T]' (Send + Sync) and 'own' transfer compiles + runs"; else bad "phase-3 S1: concurrency_ok.src compile + run"; cat "$ntmp/conc.err"; fi
     if LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/concurrency.src 2>/dev/null | grep -q "5 passed, 0 failed"; then ok "phase-3 S2: concurrency.src (chan[T], deterministic select, par_map/par_for) passes native lume test"; else bad "phase-3 S2: concurrency.src unit tests"; fi
     if LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/actor.src 2>/dev/null | grep -q "5 passed, 0 failed"; then ok "phase-3 S3: actor.src (std.actor, supervisor one_for_one/one_for_all, std.time.logical) passes native lume test"; else bad "phase-3 S3: actor.src unit tests"; fi
-    printf 'fn probe() = 1\nprint probe()\n' >"$ntmp/os_run_probe.src"
-    "$ntmp/lc" <"$ntmp/os_run_probe.src" >"$ntmp/os_run_probe.s" 2>"$ntmp/os_run_probe.err"
+    "$ntmp/lc" <../../compiler/stage1/os_run_probe.src >"$ntmp/os_run_probe.s" 2>"$ntmp/os_run_probe.err"
     "$ntmp/lasm" <"$ntmp/os_run_probe.s" >"$ntmp/os_run_probe" 2>/dev/null
     chmod +x "$ntmp/os_run_probe"
     printf '%s' "$ntmp/os_run_probe" > os_run_probe_path
