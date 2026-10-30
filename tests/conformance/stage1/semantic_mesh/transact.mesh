@@ -25,3 +25,7 @@ fn caller(x: int) -> int requires x >= 0 ensures result == x + 2 = inc(x) + 1
 @op rollback
 @to 1
 @end
+@op replay
+@from 1
+@to 3
+@end

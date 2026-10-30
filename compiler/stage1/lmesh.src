@@ -121,11 +121,12 @@ fn ms_fn_vcontract(nm, prog) = match cs_vsiglookup(nm, cs_vcollect_vsigs(prog))
 fn ms_fn_effs(nm, prog) = match cs_keffsig_lookup(nm, cs_kcollect_effsigs(prog))
     Nil => ""
     Cons(k, r) => " / {" + cs_joinsep(k.effs, ", ") + "}"
+fn ms_fn_sig_fallback(nm, ps, prog) = match cs_siglookup(nm, cs_tcollects(prog))
+    Cons(s, r) => "fn " + nm + "(" + ms_typed_params(s.pn, s.pt) + ")" + (if cs_tystr(s.rt) == "any" then "" else " -> " + cs_tystr(s.rt))
+    Nil => "fn " + nm + "(" + cs_joinsep(ps, ", ") + ")"
 fn ms_fn_sig(nm, ps, prog) = match cs_osiglookup(nm, cs_ocollects(prog))
     Cons(o, r) => (if o.pubf == 1 then "pub fn " else "fn ") + nm + "(" + ms_pl_params(o.pl) + ")" + (if cs_tystr(o.rty) == "any" then "" else " -> " + cs_tystr(o.rty))
-    Nil => match cs_siglookup(nm, cs_tcollects(prog))
-        Cons(s, r) => "fn " + nm + "(" + ms_typed_params(s.pn, s.pt) + ")" + (if cs_tystr(s.rt) == "any" then "" else " -> " + cs_tystr(s.rt))
-        Nil => "fn " + nm + "(" + cs_joinsep(ps, ", ") + ")"
+    Nil => ms_fn_sig_fallback(nm, ps, prog)
 fn ms_render_fn(nm, ps, body, prog) = ms_fn_sig(nm, ps, prog) + ms_fn_effs(nm, prog) + ms_fn_vcontract(nm, prog) + " = " + ms_expr(body)
 fn ms_cap_grant(effs) = "@capability {" + cs_joinsep(effs, ", ") + "}"
 fn ms_stmt(st, prog) = match st
@@ -175,11 +176,12 @@ fn ms_sigs_attached(prog, whole) = match prog
     Nil => 1
     Cons(h, t) => if ms_sig_attached(h, whole) == 1 then ms_sigs_attached(t, whole) else 0
 
+fn ms_fn_inferred1(f, ksigs, edecls) = match f
+    Fn(n, ps, body) => cs_kinfer_effs_e(body, ksigs, edecls)
+    _ => Nil
 fn ms_fn_inferred(nm, prog, ksigs, edecls) = match cs_fnlookup(nm, cs_buildft(prog))
     Nil => Nil
-    Cons(f, r) => match f
-        Fn(n, ps, body) => cs_kinfer_effs_e(body, ksigs, edecls)
-        _ => Nil
+    Cons(f, r) => ms_fn_inferred1(f, ksigs, edecls)
 fn ms_all_effects(ns, prog, ksigs, edecls) = match ns
     Nil => Nil
     Cons(h, t) => cs_keff_union(ms_fn_inferred(h, prog, ksigs, edecls), ms_all_effects(t, prog, ksigs, edecls))
@@ -213,17 +215,21 @@ fn ms_proof_details(proofs) = match proofs
     Cons(h, t) => h.name + "=" + h.status + (if cs_isnil(t) == 1 then "" else "," + ms_proof_details(t))
 
 fn ms_state_canon(st) = ms_field("lume-semantic-intent-state/0.1") + ms_field(st.goal) + ms_field(st.target) + ms_field(ms_caps_text(st.caps)) + ms_field(st.resources.text) + ms_field(st.acceptance) + ms_field(cs_prog_sexpr(st.ast)) + ms_field(st.source)
-fn ms_state_hash(st) = lc_sha256(ms_state_canon(st))
-fn ms_node_canon(parent_id, op, st) = ms_field("lume-semantic-intent-node/0.1") + ms_field(parent_id) + ms_field(op) + ms_field(ms_state_hash(st))
+fn ms_state_hash(st) = st.sha
+fn ms_node_canon(parent_id, op, st) = ms_field("lume-semantic-intent-node/0.1") + ms_field(parent_id) + ms_field(op) + ms_field(st.sha)
 fn ms_node_id(parent_id, op, st) = lc_sha256(ms_node_canon(parent_id, op, st))
 
-fn ms_state_json(st) = "{\"goal\":\"" + cs_jesc(st.goal) + "\",\"target\":\"" + cs_jesc(st.target) + "\",\"capabilities\":[" + cs_strlist_json(st.caps) + "],\"resources\":{\"max_source_bytes\":" + str(st.resources.max_source) + ",\"max_transactions\":" + str(st.resources.max_tx) + "},\"acceptance\":\"" + cs_jesc(st.acceptance) + "\",\"ast\":\"" + cs_jesc(cs_prog_sexpr(st.ast)) + "\",\"source\":\"" + cs_jesc(st.source) + "\",\"state_sha256\":\"" + cs_jesc(ms_state_hash(st)) + "\"}"
+fn ms_state_json(st) = "{\"goal\":\"" + cs_jesc(st.goal) + "\",\"target\":\"" + cs_jesc(st.target) + "\",\"capabilities\":[" + cs_strlist_json(st.caps) + "],\"resources\":{\"max_source_bytes\":" + str(st.resources.max_source) + ",\"max_transactions\":" + str(st.resources.max_tx) + "},\"acceptance\":\"" + cs_jesc(st.acceptance) + "\",\"ast\":\"" + cs_jesc(cs_prog_sexpr(st.ast)) + "\",\"source\":\"" + cs_jesc(st.source) + "\",\"state_sha256\":\"" + cs_jesc(st.sha) + "\"}"
 fn ms_validation_json(st) = "{\"compiler_ok\":" + ms_bool(st.comp.ok) + ",\"target_supported\":true,\"proof_status\":\"" + ms_proof_status(st.comp.proofs) + "\",\"result\":\"" + cs_jesc(st.comp.result) + "\",\"proofs\":[" + cs_proofs_json(st.comp.proofs) + "]}"
-fn ms_node_json(n) = "{\"index\":" + str(n.index) + ",\"id\":\"" + cs_jesc(n.id) + "\",\"parent_index\":" + str(n.parent_index) + ",\"parent_id\":" + (if n.parent_id == "" then "null" else "\"" + cs_jesc(n.parent_id) + "\"") + ",\"op\":\"" + cs_jesc(n.op) + "\",\"state_sha256\":\"" + cs_jesc(ms_state_hash(n.st)) + "\",\"affected_symbols\":" + ms_strs_json(n.affected) + ",\"invalidated_symbols\":" + ms_strs_json(n.invalidated) + "}"
+fn ms_node_json(n) = "{\"index\":" + str(n.index) + ",\"id\":\"" + cs_jesc(n.id) + "\",\"parent_index\":" + str(n.parent_index) + ",\"parent_id\":" + (if n.parent_id == "" then "null" else "\"" + cs_jesc(n.parent_id) + "\"") + ",\"op\":\"" + cs_jesc(n.op) + "\",\"state_sha256\":\"" + cs_jesc(n.st.sha) + "\",\"affected_symbols\":" + ms_strs_json(n.affected) + ",\"invalidated_symbols\":" + ms_strs_json(n.invalidated) + "}"
 fn ms_nodes_json(ns) = match ns
     Nil => ""
     Cons(h, t) => if cs_isnil(t) == 1 then ms_node_json(h) else ms_node_json(h) + "," + ms_nodes_json(t)
-fn ms_branch_ids(n, ns) = if n.parent_index < 0 then Cons(n.id, Nil) else cs_app(ms_branch_ids(ms_node_at(n.parent_index, ns), ns), Cons(n.id, Nil))
+fn ms_node_by_id(id, ns) = match ns
+    Nil => ms_root_sentinel()
+    Cons(h, t) => if h.id == id then h else ms_node_by_id(id, t)
+fn ms_branch_parent(n, ns) = if cs_startswith(n.op, "rollback:") == 1 then ms_node_by_id(ms_after_colon(n.op), ns) else ms_node_at(n.parent_index, ns)
+fn ms_branch_ids(n, ns) = if n.parent_index < 0 then Cons(n.id, Nil) else cs_app(ms_branch_ids(ms_branch_parent(n, ns), ns), Cons(n.id, Nil))
 fn ms_node_at(idx, ns) = match ns
     Nil => ms_root_sentinel()
     Cons(h, t) => if h.index == idx then h else ms_node_at(idx, t)
@@ -233,17 +239,19 @@ fn ms_response(req, current, nodes) = "{\"ok\":true,\"protocol\":\"lume-semantic
 fn ms_first_diag(ds) = match ds
     Nil => ms_diag("M2001", "compiler", "compiler rejected the canonical AST without a diagnostic", "reject the request")
     Cons(h, t) => h
-fn ms_validate(req, ast0, target_name) = if ms_prog_supported(ast0) == 0 then {ok: 0, diagnostic: ms_diag("M1004", "ast", "source uses a construct outside semantic protocol fragment 0.1", "use typed or untyped functions, capabilities, requires/ensures, calls, arithmetic, conditionals, let/var, and print")} else let names = ms_fn_names(ast0) in if ms_unique_names(names) == 0 or ms_sigs_unique(names, ast0) == 0 or ms_sigs_attached(ast0, ast0) == 0 then {ok: 0, diagnostic: ms_diag("M2002", "symbols", "duplicate, orphaned, or ambiguous function/signature name '" + ms_duplicate_name(names) + "'", "declare each function and each associated signature exactly once")} else let missing = ms_capability_missing(ast0, req.caps) in if cs_isnil(missing) == 0 then {ok: 0, diagnostic: ms_diag("M2004", "capability", "program requires capabilities outside the negotiated set: {" + cs_joinsep(missing, ", ") + "}", "renegotiate capabilities explicitly or remove the effects")} else if ms_has_top_expr(ast0) == 1 then {ok: 0, diagnostic: ms_diag("M1004", "target", "top-level expression statements are outside the semantic target fragment", "use a function or print so the selected backend cannot silently drop the expression")} else let source = ms_project(ast0) in let comp = caas_compile(source) in if comp.ok == 0 then {ok: 0, diagnostic: ms_first_diag(comp.diagnostics)} else if cs_prog_sexpr(comp.ast) != cs_prog_sexpr(ast0) or ms_project(comp.ast) != source then {ok: 0, diagnostic: ms_diag("M2001", "ast", "canonical AST/source projection did not reach an exact round-trip fixed point", "reject the source instead of continuing with a changed program")} else let tp = ms_target(target_name) in if tp.ok == 0 then {ok: 0, diagnostic: ms_diag("M2003", "target", "unsupported semantic target '" + target_name + "'", "use x86_64-linux-elf or lumb in protocol 0.1")} else let proof_status = ms_proof_status(comp.proofs) in if req.acceptance == "prove" and proof_status != "proven" then {ok: 0, diagnostic: ms_diag("M3001", "proof", "acceptance requires every obligation to be proven; actual status is " + proof_status + " [" + ms_proof_details(comp.proofs) + "]", "use acceptance compile or strengthen the QF_LIA obligations")} else {ok: 1, st: {goal: req.goal, target: tp.triple, caps: req.caps, resources: req.resources, acceptance: req.acceptance, ast: ast0, source: source, comp: comp}}
+fn ms_validate(req, ast0, target_name) = if ms_prog_supported(ast0) == 0 then {ok: 0, diagnostic: ms_diag("M1004", "ast", "source uses a construct outside semantic protocol fragment 0.1", "use typed or untyped functions, capabilities, requires/ensures, calls, arithmetic, conditionals, let/var, and print")} else let names = ms_fn_names(ast0) in if ms_unique_names(names) == 0 or ms_sigs_unique(names, ast0) == 0 or ms_sigs_attached(ast0, ast0) == 0 then {ok: 0, diagnostic: ms_diag("M2002", "symbols", "duplicate, orphaned, or ambiguous function/signature name '" + ms_duplicate_name(names) + "'", "declare each function and each associated signature exactly once")} else let missing = ms_capability_missing(ast0, req.caps) in if cs_isnil(missing) == 0 then {ok: 0, diagnostic: ms_diag("M2004", "capability", "program requires capabilities outside the negotiated set: {" + cs_joinsep(missing, ", ") + "}", "renegotiate capabilities explicitly or remove the effects")} else if ms_has_top_expr(ast0) == 1 then {ok: 0, diagnostic: ms_diag("M1004", "target", "top-level expression statements are outside the semantic target fragment", "use a function or print so the selected backend cannot silently drop the expression")} else let source = ms_project(ast0) in let comp = caas_compile(source) in if comp.ok == 0 then {ok: 0, diagnostic: ms_first_diag(comp.diagnostics)} else if cs_prog_sexpr(comp.ast) != cs_prog_sexpr(ast0) or ms_project(comp.ast) != source then {ok: 0, diagnostic: ms_diag("M2001", "ast", "canonical AST/source projection did not reach an exact round-trip fixed point", "reject the source instead of continuing with a changed program")} else let tp = ms_target(target_name) in if tp.ok == 0 then {ok: 0, diagnostic: ms_diag("M2003", "target", "unsupported semantic target '" + target_name + "'", "use x86_64-linux-elf or lumb in protocol 0.1")} else let proof_status = ms_proof_status(comp.proofs) in if req.acceptance == "prove" and proof_status != "proven" then {ok: 0, diagnostic: ms_diag("M3001", "proof", "acceptance requires every obligation to be proven; actual status is " + proof_status + " [" + ms_proof_details(comp.proofs) + "]", "use acceptance compile or strengthen the QF_LIA obligations")} else let st0 = {goal: req.goal, target: tp.triple, caps: req.caps, resources: req.resources, acceptance: req.acceptance, ast: ast0, source: source, comp: comp} in let sha = lc_sha256(ms_state_canon(st0)) in {ok: 1, st: {goal: req.goal, target: tp.triple, caps: req.caps, resources: req.resources, acceptance: req.acceptance, ast: ast0, source: source, comp: comp, sha: sha}}
 
 fn ms_initial(req) = let raw = caas_compile(req.source) in ms_validate(req, raw.ast, req.target)
 
 fn ms_contract_wrapper_valid(p) = if cs_len(p) == 2 and cs_len(ms_fn_names(p)) == 1 and ms_name_count("__mesh_contract", p, "fn") == 1 and ms_name_count("__mesh_contract", p, "vsig") == 1 then 1 else 0
-fn ms_contract_expr(text, kind) = let wrapped = "fn __mesh_contract() ensures " + text + " = 0\n" in let p = cs_parse(wrapped) in if ms_prog_supported(p) == 0 then {ok: 0, diagnostic: ms_diag("M1004", "contract", "contract expression is outside the semantic protocol fragment", "use a parsed boolean arithmetic expression")} else if ms_contract_wrapper_valid(p) == 0 then {ok: 0, diagnostic: ms_diag("M1002", "contract", "ambiguous contract expression payload", "provide exactly one expression without declaration tokens or trailing content")} else let vs = cs_vcollect_vsigs(p) in match vs
+fn ms_contract_expr1(text, vs) = match vs
     Nil => {ok: 0, diagnostic: ms_diag("M1002", "contract", "contract expression did not parse", "provide one complete expression")}
     Cons(v, rest) => if cs_len(v.enss) != 1 or cs_isnil(v.reqs) == 0 then {ok: 0, diagnostic: ms_diag("M1002", "contract", "ambiguous contract expression payload", "provide exactly one expression without declaration tokens")} else let e = cs_asthead(v.enss) in let check = ms_validate_expr(e, text) in if check == 0 then {ok: 0, diagnostic: ms_diag("M1002", "contract", "contract expression failed canonical parse validation", "provide one complete expression without trailing tokens")} else {ok: 1, expr: e}
-fn ms_validate_expr(e, text) = let projected = ms_expr(e) in let p = cs_parse("fn __mesh_contract() ensures " + projected + " = 0\n") in if ms_contract_wrapper_valid(p) == 0 then 0 else let vs = cs_vcollect_vsigs(p) in match vs
+fn ms_contract_expr(text, kind) = let wrapped = "fn __mesh_contract() ensures " + text + " = 0\n" in let p = cs_parse(wrapped) in if ms_prog_supported(p) == 0 then {ok: 0, diagnostic: ms_diag("M1004", "contract", "contract expression is outside the semantic protocol fragment", "use a parsed boolean arithmetic expression")} else if ms_contract_wrapper_valid(p) == 0 then {ok: 0, diagnostic: ms_diag("M1002", "contract", "ambiguous contract expression payload", "provide exactly one expression without declaration tokens or trailing content")} else ms_contract_expr1(text, cs_vcollect_vsigs(p))
+fn ms_validate_expr1(e, vs) = match vs
     Nil => 0
     Cons(v, rest) => if cs_len(v.enss) == 1 then if cs_expr_sexpr(cs_asthead(v.enss)) == cs_expr_sexpr(e) then 1 else 0 else 0
+fn ms_validate_expr(e, text) = let projected = ms_expr(e) in let p = cs_parse("fn __mesh_contract() ensures " + projected + " = 0\n") in if ms_contract_wrapper_valid(p) == 0 then 0 else ms_validate_expr1(e, cs_vcollect_vsigs(p))
 
 fn ms_contract_count(kind, v) = if kind == "requires" then cs_len(v.reqs) else cs_len(v.enss)
 fn ms_contract_has(e, xs) = match xs
@@ -253,27 +261,28 @@ fn ms_contract_append(e, xs) = cs_app(xs, Cons(e, Nil))
 fn ms_contract_replace(e, xs) = match xs
     Nil => Nil
     Cons(h, t) => Cons(e, t)
-fn ms_update_vsig(v, kind, e, replace) = if kind == "requires" then VContractSig(v.nm, v.ps, if replace == 1 then ms_contract_replace(e, v.reqs) else ms_contract_append(e, v.reqs), v.enss) else VContractSig(v.nm, v.ps, v.reqs, if replace == 1 then ms_contract_replace(e, v.enss) else ms_contract_append(e, v.enss))
 fn ms_edit_contract(prog, nm, kind, e, replace) = match prog
     Nil => Nil
     Cons(h, t) => Cons(ms_edit_contract1(h, nm, kind, e, replace), ms_edit_contract(t, nm, kind, e, replace))
 fn ms_edit_contract1(st, nm, kind, e, replace) = match st
-    VContractSig(n, ps, reqs, enss) => if n == nm then ms_update_vsig(st, kind, e, replace) else st
+    VContractSig(n, ps, reqs, enss) => if n != nm then st else if kind == "requires" then VContractSig(n, ps, if replace == 1 then ms_contract_replace(e, reqs) else ms_contract_append(e, reqs), enss) else VContractSig(n, ps, reqs, if replace == 1 then ms_contract_replace(e, enss) else ms_contract_append(e, enss))
     _ => st
 
-fn ms_contract_op(req, current, op) = if ms_name_count(op.symbol, current.st.ast, "fn") != 1 then {ok: 0, diagnostic: ms_diag("M3002", "transaction", "contract target is missing or ambiguous: '" + op.symbol + "'", "name exactly one parsed function")} else let parsed = ms_contract_expr(op.expr, op.ckind) in if parsed.ok == 0 then parsed else let mv = cs_vsiglookup(op.symbol, cs_vcollect_vsigs(current.st.ast)) in match mv
-    Nil => if op.kind == "replace_contract" then {ok: 0, diagnostic: ms_diag("M3003", "transaction", "cannot replace a missing " + op.ckind + " contract on '" + op.symbol + "'", "use add_contract first")} else ms_contract_add(req, current, op, parsed.expr, Nil)
-    Cons(v, rest) => let count_kind = ms_contract_count(op.ckind, v) in if op.kind == "replace_contract" and count_kind != 1 then {ok: 0, diagnostic: ms_diag("M3003", "transaction", "replace_contract requires exactly one existing " + op.ckind + " contract on '" + op.symbol + "'; found " + str(count_kind), "disambiguate the contract state before replacement")} else if op.kind == "add_contract" and ms_contract_has(parsed.expr, if op.ckind == "requires" then v.reqs else v.enss) == 1 then {ok: 0, diagnostic: ms_diag("M3003", "transaction", "duplicate contract expression on '" + op.symbol + "'", "do not add the same parsed obligation twice")} else ms_contract_add(req, current, op, parsed.expr, Cons(v, Nil))
+fn ms_contract_op1(req, current, op, e, mv) = match mv
+    Nil => if op.kind == "replace_contract" then {ok: 0, diagnostic: ms_diag("M3003", "transaction", "cannot replace a missing " + op.ckind + " contract on '" + op.symbol + "'", "use add_contract first")} else ms_contract_add(req, current, op, e, Nil)
+    Cons(v, rest) => let count_kind = ms_contract_count(op.ckind, v) in if op.kind == "replace_contract" and count_kind != 1 then {ok: 0, diagnostic: ms_diag("M3003", "transaction", "replace_contract requires exactly one existing " + op.ckind + " contract on '" + op.symbol + "'; found " + str(count_kind), "disambiguate the contract state before replacement")} else if op.kind == "add_contract" and ms_contract_has(e, if op.ckind == "requires" then v.reqs else v.enss) == 1 then {ok: 0, diagnostic: ms_diag("M3003", "transaction", "duplicate contract expression on '" + op.symbol + "'", "do not add the same parsed obligation twice")} else ms_contract_add(req, current, op, e, Cons(v, Nil))
+fn ms_contract_op(req, current, op) = if ms_name_count(op.symbol, current.st.ast, "fn") != 1 then {ok: 0, diagnostic: ms_diag("M3002", "transaction", "contract target is missing or ambiguous: '" + op.symbol + "'", "name exactly one parsed function")} else let parsed = ms_contract_expr(op.expr, op.ckind) in if parsed.ok == 0 then parsed else ms_contract_op1(req, current, op, parsed.expr, cs_vsiglookup(op.symbol, cs_vcollect_vsigs(current.st.ast)))
 fn ms_fn_params(f) = match f
     Fn(nm, ps, body) => ps
     _ => Nil
 fn ms_contract_add(req, current, op, e, mv) = let ps = ms_fn_params(cs_asthead(cs_fnlookup(op.symbol, cs_buildft(current.st.ast)))) in let ast1 = if cs_isnil(mv) == 1 then Cons(VContractSig(op.symbol, ps, if op.ckind == "requires" then Cons(e, Nil) else Nil, if op.ckind == "ensures" then Cons(e, Nil) else Nil), current.st.ast) else ms_edit_contract(current.st.ast, op.symbol, op.ckind, e, if op.kind == "replace_contract" then 1 else 0) in {ok: 1, ast: ast1, expr: e}
 
+fn ms_fn_fingerprint1(f, prog) = match f
+    Fn(n, ps, body) => ms_render_fn(n, ps, body, prog)
+    _ => ""
 fn ms_fn_fingerprint(nm, prog) = match cs_fnlookup(nm, cs_buildft(prog))
     Nil => ""
-    Cons(f, rest) => match f
-        Fn(n, ps, body) => ms_render_fn(n, ps, body, prog)
-        _ => ""
+    Cons(f, rest) => ms_fn_fingerprint1(f, prog)
 fn ms_name_union(a, b) = match a
     Nil => b
     Cons(h, t) => if cs_omem(h, b) == 1 then ms_name_union(t, b) else Cons(h, ms_name_union(t, b))
@@ -283,10 +292,10 @@ fn ms_changed_names(ns, before, after) = match ns
 fn ms_changed(before, after) = ms_changed_names(ms_name_union(ms_fn_names(before), ms_fn_names(after)), before, after)
 fn ms_callers_of(changed, prog) = match prog
     Nil => Nil
-    Cons(h, t) => ms_callers_of1(h, t, changed, prog)
-fn ms_callers_of1(st, rest, changed, prog) = match st
-    Fn(nm, ps, body) => if ms_calls_any(cs_collect_callees_e(body, Nil), changed) == 1 then Cons(nm, ms_callers_of(rest, changed, prog)) else ms_callers_of(rest, changed, prog)
-    _ => ms_callers_of(rest, changed, prog)
+    Cons(h, t) => ms_callers_of1(h, t, changed)
+fn ms_callers_of1(st, rest, changed) = match st
+    Fn(nm, ps, body) => if ms_calls_any(cs_collect_callees_e(body, Nil), changed) == 1 then Cons(nm, ms_callers_of(changed, rest)) else ms_callers_of(changed, rest)
+    _ => ms_callers_of(changed, rest)
 fn ms_calls_any(callees, changed) = match callees
     Nil => 0
     Cons(h, t) => if cs_omem(h, changed) == 1 then 1 else ms_calls_any(t, changed)
@@ -297,15 +306,15 @@ fn ms_closure(names, prog) = let next = ms_closure_step(names, prog, names) in i
 fn ms_impact(before, after, changed) = if before.target != after.target then ms_name_union(ms_fn_names(before.ast), ms_fn_names(after.ast)) else ms_closure(changed, before.ast)
 
 fn ms_mk_node(nodes, current, op, next_st, affected) = let idx = cs_len(nodes) in let id = ms_node_id(current.id, op, next_st) in let invalidated = ms_impact(current.st, next_st, affected) in let node = {index: idx, id: id, parent_index: current.index, parent_id: current.id, op: op, st: next_st, affected: affected, invalidated: invalidated} in {ok: 1, current: node, nodes: cs_app(nodes, Cons(node, Nil))}
-fn ms_commit(req, nodes, current, op_text, ast1, target1, affected) = let next_req = {mode: req.mode, goal: req.goal, target: target1, caps: req.caps, resources: req.resources, acceptance: req.acceptance, source: req.source, ops: req.ops} in let validated = ms_validate(next_req, ast1, target1) in if validated.ok == 0 then validated else ms_mk_node(nodes, current, op_text, validated.st, affected)
+fn ms_commit(req, nodes, current, op_text, step) = let next_req = {mode: req.mode, goal: req.goal, target: step.target, caps: req.caps, resources: req.resources, acceptance: req.acceptance, source: req.source, ops: req.ops} in let validated = ms_validate(next_req, step.ast, step.target) in if validated.ok == 0 then validated else ms_mk_node(nodes, current, op_text, validated.st, step.affected)
 
-fn ms_apply_regular(req, nodes, current, op) = if op.kind == "set_target" then let affected = ms_name_union(ms_fn_names(current.st.ast), Nil) in ms_commit(req, nodes, current, "set_target:" + op.target, current.st.ast, op.target, affected) else let edited = ms_contract_op(req, current, op) in if edited.ok == 0 then edited else ms_commit(req, nodes, current, op.kind + ":" + op.symbol + ":" + op.ckind + ":" + ms_expr(edited.expr), edited.ast, current.st.target, Cons(op.symbol, Nil))
+fn ms_apply_regular(req, nodes, current, op) = if op.kind == "set_target" then let affected = ms_name_union(ms_fn_names(current.st.ast), Nil) in ms_commit(req, nodes, current, "set_target:" + op.target, {ast: current.st.ast, target: op.target, affected: affected}) else let edited = ms_contract_op(req, current, op) in if edited.ok == 0 then edited else ms_commit(req, nodes, current, op.kind + ":" + op.symbol + ":" + op.ckind + ":" + ms_expr(edited.expr), {ast: edited.ast, target: current.st.target, affected: Cons(op.symbol, Nil)})
 
 fn ms_find_node_op(nodes, idx) = let n = ms_node_at(idx, nodes) in if n.index != idx then {ok: 0, diagnostic: ms_diag("M3004", "lineage", "lineage index " + str(idx) + " does not exist", "reference an index present in the current response")} else {ok: 1, node: n}
 fn ms_same_state(a, b) = ms_state_hash(a) == ms_state_hash(b)
 fn ms_rollback(req, nodes, current, op) = let found = ms_find_node_op(nodes, op.to) in if found.ok == 0 then found else let target_st = found.node.st in let changed = ms_changed(current.st.ast, target_st.ast) in let affected = if current.st.target != target_st.target then ms_name_union(ms_fn_names(current.st.ast), ms_fn_names(target_st.ast)) else changed in ms_mk_node(nodes, current, "rollback:" + found.node.id, target_st, affected)
 
-fn ms_replay_range(req, nodes, current, originals, idx, to) = if idx > to then {ok: 1, nodes: nodes, current: current} else let original = ms_node_at(idx, originals) in if original.index != idx then {ok: 0, diagnostic: ms_diag("M3004", "lineage", "replay lineage index " + str(idx) + " does not exist", "choose a range from the supplied history")} else if original.parent_index < 0 then {ok: 0, diagnostic: ms_diag("M3004", "lineage", "cannot replay the negotiation root", "replay operation indexes greater than the from snapshot")} else if cs_startswith(original.op, "rollback:") == 1 or cs_startswith(original.op, "replay:") == 1 then {ok: 0, diagnostic: ms_diag("M3004", "lineage", "nested rollback/replay records are not replayable operations", "replay only add/replace/set_target records")} else let op = ms_original_op(original.op) in if op.ok == 0 then op else let r = ms_apply_regular(req, nodes, current, op) in if r.ok == 0 then r else let replayed = ms_relabel_last(r.nodes, r.current, "replay:" + original.id + ":" + original.op) in ms_replay_range(req, replayed.nodes, replayed.current, originals, idx + 1, to)
+fn ms_replay_range(req, nodes, current, originals, idx, to) = if idx > to then {ok: 1, nodes: nodes, current: current} else let original = ms_node_at(idx, originals) in if original.index != idx then {ok: 0, diagnostic: ms_diag("M3004", "lineage", "replay lineage index " + str(idx) + " does not exist", "choose a range from the supplied history")} else if original.parent_index < 0 then {ok: 0, diagnostic: ms_diag("M3004", "lineage", "cannot replay the negotiation root", "replay operation indexes greater than the from snapshot")} else if cs_startswith(original.op, "rollback:") == 1 or cs_startswith(original.op, "replay:") == 1 then {ok: 0, diagnostic: ms_diag("M3004", "lineage", "nested rollback/replay records are not replayable operations", "replay only add/replace/set_target records")} else let op = ms_original_op(original.op) in if op.ok == 0 then op else let r = ms_apply_regular(req, nodes, current, op.op) in if r.ok == 0 then r else let replayed = ms_relabel_last(r.nodes, r.current, "replay:" + original.id + ":" + original.op) in ms_replay_range(req, replayed.nodes, replayed.current, originals, idx + 1, to)
 fn ms_relabel_last(nodes, current, op_text) = let id = ms_node_id(current.parent_id, op_text, current.st) in let n2 = {index: current.index, id: id, parent_index: current.parent_index, parent_id: current.parent_id, op: op_text, st: current.st, affected: current.affected, invalidated: current.invalidated} in {nodes: ms_replace_node(nodes, n2), current: n2}
 fn ms_replace_node(nodes, replacement) = match nodes
     Nil => Nil

@@ -150,10 +150,12 @@ run_core_tool() {
         if [ "$1" = "lmod" ] || ! grep -Eq '^[ \t]*use[ \t]+' "$SRC_DIR/$1.src"; then
             run_l0 run "$SRC_DIR/compiler_in_core.lume" "$SRC_DIR/$1.src" "$2"
         else
-            mkdir -p "$BIN_DIR"
-            _rct_bun="$BIN_DIR/$1.bundled.src"
-            if [ ! -s "$_rct_bun" ] || [ "$SRC_DIR/$1.src" -nt "$_rct_bun" ]; then
-                bundle_src_if_needed "$SRC_DIR/$1.src" "$_rct_bun"
+            _rct_ck=$(cksum "$SRC_DIR/$1.src" 2>/dev/null | awk '{print $1"_"$2}')
+            _rct_bun="${TMPDIR:-/tmp}/lume_bun_${1}_${_rct_ck}.src"
+            if [ ! -s "$_rct_bun" ]; then
+                _rct_tmp=$(mktemp)
+                bundle_src_if_needed "$SRC_DIR/$1.src" "$_rct_tmp"
+                mv "$_rct_tmp" "$_rct_bun"
             fi
             run_l0 run "$SRC_DIR/compiler_in_core.lume" "$_rct_bun" "$2"
         fi
