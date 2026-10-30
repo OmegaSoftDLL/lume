@@ -99,8 +99,9 @@ test verification.
 `hashlib` as an independent CID oracle. Adversarial coverage includes a false proof with a
 maliciously recomputed certificate hash, mismatched adapter hash, source/proof staleness, test-output
 tampering with a recomputed component CID, stale toolchain identity, failing tests, capability and
-contract-signature discovery, and target incompatibility. The Stage-0 suite invokes this gate on
-Linux x86-64; other hosts do not claim target execution coverage.
+contract-signature discovery, and target incompatibility. The Stage-0 suite invokes this gate only
+in its native Linux x86-64 configuration. The dedicated Ubuntu job is the execution-evidence gate;
+ASan/UBSan, interpreter, and other-host configurations do not claim target execution coverage.
 
 The increment authenticates content and evidence freshness, not publisher identity or repository
 permissions. SHA-256 collision resistance is assumed. Proof guarantees are limited to the existing

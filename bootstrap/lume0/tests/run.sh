@@ -1550,10 +1550,10 @@ EOF
     if LUME_BIN_DIR="$ntmp" sh ../../tests/capstones/run.sh >"$_p0_real_log" 2>&1; then ok "priority-0 real capstone slices (#337/#332/#241): independent HTTP/WAL tenant tests and freestanding RTC in QEMU"; else bad "priority-0 real capstone slices (#337/#332/#241)"; cat "$_p0_real_log"; fi
     rm -f "$_p0_real_log"
 
-    if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ]; then
+    if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_ASAN:-}" ] && [ -z "${LUME0_RUNNER:-}" ]; then
         if LUME_CLI=../../lume LUME_BIN_DIR="$ntmp" sh ../../scripts/check-verified-registry.sh >"$ntmp/verified_registry.out" 2>&1; then ok "verified registry (#337): real artifact CIDs, independent proofs, native tests, discovery, freshness, target checks & adversarial rejection"; else bad "verified registry (#337): publication/resolution adversarial checks"; cat "$ntmp/verified_registry.out"; fi
     else
-        ok "verified registry (#337): x86_64-linux-elf execution coverage not applicable on this host"
+        ok "verified registry (#337): native execution covered by the dedicated Ubuntu gate; not applicable in this host/configuration"
     fi
 
     # Issue #197 & #215: Core language features (trait/impl [T0400]/[T0401], first-class closures with capture,

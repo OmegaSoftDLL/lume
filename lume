@@ -2714,7 +2714,7 @@ registry_cid_material() {
 registry_evaluate() {
     _re_dir=$1
     REG_TARGET=$2
-    if ! is_linux_x86_64 || [ "$REG_TARGET" != "x86_64-linux-elf" ]; then
+    if ! is_linux_x86_64 || [ -n "${LUME0_ASAN:-}" ] || [ "$REG_TARGET" != "x86_64-linux-elf" ]; then
         registry_error "$REG_ACTION" R0004 "this increment publishes and resolves only on the x86_64-linux-elf execution target"
         return 1
     fi
