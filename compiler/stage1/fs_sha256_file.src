@@ -1,0 +1,17 @@
+use lcaas
+
+fn fs_file_size(path, i) = if fs_read_byte(path, i) < 0 then i else fs_file_size(path, i + 1)
+
+fn fs_msg_byte(msg, total, idx) = if idx < msg.len then fs_read_byte(msg.path, idx) else if idx == msg.len then 128 else if idx >= total - 8 then ((msg.len * 8) / sha_pow2(8 * (total - 1 - idx))) % 256 else 0
+
+fn fs_msg_word(msg, total, base) = fs_msg_byte(msg, total, base) * 16777216 + fs_msg_byte(msg, total, base + 1) * 65536 + fs_msg_byte(msg, total, base + 2) * 256 + fs_msg_byte(msg, total, base + 3)
+
+fn fs_w_build(msg, total, blk_off, t, w_rev) = if t >= 64 then w_rev else let wt = (if t < 16 then fs_msg_word(msg, total, blk_off + t * 4) else sha_u32(sha_nth(w_rev, 15) + sha_sml_sig0(sha_nth(w_rev, 14)) + sha_nth(w_rev, 6) + sha_sml_sig1(sha_nth(w_rev, 1)))) in fs_w_build(msg, total, blk_off, t + 1, Cons(wt, w_rev))
+
+fn fs_sha_blocks(msg, total, blk_off, st) = if blk_off >= total then st else let w_rev = fs_w_build(msg, total, blk_off, 0, Nil) in let r = sha_rounds(st, w_rev, 0) in fs_sha_blocks(msg, total, blk_off + 64, {a: sha_u32(st.a + r.a), b: sha_u32(st.b + r.b), c: sha_u32(st.c + r.c), d: sha_u32(st.d + r.d), e: sha_u32(st.e + r.e), f: sha_u32(st.f + r.f), g: sha_u32(st.g + r.g), h: sha_u32(st.h + r.h)})
+
+fn fs_sha256_file(path) = let len = fs_file_size(path, 0) in let total = ((len + 9 + 63) / 64) * 64 in let msg = {path: path, len: len} in let init = {a: 1779033703, b: 3144134277, c: 1013904242, d: 2773480762, e: 1359893119, f: 2600822924, g: 528734635, h: 1541459225} in let fin = fs_sha_blocks(msg, total, 0, init) in sha_hex32(fin.a) + sha_hex32(fin.b) + sha_hex32(fin.c) + sha_hex32(fin.d) + sha_hex32(fin.e) + sha_hex32(fin.f) + sha_hex32(fin.g) + sha_hex32(fin.h)
+
+fn test_fs_sha256_file_empty() = let path = "fs_sha256_empty_probe" in let written = fs_write_sync(path, "") in written == 1 and fs_sha256_file(path) == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
+fn test_fs_sha256_file_abc() = let path = "fs_sha256_abc_probe" in let written = fs_write_sync(path, "abc") in written == 1 and fs_sha256_file(path) == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"

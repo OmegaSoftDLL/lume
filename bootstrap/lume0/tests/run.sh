@@ -427,6 +427,9 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_
     LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/fs_mkdir_ok.src >"$ntmp/fs_mkdir.out" 2>"$ntmp/fs_mkdir.err"
     if grep -q "3 passed, 0 failed" "$ntmp/fs_mkdir.out"; then ok "phase-2 artifact filesystem: fs_mkdir creates, reuses, and validates artifact directories"; else bad "phase-2 artifact filesystem: fs_mkdir"; cat "$ntmp/fs_mkdir.out" "$ntmp/fs_mkdir.err"; fi
     rm -rf fs_mkdir_probe fs_mkdir_nested_probe definitely_missing_parent
+    LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/fs_sha256_file.src >"$ntmp/fs_sha256_file.out" 2>"$ntmp/fs_sha256_file.err"
+    if grep -q "2 passed, 0 failed" "$ntmp/fs_sha256_file.out"; then ok "phase-2 binary evidence: fs_sha256_file matches FIPS 180-4 empty and abc vectors"; else bad "phase-2 binary evidence: fs_sha256_file"; cat "$ntmp/fs_sha256_file.out" "$ntmp/fs_sha256_file.err"; fi
+    rm -f fs_sha256_empty_probe fs_sha256_abc_probe
     LUME_BIN_DIR="$ntmp" ../../lume pkg init "$ntmp/pkgdemo" >/dev/null 2>&1
     LUME_BIN_DIR="$ntmp" ../../lume pkg lock "$ntmp/pkgdemo" >/dev/null 2>&1
     pkg_ok=1

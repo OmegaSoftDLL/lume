@@ -44,7 +44,7 @@ maintenance cost.
 Requirements are a native Linux x86-64 host, the checked-out Lume repository, and POSIX shell. The
 runner and report generation are implemented in Lume. No third-party package, network service, AI API,
 credential, C compiler, external assembler, or external linker is used by the benchmark path. Binary
-artifact hashes remain explicitly `UNKNOWN` until native binary hashing is implemented.
+artifact hashes are computed directly from exact file bytes by `fs_sha256_file`.
 
 ```sh
 make -C bootstrap/lume0
