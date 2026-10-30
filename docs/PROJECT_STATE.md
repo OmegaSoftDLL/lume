@@ -112,6 +112,10 @@ see the Phase 1–5 entries in §5 for the current state.
 - `lume0 asm` encoder: mov/lea, ALU group, imul, neg/not/mul/div/idiv/inc/dec, test, cqto,
   movzbq/l, setcc, push/pop, jmp/call/jcc, syscall, ret; ModRM/SIB/REX; rip-relative;
   labels incl. GAS numeric (`1:`/`1f`/`2b`); .rodata/.ascii/.asciz; .lcomm bss.
+- **Self-hosted assembler symbol lookup:** `lasm.src` uses 256 hash buckets with an
+  association-list fallback instead of scanning every symbol for every relocation. The
+  `lasm_symbol_collisions.s` regression covers colliding labels and requires byte-identical ELF
+  output with the `lume0 asm` oracle plus successful native execution.
 - **Semantic `check`** (`resolve.c`): `R0200` undefined name, `T0001` literal type mismatch
   vs annotation, `D0001` duplicate parameter, `D0002` duplicate top-level function.
 - **P35 test coverage warning** (`compiler/stage1/lcaas.src`): `lume agent check` reports
