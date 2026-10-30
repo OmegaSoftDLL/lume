@@ -1,0 +1,20 @@
+## compiler/stage1/track_n_p0_mesh_ok.src -- Priority 0 (#337) Conformance & Run-Verification Suite
+## Exercises all 6 flagship pillars of #337 (and #334, #335, #332, #333, #241) via `use lmesh`:
+##   1. FIPS 180-4 SHA-256 vectors ("", "abc", 56-byte NIST vector) + Semantic Intent Protocol
+##      (`lume-intent-protocol/1.0`) + atomic transactions, repair, rollback, and replay.
+##   2. Verifiable Universal Adapters ("Chameleon"): C-ABI (`own` linear ownership, `[O0001]`, `[F0401]`),
+##      Device MMIO (`RO`/`RW`, Ring-0/Ring-3 `[E0200]`, `[M0402]`), and OpenAPI HTTP (cross-tenant `403`).
+##   3. Portable & Renewable Evidence (`lume-evidence-bundle/1.0`): material-change invalidation
+##      (`intent`, `compiler`, `dependency`, `target`, `policy`), subgraph retention, and fail-closed `UNKNOWN`.
+##   4. Global Machine-Native Component Registry (`lume-component-registry/1.0`): content-addressed
+##      publish/resolve and automatic rejection of stale/incompatible evidence.
+##   5. Publicly Measured Economic Benchmark (`lume-economy-benchmark/1.0`): zero-shot verification,
+##      token/attempt savings, zero escaped defects, and negative refutation.
+##   6. Reproducible Killer Capstones: `TenantLedgerSaaS` (SaaS + Web DOM + secure backend) and
+##      `KernelRtcPciDriver` (bare-metal kernel + hardware driver) verified on the same semantic mesh.
+
+use lmesh
+
+fn run_p0_mesh_suite() = let p1 = test_lmesh_fips_sha256_vectors() in let p2 = test_lmesh_semantic_transactions_rollback_replay() in let p3 = test_lmesh_universal_adapters_chameleon() in let p4 = test_lmesh_evidence_invalidation_and_registry() in let b = mesh_run_economy_bench() in let saas = mesh_capstone_saas_web() in let kern = mesh_capstone_kernel_driver() in let p5 = (if b.positive_tasks_verified == 3 and b.negative_tasks_refuted == 1 and b.lume_escaped_defects == 0 and saas.ok == 1 and kern.ok == 1 then 1 else 0) in "p0_pillars_passed=" + str(p1 + p2 + p3 + p4 + p5) + "/5\nsaas_dom=" + saas.dom_output + "\nkernel_rtc_year=" + str(kern.rtc_year) + " sector7=" + str(kern.sector_offset_7) + "\neconomy_token_saving_pct=" + str(b.token_saving_pct)
+
+print run_p0_mesh_suite()

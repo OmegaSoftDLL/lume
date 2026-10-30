@@ -1523,6 +1523,29 @@ EOF
     _tl_med_t=$(LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/media.src 2>&1 || true)
     if diff -u ../../tests/conformance/stage1/track_l_domains_ok_asm.expected "$ntmp/tl_ok.out" >/dev/null && grep -q '"name":"relu","kind":"contract","status":"proven"' "$ntmp/tl_prove.json" && grep -q '"name":"abs","kind":"contract","status":"proven"' "$ntmp/tl_prove.json" && grep -q '"name":"clamp","kind":"contract","status":"proven"' "$ntmp/tl_prove.json" && printf '%s' "$_tl_net_t" | grep -q "5 passed, 0 failed" && printf '%s' "$_tl_art_t" | grep -q "5 passed, 0 failed" && printf '%s' "$_tl_gui_t" | grep -q "5 passed, 0 failed" && printf '%s' "$_tl_db_t" | grep -q "5 passed, 0 failed" && printf '%s' "$_tl_med_t" | grep -q "5 passed, 0 failed" && ! grep -Eq '^fn (promise_|signal_)' ../../compiler/stage1/concurrency.src; then ok "track-L (#257): standard library & domains (Linux TCP/UDP loopback sockets + TLS 1.3 + HTTP/1.1, epoll reactor + work-stealing async runtime, GUI canvas/layout/PPM/SVG, B+Tree + MVCC ACID database, WAV/FIR/GOP media codecs, symbolic + Wengert tape autodiff + HMC + safetensors/ONNX)"; else bad "track-L (#257): standard library & domains"; diff -u ../../tests/conformance/stage1/track_l_domains_ok_asm.expected "$ntmp/tl_ok.out" | head -30; cat "$ntmp/tl_ok.err" "$ntmp/tl_prove.json" 2>/dev/null; printf '%s\n' "$_tl_net_t" "$_tl_art_t" "$_tl_gui_t" "$_tl_db_t" "$_tl_med_t"; fi
 
+    # Track O (#241): General-Purpose Operating System in Lume (block/storage WAL & CRC-32, VFS + ramfs/lumefs mounts,
+    # IPv4/ARP/ICMP/UDP/TCP network stack, Ring-3/Ring-0 capability-checked syscall interface, userland shell & coreutils,
+    # and CMOS RTC / PCI Config Space / PS/2 keyboard drivers):
+    LUME_BIN_DIR="$ntmp" ../../lume run ../../compiler/stage1/track_o_os_ok.src >"$ntmp/to_ok.out" 2>"$ntmp/to_ok.err" || true
+    LUME_BIN_DIR="$ntmp" ../../lume certify --json ../../compiler/stage1/los.src >"$ntmp/to_los.cert.json" 2>/dev/null || true
+    _to_vcert=$(LUME_BIN_DIR="$ntmp" ../../lume verify-cert --json "$ntmp/to_los.cert.json" 2>/dev/null || true)
+    _to_los_t=$(LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/los.src 2>&1 || true)
+    if diff -u ../../tests/conformance/stage1/track_o_os_ok_asm.expected "$ntmp/to_ok.out" >/dev/null && printf '%s' "$_to_vcert" | grep -q '"kernel_verified":true' && printf '%s' "$_to_los_t" | grep -q "6 passed, 0 failed"; then ok "track-O (#241): general-purpose OS stack (block WAL/CRC-32, VFS ramfs/lumefs, IPv4/ICMP/TCP, Ring-3/Ring-0 syscalls, shell/coreutils, RTC/PCI/PS2 drivers) + proof certificate"; else bad "track-O (#241): general-purpose OS stack"; diff -u ../../tests/conformance/stage1/track_o_os_ok_asm.expected "$ntmp/to_ok.out" | head -30; cat "$ntmp/to_ok.err" "$ntmp/to_los.cert.json" 2>/dev/null; printf '%s\n' "$_to_vcert" "$_to_los_t"; fi
+
+    # Priority 0 (#337): Semantic Intent Mesh (1. Semantic Intent Protocol & Transactional Authoring, 2. Universal Chameleon Adapters,
+    # 3. Portable & Renewable Evidence with PASS/FAIL/INVALIDATED/UNKNOWN, 4. Content-Addressed Global Component Registry,
+    # 5. Publicly Measured Economic Benchmark, 6. Reproducible SaaS+Web+Backend & Kernel+Driver Capstones on Same Semantic Mesh):
+    LUME_BIN_DIR="$ntmp" ../../lume run ../../compiler/stage1/track_n_p0_mesh_ok.src >"$ntmp/p0_mesh.out" 2>"$ntmp/p0_mesh.err" || true
+    _p0_mesh_t=$(LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/lmesh.src 2>&1 || true)
+    _p0_cap_json=$(LUME_BIN_DIR="$ntmp" ../../lume mesh capstone --json 2>/dev/null || true)
+    _p0_bench_json=$(LUME_BIN_DIR="$ntmp" ../../lume mesh bench --json 2>/dev/null || true)
+    _p0_schema_json=$(LUME_BIN_DIR="$ntmp" ../../lume mesh schema --json 2>/dev/null || true)
+    LUME_BIN_DIR="$ntmp" ../../lume intent build -o "$ntmp/saas_intent.elf" ../../examples/intent/saas_web_ledger.intent >/dev/null 2>&1 || true
+    _p0_saas_iout=$("$ntmp/saas_intent.elf" 2>/dev/null | tr '\n' ',' || true)
+    LUME_BIN_DIR="$ntmp" ../../lume intent build -o "$ntmp/kern_intent.elf" ../../examples/intent/kernel_rtc_driver.intent >/dev/null 2>&1 || true
+    _p0_kern_iout=$("$ntmp/kern_intent.elf" 2>/dev/null | tr '\n' ',' || true)
+    if diff -u ../../tests/conformance/stage1/track_n_p0_mesh_ok_asm.expected "$ntmp/p0_mesh.out" >/dev/null && printf '%s' "$_p0_mesh_t" | grep -q "5 passed, 0 failed" && printf '%s' "$_p0_cap_json" | grep -q '"same_semantic_mesh":true' && printf '%s' "$_p0_cap_json" | grep -q '"dom_output":"div.tenant-badge\[data-tenant=101\]:65"' && printf '%s' "$_p0_cap_json" | grep -q '"rtc_year":2026' && printf '%s' "$_p0_bench_json" | grep -q '"token_saving_pct":76' && printf '%s' "$_p0_schema_json" | grep -q '"protocol":"lume-intent-protocol/1.0"' && [ "$_p0_saas_iout" = "1,65,90," ] && [ "$_p0_kern_iout" = "26,3584," ]; then ok "priority-0 (#337): semantic intent mesh (protocol/transactions, universal chameleon adapters, portable/renewable evidence, content-addressed registry, economic benchmark, and SaaS+Web + Kernel+Driver capstones)"; else bad "priority-0 (#337): semantic intent mesh (saas_iout='$_p0_saas_iout' kern_iout='$_p0_kern_iout')"; diff -u ../../tests/conformance/stage1/track_n_p0_mesh_ok_asm.expected "$ntmp/p0_mesh.out" | head -30; cat "$ntmp/p0_mesh.err" 2>/dev/null; printf '%s\n' "$_p0_mesh_t" "$_p0_cap_json" "$_p0_bench_json" "$_p0_schema_json"; fi
+
     # Issue #197 & #215: Core language features (trait/impl [T0400]/[T0401], first-class closures with capture,
     # refinement types `T where <pred>` with QF_LIA guard elision & exit-3 runtime trap, async fn/.await/block_on [E0200],
     # rc/arc/weak shared control blocks [O0001], shard data-parallel construct [S0001]/[E0200], F3c let-polymorphism [T0500],

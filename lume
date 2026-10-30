@@ -2564,6 +2564,29 @@ cmd_evolve() {
     esac
 }
 
+cmd_mesh() {
+    _mmode="capstone"
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            schema)    _mmode="schema"; shift ;;
+            negotiate) _mmode="negotiate"; shift ;;
+            transact)  _mmode="transact"; shift ;;
+            adapter)   _mmode="adapter"; shift ;;
+            evidence)  _mmode="evidence"; shift ;;
+            registry)  _mmode="registry"; shift ;;
+            bench)     _mmode="bench"; shift ;;
+            capstone)  _mmode="capstone"; shift ;;
+            --json)    shift ;;
+            *)         shift ;;
+        esac
+    done
+    _mtmp=$(mktemp)
+    printf '@mode %s\n' "$_mmode" > "$_mtmp"
+    _mout=$(run_core_tool lmesh "$_mtmp")
+    rm -f "$_mtmp"
+    printf '%s\n' "$_mout"
+}
+
 [ $# -ge 1 ] || usage
 _sub=$1
 shift
@@ -2622,6 +2645,9 @@ case "$_sub" in
         ;;
     mcp)
         cmd_mcp "$@"
+        ;;
+    mesh)
+        cmd_mesh "$@"
         ;;
     evolve)
         cmd_evolve "$@"

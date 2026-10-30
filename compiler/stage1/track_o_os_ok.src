@@ -1,0 +1,29 @@
+## Conformance & Proof Test: Track O (#241) -- General-Purpose OS Subsystems
+## Verifies all 6 Track O subsystems:
+##   1. Block / Storage Stack (LBA bounds, CRC32 check, buffer cache, WAL journal recovery, EIO=-5 on corruption, EINVAL=-22 on OOB LBA)
+##   2. Filesystem + VFS Layer (lumefs + ramfs mounts, mkdir, write_file, open/read_fd, stat, readdir, unlink, ENOENT=-2, EEXIST=-17, EBADF=-9)
+##   3. Network Stack (Ethernet II, ARP lookup/insert, IPv4 RFC 1071 checksum + corruption drop, ICMP Echo Reply, TCP 3-way handshake SYN->SYN_ACK->ESTABLISHED->DATA->CLOSED)
+##   4. Process / Userspace Model + Syscalls (PCB table, capability bitmasks, Ring-3 EACCES=-13 on unauthorized write & SYS_IOPL, SYS_SPAWN, SYS_EXIT, ENOSYS=-38)
+##   5. Shell + Userland Coreutils (pipelines `|`, redirection `>`, uname, echo, cat, ls, stat, ps, mkdir, rm, ping, wc, grep)
+##   6. Device-Driver Ecosystem (CMOS RTC BCD decoder, PCI Bus 0 Config Space enumerator, PS/2 Set-1 Keyboard scancode stream decoder)
+
+use los
+
+fn test_o1_storage() = let os0 = os_boot_default() in let bw1 = blk_write_sector(os0.blk, 5, 4200, 99) in let br1 = blk_read_sector(bw1.dev, 5) in let br_oob = blk_read_sector(br1.dev, 999) in let dev_bad = blk_corrupt_sector_for_test(br1.dev, 5, 1111) in let br_bad = blk_read_sector(dev_bad, 5) in let dev_rec = blk_recover_from_journal(dev_bad) in let br_rec = blk_read_sector(dev_rec, 5) in br1.ok * 10000 + br1.w0 + br_oob.err + br_bad.err + br_rec.ok * 100
+
+fn test_o2_vfs() = let os0 = os_boot_default() in let st_host = vfs_stat(os0.fs, "/etc/hostname") in let op_host = vfs_open(os0.fs, "/etc/hostname", 0) in let rd_host = vfs_read_fd(op_host.fs, op_host.fd) in let rd_bad_fd = vfs_read_fd(op_host.fs, 55) in let mk_dup = vfs_mkdir(op_host.fs, "/etc", 493) in let wr_ram = vfs_write_file(op_host.fs, "/tmp/ephemeral", "ram_ok", 0) in let st_ram = vfs_stat(wr_ram.fs, "/tmp/ephemeral") in let ul_ram = vfs_unlink(wr_ram.fs, "/tmp/ephemeral") in let st_gone = vfs_stat(ul_ram.fs, "/tmp/ephemeral") in rd_host.data + ":" + st_host.fstype + ":" + st_ram.fstype + ":" + str(rd_bad_fd.err) + ":" + str(mk_dup.err) + ":" + str(st_gone.err)
+
+fn test_o3_network() = let os0 = os_boot_default() in let gw_ip = net_ipv4_pack(10, 0, 2, 2) in let my_ip = net_ipv4_pack(10, 0, 2, 15) in let arp_gw = net_arp_lookup(os0.arp, gw_ip) in let icmp_req = net_icmp_echo_request(my_ip, gw_ip, 77, 1, 32) in let icmp_rep = net_icmp_responder(icmp_req) in let bad_ip = {ver_ihl: icmp_req.ip.ver_ihl, total_len: icmp_req.ip.total_len, proto: icmp_req.ip.proto, src_ip: icmp_req.ip.src_ip, dst_ip: icmp_req.ip.dst_ip, checksum: icmp_req.ip.checksum + 1} in let bad_pkt = {ethertype: 2048, ip: bad_ip, icmp_type: 8, icmp_code: 0, ident: 77, seq: 1, payload_len: 32} in let icmp_bad = net_icmp_responder(bad_pkt) in let tcp0 = net_tcp_connect_init(49152, gw_ip, 80, 1000) in let tcp1 = net_tcp_on_syn_ack(tcp0, 5000) in let tcp2 = net_tcp_send_payload(tcp1, 128) in let tcp3 = net_tcp_close_conn(tcp2) in arp_gw.found * 10000 + icmp_rep.ok * 1000 + icmp_rep.icmp_type * 100 + icmp_bad.ok * 10 + tcp1.state * 100 + tcp2.bytes_acked + tcp3.state
+
+fn test_o4_syscalls() = let os0 = os_boot_default() in let s_pid = sys_dispatch(os0, 1, 39, "", 0) in let s_iopl = sys_dispatch(os0, 1, 172, "", 3) in let s_wr_deny = sys_dispatch(os0, 2, 1, "/etc/pwn", 99) in let s_wr_ok = sys_dispatch(os0, 1, 1, "/var/sys.log", 7) in let s_spawn = sys_dispatch(s_wr_ok.os, 1, 57, "httpd", 13) in let s_exit = sys_dispatch(s_spawn.os, s_spawn.ret, 60, "", 0) in let s_nosys = sys_dispatch(s_exit.os, 1, 999, "", 0) in str(s_pid.ret) + ":" + str(s_iopl.ret) + ":" + str(s_wr_deny.ret) + ":" + str(s_wr_ok.ret) + ":" + str(s_spawn.ret) + ":" + str(s_nosys.ret)
+
+fn test_o5_shell() = let os0 = os_boot_default() in let sh1 = sh_exec_pipeline(os0, "echo hello_lume_os > /var/greet.txt", "") in let sh2 = sh_exec_pipeline(sh1.os, "cat /var/greet.txt | grep lume | wc", "") in let sh3 = sh_exec_pipeline(sh2.os, "ls /", "") in let sh4 = sh_exec_pipeline(sh3.os, "ping 10.0.2.2", "") in sh2.out + "|" + sh3.out + "|" + sh4.out
+
+fn test_o6_drivers() = let rtc = drv_rtc_decode_bcd_regs(8, 4, 21, 41, 16, 38) in let pci_devs = drv_pci_bus0_table() in let pci_nic = drv_pci_find_device(pci_devs, 6900, 4096) in let kbd_scs = Cons(42, Cons(38, Cons(170, Cons(22, Cons(50, Cons(18, Cons(28, Nil))))))) in let kbd_str = drv_kbd_decode_stream(kbd_scs, 0) in str(rtc.year) + "-" + str(rtc.month) + "-" + str(rtc.day) + ":" + pci_nic.class_nm + ":" + los_trim(kbd_str)
+
+print test_o1_storage()
+print test_o2_vfs()
+print test_o3_network()
+print test_o4_syscalls()
+print test_o5_shell()
+print test_o6_drivers()

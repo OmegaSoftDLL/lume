@@ -1,0 +1,29 @@
+@intent TenantLedgerSaaS
+@version 1
+## @goal: Multi-tenant financial ledger SaaS with Web DOM badge + HTTP API + capability-gated persistence
+## @target: x86_64-linux-musl,wasm32-wasi
+## @effects: net,http,db,dom
+## @resources: max_heap_kb:2048,max_latency_ms:10
+## @adapter: http:openapi:sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad
+
+pub fn tenant_isolated(req_tenant: int, row_tenant: int) -> int
+    requires req_tenant > 0
+    requires row_tenant > 0
+    ensures (result == 1 and req_tenant == row_tenant) or (result == 0 and req_tenant != row_tenant)
+    = if req_tenant == row_tenant then 1 else 0
+
+pub fn safe_debit(bal: int, amt: int) -> int
+    requires bal >= amt
+    requires amt >= 0
+    ensures result == bal - amt and result >= 0
+    = _
+
+pub fn safe_credit(bal: int, amt: int) -> int
+    requires bal >= 0
+    requires amt >= 0
+    ensures result == bal + amt and result >= bal
+    = _
+
+print tenant_isolated(101, 101)
+print safe_debit(100, 35)
+print safe_credit(65, 25)

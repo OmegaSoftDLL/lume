@@ -66,6 +66,8 @@ jobs:
           cp build/bootstrap/lasm3  build/x86_64-bin/lasm
           cp build/bootstrap/lcli3  build/x86_64-bin/lcli
           cp bootstrap/lume0/lume0  build/x86_64-bin/lume0
+          ./lume build --target x86_64-linux-elf compiler/stage1/lmesh.src -o build/x86_64-bin/lmesh
+          ./lume build --target x86_64-linux-elf compiler/stage1/los.src -o build/x86_64-bin/los
           ./lume build --target x86_64-linux-elf stage/verify_ok.src -o build/x86_64-bin/lume-target-check
           ./lume build --target x86_64-linux-elf stage/verify_trap.src -o build/x86_64-bin/lume-target-trap
           chmod +x build/x86_64-bin/*
