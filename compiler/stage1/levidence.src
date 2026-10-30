@@ -1,0 +1,231 @@
+## Portable renewable evidence issuance over real lcaas compilation and proof certificates.
+
+use lcaas
+
+fn ev_len(xs) = match xs
+    Nil => 0
+    Cons(h, t) => 1 + ev_len(t)
+
+fn ev_app(xs, ys) = match xs
+    Nil => ys
+    Cons(h, t) => Cons(h, ev_app(t, ys))
+
+fn ev_mem(x, xs) = match xs
+    Nil => 0
+    Cons(h, t) => if h == x then 1 else ev_mem(x, t)
+
+fn ev_digits(s, i, n) = if i >= n then 1 else let c = at(s, i) in if c >= "0" and c <= "9" then ev_digits(s, i + 1, n) else 0
+
+fn ev_frame(s, i) = let n = count(s) in let e = lc_find_ch(s, i, n, "\n") in if i >= n or e >= n or cs_startswith(slice(s, i, e), "@frame ") == 0 then {ok: 0, label: "", text: "", next: n} else let rest = slice(s, i + 7, e) in let sp = lc_find_ch(rest, 0, count(rest), " ") in if sp <= 0 or sp + 1 >= count(rest) then {ok: 0, label: "", text: "", next: n} else let ns = slice(rest, sp + 1, count(rest)) in if count(ns) == 0 or ev_digits(ns, 0, count(ns)) == 0 then {ok: 0, label: "", text: "", next: n} else let len = toint(ns) in let start = e + 1 in if start + len > n then {ok: 0, label: "", text: "", next: n} else {ok: 1, label: slice(rest, 0, sp), text: slice(s, start, start + len), next: start + len}
+
+fn ev_frames(s, i, acc) = if i >= count(s) then {ok: 1, items: acc} else let f = ev_frame(s, i) in if f.ok == 0 then {ok: 0, items: Nil} else ev_frames(s, f.next, ev_app(acc, Cons(f, Nil)))
+
+fn ev_label_count(label, fs) = match fs
+    Nil => 0
+    Cons(h, t) => (if h.label == label then 1 else 0) + ev_label_count(label, t)
+
+fn ev_label_text(label, fs) = match fs
+    Nil => ""
+    Cons(h, t) => if h.label == label then h.text else ev_label_text(label, t)
+
+fn ev_label_name_chars(s, i, n) = if i >= n then 1 else let c = at(s, i) in if (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or (c >= "0" and c <= "9") or c == "_" or c == "-" or c == "." or c == "/" then ev_label_name_chars(s, i + 1, n) else 0
+
+fn ev_frame_label_valid(label) = if label == "source" or label == "intent" or label == "policy" or label == "target" or label == "environment" or label == "graph" or label == "bundle" then 1 else if cs_startswith(label, "compiler.") == 1 or cs_startswith(label, "dependency.") == 1 then let p = if cs_startswith(label, "compiler.") == 1 then 9 else 11 in let n = count(label) in if n > p then ev_label_name_chars(label, p, n) else 0 else 0
+
+fn ev_frame_labels_valid(fs) = match fs
+    Nil => 1
+    Cons(h, t) => if ev_frame_label_valid(h.label) == 1 then ev_frame_labels_valid(t) else 0
+
+fn ev_entry_insert(e, xs) = match xs
+    Nil => Cons(e, Nil)
+    Cons(h, t) => if e.name <= h.name then Cons(e, Cons(h, t)) else Cons(h, ev_entry_insert(e, t))
+
+fn ev_file_entries(prefix, fs, acc) = match fs
+    Nil => acc
+    Cons(h, t) => if cs_startswith(h.label, prefix) == 1 then ev_file_entries(prefix, t, ev_entry_insert({name: slice(h.label, count(prefix), count(h.label)), sha: lc_sha256(h.text)}, acc)) else ev_file_entries(prefix, t, acc)
+
+fn ev_entries_valid(xs) = match xs
+    Nil => 1
+    Cons(h, t) => if count(h.name) == 0 then 0 else ev_entries_valid_tail(h.name, t)
+
+fn ev_entries_valid_tail(previous, xs) = match xs
+    Nil => 1
+    Cons(h, t) => if h.name <= previous or count(h.name) == 0 then 0 else ev_entries_valid_tail(h.name, t)
+
+fn ev_entries_json(xs) = match xs
+    Nil => ""
+    Cons(h, t) => "{\"name\":\"" + cs_jesc(h.name) + "\",\"sha256\":\"" + cs_jesc(h.sha) + "\"}" + (if cs_isnil(t) == 1 then "" else "," + ev_entries_json(t))
+
+fn ev_strlist_json(xs) = match xs
+    Nil => ""
+    Cons(h, t) => "\"" + cs_jesc(h) + "\"" + (if cs_isnil(t) == 1 then "" else "," + ev_strlist_json(t))
+
+fn ev_split_commas(s) = let p = lc_find_ch(s, 0, count(s), ",") in if p >= count(s) then Cons(s, Nil) else Cons(slice(s, 0, p), ev_split_commas(slice(s, p + 1, count(s))))
+
+fn ev_graph_line(line) = let p = lc_find_ch(line, 0, count(line), "=") in if p <= 0 then {ok: 0, name: "", deps: Nil} else {ok: 1, name: slice(line, 0, p), deps: (if p + 1 == count(line) then Nil else ev_split_commas(slice(line, p + 1, count(line))))}
+
+fn ev_graph_lines(ls) = match ls
+    Nil => Nil
+    Cons(h, t) => let line = lc_trim(h) in if count(line) == 0 then ev_graph_lines(t) else Cons(ev_graph_line(line), ev_graph_lines(t))
+
+fn ev_graph_lookup(name, gs) = match gs
+    Nil => {ok: 0, deps: Nil}
+    Cons(h, t) => if h.ok == 1 and h.name == name then {ok: 1, deps: h.deps} else ev_graph_lookup(name, t)
+
+fn ev_graph_count(name, gs) = match gs
+    Nil => 0
+    Cons(h, t) => (if h.ok == 1 and h.name == name then 1 else 0) + ev_graph_count(name, t)
+
+fn ev_dep_names_valid(ds) = match ds
+    Nil => 1
+    Cons(h, t) => if count(h) == 0 or ev_mem(h, t) == 1 then 0 else ev_dep_names_valid(t)
+
+fn ev_dep_declared(name, deps) = match deps
+    Nil => 0
+    Cons(h, t) => if h.name == name then 1 else ev_dep_declared(name, t)
+
+fn ev_claim_declared(name, claims) = match claims
+    Nil => 0
+    Cons(h, t) => if h.name == name then 1 else ev_claim_declared(name, t)
+
+fn ev_claim_insert(c, xs) = match xs
+    Nil => Cons(c, Nil)
+    Cons(h, t) => if c.name <= h.name then Cons(c, Cons(h, t)) else Cons(h, ev_claim_insert(c, t))
+
+fn ev_claims(ps, gs, auto_root) = match ps
+    Nil => {ok: 1, items: Nil}
+    Cons(h, t) => let found = ev_graph_lookup(h.name, gs) in let ds = if auto_root == 1 then Nil else found.deps in let rest = ev_claims(t, gs, auto_root) in let valid = if auto_root == 1 then 1 else if found.ok == 1 and ev_graph_count(h.name, gs) == 1 and ev_dep_names_valid(ds) == 1 then 1 else 0 in if rest.ok == 0 or valid == 0 then {ok: 0, items: Nil} else {ok: 1, items: ev_claim_insert({name: h.name, kind: h.kind, deps: ds}, rest.items)}
+
+fn ev_claim_refs_valid(ds, deps, claims) = match ds
+    Nil => 1
+    Cons(h, t) => if (ev_dep_declared(h, deps) == 1 or ev_claim_declared(h, claims) == 1) and ev_claim_refs_valid(t, deps, claims) == 1 then 1 else 0
+
+fn ev_all_claim_refs_valid(claims, deps, all_claims) = match claims
+    Nil => 1
+    Cons(h, t) => if ev_claim_refs_valid(h.deps, deps, all_claims) == 1 then ev_all_claim_refs_valid(t, deps, all_claims) else 0
+
+fn ev_claim_by_name(name, claims) = match claims
+    Nil => {name: "", kind: "", deps: Nil}
+    Cons(h, t) => if h.name == name then h else ev_claim_by_name(name, t)
+
+fn ev_claim_acyclic(name, claims, visiting) = if ev_mem(name, visiting) == 1 then 0 else if ev_claim_declared(name, claims) == 0 then 1 else ev_ref_list_acyclic((ev_claim_by_name(name, claims)).deps, claims, Cons(name, visiting))
+
+fn ev_ref_list_acyclic(refs, claims, visiting) = match refs
+    Nil => 1
+    Cons(h, t) => if ev_claim_acyclic(h, claims, visiting) == 1 then ev_ref_list_acyclic(t, claims, visiting) else 0
+
+fn ev_all_claims_acyclic(claims, all_claims) = match claims
+    Nil => 1
+    Cons(h, t) => if ev_claim_acyclic(h.name, all_claims, Nil) == 1 then ev_all_claims_acyclic(t, all_claims) else 0
+
+fn ev_claim_names_unique(claims) = match claims
+    Nil => 1
+    Cons(h, t) => if ev_claim_declared(h.name, t) == 1 then 0 else ev_claim_names_unique(t)
+
+fn ev_claims_json(xs) = match xs
+    Nil => ""
+    Cons(h, t) => "{\"name\":\"" + cs_jesc(h.name) + "\",\"kind\":\"" + cs_jesc(h.kind) + "\",\"dependencies\":[" + ev_strlist_json(h.deps) + "]}" + (if cs_isnil(t) == 1 then "" else "," + ev_claims_json(t))
+
+fn ev_proof_counts(ps) = match ps
+    Nil => {total: 0, proven: 0, budget: 0, runtime: 0, refuted: 0, unknown: 0}
+    Cons(h, t) => let r = ev_proof_counts(t) in {total: 1 + r.total, proven: r.proven + (if h.status == "proven" then 1 else 0), budget: r.budget + (if h.status == "budget_checked" then 1 else 0), runtime: r.runtime + (if h.status == "runtime_checked" then 1 else 0), refuted: r.refuted + (if h.status == "refuted" then 1 else 0), unknown: r.unknown + (if h.status == "proven" or h.status == "budget_checked" or h.status == "runtime_checked" or h.status == "refuted" then 0 else 1)}
+
+fn ev_counts_verdict(r, c) = if c.refuted > 0 then "FAIL" else if r.ok == 0 or c.total == 0 or c.runtime > 0 or c.unknown > 0 or c.proven + c.budget != c.total then "UNKNOWN" else "PASS"
+
+fn ev_proof_json(verdict, c) = "{\"verdict\":\"" + verdict + "\",\"obligations_total\":" + str(c.total) + ",\"proven\":" + str(c.proven) + ",\"budget_checked\":" + str(c.budget) + ",\"runtime_checked\":" + str(c.runtime) + ",\"refuted\":" + str(c.refuted) + ",\"unknown\":" + str(c.unknown) + "}"
+
+fn ev_identity_json(src_sha, intent_sha, compiler_sha, deps, target, environment_sha, policy_sha, claims, cert_sha) = "{\"schema\":\"lume-portable-evidence/0.1\",\"source_sha256\":\"" + cs_jesc(src_sha) + "\",\"intent_sha256\":\"" + cs_jesc(intent_sha) + "\",\"compiler_sha256\":\"" + cs_jesc(compiler_sha) + "\",\"dependencies\":[" + ev_entries_json(deps) + "],\"target\":\"" + cs_jesc(target) + "\",\"target_sha256\":\"" + lc_sha256(target) + "\",\"environment_sha256\":\"" + cs_jesc(environment_sha) + "\",\"policy_sha256\":\"" + cs_jesc(policy_sha) + "\",\"claims\":[" + ev_claims_json(claims) + "],\"certificate_sha256\":\"" + cs_jesc(cert_sha) + "\"}"
+
+fn ev_error(reason) = "{\"schema\":\"lume-portable-evidence/0.1\",\"ok\":false,\"verdict\":\"UNKNOWN\",\"reason\":\"" + cs_jesc(reason) + "\"}"
+
+fn ev_build(fs) = let source = ev_label_text("source", fs) in let intent = ev_label_text("intent", fs) in let policy = ev_label_text("policy", fs) in let target = ev_label_text("target", fs) in let environment = ev_label_text("environment", fs) in let compiler = ev_file_entries("compiler.", fs, Nil) in let deps = ev_file_entries("dependency.", fs, Nil) in let graph_text = ev_label_text("graph", fs) in let gs = ev_graph_lines(lc_split_lines(graph_text, 0, count(graph_text))) in let auto_root = if ev_len(deps) == 0 and count(graph_text) == 0 then 1 else 0 in let r = caas_compile(source) in let src_sha = lc_sha256(source) in let cert_sha = lcert_certificate_hash(src_sha, r.proofs) in let cert = lcert_certify_result(source, src_sha, r) in let cs0 = ev_claims(r.proofs, gs, auto_root) in let valid = if ev_frame_labels_valid(fs) == 1 and ev_label_count("source", fs) == 1 and ev_label_count("intent", fs) == 1 and ev_label_count("policy", fs) == 1 and ev_label_count("target", fs) == 1 and ev_label_count("environment", fs) == 1 and ev_label_count("graph", fs) <= 1 and count(source) > 0 and count(intent) > 0 and count(policy) > 0 and count(target) > 0 and count(environment) > 0 and ev_len(compiler) > 0 and ev_entries_valid(compiler) == 1 and ev_entries_valid(deps) == 1 and cs0.ok == 1 and ev_claim_names_unique(cs0.items) == 1 and ev_all_claim_refs_valid(cs0.items, deps, cs0.items) == 1 and ev_all_claims_acyclic(cs0.items, cs0.items) == 1 and (auto_root == 1 or ev_len(gs) == cs_len(r.proofs)) then 1 else 0 in if valid == 0 then {ok: 0, error: ev_error("invalid_material_identity_or_incomplete_claim_graph")} else let compiler_sha = lc_sha256("[" + ev_entries_json(compiler) + "]") in let identity = ev_identity_json(src_sha, lc_sha256(intent), compiler_sha, deps, target, lc_sha256(environment), lc_sha256(policy), cs0.items, cert_sha) in let counts = ev_proof_counts(r.proofs) in let verdict = ev_counts_verdict(r, counts) in let semantic = lc_sha256(identity) in let proof = ev_proof_json(verdict, counts) in let payload = "{\"schema\":\"lume-portable-evidence/0.1\",\"semantic_id\":\"" + semantic + "\",\"verdict\":\"" + verdict + "\",\"identity\":" + identity + ",\"proof\":" + proof + ",\"certificate\":" + cert + "}" in let bundle = slice(payload, 0, count(payload) - 1) + ",\"bundle_sha256\":\"" + lc_sha256(payload) + "\"}" in {ok: 1, error: "", bundle: bundle, identity: identity, proof: proof, certificate: cert, claims: cs0.items, deps: deps}
+
+fn ev_between(s, open, close) = let n = count(s) in let a = cs_find_substr(s, open, 0, n, count(open)) in if a >= n then {ok: 0, text: ""} else let start = a + count(open) in let b = cs_find_substr(s, close, start, n, count(close)) in if b >= n then {ok: 0, text: ""} else {ok: 1, text: slice(s, start, b)}
+
+fn ev_number_end(s, i, n) = if i >= n then n else if at(s, i) == "," or at(s, i) == "}" then i else ev_number_end(s, i + 1, n)
+
+fn ev_json_number(s, key) = let marker = "\"" + key + "\":" in let p = cs_find_substr(s, marker, 0, count(s), count(marker)) in if p >= count(s) then {ok: 0, value: 0} else let start = p + count(marker) in let finish = ev_number_end(s, start, count(s)) in let text = slice(s, start, finish) in if count(text) == 0 or ev_digits(text, 0, count(text)) == 0 then {ok: 0, value: 0} else {ok: 1, value: toint(text)}
+
+fn ev_proof_json_counts(proof) = let total = ev_json_number(proof, "obligations_total") in let proven = ev_json_number(proof, "proven") in let budget = ev_json_number(proof, "budget_checked") in let runtime = ev_json_number(proof, "runtime_checked") in let refuted = ev_json_number(proof, "refuted") in let unknown = ev_json_number(proof, "unknown") in let valid = if total.ok == 1 and proven.ok == 1 and budget.ok == 1 and runtime.ok == 1 and refuted.ok == 1 and unknown.ok == 1 and total.value == proven.value + budget.value + runtime.value + refuted.value + unknown.value then 1 else 0 in {ok: valid, counts: {total: total.value, proven: proven.value, budget: budget.value, runtime: runtime.value, refuted: refuted.value, unknown: unknown.value}}
+
+fn ev_bundle_parse(bundle) = let n = count(bundle) in if n < 92 or slice(bundle, n - 2, n) != "\"}" then {ok: 0} else let payload = slice(bundle, 0, n - 91) + "}" in let stored_hash = slice(bundle, n - 73, n - 2) in if lc_sha256(payload) != stored_hash then {ok: 0} else let semantic = ev_between(payload, "{\"schema\":\"lume-portable-evidence/0.1\",\"semantic_id\":\"", "\",\"verdict\":\"") in let verdict = ev_between(payload, "\",\"verdict\":\"", "\",\"identity\":") in let identity = ev_between(payload, ",\"identity\":", ",\"proof\":") in let proof = ev_between(payload, ",\"proof\":", ",\"certificate\":") in let certificate = ev_between(bundle, ",\"certificate\":", ",\"bundle_sha256\":") in let pc = ev_proof_json_counts(proof.text) in let valid = if semantic.ok == 1 and verdict.ok == 1 and identity.ok == 1 and proof.ok == 1 and certificate.ok == 1 and pc.ok == 1 and semantic.text == lc_sha256(identity.text) and (verdict.text == "PASS" or verdict.text == "FAIL" or verdict.text == "UNKNOWN") and verdict.text == ev_counts_verdict({ok: 1}, pc.counts) then 1 else 0 in if valid == 1 then {ok: 1, identity: identity.text, proof: proof.text, certificate: certificate.text, verdict: verdict.text} else {ok: 0}
+
+fn ev_identity_parse(identity) = let source = ev_between(identity, "{\"schema\":\"lume-portable-evidence/0.1\",\"source_sha256\":\"", "\",\"intent_sha256\":\"") in let intent = ev_between(identity, ",\"intent_sha256\":\"", "\",\"compiler_sha256\":\"") in let compiler = ev_between(identity, ",\"compiler_sha256\":\"", "\",\"dependencies\":[") in let deps = ev_between(identity, ",\"dependencies\":[", "],\"target\":\"") in let target = ev_between(identity, ",\"target\":\"", "\",\"target_sha256\":\"") in let target_sha = ev_between(identity, ",\"target_sha256\":\"", "\",\"environment_sha256\":\"") in let environment = ev_between(identity, ",\"environment_sha256\":\"", "\",\"policy_sha256\":\"") in let policy = ev_between(identity, ",\"policy_sha256\":\"", "\",\"claims\":[") in let claims = ev_between(identity, ",\"claims\":[", "],\"certificate_sha256\":\"") in let certificate = ev_between(identity, ",\"certificate_sha256\":\"", "\"}") in let valid = if source.ok == 1 and intent.ok == 1 and compiler.ok == 1 and deps.ok == 1 and target.ok == 1 and target_sha.ok == 1 and environment.ok == 1 and policy.ok == 1 and claims.ok == 1 and certificate.ok == 1 and target_sha.text == lc_sha256(target.text) then 1 else 0 in if valid == 1 then {ok: 1, source: source.text, intent: intent.text, compiler: compiler.text, deps_text: deps.text, target: target.text, target_sha: target_sha.text, environment: environment.text, policy: policy.text, claims_text: claims.text, certificate: certificate.text} else {ok: 0}
+
+fn ev_dep_entries(text) = if text == "" then {ok: 1, items: Nil} else let p = cs_find_substr(text, "},{", 0, count(text), 3) in let raw = if p >= count(text) then text else slice(text, 0, p + 1) in let rest = if p >= count(text) then "" else slice(text, p + 2, count(text)) in let name = ev_between(raw, "{\"name\":\"", "\",\"sha256\":\"") in let sha = ev_between(raw, ",\"sha256\":\"", "\"}") in let tail = ev_dep_entries(rest) in if name.ok == 1 and sha.ok == 1 and count(name.text) > 0 and count(sha.text) == 71 and tail.ok == 1 then {ok: 1, items: Cons({name: name.text, sha: sha.text}, tail.items)} else {ok: 0, items: Nil}
+
+fn ev_dep_sha(name, deps) = match deps
+    Nil => ""
+    Cons(h, t) => if h.name == name then h.sha else ev_dep_sha(name, t)
+
+fn ev_dep_changed(name, old_deps, new_deps) = let old_sha = ev_dep_sha(name, old_deps) in let new_sha = ev_dep_sha(name, new_deps) in if old_sha == "" or new_sha == "" or old_sha != new_sha then 1 else 0
+
+fn ev_claim_affected(c, old_deps, new_deps, claims, visiting) = if ev_mem(c.name, visiting) == 1 then 1 else ev_refs_affected(c.deps, old_deps, new_deps, claims, Cons(c.name, visiting))
+
+fn ev_refs_affected(refs, old_deps, new_deps, claims, visiting) = match refs
+    Nil => 0
+    Cons(h, t) => let direct = if ev_dep_declared(h, new_deps) == 1 then ev_dep_changed(h, old_deps, new_deps) else if ev_claim_declared(h, claims) == 1 then ev_claim_affected(ev_claim_by_name(h, claims), old_deps, new_deps, claims, visiting) else 1 in if direct == 1 or ev_refs_affected(t, old_deps, new_deps, claims, visiting) == 1 then 1 else 0
+
+fn ev_claim_names(claims) = match claims
+    Nil => Nil
+    Cons(h, t) => Cons(h.name, ev_claim_names(t))
+
+fn ev_claims_partition(claims, old_deps, new_deps, all_claims) = match claims
+    Nil => {retained: Nil, invalidated: Nil}
+    Cons(h, t) => let rest = ev_claims_partition(t, old_deps, new_deps, all_claims) in if ev_claim_affected(h, old_deps, new_deps, all_claims, Nil) == 1 then {retained: rest.retained, invalidated: Cons(h.name, rest.invalidated)} else {retained: Cons(h.name, rest.retained), invalidated: rest.invalidated}
+
+fn ev_refs_missing_previous(refs, old_deps, new_deps) = match refs
+    Nil => 0
+    Cons(h, t) => if (ev_dep_declared(h, new_deps) == 1 and ev_dep_sha(h, old_deps) == "") or ev_refs_missing_previous(t, old_deps, new_deps) == 1 then 1 else 0
+
+fn ev_missing_previous(claims, old_deps, new_deps) = match claims
+    Nil => Nil
+    Cons(h, t) => let rest = ev_missing_previous(t, old_deps, new_deps) in if ev_refs_missing_previous(h.deps, old_deps, new_deps) == 1 then Cons(h.name, rest) else rest
+
+fn ev_verify_response(verdict, freshness, retained, invalidated, missing, newly_required, identity, proof, certificate) = "{\"schema\":\"lume-portable-evidence/0.1\",\"ok\":true,\"verdict\":\"" + verdict + "\",\"freshness\":\"" + freshness + "\",\"retained\":[" + ev_strlist_json(retained) + "],\"invalidated\":[" + ev_strlist_json(invalidated) + "],\"stale\":[" + ev_strlist_json(invalidated) + "],\"missing\":[" + ev_strlist_json(missing) + "],\"newly_required\":[" + ev_strlist_json(newly_required) + "],\"equivalence\":\"canonical_identity_proof_and_certificate\",\"current_identity\":" + identity + ",\"current_proof\":" + proof + ",\"current_certificate\":" + certificate + "}"
+
+fn ev_verify(input) = let parsed = ev_frames(input, 0, Nil) in if parsed.ok == 0 or ev_label_count("bundle", parsed.items) != 1 then ev_error("invalid_evidence_verification_request") else let built = ev_build(parsed.items) in if built.ok == 0 then built.error else let old = ev_bundle_parse(ev_label_text("bundle", parsed.items)) in if old.ok == 0 then ev_error("invalid_or_tampered_evidence_bundle") else let previous = ev_identity_parse(old.identity) in let current = ev_identity_parse(built.identity) in if previous.ok == 0 or current.ok == 0 then ev_error("invalid_evidence_identity") else let old_deps = ev_dep_entries(previous.deps_text) in if old_deps.ok == 0 or ev_entries_valid(old_deps.items) == 0 then ev_error("invalid_previous_dependency_identity") else let global_changed = if previous.source != current.source or previous.intent != current.intent or previous.compiler != current.compiler or previous.target != current.target or previous.target_sha != current.target_sha or previous.environment != current.environment or previous.policy != current.policy or previous.claims_text != current.claims_text then 1 else 0 in let compatible = if old.certificate == built.certificate and old.proof == built.proof then 1 else 0 in let partition = if global_changed == 1 then {retained: Nil, invalidated: ev_claim_names(built.claims)} else if compatible == 0 then {retained: Nil, invalidated: ev_claim_names(built.claims)} else ev_claims_partition(built.claims, old_deps.items, built.deps, built.claims) in let fresh = if global_changed == 0 and compatible == 1 and cs_isnil(partition.invalidated) == 1 then 1 else 0 in let verdict = if fresh == 1 then old.verdict else "UNKNOWN" in let freshness = if fresh == 1 then "fresh" else "revalidation_required" in ev_verify_response(verdict, freshness, partition.retained, partition.invalidated, ev_missing_previous(built.claims, old_deps.items, built.deps), partition.invalidated, built.identity, built.proof, built.certificate)
+
+fn ev_issue(input) = let parsed = ev_frames(input, 0, Nil) in if parsed.ok == 0 then ev_error("invalid_canonical_frame_request") else let built = ev_build(parsed.items) in if built.ok == 1 then built.bundle else built.error
+
+fn levidence_dispatch(input) = if cs_startswith(input, "@mode issue\n") == 1 then ev_issue(slice(input, 12, count(input))) else if cs_startswith(input, "@mode verify\n") == 1 then ev_verify(slice(input, 13, count(input))) else ev_error("unknown_evidence_mode")
+
+fn ev_frame_text(f) = "@frame " + f.label + " " + str(count(f.text)) + "\n" + f.text
+
+fn ev_frames_text(fs) = match fs
+    Nil => ""
+    Cons(h, t) => ev_frame_text(h) + ev_frames_text(t)
+
+fn ev_test_frames(dep, environment) = Cons({label: "source", text: "fn base(x: int) -> int ensures result == x + 1 = x + 1\nfn independent(x: int) -> int ensures result == x + 2 = x + 2\n"}, Cons({label: "intent", text: "maintain verified arithmetic\n"}, Cons({label: "policy", text: "all_proofs_proven\n"}, Cons({label: "target", text: "x86_64-linux-elf"}, Cons({label: "environment", text: environment}, Cons({label: "compiler.lumec", text: "self-hosted-lumec\n"}, Cons({label: "compiler.kernel", text: "qf-lia-v1\n"}, Cons({label: "dependency.stdlib", text: dep}, Cons({label: "dependency.other", text: "other-v1\n"}, Cons({label: "graph", text: "base=stdlib\nindependent=other\n"}, Nil)))))))))
+
+fn ev_test_request(fs, bundle) = "@mode verify\n" + ev_frame_text({label: "bundle", text: bundle}) + ev_frames_text(fs)
+
+fn ev_test_issue(fs) = ev_issue("@mode issue\n" + ev_frames_text(fs))
+
+fn ev_tamper(text) = let replacement = if at(text, 24) == "0" then "1" else "0" in slice(text, 0, 24) + replacement + slice(text, 25, count(text))
+
+fn ev_without_label(label, fs) = match fs
+    Nil => Nil
+    Cons(h, t) => if h.label == label then ev_without_label(label, t) else Cons(h, ev_without_label(label, t))
+
+fn test_evidence_fresh_bundle_is_retained() = let fs = ev_test_frames("stdlib-v1\n", "ci-linux-x86_64") in let issued = ev_test_issue(fs) in let verified = ev_verify(ev_test_request(fs, issued)) in cs_has_substr(verified, "\"verdict\":\"PASS\"") == 1 and cs_has_substr(verified, "\"freshness\":\"fresh\"") == 1 and cs_has_substr(verified, "\"retained\":[\"base\",\"independent\"]") == 1 and cs_has_substr(verified, "\"invalidated\":[]") == 1
+
+fn test_evidence_dependency_change_invalidates_only_affected_claim() = let old_fs = ev_test_frames("stdlib-v1\n", "ci-linux-x86_64") in let new_fs = ev_test_frames("stdlib-v2\n", "ci-linux-x86_64") in let issued = ev_test_issue(old_fs) in let verified = ev_verify(ev_test_request(new_fs, issued)) in cs_has_substr(verified, "\"verdict\":\"UNKNOWN\"") == 1 and cs_has_substr(verified, "\"retained\":[\"independent\"]") == 1 and cs_has_substr(verified, "\"invalidated\":[\"base\"]") == 1 and cs_has_substr(verified, "\"newly_required\":[\"base\"]") == 1
+
+fn test_evidence_environment_change_invalidates_all_claims() = let old_fs = ev_test_frames("stdlib-v1\n", "ci-linux-x86_64") in let new_fs = ev_test_frames("stdlib-v1\n", "ci-linux-x86_65") in let issued = ev_test_issue(old_fs) in let verified = ev_verify(ev_test_request(new_fs, issued)) in cs_has_substr(verified, "\"verdict\":\"UNKNOWN\"") == 1 and cs_has_substr(verified, "\"retained\":[]") == 1 and cs_has_substr(verified, "\"invalidated\":[\"base\",\"independent\"]") == 1
+
+fn test_evidence_tampered_bundle_is_rejected() = let fs = ev_test_frames("stdlib-v1\n", "ci-linux-x86_64") in let issued = ev_test_issue(fs) in let verified = ev_verify(ev_test_request(fs, ev_tamper(issued))) in cs_has_substr(verified, "\"ok\":false") == 1 and cs_has_substr(verified, "invalid_or_tampered_evidence_bundle") == 1
+
+fn test_evidence_missing_environment_fails_closed() = ev_build(ev_without_label("environment", ev_test_frames("stdlib-v1\n", "ci-linux-x86_64"))).ok == 0
+
+fn ev_with_graph(fs, graph) = match fs
+    Nil => Nil
+    Cons(h, t) => if h.label == "graph" then Cons({label: "graph", text: graph}, t) else Cons(h, ev_with_graph(t, graph))
+
+fn test_evidence_dependency_closure_is_transitive() = let old_fs = ev_test_frames("stdlib-v1\n", "ci-linux-x86_64") in let changed_fs = ev_test_frames("stdlib-v2\n", "ci-linux-x86_64") in let old_transitive = ev_with_graph(old_fs, "base=stdlib\nindependent=base\n") in let new_transitive = ev_with_graph(changed_fs, "base=stdlib\nindependent=base\n") in let issued = ev_test_issue(old_transitive) in let verified = ev_verify(ev_test_request(new_transitive, issued)) in cs_has_substr(verified, "\"retained\":[]") == 1 and cs_has_substr(verified, "\"invalidated\":[\"base\",\"independent\"]") == 1
+
+fn ev_with_dependency(fs, label, text) = Cons({label: label, text: text}, fs)
+
+fn test_evidence_missing_previous_dependency_is_explicit() = let old_fs = ev_test_frames("stdlib-v1\n", "ci-linux-x86_64") in let changed_fs = ev_with_dependency(ev_with_graph(ev_test_frames("stdlib-v1\n", "ci-linux-x86_64"), "base=required\nindependent=other\n"), "dependency.required", "required-v1\n") in let issued = ev_test_issue(old_fs) in let verified = ev_verify(ev_test_request(changed_fs, issued)) in cs_has_substr(verified, "\"verdict\":\"UNKNOWN\"") == 1 and cs_has_substr(verified, "\"missing\":[\"base\"]") == 1 and cs_has_substr(verified, "\"newly_required\":[\"base\",\"independent\"]") == 1
+
+print levidence_dispatch(readall())
