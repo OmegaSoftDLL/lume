@@ -43,6 +43,7 @@ jobs:
   economic-benchmark:
     name: Economic benchmark real-execution protocol (#337)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     env:
       ECONOMIC_DEBUG_DIR: ${{ runner.temp }}/economic-debug
     steps:
