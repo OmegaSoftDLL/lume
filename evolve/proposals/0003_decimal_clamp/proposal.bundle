@@ -4,7 +4,7 @@
 @principles P1,P7,P24,P30,P31
 @capability pure
 @max_asm_lines 2500
-@approval signed:ricardo:ed25519:213eeaec6fac6d5ff5ab457a2d57d00c16e9ba82baf6444b2c477363d68934ab700b44cc2938f7abbc20456a32fb0f299dd9a304047c9756780f3147ade34d0c
+@approval signed:ricardo:ed25519:15be8d76006da3fc800017ee482f4f62634ba63d149cb7b1fd9b708ba40f789074b6b686ebcb99c17ade8b8057fab697aedb67d69e1d837074d48daf4f1f020e
 @baseline
 ## decimal.src — exact base-10 arithmetic over signed integer coefficients.
 ## A value {coefficient: c, scale: s, precision: p} represents c * 10^-s.
