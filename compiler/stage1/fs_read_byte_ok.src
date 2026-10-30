@@ -1,0 +1,9 @@
+fn frb_fixture() = fs_write_sync("fs_read_byte_probe", "A\n")
+
+fn test_fs_read_byte_first() = let written = frb_fixture() in written == 1 and fs_read_byte("fs_read_byte_probe", 0) == 65
+
+fn test_fs_read_byte_second() = let written = frb_fixture() in written == 1 and fs_read_byte("fs_read_byte_probe", 1) == 10
+
+fn test_fs_read_byte_out_of_range() = let written = frb_fixture() in written == 1 and fs_read_byte("fs_read_byte_probe", 2) == 0 - 1
+
+fn test_fs_read_byte_missing() = fs_read_byte("../../compiler/stage1/definitely_missing_byte_probe", 0) == 0 - 1
