@@ -1,0 +1,5 @@
+fn test_fs_path_exists_present() = fs_path_exists("../../compiler/stage1/fs_path_exists_ok.src") == 1
+
+fn test_fs_path_exists_missing() = fs_path_exists("../../compiler/stage1/definitely_missing_fs_probe") == 0
+
+fn test_fs_path_exists_empty_file() = let path = "fs_path_exists_empty_probe" in let written = fs_write_sync(path, "") in written == 1 and fs_path_exists(path) == 1 and fs_read_file(path) == ""
