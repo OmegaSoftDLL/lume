@@ -852,8 +852,8 @@ PY
     chmod +x "$ntmp/os_run_probe"
     printf '%s' "$ntmp/os_run_probe" > os_run_probe_path
     LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/os_run_ok.src >"$ntmp/os_run_test.out" 2>"$ntmp/os_run_test.err"
-    if grep -q "3 passed, 0 failed" "$ntmp/os_run_test.out"; then ok "phase-3 K7: os_run executes a Lume binary via fork+execve and reports wait status"; else bad "phase-3 K7: os_run native process execution"; cat "$ntmp/os_run_test.out" "$ntmp/os_run_test.err"; fi
-    rm -f os_run_probe_path
+    if grep -q "4 passed, 0 failed" "$ntmp/os_run_test.out"; then ok "phase-3 K7: os_run executes a Lume binary via fork+execve and reports wait status"; else bad "phase-3 K7: os_run native process execution"; cat "$ntmp/os_run_test.out" "$ntmp/os_run_test.err"; fi
+    rm -f os_run_probe_path os_run_capture_stdout os_run_capture_stderr
     # S0001: unstructured `spawn` outside `scope`, capturing non-`Send` `rc[T]`, or capturing unmoved `var`/`mut` across `spawn`
     printf 'fn bad_unscoped() -> int = spawn(42)\nprint bad_unscoped()\n' >"$ntmp/s1a.src"
     "$ntmp/lc" <"$ntmp/s1a.src" >"$ntmp/s1a.s" 2>"$ntmp/s1a.err"; s1ac=$?
