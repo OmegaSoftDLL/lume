@@ -36,4 +36,12 @@ fn rt_request(input) = let ls = lc_split_lines(input, 0, count(input)) in {image
 
 fn rt_dispatch(input) = let req = rt_request(input) in let first_serial = fs_read_file(req.first) in let second_serial = fs_read_file(req.second) in let first = rt_serial(first_serial) in let second = rt_serial(second_serial) in let ok = if rt_image_valid(req.image, fs_read_file(req.assembly)) == 1 and first.valid == 1 and second.valid == 1 and rt_within(first, rt_base(req.first_base)) == 1 and rt_within(second, rt_base(req.second_base)) == 1 and rt_compare(first, second) != 0 and first.year == 2024 and second.year == 2031 then 1 else 0 in if ok == 1 then "PASS: " + lc_trim(first_serial) + "\nPASS: " + lc_trim(second_serial) else ctfail("RTC capstone assertion failed")
 
+fn test_rtc_rejects_elf_image() = rt_image_valid("../../bootstrap/lume0/lume0", ".kernel\nport_in8:\n    inb %dx, %al\nport_out8:\n    outb %al, %dx\n") == 0
+
+fn test_rtc_rejects_hosted_syscall() = rt_no_syscall(lc_split_lines("cli\nsyscall\n", 0, 12)) == 0
+
+fn test_rtc_rejects_impossible_date() = rt_serial("p0_rtc_kernel=ok year=2024 month=13 day=1 hour=0 minute=0 second=0 status_b=0\n").valid == 0
+
+fn test_rtc_rejects_time_before_base() = rt_within(rt_base("2023-06-15T12:34:56"), rt_base("2024-06-15T12:34:56")) == 0
+
 print rt_dispatch(readall())
