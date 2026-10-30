@@ -2674,6 +2674,7 @@ registry_toolchain_id() {
     ensure_core_tool lcert
     ensure_core_tool ltest
     ensure_core_tool lregistry
+    ensure_core_tool lregistry_cid
     {
         printf 'cli=%s\n' "$(sha256_file "$ROOT/lume")"
         printf 'lumec=%s\n' "$(sha256_file "$LUMEC")"

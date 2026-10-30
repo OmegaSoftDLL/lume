@@ -1,0 +1,31 @@
+## Independent manifest-to-CID oracle for verified component registry acceptance.
+
+use lcaas
+
+fn rj_field(s, key) = let marker = "\"" + key + "\":\"" in let p = cs_find_substr(s, marker, 0, count(s), count(marker)) in if p >= count(s) then {ok: 0, value: ""} else let start = p + count(marker) in let finish = lc_find_ch(s, start, count(s), "\"") in if finish >= count(s) then {ok: 0, value: ""} else {ok: 1, value: slice(s, start, finish)}
+
+fn rj_number_end(s, i, n) = if i >= n then n else if at(s, i) == "," or at(s, i) == "}" then i else rj_number_end(s, i + 1, n)
+
+fn rj_number(s, key) = let marker = "\"" + key + "\":" in let p = cs_find_substr(s, marker, 0, count(s), count(marker)) in if p >= count(s) then {ok: 0, value: ""} else let start = p + count(marker) in let finish = rj_number_end(s, start, count(s)) in {ok: 1, value: slice(s, start, finish)}
+
+fn rj_array(s, key) = let marker = "\"" + key + "\":[" in let p = cs_find_substr(s, marker, 0, count(s), count(marker)) in if p >= count(s) then {ok: 0, value: ""} else let start = p + count(marker) in let finish = lc_find_ch(s, start, count(s), "]") in if finish >= count(s) then {ok: 0, value: ""} else {ok: 1, value: slice(s, start, finish)}
+
+fn rj_capabilities_text(raw, i) = if i >= count(raw) then "" else let c = at(raw, i) in if c == "\"" then rj_capabilities_text(raw, i + 1) else if c == "," then "," + rj_capabilities_text(raw, i + 1) else c + rj_capabilities_text(raw, i + 1)
+
+fn rj_material(m) = let schema = rj_field(m, "schema") in let adapter = rj_field(m, "adapter_sha256") in let source = rj_field(m, "source_sha256") in let proof = rj_field(m, "proof_sha256") in let tests = rj_field(m, "tests_sha256") in let output = rj_field(m, "test_output_sha256") in let target = rj_field(m, "target") in let toolchain = rj_field(m, "toolchain_sha256") in let signature = rj_field(m, "contract_signature") in let public = rj_number(m, "public_contracts") in let kernel = rj_field(m, "proof_kernel") in let caps = rj_array(m, "capabilities") in if schema.ok == 0 or adapter.ok == 0 or source.ok == 0 or proof.ok == 0 or tests.ok == 0 or output.ok == 0 or target.ok == 0 or toolchain.ok == 0 or signature.ok == 0 or public.ok == 0 or kernel.ok == 0 or caps.ok == 0 or schema.value != "lume-verified-component/0.1" then {ok: 0, text: ""} else {ok: 1, text: "lume-verified-component/0.1\nadapter_sha256=" + adapter.value + "\nsource_sha256=" + source.value + "\nproof_sha256=" + proof.value + "\ntests_sha256=" + tests.value + "\ntest_output_sha256=" + output.value + "\ntarget=" + target.value + "\ntoolchain_sha256=" + toolchain.value + "\ncapabilities=" + rj_capabilities_text(caps.value, 0) + "\ncontract_signature=" + signature.value + "\npublic_contracts=" + public.value + "\nproof_kernel=" + kernel.value + "\n"}
+
+fn rj_cid(m) = let material = rj_material(m) in if material.ok == 0 then "" else lc_sha256(material.text)
+
+fn rj_response(m) = let cid = rj_cid(m) in if cid == "" then "{\"ok\":false,\"error\":\"invalid_or_incomplete_component_manifest\"}" else "{\"ok\":true,\"cid\":\"" + cid + "\"}"
+
+fn rj_zeros(n) = if n <= 0 then "" else "0" + rj_zeros(n - 1)
+
+fn rj_test_manifest(adapter, capabilities) = "{\"schema\":\"lume-verified-component/0.1\",\"artifacts\":{\"adapter_sha256\":\"" + adapter + "\",\"source_sha256\":\"sha256:" + rj_zeros(64) + "\",\"proof_sha256\":\"sha256:" + rj_zeros(64) + "\",\"tests_sha256\":\"sha256:" + rj_zeros(64) + "\",\"test_output_sha256\":\"sha256:" + rj_zeros(64) + "\"},\"target\":\"x86_64-linux-elf\",\"toolchain_sha256\":\"sha256:" + rj_zeros(64) + "\",\"capabilities\":[" + capabilities + "],\"contract_signature\":\"sha256:" + rj_zeros(64) + "\",\"public_contracts\":2,\"evidence\":{\"proof_kernel\":\"lume-minimal-kernel-v1\"}}"
+
+fn test_registry_cid_recomputation_and_tamper() = let manifest = rj_test_manifest("sha256:1111111111111111111111111111111111111111111111111111111111111111", "\"pure\"") in let material = rj_material(manifest) in let cid = rj_cid(manifest) in material.ok == 1 and cid == lc_sha256(material.text) and count(cid) == 71 and cid != rj_cid(rj_test_manifest("sha256:2222222222222222222222222222222222222222222222222222222222222222", "\"pure\""))
+
+fn test_registry_cid_capabilities_are_canonical() = let manifest = rj_test_manifest("sha256:1111111111111111111111111111111111111111111111111111111111111111", "\"ffi\",\"net\"") in cs_has_substr(rj_material(manifest).text, "capabilities=ffi,net\n") == 1
+
+fn test_registry_cid_rejects_missing_or_wrong_schema() = rj_cid("{}") == "" and rj_cid(rj_test_manifest("sha256:1111111111111111111111111111111111111111111111111111111111111111", "\"pure\"")) != "" and rj_cid("{\"schema\":\"wrong\"}") == ""
+
+print rj_response(readall())

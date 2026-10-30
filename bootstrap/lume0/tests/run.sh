@@ -423,6 +423,9 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_
     LUME_BIN_DIR="$ntmp" ../../lume build "$ntmp/merr/cyc_a.src" -o "$ntmp/merr/cyc.elf" 2>"$ntmp/merr/cyc.err"; cyc_rc=$?
     LUME_BIN_DIR="$ntmp" ../../lume build "$ntmp/merr/miss.src" -o "$ntmp/merr/miss.elf" 2>"$ntmp/merr/miss.err"; miss_rc=$?
     if [ "$cyc_rc" != 0 ] && grep -q "circular module dependency" "$ntmp/merr/cyc.err" && [ "$miss_rc" != 0 ] && grep -q "module 'no_such_mod' not found" "$ntmp/merr/miss.err"; then ok "phase-2 T3: native lmod.src rejects circular 'use' chains and missing modules"; else bad "phase-2 T3: native lmod.src cycle & missing-module errors"; fi
+    LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/fs_path_exists_ok.src >"$ntmp/fs_path_exists.out" 2>"$ntmp/fs_path_exists.err"
+    if grep -q "3 passed, 0 failed" "$ntmp/fs_path_exists.out"; then ok "phase-2 filesystem evidence: fs_path_exists distinguishes present, missing, and empty paths"; else bad "phase-2 filesystem evidence: fs_path_exists"; cat "$ntmp/fs_path_exists.out" "$ntmp/fs_path_exists.err"; fi
+    rm -f fs_path_exists_empty_probe
     LUME_BIN_DIR="$ntmp" ../../lume pkg init "$ntmp/pkgdemo" >/dev/null 2>&1
     LUME_BIN_DIR="$ntmp" ../../lume pkg lock "$ntmp/pkgdemo" >/dev/null 2>&1
     pkg_ok=1
@@ -666,6 +669,7 @@ PY
     # 6 automated gates `compile`/`conformance`/`api_compat`/`capability`/`budget`/`fixpoint`, and mandatory human approval).
     if LUME_BIN_DIR="$ntmp" ../../lume run ../../compiler/stage1/evolve_demo.src >"$ntmp/ev_demo.out" 2>"$ntmp/ev_demo.err" && diff -u ../../tests/conformance/stage1/evolve_demo_asm.expected "$ntmp/ev_demo.out" >/dev/null; then ok "phase-2 E3: in-process self-evolution & governance engine (use levolve: AI fix-it repair + 6 gates + human approval)"; else bad "phase-2 E3: in-process self-evolution & governance engine (use levolve)"; cat "$ntmp/ev_demo.err" "$ntmp/ev_demo.out"; fi
     if LUME_BIN_DIR="$ntmp" ../../lume run ../../compiler/stage1/evolve_evidence_ok.src >"$ntmp/ev_evidence.out" 2>"$ntmp/ev_evidence.err" && diff -u ../../tests/conformance/stage1/evolve_evidence_ok_asm.expected "$ntmp/ev_evidence.out" >/dev/null; then ok "phase-2 E3 (#330): evolve derives fail-closed gate and obligation evidence (PASS/FAIL/UNKNOWN)"; else bad "phase-2 E3 (#330): evolve derived evidence"; cat "$ntmp/ev_evidence.err" "$ntmp/ev_evidence.out"; fi
+    if LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/levidence.src >"$ntmp/levidence_test.out" 2>"$ntmp/levidence_test.err" && grep -q "7 passed, 0 failed" "$ntmp/levidence_test.out"; then ok "phase-2 E2 (#335/#337): portable evidence retention, material invalidation, dependency closure, missing identity, and tamper rejection"; else bad "phase-2 E2 (#335/#337): portable renewable evidence"; cat "$ntmp/levidence_test.err" "$ntmp/levidence_test.out"; fi
     if LUME_BIN_DIR="$ntmp" ../../lume run ../../compiler/stage1/ed25519_rfc8032_ok.src >"$ntmp/ed_rfc.out" 2>"$ntmp/ed_rfc.err" && diff -u ../../tests/conformance/stage1/ed25519_rfc8032_ok_asm.expected "$ntmp/ed_rfc.out" >/dev/null; then ok "phase-2 E3 (#222): ed25519_verify passes official RFC 8032 Section 7.1 test vectors (empty, 1B, 2B, 1024B, SHA(abc) + bit-flip/non-canonical rejection)"; else bad "phase-2 E3 (#222): ed25519_verify official RFC 8032 Section 7.1 test vectors"; cat "$ntmp/ed_rfc.err" "$ntmp/ed_rfc.out"; fi
     if command -v python3 >/dev/null 2>&1; then
         _sig_0001=$(tr -d '\r\n' < ../../evolve/proposals/0001_math_clamp/approval.sig)
@@ -1544,6 +1548,7 @@ EOF
 
     if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_ASAN:-}" ] && [ -z "${LUME0_RUNNER:-}" ]; then
         if LUME_CLI=../../lume LUME_BIN_DIR="$ntmp" sh ../../scripts/check-verified-registry.sh >"$ntmp/verified_registry.out" 2>&1; then ok "verified registry (#337): real artifact CIDs, independent proofs, native tests, discovery, freshness, target checks & adversarial rejection"; else bad "verified registry (#337): publication/resolution adversarial checks"; cat "$ntmp/verified_registry.out"; fi
+        if LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/lregistry_cid.src >"$ntmp/registry_cid_test.out" 2>"$ntmp/registry_cid_test.err" && grep -q "3 passed, 0 failed" "$ntmp/registry_cid_test.out"; then ok "verified registry (#337): Lume-native CID oracle recomputation, canonical capabilities, and schema rejection"; else bad "verified registry (#337): Lume-native CID oracle"; cat "$ntmp/registry_cid_test.err" "$ntmp/registry_cid_test.out"; fi
     else
         ok "verified registry (#337): native execution covered by the dedicated Ubuntu gate; not applicable in this host/configuration"
     fi
