@@ -134,6 +134,8 @@ Every Phase 3 brick obeys the project's non-negotiable rules:
     and real OS multi-process parallel execution (`par_fork_scale2`, `par_map_scale_os` via
     `sys_fork` + `sys_pipe` + `sys_wait4` running workers in separate kernel processes with distinct
     PIDs, plus hardware `lock xaddq` `atomic_xadd64` and `spinlock_acquire`/`spinlock_release`, `#193`).
+  - Direct process execution for Lume-only harnesses: `os_run(path, args)` builds a bounded argv,
+    invokes `execve` without a shell, and returns the raw `wait4` status.
   - *Ref: Go channels/`select`, Rayon data parallelism.*
 
 - **S3 — `std.actor`, Erlang-style `supervisor`, and `std.time.logical` ✅**

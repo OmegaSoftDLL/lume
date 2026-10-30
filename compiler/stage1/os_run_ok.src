@@ -1,0 +1,3 @@
+fn test_os_run_executes_lume_tool() = os_run(fs_read_file("os_run_probe_path"), Nil) == 0
+
+fn test_os_run_missing_tool_fails() = os_run("/definitely/missing-lume-tool", Nil) != 0
