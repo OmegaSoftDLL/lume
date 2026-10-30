@@ -16,10 +16,9 @@ Two static demonstration bearer identities are bound to tenant IDs. Cross-tenant
 are denied before storage access. Each successful mutation appends and fsyncs a real WAL snapshot;
 startup recovers the latest valid committed state.
 
-`tests/capstones/test_saas_http.py` is an independent Python client, not a Lume self-round-trip. It
-exercises actual HTTP connections and raw malformed requests, verifies two tenants' data across
-adversarial requests and process restarts, and checks that a torn trailing WAL frame does not change
-recovered balances.
+`tests/capstones/saas_assertions.src` is an independent native Lume client. It exercises actual HTTP
+connections and raw malformed requests, verifies two tenants' data across adversarial requests and
+process restarts, and checks that a torn trailing WAL frame does not change recovered balances.
 
 This is **not production SaaS acceptance**. Plain HTTP is the only implemented transport. There is
 no TLS interoperability evidence, browser/WASM DOM artifact, complete TCP stack, timeout/backpressure
