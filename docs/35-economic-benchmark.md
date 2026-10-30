@@ -45,7 +45,9 @@ Requirements are a native Linux x86-64 host, the checked-out Lume repository, an
 runner, report generation, and independent report validation are implemented in Lume. No third-party
 package, network service, AI API, credential, C compiler, external assembler, or external linker is
 used by the benchmark path. Binary artifact hashes are computed directly from exact file bytes by
-`fs_sha256_file`.
+`fs_sha256_file`. Separate producer and verifier probes using `lcaas` and the independent `lcert`
+kernel must agree on a real x86-64 ELF containing NUL and non-ASCII bytes, in addition to the fixed
+empty and `abc` vectors.
 
 ```sh
 make -C bootstrap/lume0

@@ -1,0 +1,17 @@
+use lcert
+
+fn fv_file_size(path, i) = if fs_read_byte(path, i) < 0 then i else fv_file_size(path, i + 1)
+
+fn fv_msg_byte(msg, total, idx) = if idx < msg.len then fs_read_byte(msg.path, idx) else if idx == msg.len then 128 else if idx >= total - 8 then ((msg.len * 8) / sha_pow2(8 * (total - 1 - idx))) % 256 else 0
+
+fn fv_msg_word(msg, total, base) = fv_msg_byte(msg, total, base) * 16777216 + fv_msg_byte(msg, total, base + 1) * 65536 + fv_msg_byte(msg, total, base + 2) * 256 + fv_msg_byte(msg, total, base + 3)
+
+fn fv_w_build(msg, total, blk_off, t, w_rev) = if t >= 64 then w_rev else let wt = (if t < 16 then fv_msg_word(msg, total, blk_off + t * 4) else sha_u32(sha_nth(w_rev, 15) + sha_sml_sig0(sha_nth(w_rev, 14)) + sha_nth(w_rev, 6) + sha_sml_sig1(sha_nth(w_rev, 1)))) in fv_w_build(msg, total, blk_off, t + 1, Cons(wt, w_rev))
+
+fn fv_sha_blocks(msg, total, blk_off, st) = if blk_off >= total then st else let w_rev = fv_w_build(msg, total, blk_off, 0, Nil) in let r = sha_rounds(st, w_rev, 0) in fv_sha_blocks(msg, total, blk_off + 64, {a: sha_u32(st.a + r.a), b: sha_u32(st.b + r.b), c: sha_u32(st.c + r.c), d: sha_u32(st.d + r.d), e: sha_u32(st.e + r.e), f: sha_u32(st.f + r.f), g: sha_u32(st.g + r.g), h: sha_u32(st.h + r.h)})
+
+fn fv_sha256_file(path) = let len = fv_file_size(path, 0) in let total = ((len + 9 + 63) / 64) * 64 in let msg = {path: path, len: len} in let init = {a: 1779033703, b: 3144134277, c: 1013904242, d: 2773480762, e: 1359893119, f: 2600822924, g: 528734635, h: 1541459225} in let fin = fv_sha_blocks(msg, total, 0, init) in sha_hex32(fin.a) + sha_hex32(fin.b) + sha_hex32(fin.c) + sha_hex32(fin.d) + sha_hex32(fin.e) + sha_hex32(fin.f) + sha_hex32(fin.g) + sha_hex32(fin.h)
+
+fn fv_probe() = let path = "../../bootstrap/lume0/lume0" in if fs_read_byte(path, 0) == 127 and fs_read_byte(path, 4) == 0 and fs_read_byte(path, 18) == 183 then fv_sha256_file(path) else ctfail("binary SHA-256 verifier requires a real x86-64 ELF input")
+
+print fv_probe()
