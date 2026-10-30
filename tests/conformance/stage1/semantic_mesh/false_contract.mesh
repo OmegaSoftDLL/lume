@@ -1,0 +1,10 @@
+@protocol lume-semantic-intent/0.1
+@mode negotiate
+@goal reject a false contract with the real prover
+@target x86_64-linux-elf
+@capabilities pure
+@resources max_source_bytes=4096,max_transactions=4
+@acceptance compile
+@source
+fn wrong(x: int) -> int requires x >= 0 ensures result < 0 = x + 1
+@end

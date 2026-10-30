@@ -28,6 +28,18 @@ jobs:
       - name: Test under ASan/UBSan
         run: make -C bootstrap/lume0 asan
 
+  semantic-mesh:
+    name: Semantic intent protocol (#337)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build seed
+        run: make -C bootstrap/lume0
+      - name: Test real semantic protocol requests
+        run: LUME_MESH_ONLY=1 bootstrap/lume0/tests/run.sh
+      - name: Test semantic protocol under ASan/UBSan
+        run: LUME_MESH_ONLY=1 make -C bootstrap/lume0 asan
+
   process-runtime:
     name: Native process execution (#337)
     runs-on: ubuntu-latest
@@ -39,7 +51,7 @@ jobs:
       - name: Build Lume process probes
         run: ./lume build compiler/stage1/os_run_probe.src -o build/bin/os_run_probe && ./lume build compiler/stage1/os_run_slow_probe.src -o build/bin/os_run_slow_probe
       - name: Test native process execution
-        run: printf '%s' "$PWD/build/bin/os_run_probe" > os_run_probe_path && printf '%s' "$PWD/build/bin/os_run_slow_probe" > os_run_slow_probe_path && ./lume test compiler/stage1/os_run_ok.src
+        run: printf '%s' "$PWD/build/bin/os_run_probe" > os_run_probe_path && printf '%s' "$PWD/build/bin/os_run_slow_probe" > os_run_slow_probe_path && ./lume run compiler/stage1/os_run_trace.src && ./lume test compiler/stage1/os_run_ok.src
 
   economic-benchmark:
     name: Economic benchmark real-execution protocol (#337)

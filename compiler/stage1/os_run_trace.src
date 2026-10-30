@@ -1,0 +1,4 @@
+use os_run_ok
+
+print test_os_run_accepts_native_argument_list()
+print test_os_run_capture_writes_process_streams()

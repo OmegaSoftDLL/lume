@@ -3,6 +3,8 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 LUME=${LUME_CLI:-$ROOT/lume}
+LUME_BIN_DIR=${LUME_BIN_DIR:-$ROOT/build/bin}
+export LUME_BIN_DIR
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 STORE="$TMP/store"
@@ -52,23 +54,18 @@ for artifact, filename in [
 ]:
     actual = "sha256:" + hashlib.sha256((entry / filename).read_bytes()).hexdigest()
     assert manifest["artifacts"][artifact] == actual
-material = (
-    "lume-verified-component/0.1\n"
-    f"adapter_sha256={manifest['artifacts']['adapter_sha256']}\n"
-    f"source_sha256={manifest['artifacts']['source_sha256']}\n"
-    f"proof_sha256={manifest['artifacts']['proof_sha256']}\n"
-    f"tests_sha256={manifest['artifacts']['tests_sha256']}\n"
-    f"test_output_sha256={manifest['artifacts']['test_output_sha256']}\n"
-    f"target={manifest['target']}\n"
-    f"toolchain_sha256={manifest['toolchain_sha256']}\n"
-    f"capabilities={','.join(manifest['capabilities'])}\n"
-    f"contract_signature={manifest['contract_signature']}\n"
-    f"public_contracts={manifest['public_contracts']}\n"
-    f"proof_kernel={manifest['evidence']['proof_kernel']}\n"
-)
-expected_cid = "sha256:" + hashlib.sha256(material.encode("ascii")).hexdigest()
-assert manifest["cid"] == expected_cid
-pathlib.Path(sys.argv[1] + ".cid").write_text(expected_cid, encoding="ascii")
+PY
+
+"$LUME_BIN_DIR/lregistry_cid" < "$TMP/publish.json" > "$TMP/cid-oracle.json"
+python3 - "$TMP/cid-oracle.json" "$TMP/publish.json" "$TMP/publish.json.cid" <<'PY'
+import json
+import pathlib
+import sys
+oracle = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+manifest = json.loads(pathlib.Path(sys.argv[2]).read_text(encoding="utf-8"))
+assert oracle["ok"] is True
+assert oracle["cid"] == manifest["cid"]
+pathlib.Path(sys.argv[3]).write_text(oracle["cid"], encoding="ascii")
 PY
 CID=$(cat "$TMP/publish.json.cid")
 ENTRY="$STORE/components/$CID"
