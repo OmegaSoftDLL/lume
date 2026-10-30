@@ -31,6 +31,7 @@ jobs:
   renewable-evidence:
     name: Portable renewable evidence (#335/#337)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - name: Build seed
