@@ -27,7 +27,7 @@ property of the world's missing universal ABI, not a Lume limitation.
 > - **Shipped (I1, I2, I3, I5):**
 >   - **I1 (`extern "c" fn` + System V AMD64 call lowering):** `05_codegen.src` lowers `extern "c" fn` calls to System V AMD64 unboxing/boxing trampolines (`__lume_ffi_<sym>`), paired with compile-time `"ffi"` effect checking (`[E0200]`) and foreign return provenance checking (`[A0003]`).
 >   - **I2 (Dynamic & Static Linking):** `lasm.src` (`asmdyn`) emits dynamically linked ELF64 binaries (`PT_INTERP`, `PT_DYNAMIC`, `DT_NEEDED`, `.dynsym`, `.dynstr`, `.got.plt`, `.rela.dyn` `R_X86_64_GLOB_DAT`, and PLT stubs) directly from `.need` / `.extern` / `@link("<soname>")`, and `lume build --link <lib.so|lib.a>` + `[ffi] libs = [...]` in `lume.toml` (enforcing `"ffi"` in `[capabilities] allow` `[E0200]`) link dynamic `.so` and static `.a` libraries end-to-end.
->   - **I3 (`lume agent bind <header.h>`):** Generates N-parameter `extern "c" fn` declarations and `pub fn foreign_<name>` adapters for single-line prototypes with `int64_t` returns, `int64_t` parameters, and borrowed `const char *` parameters. Adapter returns remain `unverified[int]`; unsupported pointers, mutable buffers, callbacks, variadics, and other ABI types fail closed with `[I0003]` instead of acquiring invented ownership or verification contracts.
+>   - **I3 (`lume adapt c <header.h>` / `lume agent bind <header.h>`):** Generates N-parameter `extern "c" fn` declarations and `pub fn foreign_<name>` adapters for strict single-line prototypes with `int64_t` returns, `int64_t` parameters, borrowed `const char *` strings, and adjacent `const char *name, int64_t name_len` read-only buffer pairs. Buffer wrappers derive the C length from `count(name)` and do not expose a caller-supplied length. Adapter returns remain `unverified[int]`; malformed declarations, duplicate symbols/parameters, mutable buffers, callbacks, variadics, and other ABI types fail closed with `[I0003]` and no generated source.
 >   - **I5 (Reverse C-ABI & WASM Export):** `pub extern "c" fn` and `@export("C")` emit System V AMD64 C-ABI entrypoints (`.globl <name>`, lazy Lume heap initialization when entered from a foreign `main`, callee-saved register preservation, argument boxing, and return unboxing). `lume build -o <out.a|out.so>` builds static/shared libraries callable from C with generated `.h` headers (`--emit-c-header`), and `lume build -o <out.wat|out.wasm>` / `lume agent c-export` compiles the scalar `i64` fragment to `.wat` and `\0asm` `.wasm` modules, rejecting unsupported constructs with `[I0002]`.
 > - **Model (I4 `std.wasm`):** `std.wasm` (`compiler/stage1/interop.src`) is an in-language reference model of linear-memory bounds, instruction fuel, and host capability flags paired with compile-time `[E0200]` capability enforcement (`wasm_call_host_fs` requires `"wasm"` and `"fs"`); in-process binary WASM VM hosting remains **planned**.
 
@@ -42,12 +42,26 @@ property of the world's missing universal ABI, not a Lume limitation.
 
 ## AI-first binding generation (the Lume advantage)
 
-Rust has `bindgen`, Zig has `@cImport`; Lume has **the model**. Point `lume agent` at a supported C
-header and it generates `extern "c"` declarations plus explicit `foreign_<name>` adapters. The current
-subset accepts `int64_t` scalars and borrowed `const char *` parameters, keeps returns `unverified[int]`,
-and requires the caller to validate them before trusted use. It does not infer ownership, lifetimes,
-buffer lengths, callback safety, or mathematical contracts from C syntax: declarations needing those
-guarantees are rejected with `[I0003]` for a reviewed adapter rather than silently mis-bound.
+Rust has `bindgen`, Zig has `@cImport`; Lume preserves an explicit boundary contract. Run
+`lume adapt c <header.h> -o <adapter.src>` to generate `extern "c"` declarations plus explicit
+`foreign_<name>` adapters, or use `--json` (equivalently `lume agent bind`) for the machine-readable
+manifest. The accepted fragment contains `int64_t` scalars, borrowed NUL-terminated `const char *`
+strings, and adjacent `const char *name, int64_t name_len` read-only buffer pairs. A sized-buffer
+adapter accepts only the Lume string and passes `count(string)` as the C length, so a caller cannot
+provide an inconsistent length. The pointer is borrowed for the call only; no ownership transfer or
+post-call retention is inferred.
+
+Every generated return remains `unverified[int]` and requires validation before trusted use. JSON
+manifests include the header's real SHA-256, per-parameter ownership/extent metadata, the `ffi`
+capability, and foreign return provenance. These checks establish the generated call boundary, not
+the foreign library's internal memory safety or its compliance with `const` and no-retention
+contracts.
+
+Parsing is deliberately strict: one complete prototype per line, `int64_t` returns, no macros or
+conditional preprocessing, no duplicate symbols or parameter names, and no trailing tokens. Any
+error rejects the whole header with `[I0003]`, produces no partial source, returns a nonzero CLI
+status, and leaves an existing `-o` file unchanged. Mutable/output buffers, arbitrary pointers,
+callbacks, variadics, other C types, HTTP/OpenAPI adapters, and adaptive MMIO remain open in #334.
 
 ## Safety model: interop reuses the A3 provenance mechanism
 
@@ -96,7 +110,7 @@ from Phase 3). Bricks:
 - *Status: I1, I2, I3, and I5 are **shipped** (`#191`); I4 `std.wasm` is an in-language capability/fuel **model** paired with compile-time `[E0200]` capability enforcement.*
 - **I1 — `extern "c"` declarations + System V AMD64 call lowering** (`shipped`: `05_codegen.src` unboxing/boxing trampolines + `lasm` `.extern`).
 - **I2 — Linking** (`shipped`: dynamic `.so` via `lasm` `PT_INTERP`/`PT_DYNAMIC`/`DT_NEEDED`/PLT/GOT and static `.a` via `lume build --link` + `[ffi] libs` in `lume.toml`).
-- **I3 — AI binding generator** (`shipped` for the explicit scalar/borrowed-string subset: `lume agent bind <header.h>` → N-parameter `extern "c" fn` + `foreign_<name>` adapters returning `unverified[int]`; unsupported ownership/callback boundaries fail closed with `[I0003]`).
+- **I3 — AI binding generator** (`shipped` for the explicit scalar/borrowed-string/sized-read-only-buffer subset: `lume adapt c <header.h>` or `lume agent bind <header.h>` → N-parameter `extern "c" fn` + `foreign_<name>` adapters returning `unverified[int]`; unsupported ownership/callback boundaries fail closed with `[I0003]`).
 - **I4 — WASM host + sandbox** (`model`: `std.wasm` capability/fuel/bounds reference model + compile-time `[E0200]` capability gate).
 - **I5 — Reverse export** (`shipped`: `pub extern "c" fn` / `@export("C")` + `lume build -o <out.so|out.a|out.wat|out.wasm>` + `--emit-c-header` + `[I0002]` WASM fragment check).
 - **Cross-cutting**: every brick gated by capability (P26) + effect (P14) + A3 provenance; each a green

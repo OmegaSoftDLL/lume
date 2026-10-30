@@ -1,0 +1,9 @@
+[package]
+name = "c_adapter_fixture"
+version = "0.1.0"
+
+[capabilities]
+allow = ["ffi"]
+
+[ffi]
+libs = ["libc_adapter_fixture.so"]

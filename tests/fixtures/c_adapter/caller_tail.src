@@ -1,0 +1,6 @@
+pub fn checked_buffer(bytes: str, weight: int) -> int / {ffi} ensures result >= 0 = let value = foreign_c_buffer_weighted_sum(bytes, weight) in if value >= 0 then value else 0
+pub fn checked_text(text: str) -> int / {ffi} ensures result >= 0 = let value = foreign_c_text_checksum(text) in if value >= 0 then value else 0
+print checked_buffer("Lume", 3)
+print checked_buffer("abc", 2)
+print checked_buffer("", 7)
+print checked_text("Lume")
