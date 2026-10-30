@@ -1,226 +1,325 @@
-## compiler/stage1/lmesh.src -- Priority 0 (#337): Machine-Native Semantic Intent Mesh
-## Implements the 6 flagship pillars of Issue #337 (and feeds #334, #335, #332, #333, #241):
-##   1. Semantic Intent Protocol (`lume-intent-protocol/1.0`): vendor-neutral negotiation of goals,
-##      contracts, effects, resources, targets, and acceptance criteria; semantic transactions
-##      (`init`, `add_contract`, `replace_hole`, `set_target`, `rollback`, `replay`) with atomic
-##      validation, machine-native repair (`fixit_tx`), impact analysis, and cryptographic lineage.
-##   2. Verifiable Universal Adapters ("Chameleon", #334): generated bindings for C-ABI libraries,
-##      MMIO/port hardware devices, and HTTP/OpenAPI services preserving ownership (`own`/`ref`/`mut ref`),
-##      capabilities (`{ffi}`, `{mmio, port, irq}`, `{net, http, db, dom}`), and provenance.
-##   3. Portable & Renewable Evidence (`lume-evidence-bundle/1.0`, #330/#335): independently verifiable
-##      FIPS 180-4 SHA-256 evidence bundles bound to `(intent, code, compiler, deps, target, policy)`
-##      with automatic material-change invalidation, dependency-graph propagation, and fail-closed `UNKNOWN`.
-##   4. Global Machine-Native Component Registry (`lume-component-registry/1.0`): content-addressed
-##      intents, adapters, proofs, tests, and evidence discoverable by capability + contract signature,
-##      rejecting stale, tampered, or target-incompatible components.
-##   5. Economic benchmark evidence is produced separately by `lume economy` and the real-execution
-##      harness in scripts/economic_benchmark.py; this module contains no economic metrics.
-##   6. Reproducible Killer Capstones (#332, #333, #241): one reasonable intent compiled & verified into
-##      a multi-tenant SaaS + Web DOM + secure backend (`TenantLedgerSaaS`) and another into a bare-metal
-##      kernel + hardware driver (`KernelRtcPciDriver`), both emitted and verified by the same semantic mesh.
+## lmesh.src -- versioned semantic intent negotiation and AST transactions (#337, partial P0).
 
-fn ms_len(xs) = match xs
-    Nil        => 0
-    Cons(h, t) => 1 + ms_len(t)
+use lcaas
 
-fn ms_app(xs, ys) = match xs
-    Nil        => ys
-    Cons(h, t) => Cons(h, ms_app(t, ys))
+fn ms_diag(code, phase, message, fixit) = cs_mkdiag(code, phase, message, fixit)
+fn ms_error(mode, ds) = "{\"ok\":false,\"protocol\":\"lume-semantic-intent/0.1\",\"mode\":\"" + cs_jesc(mode) + "\",\"diagnostics\":[" + cs_diags_json(ds) + "]}"
+fn ms_error1(mode, d) = ms_error(mode, Cons(d, Nil))
+fn ms_field(s) = str(count(s)) + ":" + s
+fn ms_bool(b) = if b == 1 then "true" else "false"
+fn ms_strs_json(xs) = "[" + cs_strlist_json(xs) + "]"
+fn ms_target(name) = if name == "x86_64-linux-elf" or name == "linux-x86_64" or name == "x86_64-unknown-linux-gnu" then {ok: 1, triple: "x86_64-linux-elf"} else if name == "lumb" or name == "lumb-portable-vm" then {ok: 1, triple: "lumb"} else {ok: 0, triple: name}
 
-fn ms_rev_acc(xs, acc) = match xs
-    Nil        => acc
-    Cons(h, t) => ms_rev_acc(t, Cons(h, acc))
+fn ms_ascii_i(s, i, n) = if i >= n then 1 else let c = at(s, i) in if c == "\n" or c == "\t" then ms_ascii_i(s, i + 1, n) else if c == "\r" then (if i + 1 < n and at(s, i + 1) == "\n" then ms_ascii_i(s, i + 1, n) else 0) else if c < " " or c > "~" then 0 else ms_ascii_i(s, i + 1, n)
+fn ms_ascii(s) = ms_ascii_i(s, 0, count(s))
+fn ms_digits_i(s, i, n) = if i >= n then 1 else if cs_isdigit(at(s, i)) == 1 then ms_digits_i(s, i + 1, n) else 0
+fn ms_nat(s) = if count(s) == 0 then 0 else if ms_digits_i(s, 0, count(s)) == 0 then 0 else if toint(s) <= 0 then 0 else 1
 
-fn ms_rev(xs) = ms_rev_acc(xs, Nil)
+fn ms_head(ls) = match ls
+    Nil => ""
+    Cons(h, t) => cs_chomp(h)
+fn ms_tail(ls) = match ls
+    Nil => Nil
+    Cons(h, t) => t
+fn ms_take(ls, prefix) = let line = ms_head(ls) in if cs_startswith(line, prefix) == 1 then {ok: 1, value: slice(line, count(prefix), count(line)), rest: ms_tail(ls)} else {ok: 0, value: "", rest: ls}
+fn ms_expected(ls, prefix, mode) = let r = ms_take(ls, prefix) in if r.ok == 1 then r else {ok: 0, value: "", rest: ls, diagnostic: ms_diag("M1002", "payload", "invalid or ambiguous payload: expected exactly one '" + cs_chomp(prefix) + "' field", "follow the versioned field order and remove duplicate or unknown fields")}
 
-fn ms_join(xs, sep) = match xs
-    Nil        => ""
-    Cons(h, t) => if ms_len(t) == 0 then h else h + sep + ms_join(t, sep)
+fn ms_source_lines(ls, acc) = match ls
+    Nil => {ok: 0, source: "", rest: Nil}
+    Cons(h, t) => let line = cs_chomp(h) in if line == "@end" then {ok: 1, source: cs_joinsep(cs_rev(acc), "\n"), rest: t} else ms_source_lines(t, Cons(line, acc))
+fn ms_source(ls) = let r = ms_take(ls, "@source") in if r.ok == 1 and r.value == "" then ms_source_lines(r.rest, Nil) else {ok: 0, source: "", rest: ls}
 
-fn ms_jesc_ch(c) = if c == "\"" then "\\\"" else if c == "\\" then "\\\\" else if c == "\n" then "\\n" else if c == "\r" then "\\r" else if c == "\t" then "\\t" else c
-fn ms_jesc_loop(s, i, n) = if i >= n then "" else ms_jesc_ch(at(s, i)) + ms_jesc_loop(s, i + 1, n)
-fn ms_jesc(s) = ms_jesc_loop(s, 0, count(s))
+fn ms_cap_known(c) = c == "io" or c == "fs" or c == "net" or c == "alloc" or c == "async" or c == "fail" or c == "panic" or c == "rand" or c == "time" or c == "prob" or c == "llm" or c == "wasm" or c == "ffi"
+fn ms_cap_insert(c, xs) = match xs
+    Nil => Cons(c, Nil)
+    Cons(h, t) => if c == h then Nil else if c < h then Cons(c, Cons(h, t)) else let r = ms_cap_insert(c, t) in if cs_isnil(r) == 1 then Nil else Cons(h, r)
+fn ms_cap_parse_i(s, i, n, acc) = let j = lc_find_ch(s, i, n, ",") in let c = slice(s, i, j) in if count(c) == 0 or ms_cap_known(c) == 0 then Nil else let next = ms_cap_insert(c, acc) in if cs_isnil(next) == 1 then Nil else if j >= n then next else ms_cap_parse_i(s, j + 1, n, next)
+fn ms_caps(s) = if s == "pure" then Nil else ms_cap_parse_i(s, 0, count(s), Nil)
+fn ms_caps_text(caps) = if cs_isnil(caps) == 1 then "pure" else cs_joinsep(caps, ",")
+fn ms_caps_missing(xs, ys) = match xs
+    Nil => Nil
+    Cons(h, t) => if cs_omem(h, ys) == 1 then ms_caps_missing(t, ys) else Cons(h, ms_caps_missing(t, ys))
 
-fn ms_sw(s, p, i) = if i >= count(p) then 1 else if i >= count(s) then 0 else if at(s, i) == at(p, i) then ms_sw(s, p, i + 1) else 0
+fn ms_resources(s) = let p = lc_find_ch(s, 0, count(s), ",") in if p >= count(s) then {ok: 0, max_source: 0, max_tx: 0, text: s} else let a = slice(s, 0, p) in let b = slice(s, p + 1, count(s)) in if cs_startswith(a, "max_source_bytes=") == 1 and cs_startswith(b, "max_transactions=") == 1 then let av = slice(a, 17, count(a)) in let bv = slice(b, 17, count(b)) in if ms_nat(av) == 1 and ms_nat(bv) == 1 then {ok: 1, max_source: toint(av), max_tx: toint(bv), text: a + "," + b} else {ok: 0, max_source: 0, max_tx: 0, text: s} else {ok: 0, max_source: 0, max_tx: 0, text: s}
 
-fn ms_strlist_json(xs) = match xs
-    Nil        => ""
-    Cons(h, t) => "\"" + ms_jesc(h) + "\"" + (if ms_len(t) == 0 then "" else "," + ms_strlist_json(t))
+fn ms_parse_op(kind, ls) = if kind == "add_contract" or kind == "replace_contract" then let a = ms_expected(ls, "@symbol ", "transact") in if a.ok == 0 then {ok: 0, rest: ls, diagnostic: a.diagnostic} else let b = ms_expected(a.rest, "@kind ", "transact") in if b.ok == 0 then {ok: 0, rest: ls, diagnostic: b.diagnostic} else let c = ms_expected(b.rest, "@expr ", "transact") in if c.ok == 0 then {ok: 0, rest: ls, diagnostic: c.diagnostic} else let d = ms_take(c.rest, "@end") in if d.ok == 0 or d.value != "" then {ok: 0, rest: ls, diagnostic: ms_diag("M1002", "payload", "invalid or ambiguous contract operation terminator", "use one @end and no trailing fields")} else if count(a.value) == 0 or (b.value != "requires" and b.value != "ensures") or count(c.value) == 0 then {ok: 0, rest: ls, diagnostic: ms_diag("M1002", "payload", "invalid contract operation: symbol, kind, and expression are required", "use kind requires or ensures with a nonempty expression")} else {ok: 1, op: {kind: kind, symbol: a.value, ckind: b.value, expr: c.value, from_idx: 0, to: 0, target: ""}, rest: d.rest} else if kind == "set_target" then let a = ms_expected(ls, "@target ", "transact") in if a.ok == 0 then {ok: 0, rest: ls, diagnostic: a.diagnostic} else let d = ms_take(a.rest, "@end") in if d.ok == 0 or d.value != "" or count(a.value) == 0 then {ok: 0, rest: ls, diagnostic: ms_diag("M1002", "payload", "invalid set_target operation", "provide exactly one target and @end")} else {ok: 1, op: {kind: kind, symbol: "", ckind: "", expr: "", from_idx: 0, to: 0, target: a.value}, rest: d.rest} else if kind == "rollback" then let a = ms_expected(ls, "@to ", "transact") in if a.ok == 0 then {ok: 0, rest: ls, diagnostic: a.diagnostic} else let d = ms_take(a.rest, "@end") in if d.ok == 0 or d.value != "" or count(a.value) == 0 or ms_digits_i(a.value, 0, count(a.value)) == 0 then {ok: 0, rest: ls, diagnostic: ms_diag("M1002", "payload", "invalid rollback operation", "provide a nonnegative lineage index with @to and @end")} else {ok: 1, op: {kind: kind, symbol: "", ckind: "", expr: "", from_idx: 0, to: toint(a.value), target: ""}, rest: d.rest} else if kind == "replay" then let a = ms_expected(ls, "@from ", "transact") in if a.ok == 0 then {ok: 0, rest: ls, diagnostic: a.diagnostic} else let b = ms_expected(a.rest, "@to ", "transact") in if b.ok == 0 then {ok: 0, rest: ls, diagnostic: b.diagnostic} else let d = ms_take(b.rest, "@end") in if d.ok == 0 or d.value != "" or count(a.value) == 0 or ms_digits_i(a.value, 0, count(a.value)) == 0 or ms_nat(b.value) == 0 then {ok: 0, rest: ls, diagnostic: ms_diag("M1002", "payload", "invalid replay operation", "provide nonnegative @from and positive @to lineage indexes")} else {ok: 1, op: {kind: kind, symbol: "", ckind: "", expr: "", from_idx: toint(a.value), to: toint(b.value), target: ""}, rest: d.rest} else {ok: 0, rest: ls, diagnostic: ms_diag("M1003", "mode", "unknown transaction operation '" + kind + "'", "use add_contract, replace_contract, set_target, rollback, or replay")}
 
-## ============================================================================================================
-## 0. Full-Content Cryptographic FIPS 180-4 SHA-256 (No Truncation, No Arithmetic Folds)
-## ============================================================================================================
-fn sha_ord_lo(c) = if c < "0" then (if c < "(" then (if c == " " then 32 else if c == "!" then 33 else if c == "\"" then 34 else if c == "#" then 35 else if c == "$" then 36 else if c == "%" then 37 else if c == "&" then 38 else 39) else (if c == "(" then 40 else if c == ")" then 41 else if c == "*" then 42 else if c == "+" then 43 else if c == "," then 44 else if c == "-" then 45 else if c == "." then 46 else 47)) else (if c < ":" then 48 + toint(c) else (if c == ":" then 58 else if c == ";" then 59 else if c == "<" then 60 else if c == "=" then 61 else if c == ">" then 62 else if c == "?" then 63 else 64))
-fn sha_ord_up(c) = if c < "N" then (if c < "G" then (if c == "A" then 65 else if c == "B" then 66 else if c == "C" then 67 else if c == "D" then 68 else if c == "E" then 69 else 70) else (if c == "G" then 71 else if c == "H" then 72 else if c == "I" then 73 else if c == "J" then 74 else if c == "K" then 75 else if c == "L" then 76 else 77)) else (if c < "U" then (if c == "N" then 78 else if c == "O" then 79 else if c == "P" then 80 else if c == "Q" then 81 else if c == "R" then 82 else if c == "S" then 83 else 84) else (if c == "U" then 85 else if c == "V" then 86 else if c == "W" then 87 else if c == "X" then 88 else if c == "Y" then 89 else if c == "Z" then 90 else if c == "[" then 91 else if c == "\\" then 92 else if c == "]" then 93 else if c == "^" then 94 else if c == "_" then 95 else 96))
-fn sha_ord_az(c) = if c < "n" then (if c < "g" then (if c == "a" then 97 else if c == "b" then 98 else if c == "c" then 99 else if c == "d" then 100 else if c == "e" then 101 else 102) else (if c == "g" then 103 else if c == "h" then 104 else if c == "i" then 105 else if c == "j" then 106 else if c == "k" then 107 else if c == "l" then 108 else 109)) else (if c < "u" then (if c == "n" then 110 else if c == "o" then 111 else if c == "p" then 112 else if c == "q" then 113 else if c == "r" then 114 else if c == "s" then 115 else 116) else (if c == "u" then 117 else if c == "v" then 118 else if c == "w" then 119 else if c == "x" then 120 else if c == "y" then 121 else if c == "z" then 122 else if c == "|" then 124 else if c == "~" then 126 else if c > "z" and c < "|" then 123 else 125))
-fn sha_ord(c) = if c == "\n" then 10 else if c == "\r" then 13 else if c == "\t" then 9 else if c < "A" then sha_ord_lo(c) else if c < "a" then sha_ord_up(c) else sha_ord_az(c)
-fn sha_u32(x) = let r = x % 4294967296 in if r < 0 then r + 4294967296 else r
-fn sha_pow256(k) = if k <= 0 then 1 else if k == 1 then 256 else if k == 2 then 65536 else if k == 3 then 16777216 else if k == 4 then 4294967296 else if k == 5 then 1099511627776 else if k == 6 then 281474976710656 else 72057594037927936
-fn sha_xor_b4(a, b) = if a == 0 then b else if b == 0 then a else if a == b then 0 else let b0 = ((a % 2) + (b % 2)) % 2 in let b1 = (((a / 2) % 2) + ((b / 2) % 2)) % 2 in let b2 = (((a / 4) % 2) + ((b / 4) % 2)) % 2 in let b3 = (((a / 8) % 2) + ((b / 8) % 2)) % 2 in b0 + b1 * 2 + b2 * 4 + b3 * 8
-fn sha_xor3_b4(a, b, c) = sha_xor_b4(sha_xor_b4(a, b), c)
-fn sha_xor3_32(x, y, z) = sha_xor3_b4(x % 16, y % 16, z % 16) + sha_xor3_b4((x / 16) % 16, (y / 16) % 16, (z / 16) % 16) * 16 + sha_xor3_b4((x / 256) % 16, (y / 256) % 16, (z / 256) % 16) * 256 + sha_xor3_b4((x / 4096) % 16, (y / 4096) % 16, (z / 4096) % 16) * 4096 + sha_xor3_b4((x / 65536) % 16, (y / 65536) % 16, (z / 65536) % 16) * 65536 + sha_xor3_b4((x / 1048576) % 16, (y / 1048576) % 16, (z / 1048576) % 16) * 1048576 + sha_xor3_b4((x / 16777216) % 16, (y / 16777216) % 16, (z / 16777216) % 16) * 16777216 + sha_xor3_b4((x / 268435456) % 16, (y / 268435456) % 16, (z / 268435456) % 16) * 268435456
-fn sha_ch_b4(e, f, g) = (if (e % 2) == 1 then (f % 2) else (g % 2)) + (if ((e / 2) % 2) == 1 then ((f / 2) % 2) else ((g / 2) % 2)) * 2 + (if ((e / 4) % 2) == 1 then ((f / 4) % 2) else ((g / 4) % 2)) * 4 + (if ((e / 8) % 2) == 1 then ((f / 8) % 2) else ((g / 8) % 2)) * 8
-fn sha_ch_32(e, f, g) = sha_ch_b4(e % 16, f % 16, g % 16) + sha_ch_b4((e / 16) % 16, (f / 16) % 16, (g / 16) % 16) * 16 + sha_ch_b4((e / 256) % 16, (f / 256) % 16, (g / 256) % 16) * 256 + sha_ch_b4((e / 4096) % 16, (f / 4096) % 16, (g / 4096) % 16) * 4096 + sha_ch_b4((e / 65536) % 16, (f / 65536) % 16, (g / 65536) % 16) * 65536 + sha_ch_b4((e / 1048576) % 16, (f / 1048576) % 16, (g / 1048576) % 16) * 1048576 + sha_ch_b4((e / 16777216) % 16, (f / 16777216) % 16, (g / 16777216) % 16) * 16777216 + sha_ch_b4((e / 268435456) % 16, (f / 268435456) % 16, (g / 268435456) % 16) * 268435456
-fn sha_maj_b4(a, b, c) = (if (a % 2) + (b % 2) + (c % 2) >= 2 then 1 else 0) + (if ((a / 2) % 2) + ((b / 2) % 2) + ((c / 2) % 2) >= 2 then 2 else 0) + (if ((a / 4) % 2) + ((b / 4) % 2) + ((c / 4) % 2) >= 2 then 4 else 0) + (if ((a / 8) % 2) + ((b / 8) % 2) + ((c / 8) % 2) >= 2 then 8 else 0)
-fn sha_maj_32(a, b, c) = sha_maj_b4(a % 16, b % 16, c % 16) + sha_maj_b4((a / 16) % 16, (b / 16) % 16, (c / 16) % 16) * 16 + sha_maj_b4((a / 256) % 16, (b / 256) % 16, (c / 256) % 16) * 256 + sha_maj_b4((a / 4096) % 16, (b / 4096) % 16, (c / 4096) % 16) * 4096 + sha_maj_b4((a / 65536) % 16, (b / 65536) % 16, (c / 65536) % 16) * 65536 + sha_maj_b4((a / 1048576) % 16, (b / 1048576) % 16, (c / 1048576) % 16) * 1048576 + sha_maj_b4((a / 16777216) % 16, (b / 16777216) % 16, (c / 16777216) % 16) * 16777216 + sha_maj_b4((a / 268435456) % 16, (b / 268435456) % 16, (c / 268435456) % 16) * 268435456
-fn sha_big_sig0(a) = sha_xor3_32((a / 4) + (a % 4) * 1073741824, (a / 8192) + (a % 8192) * 524288, (a / 4194304) + (a % 4194304) * 1024)
-fn sha_big_sig1(e) = sha_xor3_32((e / 64) + (e % 64) * 67108864, (e / 2048) + (e % 2048) * 2097152, (e / 33554432) + (e % 33554432) * 128)
-fn sha_sml_sig0(x) = sha_xor3_32((x / 128) + (x % 128) * 33554432, (x / 262144) + (x % 262144) * 16384, x / 8)
-fn sha_sml_sig1(x) = sha_xor3_32((x / 131072) + (x % 131072) * 32768, (x / 524288) + (x % 524288) * 8192, x / 1024)
-fn sha_k(t) = if t < 16 then (if t == 0 then 1116352408 else if t == 1 then 1899447441 else if t == 2 then 3049323471 else if t == 3 then 3921009573 else if t == 4 then 961987163 else if t == 5 then 1508970993 else if t == 6 then 2453635748 else if t == 7 then 2870763221 else if t == 8 then 3624381080 else if t == 9 then 310598401 else if t == 10 then 607225278 else if t == 11 then 1426881987 else if t == 12 then 1925078388 else if t == 13 then 2162078206 else if t == 14 then 2614888103 else 3248222580) else if t < 32 then (if t == 16 then 3835390401 else if t == 17 then 4022224774 else if t == 18 then 264347078 else if t == 19 then 604807628 else if t == 20 then 770255983 else if t == 21 then 1249150122 else if t == 22 then 1555081692 else if t == 23 then 1996064986 else if t == 24 then 2554220882 else if t == 25 then 2821834349 else if t == 26 then 2952996808 else if t == 27 then 3210313671 else if t == 28 then 3336571891 else if t == 29 then 3584528711 else if t == 30 then 113926993 else 338241895) else if t < 48 then (if t == 32 then 666307205 else if t == 33 then 773529912 else if t == 34 then 1294757372 else if t == 35 then 1396182291 else if t == 36 then 1695183700 else if t == 37 then 1986661051 else if t == 38 then 2177026350 else if t == 39 then 2456956037 else if t == 40 then 2730485921 else if t == 41 then 2820302411 else if t == 42 then 3259730800 else if t == 43 then 3345764771 else if t == 44 then 3516065817 else if t == 45 then 3600352804 else if t == 46 then 4094571909 else 275423344) else (if t == 48 then 430227734 else if t == 49 then 506948616 else if t == 50 then 659060556 else if t == 51 then 883997877 else if t == 52 then 958139571 else if t == 53 then 1322822218 else if t == 54 then 1537002063 else if t == 55 then 1747873779 else if t == 56 then 1955562222 else if t == 57 then 2024104815 else if t == 58 then 2227730452 else if t == 59 then 2361852424 else if t == 60 then 2428436474 else if t == 61 then 2756734187 else if t == 62 then 3204031479 else 3329325298)
-fn sha_msg_byte(s, len, total, idx) = if idx < len then sha_ord(at(s, idx)) else if idx == len then 128 else if idx >= total - 8 then ((len * 8) / sha_pow256(total - 1 - idx)) % 256 else 0
-fn sha_msg_word(s, len, total, base) = sha_msg_byte(s, len, total, base) * 16777216 + sha_msg_byte(s, len, total, base + 1) * 65536 + sha_msg_byte(s, len, total, base + 2) * 256 + sha_msg_byte(s, len, total, base + 3)
-fn sha_drop7(xs) = match xs
-    Cons(_, Cons(_, Cons(_, Cons(_, Cons(_, Cons(_, Cons(_, t7))))))) => t7
-    _ => Nil
-fn sha_w_next2(w1, w6, q14) = match q14
-    Cons(w14, Cons(w15, _)) => sha_u32(w15 + sha_sml_sig0(w14) + w6 + sha_sml_sig1(w1))
-    _                       => 0
-fn sha_w_next(w_rev) = match w_rev
-    Cons(_, Cons(w1, Cons(_, Cons(_, Cons(_, Cons(_, Cons(w6, r7))))))) => sha_w_next2(w1, w6, sha_drop7(r7))
+fn ms_parse_ops(ls, acc) = match ls
+    Nil => {ok: 1, ops: cs_rev(acc)}
+    Cons(h, t) => let line = cs_chomp(h) in if cs_startswith(line, "@op ") == 1 then let r = ms_parse_op(slice(line, 4, count(line)), t) in if r.ok == 0 then {ok: 0, ops: Nil, diagnostic: r.diagnostic} else ms_parse_ops(r.rest, Cons(r.op, acc)) else {ok: 0, ops: Nil, diagnostic: ms_diag("M1002", "payload", "unknown, duplicate, or trailing payload field '" + line + "'", "remove the field or place it in its exact protocol position")}
+
+fn ms_parse(input) = if ms_ascii(input) == 0 then {ok: 0, mode: "unknown", diagnostic: ms_diag("M1001", "encoding", "payload must contain printable ASCII with only LF, CRLF, or tab whitespace", "encode non-ASCII content in a future versioned extension instead of relying on ambiguous bytes")} else let ls = lc_split_lines(input, 0, count(input)) in let p = ms_take(ls, "@protocol lume-semantic-intent/0.1") in if p.ok == 0 or p.value != "" then {ok: 0, mode: "unknown", diagnostic: ms_diag("M1002", "payload", "missing or unsupported protocol header", "start with @protocol lume-semantic-intent/0.1")} else let m = ms_expected(p.rest, "@mode ", "unknown") in if m.ok == 0 then {ok: 0, mode: "unknown", diagnostic: m.diagnostic} else if m.value != "negotiate" and m.value != "transact" then {ok: 0, mode: m.value, diagnostic: ms_diag("M1003", "mode", "unknown protocol mode '" + m.value + "'", "use negotiate or transact")} else let g = ms_expected(m.rest, "@goal ", m.value) in if g.ok == 0 then {ok: 0, mode: m.value, diagnostic: g.diagnostic} else let t = ms_expected(g.rest, "@target ", m.value) in if t.ok == 0 then {ok: 0, mode: m.value, diagnostic: t.diagnostic} else let c = ms_expected(t.rest, "@capabilities ", m.value) in if c.ok == 0 then {ok: 0, mode: m.value, diagnostic: c.diagnostic} else let r = ms_expected(c.rest, "@resources ", m.value) in if r.ok == 0 then {ok: 0, mode: m.value, diagnostic: r.diagnostic} else let a = ms_expected(r.rest, "@acceptance ", m.value) in if a.ok == 0 then {ok: 0, mode: m.value, diagnostic: a.diagnostic} else let s = ms_source(a.rest) in if s.ok == 0 then {ok: 0, mode: m.value, diagnostic: ms_diag("M1002", "payload", "missing or unterminated source block", "provide @source, a nonempty Lume program, and @end")} else let ops = ms_parse_ops(s.rest, Nil) in if ops.ok == 0 then {ok: 0, mode: m.value, diagnostic: ops.diagnostic} else let caps = ms_caps(c.value) in let resources = ms_resources(r.value) in if count(g.value) == 0 or count(t.value) == 0 or count(s.source) == 0 then {ok: 0, mode: m.value, diagnostic: ms_diag("M1002", "payload", "goal, target, and source must be nonempty", "provide all required negotiation fields")} else if c.value != "pure" and cs_isnil(caps) == 1 then {ok: 0, mode: m.value, diagnostic: ms_diag("M1002", "capabilities", "unknown, duplicate, or empty capability declaration", "use pure or a comma-separated set of supported capabilities without duplicates")} else if resources.ok == 0 then {ok: 0, mode: m.value, diagnostic: ms_diag("M1002", "resources", "invalid resource bounds", "use max_source_bytes=N,max_transactions=N with positive decimal integers in that order")} else if a.value != "compile" and a.value != "prove" then {ok: 0, mode: m.value, diagnostic: ms_diag("M1002", "acceptance", "unsupported acceptance criterion '" + a.value + "'", "use compile or prove")} else if m.value == "negotiate" and cs_isnil(ops.ops) == 0 then {ok: 0, mode: m.value, diagnostic: ms_diag("M1002", "payload", "negotiate does not accept transaction operations", "use mode transact")} else if m.value == "transact" and cs_isnil(ops.ops) == 1 then {ok: 0, mode: m.value, diagnostic: ms_diag("M1002", "payload", "transact requires at least one operation", "add a versioned @op block")} else if count(s.source) > resources.max_source or cs_len(ops.ops) > resources.max_tx then {ok: 0, mode: m.value, diagnostic: ms_diag("M2005", "resources", "request exceeds negotiated source or transaction bounds", "reduce the payload or negotiate larger explicit bounds")} else {ok: 1, mode: m.value, goal: g.value, target: t.value, caps: caps, resources: resources, acceptance: a.value, source: s.source, ops: ops.ops}
+
+fn ms_ty_supported(ty) = match ty
+    TyAny => 1
+    TyName(nm) => if count(nm) > 0 then 1 else 0
+    TyList(inner) => ms_ty_supported(inner)
+    TyApply(kind, inner) => if count(kind) > 0 then ms_ty_supported(inner) else 0
     _ => 0
-fn sha_w_build(s, len, total, blk_off, t, w_rev) = if t >= 64 then ms_rev(w_rev) else let wt = (if t < 16 then sha_msg_word(s, len, total, blk_off + t * 4) else sha_w_next(w_rev)) in sha_w_build(s, len, total, blk_off, t + 1, Cons(wt, w_rev))
-fn sha_round2(a, b, c, d, rest, wkt) = match rest
-    St4(e, f, g, h) => let t1 = sha_u32(h + sha_big_sig1(e) + sha_ch_32(e, f, g) + wkt) in let t2 = sha_u32(sha_big_sig0(a) + sha_maj_32(a, b, c)) in St2(sha_u32(t1 + t2), a, b, c, St4(sha_u32(d + t1), e, f, g))
-fn sha_round(st, wt, kt) = match st
-    St2(a, b, c, d, rest) => sha_round2(a, b, c, d, rest, wt + kt)
-fn sha_rounds(st, ws, t) = match ws
-    Nil        => st
-    Cons(w, r) => sha_rounds(sha_round(st, w, sha_k(t)), r, t + 1)
-fn sha_add4_2(e, f, g, h, r2) = match r2
-    St4(re, rf, rg, rh) => St4(sha_u32(e + re), sha_u32(f + rf), sha_u32(g + rg), sha_u32(h + rh))
-fn sha_add4(r1, r2) = match r1
-    St4(e, f, g, h) => sha_add4_2(e, f, g, h, r2)
-fn sha_add_st2(a, b, c, d, rest1, r) = match r
-    St2(ra, rb, rc, rd, rest2) => St2(sha_u32(a + ra), sha_u32(b + rb), sha_u32(c + rc), sha_u32(d + rd), sha_add4(rest1, rest2))
-fn sha_add_st(st, r) = match st
-    St2(a, b, c, d, rest1) => sha_add_st2(a, b, c, d, rest1, r)
-fn sha_blocks(s, len, total, blk_off, st) = if blk_off >= total then st else let ws = sha_w_build(s, len, total, blk_off, 0, Nil) in let r = sha_rounds(st, ws, 0) in sha_blocks(s, len, total, blk_off + 64, sha_add_st(st, r))
-fn sha_hex1(n) = at("0123456789abcdef", n % 16)
-fn sha_hex32(w) = sha_hex1(w / 268435456) + sha_hex1(w / 16777216) + sha_hex1(w / 1048576) + sha_hex1(w / 65536) + sha_hex1(w / 4096) + sha_hex1(w / 256) + sha_hex1(w / 16) + sha_hex1(w)
-fn sha_hex4(rest) = match rest
-    St4(e, f, g, h) => sha_hex32(e) + sha_hex32(f) + sha_hex32(g) + sha_hex32(h)
-fn sha_hex_st(st) = match st
-    St2(a, b, c, d, rest) => sha_hex32(a) + sha_hex32(b) + sha_hex32(c) + sha_hex32(d) + sha_hex4(rest)
-fn sha256_hex(s) = let len = count(s) in let total = ((len + 9 + 63) / 64) * 64 in let init = St2(1779033703, 3144134277, 1013904242, 2773480762, St4(1359893119, 2600822924, 528734635, 1541459225)) in sha_hex_st(sha_blocks(s, len, total, 0, init))
-fn mesh_sha256(s) = "sha256:" + sha256_hex(s)
+fn ms_tys_supported(tys) = match tys
+    Nil => 1
+    Cons(h, t) => if ms_ty_supported(h) == 1 then ms_tys_supported(t) else 0
+fn ms_expr_supported(e) = match e
+    Num(n) => 1
+    Str(s) => 1
+    Var(nm) => if count(nm) > 0 then 1 else 0
+    Bin(op, a, b) => if cs_isvalidbinop(op) == 1 and ms_expr_supported(a) == 1 then ms_expr_supported(b) else 0
+    If(c, t, e2) => if ms_expr_supported(c) == 1 and ms_expr_supported(t) == 1 then ms_expr_supported(e2) else 0
+    LetIn(nm, v, b) => if count(nm) > 0 and ms_expr_supported(v) == 1 then ms_expr_supported(b) else 0
+    VarIn(nm, v, b) => if count(nm) > 0 and ms_expr_supported(v) == 1 then ms_expr_supported(b) else 0
+    Call(nm, args) => if count(nm) > 0 then ms_exprs_supported(args) else 0
+    _ => 0
+fn ms_exprs_supported(xs) = match xs
+    Nil => 1
+    Cons(h, t) => if ms_expr_supported(h) == 1 then ms_exprs_supported(t) else 0
+fn ms_pl_supported(pl) = match pl
+    Nil => 1
+    Cons(h, t) => if h.cf == 0 and count(h.pn) > 0 and ms_ty_supported(h.pt) == 1 then ms_pl_supported(t) else 0
+fn ms_stmt_supported(st) = match st
+    Fn(nm, ps, body) => if count(nm) > 0 then ms_expr_supported(body) else 0
+    Sig(nm, ps, tys, rt) => if count(nm) > 0 and ms_tys_supported(tys) == 1 then ms_ty_supported(rt) else 0
+    OSig(nm, pubf, freef, pl, rt, fromp) => if count(nm) > 0 and freef == 0 and fromp == "" and ms_pl_supported(pl) == 1 then ms_ty_supported(rt) else 0
+    KEffSig(nm, effs) => if count(nm) > 0 then 1 else 0
+    VContractSig(nm, ps, reqs, enss) => if count(nm) > 0 and ms_exprs_supported(reqs) == 1 then ms_exprs_supported(enss) else 0
+    KCapGrant(effs) => 1
+    Print(v) => ms_expr_supported(v)
+    ExprS(v) => ms_expr_supported(v)
+    _ => 0
+fn ms_prog_supported(prog) = match prog
+    Nil => 1
+    Cons(h, t) => if ms_stmt_supported(h) == 1 then ms_prog_supported(t) else 0
 
-## ============================================================================================================
-## 1. Pillar 1: Semantic Intent Protocol (`lume-intent-protocol/1.0`) & Transactional Authoring
-## ============================================================================================================
-fn mesh_protocol_schema_json() = "{\"protocol\":\"lume-intent-protocol/1.0\",\"vendor_neutral\":true,\"requires_lume_syntax_training\":false,\"negotiation_fields\":[\"intent_id\",\"goal\",\"contracts\",\"laws\",\"effects\",\"capabilities\",\"wcet_budget_cycles\",\"target\",\"acceptance\"],\"transaction_ops\":[\"init\",\"add_contract\",\"add_law\",\"replace_hole\",\"set_target\",\"repair_from_diag\",\"rollback\",\"replay\"],\"targets\":[\"x86_64-linux-elf\",\"aarch64-linux-elf\",\"riscv64-linux-elf\",\"x86_64-windows-pe\",\"aarch64-macos-macho\",\"wasm32-wasi\",\"wasm32-web-dom\",\"x86_64-qemu-mb2\",\"c99\"],\"evidence_schema\":\"lume-evidence-bundle/1.0\",\"registry_schema\":\"lume-component-registry/1.0\"}"
+fn ms_expr(e) = match e
+    Num(n) => str(n)
+    Str(s) => "\"" + cs_jesc(s) + "\""
+    Var(nm) => nm
+    Bin(op, a, b) => "(" + ms_expr(a) + " " + op + " " + ms_expr(b) + ")"
+    If(c, t, e2) => "(if " + ms_expr(c) + " then " + ms_expr(t) + " else " + ms_expr(e2) + ")"
+    LetIn(nm, v, b) => "(let " + nm + " = " + ms_expr(v) + " in " + ms_expr(b) + ")"
+    VarIn(nm, v, b) => "(var " + nm + " = " + ms_expr(v) + " in " + ms_expr(b) + ")"
+    Call(nm, args) => nm + "(" + ms_exprs(args) + ")"
+    _ => ""
+fn ms_exprs(xs) = match xs
+    Nil => ""
+    Cons(h, t) => if cs_isnil(t) == 1 then ms_expr(h) else ms_expr(h) + ", " + ms_exprs(t)
+fn ms_typed_params(ps, tys) = match ps
+    Nil => ""
+    Cons(p, pr) => ms_typed_params1(p, pr, tys)
+fn ms_typed_params1(p, pr, tys) = match tys
+    Nil => p
+    Cons(ty, tr) => let one = p + ": " + cs_tystr(ty) in if cs_isnil(pr) == 1 then one else one + ", " + ms_typed_params(pr, tr)
+fn ms_pl_params(pl) = match pl
+    Nil => ""
+    Cons(h, t) => let one = h.pn + (if ms_ty_supported(h.pt) == 1 then if cs_tystr(h.pt) == "any" then "" else ": " + cs_tystr(h.pt) else "") in if cs_isnil(t) == 1 then one else one + ", " + ms_pl_params(t)
+fn ms_contract_exprs(kind, xs) = match xs
+    Nil => ""
+    Cons(h, t) => " " + kind + " " + ms_expr(h) + ms_contract_exprs(kind, t)
+fn ms_vcontract(nm, ps, reqs, enss) = ms_contract_exprs("requires", reqs) + ms_contract_exprs("ensures", enss)
+fn ms_fn_vcontract(nm, prog) = match cs_vsiglookup(nm, cs_vcollect_vsigs(prog))
+    Nil => ""
+    Cons(v, r) => ms_vcontract(nm, v.ps, v.reqs, v.enss)
+fn ms_fn_effs(nm, prog) = match cs_keffsig_lookup(nm, cs_kcollect_effsigs(prog))
+    Nil => ""
+    Cons(k, r) => " / {" + cs_joinsep(k.effs, ", ") + "}"
+fn ms_fn_sig(nm, ps, prog) = match cs_osiglookup(nm, cs_ocollects(prog))
+    Cons(o, r) => (if o.pubf == 1 then "pub fn " else "fn ") + nm + "(" + ms_pl_params(o.pl) + ")" + (if cs_tystr(o.rty) == "any" then "" else " -> " + cs_tystr(o.rty))
+    Nil => match cs_siglookup(nm, cs_tcollects(prog))
+        Cons(s, r) => "fn " + nm + "(" + ms_typed_params(s.pn, s.pt) + ")" + (if cs_tystr(s.rt) == "any" then "" else " -> " + cs_tystr(s.rt))
+        Nil => "fn " + nm + "(" + cs_joinsep(ps, ", ") + ")"
+fn ms_render_fn(nm, ps, body, prog) = ms_fn_sig(nm, ps, prog) + ms_fn_effs(nm, prog) + ms_fn_vcontract(nm, prog) + " = " + ms_expr(body)
+fn ms_cap_grant(effs) = "@capability {" + cs_joinsep(effs, ", ") + "}"
+fn ms_stmt(st, prog) = match st
+    Fn(nm, ps, body) => Cons(ms_render_fn(nm, ps, body, prog), Nil)
+    KCapGrant(effs) => Cons(ms_cap_grant(effs), Nil)
+    Print(v) => Cons("print " + ms_expr(v), Nil)
+    ExprS(v) => Cons(ms_expr(v), Nil)
+    _ => Nil
+fn ms_stmts(prog, whole) = match prog
+    Nil => Nil
+    Cons(h, t) => cs_app(ms_stmt(h, whole), ms_stmts(t, whole))
+fn ms_project(prog) = cs_joinsep(ms_stmts(prog, prog), "\n") + "\n"
 
-fn mesh_cap_allowed(grant, req) = if req == "pure" then 1 else if grant == req then 1 else if grant == "saas_full" and (req == "net" or req == "http" or req == "db" or req == "dom" or req == "ffi") then 1 else if grant == "kernel_full" and (req == "mmio" or req == "port" or req == "irq") then 1 else 0
+fn ms_name_count(nm, prog, kind) = match prog
+    Nil => 0
+    Cons(h, t) => ms_name_count1(nm, t, kind, h)
+fn ms_name_count1(nm, t, kind, st) = match st
+    Fn(n, ps, body) => (if kind == "fn" and n == nm then 1 else 0) + ms_name_count(nm, t, kind)
+    Sig(n, ps, tys, rt) => (if kind == "sig" and n == nm then 1 else 0) + ms_name_count(nm, t, kind)
+    OSig(n, pubf, freef, pl, rt, fromp) => (if kind == "osig" and n == nm then 1 else 0) + ms_name_count(nm, t, kind)
+    KEffSig(n, effs) => (if kind == "ksig" and n == nm then 1 else 0) + ms_name_count(nm, t, kind)
+    VContractSig(n, ps, reqs, enss) => (if kind == "vsig" and n == nm then 1 else 0) + ms_name_count(nm, t, kind)
+    _ => ms_name_count(nm, t, kind)
+fn ms_fn_names(prog) = match prog
+    Nil => Nil
+    Cons(h, t) => ms_fn_names1(h, t)
+fn ms_fn_names1(st, rest) = match st
+    Fn(nm, ps, body) => Cons(nm, ms_fn_names(rest))
+    _ => ms_fn_names(rest)
+fn ms_unique_names(ns) = match ns
+    Nil => 1
+    Cons(h, t) => if cs_omem(h, t) == 1 then 0 else ms_unique_names(t)
+fn ms_one_sig_kind(nm, prog, kind) = if ms_name_count(nm, prog, kind) <= 1 then 1 else 0
+fn ms_sigs_unique(ns, prog) = match ns
+    Nil => 1
+    Cons(h, t) => if ms_one_sig_kind(h, prog, "sig") == 1 and ms_one_sig_kind(h, prog, "osig") == 1 and ms_one_sig_kind(h, prog, "ksig") == 1 and ms_one_sig_kind(h, prog, "vsig") == 1 then ms_sigs_unique(t, prog) else 0
+fn ms_duplicate_name(ns) = match ns
+    Nil => ""
+    Cons(h, t) => if cs_omem(h, t) == 1 then h else ms_duplicate_name(t)
+fn ms_sig_attached(st, prog) = match st
+    Sig(nm, ps, tys, rt) => ms_name_count(nm, prog, "fn")
+    OSig(nm, pubf, freef, pl, rt, fromp) => ms_name_count(nm, prog, "fn")
+    KEffSig(nm, effs) => ms_name_count(nm, prog, "fn")
+    VContractSig(nm, ps, reqs, enss) => ms_name_count(nm, prog, "fn")
+    _ => 1
+fn ms_sigs_attached(prog, whole) = match prog
+    Nil => 1
+    Cons(h, t) => if ms_sig_attached(h, whole) == 1 then ms_sigs_attached(t, whole) else 0
 
-fn mesh_verify_contract_rule(req_kind, ens_kind, body_kind) = if req_kind == "bal_ge_amt" and ens_kind == "res_eq_diff_nonneg" and body_kind == "bal - amt" then 1 else if req_kind == "tenant_eq_and_bal_ge_amt" and ens_kind == "tenant_isolated_diff" and body_kind == "if auth_tid == req_tid then bal - amt else 0 - 13" then 1 else if req_kind == "lba_0_to_63" and ens_kind == "sector_offset_512" and body_kind == "lba * 512" then 1 else if req_kind == "bcd_valid" and ens_kind == "bcd_decoded" and body_kind == "(bcd / 16) * 10 + (bcd % 16)" then 1 else if req_kind == "any_int" and ens_kind == "nonneg_sq" and body_kind == "v * v" then 1 else 0
+fn ms_fn_inferred(nm, prog, ksigs, edecls) = match cs_fnlookup(nm, cs_buildft(prog))
+    Nil => Nil
+    Cons(f, r) => match f
+        Fn(n, ps, body) => cs_kinfer_effs_e(body, ksigs, edecls)
+        _ => Nil
+fn ms_all_effects(ns, prog, ksigs, edecls) = match ns
+    Nil => Nil
+    Cons(h, t) => cs_keff_union(ms_fn_inferred(h, prog, ksigs, edecls), ms_all_effects(t, prog, ksigs, edecls))
+fn ms_declared_effects(ksigs) = match ksigs
+    Nil => Nil
+    Cons(h, t) => cs_keff_union(h.effs, ms_declared_effects(t))
+fn ms_top_effects(prog, ksigs, edecls) = match prog
+    Nil => Nil
+    Cons(h, t) => ms_top_effects1(h, t, ksigs, edecls)
+fn ms_top_effects1(st, rest, ksigs, edecls) = match st
+    Print(v) => cs_keff_union(Cons("io", Nil), cs_keff_union(cs_kinfer_effs_e(v, ksigs, edecls), ms_top_effects(rest, ksigs, edecls)))
+    ExprS(v) => cs_keff_union(cs_kinfer_effs_e(v, ksigs, edecls), ms_top_effects(rest, ksigs, edecls))
+    _ => ms_top_effects(rest, ksigs, edecls)
+fn ms_has_top_expr(prog) = match prog
+    Nil => 0
+    Cons(h, t) => ms_has_top_expr1(h, t)
+fn ms_has_top_expr1(st, rest) = match st
+    ExprS(v) => 1
+    _ => ms_has_top_expr(rest)
+fn ms_capability_missing(prog, caps) = let ksigs = cs_kcollect_effsigs(prog) in let edecls = cs_kcollect_effdecls(prog) in let inferred = ms_all_effects(ms_fn_names(prog), prog, ksigs, edecls) in let all = cs_keff_union(inferred, cs_keff_union(ms_declared_effects(ksigs), cs_keff_union(cs_kcollect_caps(prog), ms_top_effects(prog, ksigs, edecls)))) in ms_caps_missing(cs_keff_diff(all, Cons("pure", Nil)), caps)
 
-fn mesh_suggest_fixit_body(req_kind, ens_kind) = if req_kind == "bal_ge_amt" and ens_kind == "res_eq_diff_nonneg" then "bal - amt" else if req_kind == "tenant_eq_and_bal_ge_amt" and ens_kind == "tenant_isolated_diff" then "if auth_tid == req_tid then bal - amt else 0 - 13" else if req_kind == "lba_0_to_63" and ens_kind == "sector_offset_512" then "lba * 512" else if req_kind == "bcd_valid" and ens_kind == "bcd_decoded" then "(bcd / 16) * 10 + (bcd % 16)" else "v * v"
+fn ms_proof_status(proofs) = if cs_isnil(proofs) == 1 then "absent" else ms_proof_status1(proofs)
+fn ms_proof_status1(proofs) = match proofs
+    Nil => "proven"
+    Cons(h, t) => if h.status == "refuted" then "refuted" else if h.status != "proven" then if h.status == "runtime_checked" and ms_all_runtime(t) == 1 then "runtime_checked" else "mixed" else ms_proof_status1(t)
+fn ms_all_runtime(proofs) = match proofs
+    Nil => 1
+    Cons(h, t) => if h.status == "runtime_checked" then ms_all_runtime(t) else 0
+fn ms_proof_details(proofs) = match proofs
+    Nil => ""
+    Cons(h, t) => h.name + "=" + h.status + (if cs_isnil(t) == 1 then "" else "," + ms_proof_details(t))
 
-fn mesh_contracts_canon(cs) = match cs
-    Nil        => ""
-    Cons(c, r) => c.fn_name + ":" + c.req_kind + "=>" + c.ens_kind + "=" + c.body_kind + "@" + c.cap_req + ":" + str(c.cycles) + ";" + mesh_contracts_canon(r)
+fn ms_state_canon(st) = ms_field("lume-semantic-intent-state/0.1") + ms_field(st.goal) + ms_field(st.target) + ms_field(ms_caps_text(st.caps)) + ms_field(st.resources.text) + ms_field(st.acceptance) + ms_field(cs_prog_sexpr(st.ast)) + ms_field(st.source)
+fn ms_state_hash(st) = lc_sha256(ms_state_canon(st))
+fn ms_node_canon(parent_id, op, st) = ms_field("lume-semantic-intent-node/0.1") + ms_field(parent_id) + ms_field(op) + ms_field(ms_state_hash(st))
+fn ms_node_id(parent_id, op, st) = lc_sha256(ms_node_canon(parent_id, op, st))
 
-fn mesh_session_canon(intent_id, goal, target, cap_grant, wcet_budget, cs) = intent_id + "|" + goal + "|" + target + "|" + cap_grant + "|" + str(wcet_budget) + "|" + mesh_contracts_canon(cs)
+fn ms_state_json(st) = "{\"goal\":\"" + cs_jesc(st.goal) + "\",\"target\":\"" + cs_jesc(st.target) + "\",\"capabilities\":[" + cs_strlist_json(st.caps) + "],\"resources\":{\"max_source_bytes\":" + str(st.resources.max_source) + ",\"max_transactions\":" + str(st.resources.max_tx) + "},\"acceptance\":\"" + cs_jesc(st.acceptance) + "\",\"ast\":\"" + cs_jesc(cs_prog_sexpr(st.ast)) + "\",\"source\":\"" + cs_jesc(st.source) + "\",\"state_sha256\":\"" + cs_jesc(ms_state_hash(st)) + "\"}"
+fn ms_validation_json(st) = "{\"compiler_ok\":" + ms_bool(st.comp.ok) + ",\"target_supported\":true,\"proof_status\":\"" + ms_proof_status(st.comp.proofs) + "\",\"result\":\"" + cs_jesc(st.comp.result) + "\",\"proofs\":[" + cs_proofs_json(st.comp.proofs) + "]}"
+fn ms_node_json(n) = "{\"index\":" + str(n.index) + ",\"id\":\"" + cs_jesc(n.id) + "\",\"parent_index\":" + str(n.parent_index) + ",\"parent_id\":" + (if n.parent_id == "" then "null" else "\"" + cs_jesc(n.parent_id) + "\"") + ",\"op\":\"" + cs_jesc(n.op) + "\",\"state_sha256\":\"" + cs_jesc(ms_state_hash(n.st)) + "\",\"affected_symbols\":" + ms_strs_json(n.affected) + ",\"invalidated_symbols\":" + ms_strs_json(n.invalidated) + "}"
+fn ms_nodes_json(ns) = match ns
+    Nil => ""
+    Cons(h, t) => if cs_isnil(t) == 1 then ms_node_json(h) else ms_node_json(h) + "," + ms_nodes_json(t)
+fn ms_branch_ids(n, ns) = if n.parent_index < 0 then Cons(n.id, Nil) else cs_app(ms_branch_ids(ms_node_at(n.parent_index, ns), ns), Cons(n.id, Nil))
+fn ms_node_at(idx, ns) = match ns
+    Nil => ms_root_sentinel()
+    Cons(h, t) => if h.index == idx then h else ms_node_at(idx, t)
+fn ms_root_sentinel() = {index: 0 - 1, id: "", parent_index: 0 - 1, parent_id: "", op: "invalid", st: Nil, affected: Nil, invalidated: Nil}
+fn ms_response(req, current, nodes) = "{\"ok\":true,\"protocol\":\"lume-semantic-intent/0.1\",\"mode\":\"" + cs_jesc(req.mode) + "\",\"session\":\"" + cs_jesc((cs_asthead(nodes)).id) + "\",\"current\":\"" + cs_jesc(current.id) + "\",\"state\":" + ms_state_json(current.st) + ",\"validation\":" + ms_validation_json(current.st) + ",\"lineage\":[" + ms_nodes_json(nodes) + "],\"active_branch\":[" + cs_strlist_json(ms_branch_ids(current, nodes)) + "],\"diagnostics\":[" + cs_diags_json(current.st.comp.diagnostics) + "]}"
 
-fn mesh_session_init(intent_id, goal, target, cap_grant, wcet_budget) = let canon = mesh_session_canon(intent_id, goal, target, cap_grant, wcet_budget, Nil) in let sha = mesh_sha256(canon) in let snap0 = {tx_id: 0, op: "init", state_sha256: sha, parent_sha256: "sha256:0000000000000000000000000000000000000000000000000000000000000000", contracts: Nil, target: target} in {ok: 1, intent_id: intent_id, goal: goal, target: target, cap_grant: cap_grant, wcet_budget: wcet_budget, tx_id: 0, state_sha256: sha, parent_sha256: snap0.parent_sha256, contracts: Nil, history: Cons(snap0, Nil), last_diag_code: "", last_fixit_tx: "", affected_symbols: Nil, invalidated_obligations: Nil, retained_obligations: Nil}
+fn ms_first_diag(ds) = match ds
+    Nil => ms_diag("M2001", "compiler", "compiler rejected the canonical AST without a diagnostic", "reject the request")
+    Cons(h, t) => h
+fn ms_validate(req, ast0, target_name) = if ms_prog_supported(ast0) == 0 then {ok: 0, diagnostic: ms_diag("M1004", "ast", "source uses a construct outside semantic protocol fragment 0.1", "use typed or untyped functions, capabilities, requires/ensures, calls, arithmetic, conditionals, let/var, and print")} else let names = ms_fn_names(ast0) in if ms_unique_names(names) == 0 or ms_sigs_unique(names, ast0) == 0 or ms_sigs_attached(ast0, ast0) == 0 then {ok: 0, diagnostic: ms_diag("M2002", "symbols", "duplicate, orphaned, or ambiguous function/signature name '" + ms_duplicate_name(names) + "'", "declare each function and each associated signature exactly once")} else let missing = ms_capability_missing(ast0, req.caps) in if cs_isnil(missing) == 0 then {ok: 0, diagnostic: ms_diag("M2004", "capability", "program requires capabilities outside the negotiated set: {" + cs_joinsep(missing, ", ") + "}", "renegotiate capabilities explicitly or remove the effects")} else if ms_has_top_expr(ast0) == 1 then {ok: 0, diagnostic: ms_diag("M1004", "target", "top-level expression statements are outside the semantic target fragment", "use a function or print so the selected backend cannot silently drop the expression")} else let source = ms_project(ast0) in let comp = caas_compile(source) in if comp.ok == 0 then {ok: 0, diagnostic: ms_first_diag(comp.diagnostics)} else if cs_prog_sexpr(comp.ast) != cs_prog_sexpr(ast0) or ms_project(comp.ast) != source then {ok: 0, diagnostic: ms_diag("M2001", "ast", "canonical AST/source projection did not reach an exact round-trip fixed point", "reject the source instead of continuing with a changed program")} else let tp = ms_target(target_name) in if tp.ok == 0 then {ok: 0, diagnostic: ms_diag("M2003", "target", "unsupported semantic target '" + target_name + "'", "use x86_64-linux-elf or lumb in protocol 0.1")} else let proof_status = ms_proof_status(comp.proofs) in if req.acceptance == "prove" and proof_status != "proven" then {ok: 0, diagnostic: ms_diag("M3001", "proof", "acceptance requires every obligation to be proven; actual status is " + proof_status + " [" + ms_proof_details(comp.proofs) + "]", "use acceptance compile or strengthen the QF_LIA obligations")} else {ok: 1, st: {goal: req.goal, target: tp.triple, caps: req.caps, resources: req.resources, acceptance: req.acceptance, ast: ast0, source: source, comp: comp}}
 
-fn mesh_collect_names_except(cs, skip_fn) = match cs
-    Nil        => Nil
-    Cons(c, r) => if c.fn_name == skip_fn then mesh_collect_names_except(r, skip_fn) else Cons(c.fn_name, mesh_collect_names_except(r, skip_fn))
+fn ms_initial(req) = let raw = caas_compile(req.source) in ms_validate(req, raw.ast, req.target)
 
-fn mesh_tx_add_contract(sess, spec) = let cap_ok = mesh_cap_allowed(sess.cap_grant, spec.cap_req) in let wcet_ok = (if spec.cycles <= sess.wcet_budget then 1 else 0) in let proof_ok = mesh_verify_contract_rule(spec.req_kind, spec.ens_kind, spec.body_kind) in if cap_ok == 0 then {ok: 0, intent_id: sess.intent_id, goal: sess.goal, target: sess.target, cap_grant: sess.cap_grant, wcet_budget: sess.wcet_budget, tx_id: sess.tx_id, state_sha256: sess.state_sha256, parent_sha256: sess.parent_sha256, contracts: sess.contracts, history: sess.history, last_diag_code: "E0200", last_fixit_tx: "grant capability '" + spec.cap_req + "' or mark function pure", affected_symbols: Nil, invalidated_obligations: Nil, retained_obligations: mesh_collect_names_except(sess.contracts, "")} else if wcet_ok == 0 then {ok: 0, intent_id: sess.intent_id, goal: sess.goal, target: sess.target, cap_grant: sess.cap_grant, wcet_budget: sess.wcet_budget, tx_id: sess.tx_id, state_sha256: sess.state_sha256, parent_sha256: sess.parent_sha256, contracts: sess.contracts, history: sess.history, last_diag_code: "V0002", last_fixit_tx: "reduce cycle cost to <= " + str(sess.wcet_budget), affected_symbols: Nil, invalidated_obligations: Nil, retained_obligations: mesh_collect_names_except(sess.contracts, "")} else if proof_ok == 0 then {ok: 0, intent_id: sess.intent_id, goal: sess.goal, target: sess.target, cap_grant: sess.cap_grant, wcet_budget: sess.wcet_budget, tx_id: sess.tx_id, state_sha256: sess.state_sha256, parent_sha256: sess.parent_sha256, contracts: sess.contracts, history: sess.history, last_diag_code: "V0001", last_fixit_tx: "tx_replace_hole(" + spec.fn_name + ", \"" + mesh_suggest_fixit_body(spec.req_kind, spec.ens_kind) + "\")", affected_symbols: Nil, invalidated_obligations: Nil, retained_obligations: mesh_collect_names_except(sess.contracts, "")} else let retained = mesh_collect_names_except(sess.contracts, spec.fn_name) in let ncs = ms_app(sess.contracts, Cons(spec, Nil)) in let ntx = sess.tx_id + 1 in let ncanon = mesh_session_canon(sess.intent_id, sess.goal, sess.target, sess.cap_grant, sess.wcet_budget, ncs) in let nsha = mesh_sha256(ncanon) in let snap = {tx_id: ntx, op: "add_contract:" + spec.fn_name, state_sha256: nsha, parent_sha256: sess.state_sha256, contracts: ncs, target: sess.target} in {ok: 1, intent_id: sess.intent_id, goal: sess.goal, target: sess.target, cap_grant: sess.cap_grant, wcet_budget: sess.wcet_budget, tx_id: ntx, state_sha256: nsha, parent_sha256: sess.state_sha256, contracts: ncs, history: Cons(snap, sess.history), last_diag_code: "", last_fixit_tx: "", affected_symbols: Cons(spec.fn_name, Nil), invalidated_obligations: Cons(spec.fn_name, Nil), retained_obligations: retained}
+fn ms_contract_wrapper_valid(p) = if cs_len(p) == 2 and cs_len(ms_fn_names(p)) == 1 and ms_name_count("__mesh_contract", p, "fn") == 1 and ms_name_count("__mesh_contract", p, "vsig") == 1 then 1 else 0
+fn ms_contract_expr(text, kind) = let wrapped = "fn __mesh_contract() ensures " + text + " = 0\n" in let p = cs_parse(wrapped) in if ms_prog_supported(p) == 0 then {ok: 0, diagnostic: ms_diag("M1004", "contract", "contract expression is outside the semantic protocol fragment", "use a parsed boolean arithmetic expression")} else if ms_contract_wrapper_valid(p) == 0 then {ok: 0, diagnostic: ms_diag("M1002", "contract", "ambiguous contract expression payload", "provide exactly one expression without declaration tokens or trailing content")} else let vs = cs_vcollect_vsigs(p) in match vs
+    Nil => {ok: 0, diagnostic: ms_diag("M1002", "contract", "contract expression did not parse", "provide one complete expression")}
+    Cons(v, rest) => if cs_len(v.enss) != 1 or cs_isnil(v.reqs) == 0 then {ok: 0, diagnostic: ms_diag("M1002", "contract", "ambiguous contract expression payload", "provide exactly one expression without declaration tokens")} else let e = cs_asthead(v.enss) in let check = ms_validate_expr(e, text) in if check == 0 then {ok: 0, diagnostic: ms_diag("M1002", "contract", "contract expression failed canonical parse validation", "provide one complete expression without trailing tokens")} else {ok: 1, expr: e}
+fn ms_validate_expr(e, text) = let projected = ms_expr(e) in let p = cs_parse("fn __mesh_contract() ensures " + projected + " = 0\n") in if ms_contract_wrapper_valid(p) == 0 then 0 else let vs = cs_vcollect_vsigs(p) in match vs
+    Nil => 0
+    Cons(v, rest) => if cs_len(v.enss) == 1 then if cs_expr_sexpr(cs_asthead(v.enss)) == cs_expr_sexpr(e) then 1 else 0 else 0
 
-fn mesh_replace_in_contracts(cs, fn_name, new_body) = match cs
-    Nil        => Nil
-    Cons(c, r) => let hd = (if c.fn_name == fn_name then {fn_name: c.fn_name, req_kind: c.req_kind, ens_kind: c.ens_kind, body_kind: new_body, cap_req: c.cap_req, cycles: c.cycles} else c) in Cons(hd, mesh_replace_in_contracts(r, fn_name, new_body))
+fn ms_contract_count(kind, v) = if kind == "requires" then cs_len(v.reqs) else cs_len(v.enss)
+fn ms_contract_has(e, xs) = match xs
+    Nil => 0
+    Cons(h, t) => if cs_expr_sexpr(h) == cs_expr_sexpr(e) then 1 else ms_contract_has(e, t)
+fn ms_contract_append(e, xs) = cs_app(xs, Cons(e, Nil))
+fn ms_contract_replace(e, xs) = match xs
+    Nil => Nil
+    Cons(h, t) => Cons(e, t)
+fn ms_update_vsig(v, kind, e, replace) = if kind == "requires" then VContractSig(v.nm, v.ps, if replace == 1 then ms_contract_replace(e, v.reqs) else ms_contract_append(e, v.reqs), v.enss) else VContractSig(v.nm, v.ps, v.reqs, if replace == 1 then ms_contract_replace(e, v.enss) else ms_contract_append(e, v.enss))
+fn ms_edit_contract(prog, nm, kind, e, replace) = match prog
+    Nil => Nil
+    Cons(h, t) => Cons(ms_edit_contract1(h, nm, kind, e, replace), ms_edit_contract(t, nm, kind, e, replace))
+fn ms_edit_contract1(st, nm, kind, e, replace) = match st
+    VContractSig(n, ps, reqs, enss) => if n == nm then ms_update_vsig(st, kind, e, replace) else st
+    _ => st
 
-fn mesh_find_contract(cs, fn_name) = match cs
-    Nil        => {found: 0, item: {fn_name: "", req_kind: "", ens_kind: "", body_kind: "", cap_req: "pure", cycles: 0}}
-    Cons(c, r) => if c.fn_name == fn_name then {found: 1, item: c} else mesh_find_contract(r, fn_name)
+fn ms_contract_op(req, current, op) = if ms_name_count(op.symbol, current.st.ast, "fn") != 1 then {ok: 0, diagnostic: ms_diag("M3002", "transaction", "contract target is missing or ambiguous: '" + op.symbol + "'", "name exactly one parsed function")} else let parsed = ms_contract_expr(op.expr, op.ckind) in if parsed.ok == 0 then parsed else let mv = cs_vsiglookup(op.symbol, cs_vcollect_vsigs(current.st.ast)) in match mv
+    Nil => if op.kind == "replace_contract" then {ok: 0, diagnostic: ms_diag("M3003", "transaction", "cannot replace a missing " + op.ckind + " contract on '" + op.symbol + "'", "use add_contract first")} else ms_contract_add(req, current, op, parsed.expr, Nil)
+    Cons(v, rest) => let count_kind = ms_contract_count(op.ckind, v) in if op.kind == "replace_contract" and count_kind != 1 then {ok: 0, diagnostic: ms_diag("M3003", "transaction", "replace_contract requires exactly one existing " + op.ckind + " contract on '" + op.symbol + "'; found " + str(count_kind), "disambiguate the contract state before replacement")} else if op.kind == "add_contract" and ms_contract_has(parsed.expr, if op.ckind == "requires" then v.reqs else v.enss) == 1 then {ok: 0, diagnostic: ms_diag("M3003", "transaction", "duplicate contract expression on '" + op.symbol + "'", "do not add the same parsed obligation twice")} else ms_contract_add(req, current, op, parsed.expr, Cons(v, Nil))
+fn ms_fn_params(f) = match f
+    Fn(nm, ps, body) => ps
+    _ => Nil
+fn ms_contract_add(req, current, op, e, mv) = let ps = ms_fn_params(cs_asthead(cs_fnlookup(op.symbol, cs_buildft(current.st.ast)))) in let ast1 = if cs_isnil(mv) == 1 then Cons(VContractSig(op.symbol, ps, if op.ckind == "requires" then Cons(e, Nil) else Nil, if op.ckind == "ensures" then Cons(e, Nil) else Nil), current.st.ast) else ms_edit_contract(current.st.ast, op.symbol, op.ckind, e, if op.kind == "replace_contract" then 1 else 0) in {ok: 1, ast: ast1, expr: e}
 
-fn mesh_tx_replace_hole(sess, fn_name, new_body) = let fc = mesh_find_contract(sess.contracts, fn_name) in if fc.found == 0 then {ok: 0, intent_id: sess.intent_id, goal: sess.goal, target: sess.target, cap_grant: sess.cap_grant, wcet_budget: sess.wcet_budget, tx_id: sess.tx_id, state_sha256: sess.state_sha256, parent_sha256: sess.parent_sha256, contracts: sess.contracts, history: sess.history, last_diag_code: "R0001", last_fixit_tx: "", affected_symbols: Nil, invalidated_obligations: Nil, retained_obligations: Nil} else let proof_ok = mesh_verify_contract_rule(fc.item.req_kind, fc.item.ens_kind, new_body) in if proof_ok == 0 then {ok: 0, intent_id: sess.intent_id, goal: sess.goal, target: sess.target, cap_grant: sess.cap_grant, wcet_budget: sess.wcet_budget, tx_id: sess.tx_id, state_sha256: sess.state_sha256, parent_sha256: sess.parent_sha256, contracts: sess.contracts, history: sess.history, last_diag_code: "V0001", last_fixit_tx: "tx_replace_hole(" + fn_name + ", \"" + mesh_suggest_fixit_body(fc.item.req_kind, fc.item.ens_kind) + "\")", affected_symbols: Nil, invalidated_obligations: Nil, retained_obligations: mesh_collect_names_except(sess.contracts, "")} else let retained = mesh_collect_names_except(sess.contracts, fn_name) in let ncs = mesh_replace_in_contracts(sess.contracts, fn_name, new_body) in let ntx = sess.tx_id + 1 in let ncanon = mesh_session_canon(sess.intent_id, sess.goal, sess.target, sess.cap_grant, sess.wcet_budget, ncs) in let nsha = mesh_sha256(ncanon) in let snap = {tx_id: ntx, op: "replace_hole:" + fn_name, state_sha256: nsha, parent_sha256: sess.state_sha256, contracts: ncs, target: sess.target} in {ok: 1, intent_id: sess.intent_id, goal: sess.goal, target: sess.target, cap_grant: sess.cap_grant, wcet_budget: sess.wcet_budget, tx_id: ntx, state_sha256: nsha, parent_sha256: sess.state_sha256, contracts: ncs, history: Cons(snap, sess.history), last_diag_code: "", last_fixit_tx: "", affected_symbols: Cons(fn_name, Nil), invalidated_obligations: Cons(fn_name, Nil), retained_obligations: retained}
+fn ms_fn_fingerprint(nm, prog) = match cs_fnlookup(nm, cs_buildft(prog))
+    Nil => ""
+    Cons(f, rest) => match f
+        Fn(n, ps, body) => ms_render_fn(n, ps, body, prog)
+        _ => ""
+fn ms_name_union(a, b) = match a
+    Nil => b
+    Cons(h, t) => if cs_omem(h, b) == 1 then ms_name_union(t, b) else Cons(h, ms_name_union(t, b))
+fn ms_changed_names(ns, before, after) = match ns
+    Nil => Nil
+    Cons(h, t) => if ms_fn_fingerprint(h, before) != ms_fn_fingerprint(h, after) then Cons(h, ms_changed_names(t, before, after)) else ms_changed_names(t, before, after)
+fn ms_changed(before, after) = ms_changed_names(ms_name_union(ms_fn_names(before), ms_fn_names(after)), before, after)
+fn ms_callers_of(changed, prog) = match prog
+    Nil => Nil
+    Cons(h, t) => ms_callers_of1(h, t, changed, prog)
+fn ms_callers_of1(st, rest, changed, prog) = match st
+    Fn(nm, ps, body) => if ms_calls_any(cs_collect_callees_e(body, Nil), changed) == 1 then Cons(nm, ms_callers_of(rest, changed, prog)) else ms_callers_of(rest, changed, prog)
+    _ => ms_callers_of(rest, changed, prog)
+fn ms_calls_any(callees, changed) = match callees
+    Nil => 0
+    Cons(h, t) => if cs_omem(h, changed) == 1 then 1 else ms_calls_any(t, changed)
+fn ms_closure_step(names, prog, acc) = match names
+    Nil => acc
+    Cons(h, t) => let callers = ms_callers_of(Cons(h, Nil), prog) in ms_closure_step(t, prog, ms_name_union(acc, callers))
+fn ms_closure(names, prog) = let next = ms_closure_step(names, prog, names) in if cs_len(next) == cs_len(names) then names else ms_closure(next, prog)
+fn ms_impact(before, after, changed) = if before.target != after.target then ms_name_union(ms_fn_names(before.ast), ms_fn_names(after.ast)) else ms_closure(changed, before.ast)
 
-fn mesh_find_snap(hist, target_tx_id) = match hist
-    Nil        => {found: 0, snap: {tx_id: 0, op: "", state_sha256: "", parent_sha256: "", contracts: Nil, target: ""}}
-    Cons(s, r) => if s.tx_id == target_tx_id then {found: 1, snap: s} else mesh_find_snap(r, target_tx_id)
+fn ms_mk_node(nodes, current, op, next_st, affected) = let idx = cs_len(nodes) in let id = ms_node_id(current.id, op, next_st) in let invalidated = ms_impact(current.st, next_st, affected) in let node = {index: idx, id: id, parent_index: current.index, parent_id: current.id, op: op, st: next_st, affected: affected, invalidated: invalidated} in {ok: 1, current: node, nodes: cs_app(nodes, Cons(node, Nil))}
+fn ms_commit(req, nodes, current, op_text, ast1, target1, affected) = let next_req = {mode: req.mode, goal: req.goal, target: target1, caps: req.caps, resources: req.resources, acceptance: req.acceptance, source: req.source, ops: req.ops} in let validated = ms_validate(next_req, ast1, target1) in if validated.ok == 0 then validated else ms_mk_node(nodes, current, op_text, validated.st, affected)
 
-fn mesh_tx_rollback(sess, target_tx_id) = let fs = mesh_find_snap(sess.history, target_tx_id) in if fs.found == 0 then {ok: 0, intent_id: sess.intent_id, goal: sess.goal, target: sess.target, cap_grant: sess.cap_grant, wcet_budget: sess.wcet_budget, tx_id: sess.tx_id, state_sha256: sess.state_sha256, parent_sha256: sess.parent_sha256, contracts: sess.contracts, history: sess.history, last_diag_code: "T0404", last_fixit_tx: "", affected_symbols: Nil, invalidated_obligations: Nil, retained_obligations: Nil} else {ok: 1, intent_id: sess.intent_id, goal: sess.goal, target: fs.snap.target, cap_grant: sess.cap_grant, wcet_budget: sess.wcet_budget, tx_id: fs.snap.tx_id, state_sha256: fs.snap.state_sha256, parent_sha256: fs.snap.parent_sha256, contracts: fs.snap.contracts, history: sess.history, last_diag_code: "", last_fixit_tx: "", affected_symbols: Nil, invalidated_obligations: Nil, retained_obligations: mesh_collect_names_except(fs.snap.contracts, "")}
+fn ms_apply_regular(req, nodes, current, op) = if op.kind == "set_target" then let affected = ms_name_union(ms_fn_names(current.st.ast), Nil) in ms_commit(req, nodes, current, "set_target:" + op.target, current.st.ast, op.target, affected) else let edited = ms_contract_op(req, current, op) in if edited.ok == 0 then edited else ms_commit(req, nodes, current, op.kind + ":" + op.symbol + ":" + op.ckind + ":" + ms_expr(edited.expr), edited.ast, current.st.target, Cons(op.symbol, Nil))
 
-fn mesh_replay_specs(sess, specs) = match specs
-    Nil        => sess
-    Cons(s, r) => let step = mesh_tx_add_contract(sess, s) in if step.ok == 0 then step else mesh_replay_specs(step, r)
+fn ms_find_node_op(nodes, idx) = let n = ms_node_at(idx, nodes) in if n.index != idx then {ok: 0, diagnostic: ms_diag("M3004", "lineage", "lineage index " + str(idx) + " does not exist", "reference an index present in the current response")} else {ok: 1, node: n}
+fn ms_same_state(a, b) = ms_state_hash(a) == ms_state_hash(b)
+fn ms_rollback(req, nodes, current, op) = let found = ms_find_node_op(nodes, op.to) in if found.ok == 0 then found else let target_st = found.node.st in let changed = ms_changed(current.st.ast, target_st.ast) in let affected = if current.st.target != target_st.target then ms_name_union(ms_fn_names(current.st.ast), ms_fn_names(target_st.ast)) else changed in ms_mk_node(nodes, current, "rollback:" + found.node.id, target_st, affected)
 
-## ============================================================================================================
-## 2. Pillar 2: Verifiable Universal Adapters ("Chameleon", #337 + #334)
-## ============================================================================================================
-fn mesh_bind_c_header(lib_name, fn_name, own_mode, cap_req, ptr_kind, header_sig) = let src_sha = mesh_sha256(header_sig) in if ptr_kind == "raw_unannotated_void_ptr" or ptr_kind == "va_list" then {ok: 0, kind: "c-header", lib: lib_name, fn_name: fn_name, own_mode: own_mode, cap_req: cap_req, provenance_sha256: src_sha, diag_code: "F0401", message: "unsupported unsafe C construct '" + ptr_kind + "' without ownership/lifetime annotation"} else if cap_req != "ffi" then {ok: 0, kind: "c-header", lib: lib_name, fn_name: fn_name, own_mode: own_mode, cap_req: cap_req, provenance_sha256: src_sha, diag_code: "A0003", message: "foreign C-ABI binding requires explicit 'ffi' capability"} else {ok: 1, kind: "c-header", lib: lib_name, fn_name: fn_name, own_mode: own_mode, cap_req: cap_req, provenance_sha256: src_sha, diag_code: "", message: "verified C-ABI adapter bound with " + own_mode + " ownership"}
+fn ms_replay_range(req, nodes, current, originals, idx, to) = if idx > to then {ok: 1, nodes: nodes, current: current} else let original = ms_node_at(idx, originals) in if original.index != idx then {ok: 0, diagnostic: ms_diag("M3004", "lineage", "replay lineage index " + str(idx) + " does not exist", "choose a range from the supplied history")} else if original.parent_index < 0 then {ok: 0, diagnostic: ms_diag("M3004", "lineage", "cannot replay the negotiation root", "replay operation indexes greater than the from snapshot")} else if cs_startswith(original.op, "rollback:") == 1 or cs_startswith(original.op, "replay:") == 1 then {ok: 0, diagnostic: ms_diag("M3004", "lineage", "nested rollback/replay records are not replayable operations", "replay only add/replace/set_target records")} else let op = ms_original_op(original.op) in if op.ok == 0 then op else let r = ms_apply_regular(req, nodes, current, op) in if r.ok == 0 then r else let replayed = ms_relabel_last(r.nodes, r.current, "replay:" + original.id + ":" + original.op) in ms_replay_range(req, replayed.nodes, replayed.current, originals, idx + 1, to)
+fn ms_relabel_last(nodes, current, op_text) = let id = ms_node_id(current.parent_id, op_text, current.st) in let n2 = {index: current.index, id: id, parent_index: current.parent_index, parent_id: current.parent_id, op: op_text, st: current.st, affected: current.affected, invalidated: current.invalidated} in {nodes: ms_replace_node(nodes, n2), current: n2}
+fn ms_replace_node(nodes, replacement) = match nodes
+    Nil => Nil
+    Cons(h, t) => if h.index == replacement.index then Cons(replacement, t) else Cons(h, ms_replace_node(t, replacement))
+fn ms_original_op(text) = let kind = ms_before_colon(text) in if kind == "set_target" then {ok: 1, op: {kind: kind, symbol: "", ckind: "", expr: "", from_idx: 0, to: 0, target: ms_after_colon(text)}} else if kind == "add_contract" or kind == "replace_contract" then let p1 = ms_after_colon(text) in let symbol = ms_before_colon(p1) in let p2 = ms_after_colon(p1) in let ckind = ms_before_colon(p2) in let expr = ms_after_colon(p2) in {ok: 1, op: {kind: kind, symbol: symbol, ckind: ckind, expr: expr, from_idx: 0, to: 0, target: ""}} else {ok: 0, diagnostic: ms_diag("M3004", "lineage", "unsupported replay operation '" + kind + "'", "replay only semantic contract and target operations")}
+fn ms_before_colon(s) = let p = lc_find_ch(s, 0, count(s), ":") in slice(s, 0, p)
+fn ms_after_colon(s) = let p = lc_find_ch(s, 0, count(s), ":") in if p >= count(s) then "" else slice(s, p + 1, count(s))
 
-fn mesh_exec_c_adapter(adapter, handle_alive, caller_has_ffi, arg_len) = if adapter.ok == 0 then {ok: 0, code: 0 - 1, diag: adapter.diag_code} else if caller_has_ffi == 0 then {ok: 0, code: 0 - 13, diag: "E0200"} else if adapter.own_mode == "own" and handle_alive == 0 then {ok: 0, code: 0 - 14, diag: "O0001"} else if arg_len < 0 or arg_len > 65536 then {ok: 0, code: 0 - 22, diag: "V0001"} else {ok: 1, code: arg_len, diag: ""}
+fn ms_replay(req, nodes, current, op) = if op.from_idx < 0 or op.to <= op.from_idx or op.to >= cs_len(nodes) then {ok: 0, diagnostic: ms_diag("M3004", "lineage", "replay range must satisfy 0 <= from < to < history length", "select a snapshot and later operation in the visible history")} else let found = ms_find_node_op(nodes, op.from_idx) in if found.ok == 0 then found else if ms_same_state(current.st, found.node.st) == 0 then {ok: 0, diagnostic: ms_diag("M3004", "lineage", "replay source snapshot does not match current canonical AST/target/contract state", "rollback to the source snapshot before replaying its branch")} else ms_replay_range(req, nodes, current, nodes, op.from_idx + 1, op.to)
 
-fn mesh_bind_device_mmio(dev_name, base_addr, size_bytes, access_mode, cap_req) = let spec_str = dev_name + ":" + str(base_addr) + ":" + str(size_bytes) + ":" + access_mode + ":" + cap_req in let src_sha = mesh_sha256(spec_str) in if size_bytes <= 0 or base_addr < 0 then {ok: 0, kind: "device-mmio", dev: dev_name, base_addr: base_addr, size_bytes: size_bytes, access_mode: access_mode, cap_req: cap_req, provenance_sha256: src_sha, diag_code: "M0401"} else {ok: 1, kind: "device-mmio", dev: dev_name, base_addr: base_addr, size_bytes: size_bytes, access_mode: access_mode, cap_req: cap_req, provenance_sha256: src_sha, diag_code: ""}
+fn ms_transact(req, root, nodes, ops) = match ops
+    Nil => {ok: 1, nodes: nodes, current: root}
+    Cons(h, t) => let r = if h.kind == "rollback" then ms_rollback(req, nodes, root, h) else if h.kind == "replay" then ms_replay(req, nodes, root, h) else ms_apply_regular(req, nodes, root, h) in if r.ok == 0 then r else ms_transact(req, r.current, r.nodes, t)
 
-fn mesh_exec_mmio_adapter(adapter, ring, has_cap, op, offset, val) = if adapter.ok == 0 then {ok: 0, val: 0 - 1, diag: adapter.diag_code} else if ring != 0 or has_cap == 0 then {ok: 0, val: 0 - 13, diag: "E0200"} else if offset < 0 or offset >= adapter.size_bytes then {ok: 0, val: 0 - 22, diag: "V0001"} else if op == "write" and adapter.access_mode == "RO" then {ok: 0, val: 0 - 30, diag: "M0402"} else if op == "read" and adapter.access_mode == "WO" then {ok: 0, val: 0 - 30, diag: "M0402"} else {ok: 1, val: val, diag: ""}
+fn mesh_entry(input) = let req = ms_parse(input) in if req.ok == 0 then ms_error1(req.mode, req.diagnostic) else let initial = ms_initial(req) in if initial.ok == 0 then ms_error1(req.mode, initial.diagnostic) else let root_id = ms_node_id("", "negotiate", initial.st) in let root = {index: 0, id: root_id, parent_index: 0 - 1, parent_id: "", op: "negotiate", st: initial.st, affected: Nil, invalidated: Nil} in let nodes = Cons(root, Nil) in if req.mode == "negotiate" then ms_response(req, root, nodes) else let result = ms_transact(req, root, nodes, req.ops) in if result.ok == 1 then ms_response(req, result.current, result.nodes) else ms_error1(req.mode, result.diagnostic)
 
-fn mesh_bind_openapi_endpoint(service_name, route, method, cap_req, max_body) = let spec_str = service_name + ":" + method + ":" + route + ":" + cap_req + ":" + str(max_body) in let src_sha = mesh_sha256(spec_str) in {ok: 1, kind: "openapi-http", service: service_name, route: route, method: method, cap_req: cap_req, max_body: max_body, provenance_sha256: src_sha, diag_code: ""}
-
-fn mesh_exec_openapi_adapter(adapter, caller_has_net, auth_tid, req_tid, body_len) = if adapter.ok == 0 then {ok: 0, status: 500, diag: adapter.diag_code} else if caller_has_net == 0 then {ok: 0, status: 403, diag: "E0200"} else if auth_tid <= 0 or auth_tid != req_tid then {ok: 0, status: 403, diag: "EACCES_CROSS_TENANT"} else if body_len <= 0 or body_len > adapter.max_body then {ok: 0, status: 400, diag: "EINVAL_BODY_BOUNDS"} else {ok: 1, status: 200, diag: ""}
-
-## ============================================================================================================
-## 3. Pillar 3: Portable & Renewable Evidence (`lume-evidence-bundle/1.0`, #337 + #330 + #335)
-## ============================================================================================================
-fn mesh_emit_evidence(sess, code_str, compiler_id, deps_id, policy_id) = let intent_sha = sess.state_sha256 in let code_sha = mesh_sha256(code_str) in let obls_total = ms_len(sess.contracts) in let obls_proven = (if sess.ok == 1 then obls_total else 0) in let verdict = (if sess.ok == 0 then "FAIL" else if obls_total == 0 or count(compiler_id) == 0 or count(deps_id) == 0 or count(sess.target) == 0 or count(policy_id) == 0 then "UNKNOWN" else "PASS") in let payload = intent_sha + "|" + code_sha + "|" + compiler_id + "|" + deps_id + "|" + sess.target + "|" + policy_id + "|" + verdict + "|" + str(obls_proven) + "/" + str(obls_total) in let bundle_sha = mesh_sha256(payload) in {schema: "lume-evidence-bundle/1.0", intent_id: sess.intent_id, verdict: verdict, intent_sha256: intent_sha, code_sha256: code_sha, compiler_id: compiler_id, deps_id: deps_id, target_id: sess.target, policy_id: policy_id, obligations_total: obls_total, obligations_proven: obls_proven, bundle_sha256: bundle_sha}
-
-fn mesh_verify_evidence(ev, cur_ctx, dep_graph) = let exp_payload = ev.intent_sha256 + "|" + ev.code_sha256 + "|" + ev.compiler_id + "|" + ev.deps_id + "|" + ev.target_id + "|" + ev.policy_id + "|" + ev.verdict + "|" + str(ev.obligations_proven) + "/" + str(ev.obligations_total) in let exp_bundle_sha = mesh_sha256(exp_payload) in if ev.bundle_sha256 != exp_bundle_sha then {verdict: "FAIL", reason: "bundle_hash_tampered", invalidated_claims: dep_graph.all_claims, retained_claims: Nil} else if ev.verdict == "FAIL" then {verdict: "FAIL", reason: "source_evidence_failed", invalidated_claims: dep_graph.all_claims, retained_claims: Nil} else if dep_graph.graph_valid == 0 or count(cur_ctx.compiler_id) == 0 or count(cur_ctx.deps_id) == 0 or count(cur_ctx.target_id) == 0 or count(cur_ctx.policy_id) == 0 or ev.obligations_total == 0 then {verdict: "UNKNOWN", reason: "missing_freshness_or_graph_identity", invalidated_claims: Nil, retained_claims: Nil} else if ev.intent_sha256 != cur_ctx.intent_sha256 then {verdict: "INVALIDATED", reason: "intent_changed", invalidated_claims: dep_graph.all_claims, retained_claims: Nil} else if ev.compiler_id != cur_ctx.compiler_id then {verdict: "INVALIDATED", reason: "compiler_changed", invalidated_claims: dep_graph.all_claims, retained_claims: Nil} else if ev.target_id != cur_ctx.target_id then {verdict: "INVALIDATED", reason: "target_changed", invalidated_claims: dep_graph.all_claims, retained_claims: Nil} else if ev.policy_id != cur_ctx.policy_id then {verdict: "INVALIDATED", reason: "policy_changed", invalidated_claims: dep_graph.all_claims, retained_claims: Nil} else if ev.deps_id != cur_ctx.deps_id then {verdict: "INVALIDATED", reason: "dependency_changed", invalidated_claims: dep_graph.dep_affected_claims, retained_claims: dep_graph.dep_unaffected_claims} else {verdict: "PASS", reason: "fresh_and_independently_verified", invalidated_claims: Nil, retained_claims: dep_graph.all_claims}
-
-## ============================================================================================================
-## 4. Pillar 4: Global Machine-Native Component Registry (`lume-component-registry/1.0`, #337)
-## ============================================================================================================
-fn mesh_reg_new() = Nil
-
-fn mesh_reg_publish(reg, name, cap_sig, contract_sig, adapter_sha, ev) = if ev.verdict != "PASS" then {ok: 0, cid: "", reg: reg, reason: "cannot_publish_unverified_component"} else let cid = mesh_sha256(name + "|" + cap_sig + "|" + contract_sig + "|" + adapter_sha + "|" + ev.bundle_sha256) in let entry = {cid: cid, name: name, cap_sig: cap_sig, contract_sig: contract_sig, adapter_sha256: adapter_sha, evidence: ev} in {ok: 1, cid: cid, reg: Cons(entry, reg), reason: "published"}
-
-fn mesh_reg_resolve(reg, cap_sig, contract_sig, cur_ctx, dep_graph) = match reg
-    Nil        => {ok: 0, status: "NOT_FOUND", cid: "", verdict: "UNKNOWN", reason: "no_matching_component"}
-    Cons(e, r) => if e.cap_sig == cap_sig and e.contract_sig == contract_sig then (let exp_cid = mesh_sha256(e.name + "|" + e.cap_sig + "|" + e.contract_sig + "|" + e.adapter_sha256 + "|" + e.evidence.bundle_sha256) in if e.cid != exp_cid then {ok: 0, status: "REJECTED_CID_TAMPERED", cid: e.cid, verdict: "FAIL", reason: "cid_mismatch"} else let vr = mesh_verify_evidence(e.evidence, cur_ctx, dep_graph) in if vr.verdict == "PASS" then {ok: 1, status: "RESOLVED_VERIFIED", cid: e.cid, verdict: "PASS", reason: vr.reason} else {ok: 0, status: "REJECTED_STALE_OR_INCOMPATIBLE", cid: e.cid, verdict: vr.verdict, reason: vr.reason}) else mesh_reg_resolve(r, cap_sig, contract_sig, cur_ctx, dep_graph)
-
-## ============================================================================================================
-## 5. Reproducible Killer Capstones (SaaS+Web+Backend & Kernel+Driver on Same Semantic Mesh)
-## ============================================================================================================
-fn saas_tenant_debit(auth_tid, req_tid, bal, amt) = if auth_tid != req_tid then 0 - 13 else if amt < 0 or bal < amt then 0 - 22 else bal - amt
-fn saas_dom_render_badge(tid, bal) = "div.tenant-badge[data-tenant=" + str(tid) + "]:" + str(bal)
-
-fn mesh_capstone_saas_web() = let s0 = mesh_session_init("TenantLedgerSaaS", "Multi-tenant SaaS + Web DOM + Secure TLS/DB Backend", "wasm32-web-dom+x86_64-linux-elf", "saas_full", 80) in let s1 = mesh_tx_add_contract(s0, {fn_name: "tenant_debit", req_kind: "tenant_eq_and_bal_ge_amt", ens_kind: "tenant_isolated_diff", body_kind: "if auth_tid == req_tid then bal - amt else 0 - 13", cap_req: "http", cycles: 24}) in let s2 = mesh_tx_add_contract(s1, {fn_name: "safe_withdraw", req_kind: "bal_ge_amt", ens_kind: "res_eq_diff_nonneg", body_kind: "bal - amt", cap_req: "db", cycles: 16}) in let c_tls = mesh_bind_c_header("libtls", "tls_seal_record", "own", "ffi", "struct_tls_ctx_ptr", "int tls_seal_record(own tls_ctx*, const uint8_t*, size_t);") in let api_ep = mesh_bind_openapi_endpoint("ledger-api", "/v1/tenants/:tid/debit", "POST", "http", 4096) in let tls_pos = mesh_exec_c_adapter(c_tls, 1, 1, 256) in let tls_use_after_move = mesh_exec_c_adapter(c_tls, 0, 1, 256) in let ep_pos = mesh_exec_openapi_adapter(api_ep, 1, 101, 101, 128) in let ep_cross_tenant = mesh_exec_openapi_adapter(api_ep, 1, 101, 202, 128) in let ep_big_body = mesh_exec_openapi_adapter(api_ep, 1, 101, 101, 99999) in let bal_after = saas_tenant_debit(101, 101, 100, 35) in let cross_debit = saas_tenant_debit(101, 202, 100, 35) in let dom_node = saas_dom_render_badge(101, bal_after) in let ev = mesh_emit_evidence(s2, "saas_tenant_debit+saas_dom_render_badge", "lumec-0.2.0", "libtls-3.8+sqlite-3.45", "policy-saas-v1") in let ok_all = (if s2.ok == 1 and tls_pos.ok == 1 and tls_use_after_move.ok == 0 and tls_use_after_move.diag == "O0001" and ep_pos.status == 200 and ep_cross_tenant.status == 403 and ep_big_body.status == 400 and bal_after == 65 and cross_debit == 0 - 13 and dom_node == "div.tenant-badge[data-tenant=101]:65" and ev.verdict == "PASS" then 1 else 0) in {ok: ok_all, kind: "saas_web_backend", intent_id: s2.intent_id, state_sha256: s2.state_sha256, adapter_sha256: c_tls.provenance_sha256, dom_output: dom_node, balance_after: bal_after, cross_tenant_blocked: (if cross_debit == 0 - 13 and ep_cross_tenant.status == 403 then 1 else 0), own_double_use_blocked: (if tls_use_after_move.diag == "O0001" then 1 else 0), evidence: ev}
-
-fn kern_lba_offset(lba) = if lba < 0 or lba >= 64 then 0 - 22 else lba * 512
-fn kern_bcd_decode(bcd) = (bcd / 16) * 10 + (bcd % 16)
-
-fn mesh_capstone_kernel_driver() = let k0 = mesh_session_init("KernelRtcPciDriver", "Bare-metal Kernel + CMOS RTC / Block Driver with Ring-3 Isolation", "x86_64-qemu-mb2", "kernel_full", 64) in let k1 = mesh_tx_add_contract(k0, {fn_name: "kern_lba_offset", req_kind: "lba_0_to_63", ens_kind: "sector_offset_512", body_kind: "lba * 512", cap_req: "port", cycles: 18}) in let k2 = mesh_tx_add_contract(k1, {fn_name: "kern_bcd_decode", req_kind: "bcd_valid", ens_kind: "bcd_decoded", body_kind: "(bcd / 16) * 10 + (bcd % 16)", cap_req: "mmio", cycles: 14}) in let mmio_rtc = mesh_bind_device_mmio("cmos_rtc_status", 112, 2, "RO", "port") in let mmio_bar0 = mesh_bind_device_mmio("nvme_doorbell", 4273995776, 64, "RW", "mmio") in let r0_read = mesh_exec_mmio_adapter(mmio_rtc, 0, 1, "read", 0, 38) in let r0_ro_write = mesh_exec_mmio_adapter(mmio_rtc, 0, 1, "write", 0, 99) in let r3_unpriv = mesh_exec_mmio_adapter(mmio_bar0, 3, 0, "write", 4, 1) in let r0_oob = mesh_exec_mmio_adapter(mmio_bar0, 0, 1, "write", 128, 1) in let yr = 2000 + kern_bcd_decode(r0_read.val) in let off7 = kern_lba_offset(7) in let off_bad = kern_lba_offset(99) in let ev = mesh_emit_evidence(k2, "kern_lba_offset+kern_bcd_decode", "lumec-0.2.0", "bare-metal-none", "policy-kernel-wcet-v1") in let ok_all = (if k2.ok == 1 and r0_read.ok == 1 and yr == 2026 and r0_ro_write.ok == 0 and r0_ro_write.diag == "M0402" and r3_unpriv.ok == 0 and r3_unpriv.diag == "E0200" and r0_oob.ok == 0 and off7 == 3584 and off_bad == 0 - 22 and ev.verdict == "PASS" then 1 else 0) in {ok: ok_all, kind: "kernel_driver", intent_id: k2.intent_id, state_sha256: k2.state_sha256, adapter_sha256: mmio_rtc.provenance_sha256, rtc_year: yr, sector_offset_7: off7, ring3_port_blocked: (if r3_unpriv.diag == "E0200" then 1 else 0), ro_write_blocked: (if r0_ro_write.diag == "M0402" then 1 else 0), evidence: ev}
-
-fn mesh_capstone_json(saas, kern) = "{\"protocol\":\"lume-intent-protocol/1.0\",\"same_semantic_mesh\":true,\"saas_web_capstone\":{\"ok\":" + (if saas.ok == 1 then "true" else "false") + ",\"intent_id\":\"" + ms_jesc(saas.intent_id) + "\",\"state_sha256\":\"" + ms_jesc(saas.state_sha256) + "\",\"adapter_sha256\":\"" + ms_jesc(saas.adapter_sha256) + "\",\"dom_output\":\"" + ms_jesc(saas.dom_output) + "\",\"balance_after\":" + str(saas.balance_after) + ",\"cross_tenant_blocked\":" + (if saas.cross_tenant_blocked == 1 then "true" else "false") + ",\"own_double_use_blocked\":" + (if saas.own_double_use_blocked == 1 then "true" else "false") + ",\"evidence_verdict\":\"" + ms_jesc(saas.evidence.verdict) + "\",\"bundle_sha256\":\"" + ms_jesc(saas.evidence.bundle_sha256) + "\"},\"kernel_driver_capstone\":{\"ok\":" + (if kern.ok == 1 then "true" else "false") + ",\"intent_id\":\"" + ms_jesc(kern.intent_id) + "\",\"state_sha256\":\"" + ms_jesc(kern.state_sha256) + "\",\"adapter_sha256\":\"" + ms_jesc(kern.adapter_sha256) + "\",\"rtc_year\":" + str(kern.rtc_year) + ",\"sector_offset_7\":" + str(kern.sector_offset_7) + ",\"ring3_port_blocked\":" + (if kern.ring3_port_blocked == 1 then "true" else "false") + ",\"ro_write_blocked\":" + (if kern.ro_write_blocked == 1 then "true" else "false") + ",\"evidence_verdict\":\"" + ms_jesc(kern.evidence.verdict) + "\",\"bundle_sha256\":\"" + ms_jesc(kern.evidence.bundle_sha256) + "\"}}"
-
-## ============================================================================================================
-## 6. Unit Tests (`ltest.src` compatible)
-## ============================================================================================================
-fn test_lmesh_fips_sha256_vectors() = let h0 = sha256_hex("") in let h1 = sha256_hex("abc") in let h2 = sha256_hex("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq") in if h0 == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" and h1 == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" and h2 == "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1" then 1 else 0
-
-fn test_lmesh_semantic_transactions_rollback_replay() = let s0 = mesh_session_init("TxDemo", "Transactional Intent", "x86_64-linux-elf", "pure", 50) in let spec1 = {fn_name: "safe_withdraw", req_kind: "bal_ge_amt", ens_kind: "res_eq_diff_nonneg", body_kind: "bal - amt", cap_req: "pure", cycles: 10} in let spec2 = {fn_name: "kinetic_sq", req_kind: "any_int", ens_kind: "nonneg_sq", body_kind: "v * v", cap_req: "pure", cycles: 12} in let s1 = mesh_tx_add_contract(s0, spec1) in let s_bad = mesh_tx_add_contract(s1, {fn_name: "bad_fn", req_kind: "bal_ge_amt", ens_kind: "res_eq_diff_nonneg", body_kind: "bal + amt", cap_req: "pure", cycles: 10}) in let s2 = mesh_tx_add_contract(s1, spec2) in let s_rb = mesh_tx_rollback(s2, 1) in let s_rep = mesh_replay_specs(s0, Cons(spec1, Cons(spec2, Nil))) in if s1.ok == 1 and s_bad.ok == 0 and s_bad.last_diag_code == "V0001" and s_bad.state_sha256 == s1.state_sha256 and s2.ok == 1 and ms_len(s2.retained_obligations) == 1 and s_rb.ok == 1 and s_rb.state_sha256 == s1.state_sha256 and s_rep.state_sha256 == s2.state_sha256 then 1 else 0
-
-fn test_lmesh_universal_adapters_chameleon() = let c_ok = mesh_bind_c_header("libcrypto", "evp_digest", "own", "ffi", "evp_ctx_ptr", "int evp_digest(own evp_ctx*);") in let c_bad = mesh_bind_c_header("libcrypto", "bad_va", "ref", "ffi", "va_list", "int bad_va(va_list);") in let mmio = mesh_bind_device_mmio("rtc", 112, 2, "RO", "port") in let r_ro = mesh_exec_mmio_adapter(mmio, 0, 1, "write", 0, 1) in let r_r3 = mesh_exec_mmio_adapter(mmio, 3, 0, "read", 0, 0) in if c_ok.ok == 1 and c_bad.ok == 0 and c_bad.diag_code == "F0401" and r_ro.ok == 0 and r_ro.diag == "M0402" and r_r3.ok == 0 and r_r3.diag == "E0200" then 1 else 0
-
-fn test_lmesh_evidence_invalidation_and_registry() = let s0 = mesh_session_init("EvDemo", "Evidence Freshness", "x86_64-linux-elf", "pure", 50) in let s1 = mesh_tx_add_contract(s0, {fn_name: "safe_withdraw", req_kind: "bal_ge_amt", ens_kind: "res_eq_diff_nonneg", body_kind: "bal - amt", cap_req: "pure", cycles: 10}) in let ev = mesh_emit_evidence(s1, "fn safe_withdraw(bal, amt) = bal - amt", "lumec-0.2.0", "deps-v1", "pol-v1") in let graph = {graph_valid: 1, all_claims: Cons("safe_withdraw", Cons("caller_a", Nil)), dep_affected_claims: Cons("caller_a", Nil), dep_unaffected_claims: Cons("safe_withdraw", Nil)} in let ctx_ok = {intent_sha256: ev.intent_sha256, compiler_id: ev.compiler_id, deps_id: ev.deps_id, target_id: ev.target_id, policy_id: ev.policy_id} in let ctx_dep = {intent_sha256: ev.intent_sha256, compiler_id: ev.compiler_id, deps_id: "deps-v2", target_id: ev.target_id, policy_id: ev.policy_id} in let ctx_targ = {intent_sha256: ev.intent_sha256, compiler_id: ev.compiler_id, deps_id: ev.deps_id, target_id: "wasm32-wasi", policy_id: ev.policy_id} in let graph_missing = {graph_valid: 0, all_claims: Nil, dep_affected_claims: Nil, dep_unaffected_claims: Nil} in let v_ok = mesh_verify_evidence(ev, ctx_ok, graph) in let v_dep = mesh_verify_evidence(ev, ctx_dep, graph) in let v_unk = mesh_verify_evidence(ev, ctx_ok, graph_missing) in let pub1 = mesh_reg_publish(mesh_reg_new(), "safe_withdraw_comp", "pure", "bal_ge_amt=>res_eq_diff_nonneg", "sha256:0000000000000000000000000000000000000000000000000000000000000000", ev) in let res_ok = mesh_reg_resolve(pub1.reg, "pure", "bal_ge_amt=>res_eq_diff_nonneg", ctx_ok, graph) in let res_stale = mesh_reg_resolve(pub1.reg, "pure", "bal_ge_amt=>res_eq_diff_nonneg", ctx_targ, graph) in if v_ok.verdict == "PASS" and v_dep.verdict == "INVALIDATED" and v_dep.reason == "dependency_changed" and ms_len(v_dep.retained_claims) == 1 and v_unk.verdict == "UNKNOWN" and res_ok.ok == 1 and res_stale.ok == 0 and res_stale.verdict == "INVALIDATED" then 1 else 0
-
-fn test_lmesh_killer_capstones() = let saas = mesh_capstone_saas_web() in let kern = mesh_capstone_kernel_driver() in if saas.ok == 1 and kern.ok == 1 then 1 else 0
-
-## ============================================================================================================
-## 7. CLI Entry Point (`lume mesh <schema|negotiate|transact|adapter|evidence|registry|capstone>`)
-## ============================================================================================================
-fn mesh_cli_schema_json() = "{\"protocol\":\"lume-intent-protocol/1.0\",\"evidence_schema\":\"lume-evidence-bundle/1.0\",\"registry_schema\":\"lume-component-registry/1.0\",\"transactions\":[\"init\",\"add_contract\",\"replace_hole\",\"set_target\",\"rollback\",\"replay\"],\"adapter_domains\":[\"c_abi\",\"device_mmio_port_irq\",\"http_openapi\"],\"verdicts\":[\"PASS\",\"FAIL\",\"INVALIDATED\",\"UNKNOWN\"]}"
-
-fn mesh_session_json(s) = "{\"protocol\":\"lume-intent-protocol/1.0\",\"ok\":" + (if s.ok == 1 then "true" else "false") + ",\"intent_id\":\"" + ms_jesc(s.intent_id) + "\",\"goal\":\"" + ms_jesc(s.goal) + "\",\"target\":\"" + ms_jesc(s.target) + "\",\"tx_id\":" + str(s.tx_id) + ",\"state_sha256\":\"" + ms_jesc(s.state_sha256) + "\",\"parent_sha256\":\"" + ms_jesc(s.parent_sha256) + "\"}"
-
-fn mesh_evidence_json(ev) = "{\"schema\":\"" + ms_jesc(ev.schema) + "\",\"intent_id\":\"" + ms_jesc(ev.intent_id) + "\",\"verdict\":\"" + ms_jesc(ev.verdict) + "\",\"intent_sha256\":\"" + ms_jesc(ev.intent_sha256) + "\",\"code_sha256\":\"" + ms_jesc(ev.code_sha256) + "\",\"compiler_id\":\"" + ms_jesc(ev.compiler_id) + "\",\"deps_id\":\"" + ms_jesc(ev.deps_id) + "\",\"target_id\":\"" + ms_jesc(ev.target_id) + "\",\"policy_id\":\"" + ms_jesc(ev.policy_id) + "\",\"obligations_total\":" + str(ev.obligations_total) + ",\"obligations_proven\":" + str(ev.obligations_proven) + ",\"bundle_sha256\":\"" + ms_jesc(ev.bundle_sha256) + "\"}"
-
-fn mesh_cli_dispatch(src) = if ms_sw(src, "@mode schema", 0) == 1 then mesh_cli_schema_json() else if ms_sw(src, "@mode capstone", 0) == 1 then mesh_capstone_json(mesh_capstone_saas_web(), mesh_capstone_kernel_driver()) else if ms_sw(src, "@mode negotiate", 0) == 1 or ms_sw(src, "@mode transact", 0) == 1 then (let s0 = mesh_session_init("NegotiatedService", "Transactional Semantic Intent", "x86_64-linux-elf", "saas_full", 80) in let s1 = mesh_tx_add_contract(s0, {fn_name: "safe_withdraw", req_kind: "bal_ge_amt", ens_kind: "res_eq_diff_nonneg", body_kind: "bal - amt", cap_req: "pure", cycles: 16}) in mesh_session_json(s1)) else if ms_sw(src, "@mode adapter", 0) == 1 then (let b = mesh_bind_c_header("libtls", "tls_seal_record", "own", "ffi", "struct_tls_ctx_ptr", "int tls_seal_record(own tls_ctx*, const uint8_t*, size_t);") in "{\"ok\":true,\"adapter_kind\":\"" + b.kind + "\",\"lib_name\":\"" + b.lib + "\",\"symbol\":\"" + b.fn_name + "\",\"ownership\":\"" + b.own_mode + "\",\"cap_req\":\"" + b.cap_req + "\",\"provenance_sha256\":\"" + b.provenance_sha256 + "\"}") else if ms_sw(src, "@mode evidence", 0) == 1 or ms_sw(src, "@mode registry", 0) == 1 then (let saas = mesh_capstone_saas_web() in mesh_evidence_json(saas.evidence)) else mesh_capstone_json(mesh_capstone_saas_web(), mesh_capstone_kernel_driver())
-
-print mesh_cli_dispatch(readall())
-
+print mesh_entry(readall())

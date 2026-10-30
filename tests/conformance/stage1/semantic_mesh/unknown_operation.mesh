@@ -1,0 +1,12 @@
+@protocol lume-semantic-intent/0.1
+@mode transact
+@goal reject unknown operation
+@target x86_64-linux-elf
+@capabilities pure
+@resources max_source_bytes=4096,max_transactions=4
+@acceptance compile
+@source
+fn ok() -> int = 1
+@end
+@op fixed_success
+@end
