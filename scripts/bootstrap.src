@@ -10,6 +10,8 @@ fn bs_out(root) = root + "/build/bootstrap"
 
 fn bs_mkdir(path) = os_run_capture_timeout("/bin/mkdir", Cons("-p", Cons(path, Nil)), path + ".mkdir.log", path + ".mkdir.err", 10000)
 
+fn bs_executable(path) = os_run_capture_timeout("/bin/chmod", Cons("+x", Cons(path, Nil)), path + ".chmod.log", path + ".chmod.err", 10000)
+
 fn bs_modules(root) = Cons(bs_src(root) + "/lume/01_lexer.src", Cons(bs_src(root) + "/lume/02_parser.src", Cons(bs_src(root) + "/lume/03_comptime.src", Cons(bs_src(root) + "/lume/04_parser_decls.src", Cons(bs_src(root) + "/lume/05_codegen.src", Cons(bs_src(root) + "/lume/06_typecheck.src", Cons(bs_src(root) + "/lume/06b_phase3.src", Cons(bs_src(root) + "/lume/07_driver.src", Nil))))))))
 
 fn bs_append(out, paths) = match paths
@@ -18,11 +20,11 @@ fn bs_append(out, paths) = match paths
 
 fn bs_amalgamate(root) = let out = bs_src(root) + "/lumec.src" in if fs_write_sync(out, "") == 1 then bs_append(out, bs_modules(root)) else 0
 
-fn bs_seed_tool(root, source, out) = let asm = out + ".s" in let compiled = os_run_capture_timeout(bs_l0(root), Cons("run", Cons(bs_src(root) + "/data_asm_cc.lume", Cons(source, Cons(asm, Nil)))), asm + ".log", asm + ".err", 900000) in if compiled != 0 then 0 else os_run_input_capture_timeout(bs_l0(root), Cons("asm", Cons(asm, Cons(out, Nil))), asm, out + ".log", out + ".err", 900000)
+fn bs_seed_tool(root, source, out) = let asm = out + ".s" in let compiled = os_run_capture_timeout(bs_l0(root), Cons("run", Cons(bs_src(root) + "/data_asm_cc.lume", Cons(source, Cons(asm, Nil)))), asm + ".log", asm + ".err", 900000) in if compiled != 0 then 0 else let assembled = os_run_input_capture_timeout(bs_l0(root), Cons("asm", Cons(asm, Cons(out, Nil))), asm, out + ".log", out + ".err", 900000) in if assembled != 0 then 0 else bs_executable(out)
 
 fn bs_stage0(root) = let out = bs_out(root) in let made = bs_mkdir(out) in let a = bs_seed_tool(root, bs_src(root) + "/lumec.src", out + "/lumec0") in if a != 0 then "stage0 lumec failed" else let b = bs_seed_tool(root, bs_src(root) + "/lasm.src", out + "/lasm0") in if b != 0 then "stage0 lasm failed" else let c = bs_seed_tool(root, bs_src(root) + "/lcli.src", out + "/lcli0") in if c != 0 then "stage0 lcli failed" else ""
 
-fn bs_compile(lc, la, input, out) = let asm = out + ".s" in let compiled = bs_run(lc, Cons(input, Nil), input, asm) in if compiled != 0 then 0 else bs_run(la, Cons(asm, Nil), asm, out)
+fn bs_compile(lc, la, input, out) = let asm = out + ".s" in let compiled = bs_run(lc, Cons(input, Nil), input, asm) in if compiled != 0 then 0 else let assembled = bs_run(la, Cons(asm, Nil), asm, out) in if assembled != 0 then 0 else bs_executable(out)
 
 fn bs_stage(root, lc, la, tag) = let out = bs_out(root) in let a = bs_compile(lc, la, bs_src(root) + "/lumec.src", out + "/lumec" + tag) in if a != 0 then "stage " + tag + " lumec failed" else let b = bs_compile(lc, la, bs_src(root) + "/lasm.src", out + "/lasm" + tag) in if b != 0 then "stage " + tag + " lasm failed" else let c = bs_compile(lc, la, bs_src(root) + "/lcli.src", out + "/lcli" + tag) in if c != 0 then "stage " + tag + " lcli failed" else ""
 
