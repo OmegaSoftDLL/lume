@@ -51,7 +51,8 @@ empty and `abc` vectors.
 
 ```sh
 make -C bootstrap/lume0
-sh scripts/check-economic-benchmark.sh
+./lume build tests/economic_benchmark/run.src -o build/bin/economic_gate
+printf '@root %s\n' "$PWD" | build/bin/economic_gate
 ```
 
 The check first prepares the self-hosted tools through the existing `./lume` wrapper. This one-time

@@ -1,0 +1,26 @@
+use lcaas
+
+extern "c" fn settle_transfer(balance: int, amount: int, fee: int) -> int
+extern "c" fn batch_checksum(settled: int, reserve: int) -> int
+
+fn sc_certificate_valid(text) = cs_has_substr(text, "\"ok\":true") == 1 and cs_has_substr(text, "\"kernel_verified\":true") == 1 and cs_has_substr(text, "\"badge\":\"Lume Verified ✓\"") == 1
+
+fn sc_settled() / {ffi} = let raw = settle_transfer(1000, 250, 15) in verify(raw, raw >= 0)
+
+fn sc_total(settled) / {ffi} = let raw = batch_checksum(settled, 265) in verify(raw, raw >= settled)
+
+fn sc_run(cert_path) = let certificate = fs_read_file(cert_path) in if sc_certificate_valid(certificate) == 0 then ctfail("sidecar certificate verification failed\n") else let settled = sc_settled() in let total = sc_total(settled) in if settled == 735 and total == 1000 then "lume_sidecar_ok badge=\"Lume Verified ✓\" settled=" + str(settled) + " total=" + str(total) else ctfail("sidecar returned unexpected values\n")
+
+fn sc_at_line(xs, idx) = match xs
+    Nil => ""
+    Cons(h, t) => if idx == 0 then cs_chomp(h) else sc_at_line(t, idx - 1)
+
+fn sc_cert_path(input) = let line = sc_at_line(lc_split_lines(input, 0, count(input)), 0) in if cs_startswith(line, "@cert ") == 1 then slice(line, 6, count(line)) else ""
+
+fn test_certificate_rejects_missing_badge() = sc_certificate_valid("{\"ok\":true,\"kernel_verified\":true}") == 0
+
+fn test_certificate_rejects_unverified_kernel() = sc_certificate_valid("{\"ok\":true,\"kernel_verified\":false,\"badge\":\"Lume Verified ✓\"}") == 0
+
+fn test_certificate_accepts_verified_badge() = sc_certificate_valid("{\"ok\":true,\"kernel_verified\":true,\"badge\":\"Lume Verified ✓\"}") == 1
+
+print sc_run(sc_cert_path(readall()))

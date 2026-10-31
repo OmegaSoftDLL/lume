@@ -12,7 +12,7 @@ fn rg_at_line(xs, idx) = match xs
 
 fn rg_root(input) = let line = rg_at_line(lc_split_lines(input, 0, count(input)), 0) in if cs_startswith(line, "@root ") == 1 then slice(line, 6, count(line)) else ""
 
-fn rg_dispatch(input) = let root = rg_root(input) in let error = rg_main(root) in if error != "" then ctfail("verified registry gate failed: " + error + "\n") else "verified registry: publication, discovery, resolution, and adversarial checks passed"
+fn rg_dispatch(input) = let root = rg_root(input) in let err_msg = rg_main(root) in if err_msg != "" then ctfail("verified registry gate failed: " + err_msg + "\n") else "verified registry: publication, discovery, resolution, and adversarial checks passed"
 
 fn test_json_compact_round_trip() = rg_json(am_parse("{\"a\":[1,true,null]}")) == "{\"a\":[1,true,null]}"
 
