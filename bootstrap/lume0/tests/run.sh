@@ -18,7 +18,8 @@ skip() { skip=$((skip+1)); printf '  SKIP %s\n' "$1"; }
 have_py() { command -v python3 >/dev/null 2>&1; }
 
 if [ "${LUME_MESH_ONLY:-0}" = "1" ]; then
-    sh ../../tests/conformance/stage1/semantic_mesh/run.sh
+    ulimit -s unlimited 2>/dev/null || ulimit -s 524288 2>/dev/null || ulimit -s 65520 2>/dev/null || true
+    ../../lume build ../../tests/conformance/stage1/semantic_mesh/gate.src -o "${LUME_BIN_DIR:-../../build/bin}/lmesh_gate" && printf '@root %s\n' "$(CDPATH= cd -- ../.. && pwd)" | "${LUME_BIN_DIR:-../../build/bin}/lmesh_gate"
     exit $?
 fi
 
