@@ -1,0 +1,3 @@
+use acceptance_json
+
+print "acceptance:entry"

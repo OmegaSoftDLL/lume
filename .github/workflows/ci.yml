@@ -150,6 +150,8 @@ jobs:
       pull-requests: read
     steps:
       - uses: actions/checkout@v7
+      - name: Probe native startup and JSON module linking
+        run: ./lume build acceptance/entry_probe.src -o build/bin/acceptance_entry_probe && build/bin/acceptance_entry_probe
       - name: Build native acceptance validator
         run: ./lume build acceptance/matrix_assertions.src -o build/bin/acceptance_matrix
       - name: Validate artifacts, evidence, negative fixtures, and generated view
