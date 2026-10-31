@@ -42,7 +42,7 @@ fn bs_stages(root) = let a = bs_stage(root, bs_out(root) + "/lumec0", bs_out(roo
 
 fn bs_same(a, b, i) = let av = fs_read_byte(a, i) in let bv = fs_read_byte(b, i) in if av != bv then 0 else if av < 0 then 1 else bs_same(a, b, i + 1)
 
-fn bs_files_equal(a, b) = if fs_read_byte(a, 4096) < 0 and fs_read_byte(b, 4096) < 0 then bs_same(a, b, 0) == 1 else os_run_capture_timeout("/usr/bin/cmp", Cons("-s", Cons(a, Cons(b, Nil))), "/dev/null", "/dev/null", 30000) == 0
+fn bs_files_equal(a, b) = fs_files_equal(a, b) == 1
 
 fn bs_fixpoint(root) = let out = bs_out(root) in if bs_files_equal(out + "/lumec2.s", out + "/lumec3.s") == 0 then "lumec assembly differs" else if bs_files_equal(out + "/lumec2", out + "/lumec3") == 0 then "lumec binary differs" else if bs_files_equal(out + "/lasm2.s", out + "/lasm3.s") == 0 then "lasm assembly differs" else if bs_files_equal(out + "/lasm2", out + "/lasm3") == 0 then "lasm binary differs" else if bs_files_equal(out + "/lcli2.s", out + "/lcli3.s") == 0 then "lcli assembly differs" else if bs_files_equal(out + "/lcli2", out + "/lcli3") == 0 then "lcli binary differs" else ""
 
@@ -65,5 +65,15 @@ fn test_binary_comparison_detects_length_difference() = let a = fs_write_sync("b
 fn test_binary_comparison_accepts_nul() = let a = fs_write_sync("bs_same_a", "a\0b") in let b = fs_write_sync("bs_same_b", "a\0b") in bs_same("bs_same_a", "bs_same_b", 0) == 1
 
 fn test_process_failure_preserves_native_evidence() = let stdout_written = fs_write_sync("bs_process.out", "compiler stdout\n") in let stderr_written = fs_write_sync("bs_process.err", "stage 1 compiler stderr\n") in bs_process_error("stage 1 lumec", 139, "bs_process.out", "bs_process.err") == "stage 1 lumec failed with native status 139\nstdout:\ncompiler stdout\n\nstderr:\nstage 1 compiler stderr\n\n"
+
+fn test_file_comparison_detects_content_difference() = let a = fs_write_sync("bs_compare_a", "abc") in let b = fs_write_sync("bs_compare_b", "abd") in fs_files_equal("bs_compare_a", "bs_compare_b") == 0
+
+fn test_file_comparison_detects_length_difference() = let a = fs_write_sync("bs_compare_a", "abc") in let b = fs_write_sync("bs_compare_b", "abcd") in fs_files_equal("bs_compare_a", "bs_compare_b") == 0
+
+fn test_file_comparison_accepts_nul() = let a = fs_write_sync("bs_compare_a", "a\0b") in let b = fs_write_sync("bs_compare_b", "a\0b") in fs_files_equal("bs_compare_a", "bs_compare_b") == 1
+
+fn test_file_comparison_rejects_missing_file() = fs_files_equal("definitely_missing_comparison_file", "bs_compare_a") < 0
+
+fn test_file_comparison_handles_multiple_blocks() = let text = fs_read_file("scripts/bootstrap.src") in let a = fs_write_sync("bs_compare_large_a", text) in let b = fs_write_sync("bs_compare_large_b", text) in let same = fs_files_equal("bs_compare_large_a", "bs_compare_large_b") in let appended = fs_append_sync("bs_compare_large_b", "x") in same == 1 and fs_files_equal("bs_compare_large_a", "bs_compare_large_b") == 0
 
 print bs_dispatch(readall())
