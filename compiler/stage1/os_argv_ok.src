@@ -1,0 +1,4 @@
+fn test_os_arg_count_is_at_least_one() = os_arg_count() >= 1
+fn test_os_arg_at_reads_executable_path() = count(os_arg_at(0)) > 0
+fn test_os_arg_at_rejects_negative_index() = os_arg_at(0 - 1) == ""
+fn test_os_arg_at_rejects_past_arguments() = os_arg_at(os_arg_count()) == ""
