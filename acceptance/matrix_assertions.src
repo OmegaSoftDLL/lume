@@ -17,19 +17,27 @@ fn test_json_duplicate_keys_are_rejected() = am_check_keys(am_parse("{\"schema\"
 fn test_json_trailing_data_is_rejected() = am_parse("{} trailing").ok == 0
 fn test_claim_id_requires_track_l_shape() = am_claim_id_valid("ASYNC.EPOLL", 0, 1) == 1 and am_claim_id_valid("async.epoll", 0, 1) == 0
 fn test_markdown_escapes_table_pipes() = am_md("a|b\nc", 0) == "a\\|b c"
+fn test_json_all_required_keys_use_original_fields() = am_check_keys(am_parse("{\"a\":1,\"b\":2}"), Cons("a", Cons("b", Nil)), "matrix") == ""
 
 print "acceptance:entry"
+flush()
 let am_debug_input = readall()
 print "acceptance:input"
+flush()
 let am_debug_req = am_request(am_debug_input)
 print am_debug_req.mode
 print am_debug_req.root
+flush()
 let am_debug_parsed = am_load(am_debug_req.root)
 print "acceptance:parsed"
+flush()
 let am_debug_valid = am_validate(am_debug_parsed, am_debug_req.root)
 print am_debug_valid
+flush()
 let am_debug_fixtures = am_self_test(am_debug_req.root)
 print am_debug_fixtures
+flush()
 let am_debug_rendered = am_render(am_debug_parsed)
 print "acceptance:rendered"
+flush()
 print am_dispatch(am_debug_input)

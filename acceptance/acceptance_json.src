@@ -39,7 +39,7 @@ fn am_keys_allowed(fields, allowed) = match fields
     Cons(h, t) => if am_string_in(allowed, h.key) == 1 then am_keys_allowed(t, allowed) else 0
 fn am_keys_required(fields, required) = match required
     Nil => 1
-    Cons(h, t) => if am_has_key(fields, h) == 1 then am_keys_required(t, t) else 0
+    Cons(h, t) => if am_has_key(fields, h) == 1 then am_keys_required(fields, t) else 0
 fn am_check_keys(value, required, path) = if value.kind != "object" then path + ": must be an object" else if am_keys_unique(value.fields, Nil) == 0 then path + ": duplicate JSON key" else if am_keys_allowed(value.fields, required) == 0 then path + ": unknown key" else if am_keys_required(value.fields, required) == 0 then path + ": missing required key" else ""
 fn am_first(a, b) = if a != "" then a else b
 fn am_nonempty(value) = value.kind == "string" and lc_trim(value.text) != ""
