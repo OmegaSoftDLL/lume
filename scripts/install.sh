@@ -87,9 +87,8 @@ done
 if [ -f "$FROM_LOCAL/evolve/maintainers.pub" ]; then
     cp "$FROM_LOCAL/evolve/maintainers.pub" "$PREFIX/evolve/maintainers.pub"
 fi
-if [ -f "$FROM_LOCAL/scripts/amalgamate.sh" ]; then
-    cp "$FROM_LOCAL/scripts/amalgamate.sh" "$PREFIX/scripts/amalgamate.sh"
-    chmod +x "$PREFIX/scripts/amalgamate.sh"
+if [ -f "$FROM_LOCAL/scripts/amalgamate.src" ]; then
+    cp "$FROM_LOCAL/scripts/amalgamate.src" "$PREFIX/scripts/amalgamate.src"
 fi
 if [ -f "$FROM_LOCAL/scripts/install.sh" ]; then
     cp "$FROM_LOCAL/scripts/install.sh" "$PREFIX/scripts/install.sh"
