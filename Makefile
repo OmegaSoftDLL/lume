@@ -11,8 +11,8 @@ amalgamate:
 ## Staged, self-verifying self-host: C seed -> lumec+lasm -> rebuild in Lume,
 ## asserting stage 2 == stage 3 bit-for-bit. The only step that uses C is the seed.
 bootstrap: seed amalgamate
-	ulimit -s unlimited 2>/dev/null || true
-	./lume build scripts/bootstrap.src -o build/bootstrap_runner
+	ulimit -s unlimited 2>/dev/null || ulimit -s 524288 2>/dev/null || ulimit -s 65520 2>/dev/null || ulimit -s 32768 2>/dev/null || true; \
+	./lume build scripts/bootstrap.src -o build/bootstrap_runner && \
 	printf '@root %s\n' "$(CURDIR)" | build/bootstrap_runner
 
 ## Build just the frozen C seed (lume0 + its own assembler/ELF writer).
