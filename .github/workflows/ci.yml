@@ -71,9 +71,9 @@ jobs:
       - name: Build seed
         run: make -C bootstrap/lume0
       - name: Build Lume process probes
-        run: ./lume build compiler/stage1/os_run_probe.src -o build/bin/os_run_probe && ./lume build compiler/stage1/os_run_slow_probe.src -o build/bin/os_run_slow_probe
+        run: ./lume build compiler/stage1/os_run_probe.src -o build/bin/os_run_probe && ./lume build compiler/stage1/os_run_slow_probe.src -o build/bin/os_run_slow_probe && ./lume build compiler/stage1/os_run_input_probe.src -o build/bin/os_run_input_probe
       - name: Test native process execution
-        run: printf '%s' "$PWD/build/bin/os_run_probe" > os_run_probe_path && printf '%s' "$PWD/build/bin/os_run_slow_probe" > os_run_slow_probe_path && ./lume run compiler/stage1/os_run_trace.src && ./lume test compiler/stage1/os_run_ok.src
+        run: printf '%s' "$PWD/build/bin/os_run_probe" > os_run_probe_path && printf '%s' "$PWD/build/bin/os_run_slow_probe" > os_run_slow_probe_path && printf '%s' "$PWD/build/bin/os_run_input_probe" > os_run_input_probe_path && ./lume run compiler/stage1/os_run_trace.src && ./lume test compiler/stage1/os_run_ok.src
 
   economic-benchmark:
     name: Economic benchmark real-execution protocol (#337)
@@ -82,16 +82,16 @@ jobs:
       - uses: actions/checkout@v7
       - name: Build seed
         run: make -C bootstrap/lume0
+      - name: Build native economic gate
+        run: ./lume build tests/economic_benchmark/run.src -o build/bin/economic_gate
       - name: Run real compilation, proof, native execution, and negative gates
-        env:
-          ECONOMIC_DEBUG_DIR: ${{ runner.temp }}/economic-debug
-        run: sh scripts/check-economic-benchmark.sh
+        run: printf '@root %s\n' "$PWD" | build/bin/economic_gate
       - name: Preserve report on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: economic-report-${{ github.run_id }}
-          path: ${{ runner.temp }}/economic-debug
+          path: build/economic-gate
           retention-days: 3
 
   verified-registry:
