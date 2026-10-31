@@ -27,7 +27,7 @@ accounting database.
 From the repository root:
 
 ```sh
-tests/capstones/run.sh
+printf '@root %s\n@bin %s\n' "$PWD" "$PWD/build/bin" | ./lume run tests/capstones/gate.src
 ```
 
 The test is an independent native Lume HTTP/raw-socket client. It checks real status codes and JSON

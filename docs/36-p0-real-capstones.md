@@ -5,7 +5,7 @@
 This increment adds executable product evidence for #337 without reusing or promoting the
 arithmetic-only capstone models in `compiler/stage1/lmesh.src`. Those models remain insufficient for
 SaaS, browser, kernel, or driver acceptance. The two slices below are independently runnable from
-`tests/capstones/run.sh`; neither closes an umbrella issue.
+`tests/capstones/gate.src`; neither closes an umbrella issue.
 
 ## SaaS/HTTP slice: shipped only as a bounded demo
 
@@ -48,7 +48,7 @@ those missing capabilities here.
 ## Reproduction
 
 ```sh
-tests/capstones/run.sh
+printf '@root %s\n@bin %s\n' "$PWD" "$PWD/build/bin" | ./lume run tests/capstones/gate.src
 ```
 
 The command requires Linux x86-64, the repository Lume toolchain, and `qemu-system-x86_64`.

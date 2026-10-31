@@ -25,7 +25,7 @@ with two different RTC bases, and verifies that each reported timestamp matches 
 emulated hardware clock:
 
 ```sh
-tests/capstones/run.sh
+printf '@root %s\n@bin %s\n' "$PWD" "$PWD/build/bin" | ./lume run tests/capstones/gate.src
 ```
 
 ## Explicitly open
