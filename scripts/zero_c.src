@@ -1,4 +1,5 @@
 use bootstrap
+use fs_sha256_file
 
 fn zc_out(root) = root + "/build/zero-c"
 fn zc_shim(root) = zc_out(root) + "/shim"
