@@ -55,4 +55,8 @@ fn rg_error(reason) = "{\"ok\":false,\"error\":\"" + rg_jesc(reason) + "\"}"
 
 fn rg_dispatch(input) = let p = rg_parse(input) in let mode = rg_get(p.headers, "mode") in if (mode != "emit" and mode != "verify") or rg_required(p.headers) == 0 then rg_error("invalid registry manifest request") else let expected = rg_manifest(p.headers) in if mode == "emit" then expected else if rg_chomp(p.manifest) == expected then "{\"ok\":true,\"cid\":\"" + rg_jesc(rg_get(p.headers, "cid")) + "\"}" else rg_error("stored manifest does not match freshly derived artifacts and evidence")
 
+fn rg_test_request() = "@mode emit\n@cid sha256:0000000000000000000000000000000000000000000000000000000000000001\n@adapter-sha256 sha256:0000000000000000000000000000000000000000000000000000000000000002\n@source-sha256 sha256:0000000000000000000000000000000000000000000000000000000000000003\n@proof-sha256 sha256:0000000000000000000000000000000000000000000000000000000000000004\n@tests-sha256 sha256:0000000000000000000000000000000000000000000000000000000000000005\n@test-output-sha256 sha256:0000000000000000000000000000000000000000000000000000000000000006\n@toolchain-sha256 sha256:0000000000000000000000000000000000000000000000000000000000000007\n@contract-signature sha256:0000000000000000000000000000000000000000000000000000000000000008\n@target x86_64-linux-elf\n@proof-kernel lume-minimal-kernel-v1\n@public-contracts 2\n@capabilities pure\n"
+
+fn test_manifest_closes_evidence_and_root() = let text = rg_manifest((rg_parse(rg_test_request())).headers) in count(text) > 2 and slice(text, count(text) - 2, count(text)) == "}}"
+
 print rg_dispatch(readall())
