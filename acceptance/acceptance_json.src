@@ -1,0 +1,87 @@
+fn cs_isnil(xs) = match xs
+    Nil => 1
+    Cons(h, t) => 0
+fn cs_len(xs) = match xs
+    Nil => 0
+    Cons(h, t) => 1 + cs_len(t)
+fn cs_app(xs, ys) = match xs
+    Nil => ys
+    Cons(h, t) => Cons(h, cs_app(t, ys))
+fn cs_rev_acc(xs, acc) = match xs
+    Nil => acc
+    Cons(h, t) => cs_rev_acc(t, Cons(h, acc))
+fn cs_rev(xs) = cs_rev_acc(xs, Nil)
+fn cs_joinall(xs) = match xs
+    Nil => ""
+    Cons(h, t) => h + cs_joinall(t)
+fn cs_joinsep(xs, sep) = match xs
+    Nil => ""
+    Cons(h, t) => h + (if cs_isnil(t) == 1 then "" else sep + cs_joinsep(t, sep))
+fn cs_startswith(s, p) = let m = count(p) in if m == 0 then 1 else if count(s) < m then 0 else if at(s, 0) != at(p, 0) then 0 else slice(s, 0, m) == p
+fn cs_find_substr(s, sub, i, n, m) = if m == 0 then i else if i + m > n then n else if at(s, i) == at(sub, 0) and slice(s, i, i + m) == sub then i else cs_find_substr(s, sub, i + 1, n, m)
+fn cs_has_substr(s, sub) = if cs_find_substr(s, sub, 0, count(s), count(sub)) < count(s) then 1 else 0
+fn cs_chomp(s) = let n = count(s) in if n == 0 then "" else let c = at(s, n - 1) in if c == "\n" or c == "\r" or c == " " or c == "\t" then cs_chomp(slice(s, 0, n - 1)) else s
+fn lc_ltrim(s, i, n) = if i >= n then "" else let c = at(s, i) in if c == " " or c == "\n" or c == "\r" or c == "\t" then lc_ltrim(s, i + 1, n) else slice(s, i, n)
+fn lc_trim(s) = cs_chomp(lc_ltrim(s, 0, count(s)))
+fn lc_find_nl(s, i, n) = if i >= n then n else if at(s, i) == "\n" then i else lc_find_nl(s, i + 1, n)
+fn lc_split_lines(s, i, n) = if i >= n then Nil else let e = lc_find_nl(s, i, n) in Cons(slice(s, i, e), lc_split_lines(s, e + 1, n))
+
+fn am_err(pos, message) = {ok: 0, pos: pos, kind: "error", text: message, num: 0, items: Nil, fields: Nil}
+fn am_val(pos, kind, text, num, items, fields) = {ok: 1, pos: pos, kind: kind, text: text, num: num, items: items, fields: fields}
+fn am_ws(s, i) = if i >= count(s) then i else let c = at(s, i) in if c == " " or c == "\n" or c == "\r" or c == "\t" then am_ws(s, i + 1) else i
+
+fn am_hex_val(c) = if c >= "0" and c <= "9" then ord(c) - 48 else if c >= "a" and c <= "f" then ord(c) - 87 else if c >= "A" and c <= "F" then ord(c) - 55 else 0 - 1
+fn am_hex4(s, i) = if i + 4 > count(s) then 0 - 1 else let a = am_hex_val(at(s, i)) in let b = am_hex_val(at(s, i + 1)) in let c = am_hex_val(at(s, i + 2)) in let d = am_hex_val(at(s, i + 3)) in if a < 0 or b < 0 or c < 0 or d < 0 then 0 - 1 else a * 4096 + b * 256 + c * 16 + d
+fn am_unicode_pair(s, i, high) = if i + 11 > count(s) or at(s, i + 5) != "\\" or at(s, i + 6) != "u" then am_err(i, "high surrogate requires a following low surrogate") else let low = am_hex4(s, i + 7) in if low < 56320 or low > 57343 then am_err(i, "high surrogate requires a valid low surrogate") else am_val(i + 11, "string", utf8_chr(65536 + (high - 55296) * 1024 + low - 56320), 0, Nil, Nil)
+fn am_unicode(s, i) = let code = am_hex4(s, i + 1) in if code < 0 then am_err(i, "invalid four-digit Unicode escape") else if code == 0 then am_err(i, "NUL cannot be represented in a native Lume string") else if code >= 55296 and code <= 56319 then am_unicode_pair(s, i, code) else if code >= 56320 and code <= 57343 then am_err(i, "unexpected low surrogate") else am_val(i + 5, "string", utf8_chr(code), 0, Nil, Nil)
+fn am_escape(s, i) = if i >= count(s) then am_err(i, "unterminated string escape") else let c = at(s, i) in if c == "u" then am_unicode(s, i) else let decoded = if c == "n" then "\n" else if c == "r" then "\r" else if c == "t" then "\t" else if c == "b" then utf8_chr(8) else if c == "f" then utf8_chr(12) else if c == "\"" then "\"" else if c == "\\" then "\\" else if c == "/" then "/" else "" in if decoded == "" then am_err(i, "unsupported JSON escape") else am_val(i + 1, "string", decoded, 0, Nil, Nil)
+
+fn am_string_loop(s, i, acc) = if i >= count(s) then am_err(i, "unterminated JSON string") else let c = at(s, i) in if c == "\"" then am_val(i + 1, "string", cs_joinall(cs_rev(acc)), 0, Nil, Nil) else if c == "\\" then let escaped = am_escape(s, i + 1) in if escaped.ok == 0 then escaped else am_string_loop(s, escaped.pos, Cons(escaped.text, acc)) else if ord(c) < 32 then am_err(i, "unescaped control character in JSON string") else am_string_loop(s, i + 1, Cons(c, acc))
+fn am_string(s, i) = if i >= count(s) or at(s, i) != "\"" then am_err(i, "expected JSON string") else am_string_loop(s, i + 1, Nil)
+fn am_digit(c) = c >= "0" and c <= "9"
+fn am_number(s, i) = let start = i in let negative = if i < count(s) and at(s, i) == "-" then 1 else 0 in let first = i + negative in if first >= count(s) or am_digit(at(s, first)) == 0 then am_err(i, "expected JSON integer") else let finish = am_number_digits(s, first) in let text = slice(s, start, finish) in am_val(finish, "number", text, toint(text), Nil, Nil)
+fn am_number_digits(s, i) = if i < count(s) and am_digit(at(s, i)) then am_number_digits(s, i + 1) else i
+fn am_literal(s, i, text, kind, num) = let end = i + count(text) in if end <= count(s) and slice(s, i, end) == text then am_val(end, kind, text, num, Nil, Nil) else am_err(i, "invalid JSON literal")
+
+fn am_array(s, i) = let p = am_ws(s, i + 1) in if p < count(s) and at(s, p) == "]" then am_val(p + 1, "array", "", 0, Nil, Nil) else am_array_items(s, p, Nil)
+fn am_array_items(s, i, acc) = let value = am_value(s, i) in if value.ok == 0 then value else let p = am_ws(s, value.pos) in if p >= count(s) then am_err(p, "unterminated JSON array") else let c = at(s, p) in if c == "," then am_array_items(s, am_ws(s, p + 1), Cons(value, acc)) else if c == "]" then am_val(p + 1, "array", "", 0, cs_rev(Cons(value, acc)), Nil) else am_err(p, "expected ',' or ']' in JSON array")
+fn am_object(s, i) = let p = am_ws(s, i + 1) in if p < count(s) and at(s, p) == "}" then am_val(p + 1, "object", "", 0, Nil, Nil) else am_object_fields(s, p, Nil)
+fn am_object_fields(s, i, acc) = let key = am_string(s, i) in if key.ok == 0 then key else let colon = am_ws(s, key.pos) in if colon >= count(s) or at(s, colon) != ":" then am_err(colon, "expected ':' after JSON object key") else let value = am_value(s, am_ws(s, colon + 1)) in if value.ok == 0 then value else let p = am_ws(s, value.pos) in if p >= count(s) then am_err(p, "unterminated JSON object") else let c = at(s, p) in let field = {key: key.text, value: value} in if c == "," then am_object_fields(s, am_ws(s, p + 1), Cons(field, acc)) else if c == "}" then am_val(p + 1, "object", "", 0, Nil, cs_rev(Cons(field, acc))) else am_err(p, "expected ',' or '}' in JSON object")
+
+fn am_value(s, i) = let p = am_ws(s, i) in if p >= count(s) then am_err(p, "expected JSON value") else let c = at(s, p) in if c == "{" then am_object(s, p) else if c == "[" then am_array(s, p) else if c == "\"" then am_string(s, p) else if c == "t" then am_literal(s, p, "true", "bool", 1) else if c == "f" then am_literal(s, p, "false", "bool", 0) else if c == "n" then am_literal(s, p, "null", "null", 0) else am_number(s, p)
+fn am_parse(s) = let value = am_value(s, 0) in if value.ok == 0 then value else let p = am_ws(s, value.pos) in if p == count(s) then value else am_err(p, "trailing data after JSON value")
+
+fn am_get(obj, key) = am_get_fields(obj.fields, key)
+fn am_get_fields(fields, key) = match fields
+    Nil => am_val(0, "missing", "", 0, Nil, Nil)
+    Cons(h, t) => if h.key == key then h.value else am_get_fields(t, key)
+fn am_has_key(fields, key) = match fields
+    Nil => 0
+    Cons(h, t) => if h.key == key then 1 else am_has_key(t, key)
+fn am_string_in(xs, text) = match xs
+    Nil => 0
+    Cons(h, t) => if h == text then 1 else am_string_in(t, text)
+fn am_keys_unique(fields, seen) = match fields
+    Nil => 1
+    Cons(h, t) => if am_string_in(seen, h.key) == 1 then 0 else am_keys_unique(t, Cons(h.key, seen))
+fn am_keys_allowed(fields, allowed) = match fields
+    Nil => 1
+    Cons(h, t) => if am_string_in(allowed, h.key) == 1 then am_keys_allowed(t, allowed) else 0
+fn am_keys_required(fields, required) = match required
+    Nil => 1
+    Cons(h, t) => if am_has_key(fields, h) == 1 then am_keys_required(fields, t) else 0
+fn am_check_keys(value, required, path) = if value.kind != "object" then path + ": must be an object" else if am_keys_unique(value.fields, Nil) == 0 then path + ": duplicate JSON key" else if am_keys_allowed(value.fields, required) == 0 then path + ": unknown key" else if am_keys_required(value.fields, required) == 0 then path + ": missing required key" else ""
+fn am_first(a, b) = if a != "" then a else b
+fn am_nonempty(value) = value.kind == "string" and lc_trim(value.text) != ""
+
+fn am_safe_path_text(path, i) = if i >= count(path) then 1 else let c = at(path, i) in if c == "\\" then 0 else am_safe_path_text(path, i + 1)
+fn am_parent_segment(path, i) = if i + 3 <= count(path) and slice(path, i, i + 3) == "../" then 1 else if i + 2 <= count(path) and slice(path, i, i + 2) == ".." and i + 2 == count(path) then 1 else 0
+fn am_parent_path(path, i) = if i >= count(path) then 0 else if at(path, i) == "/" then if am_parent_segment(path, i + 1) == 1 then 1 else am_parent_path(path, i + 1) else am_parent_path(path, i + 1)
+fn am_artifact(value, root, path) = if am_nonempty(value) == 0 then path + ": artifact must be a non-empty string" else let text = value.text in if count(text) == 0 or at(text, 0) == "/" or am_safe_path_text(text, 0) == 0 or am_parent_segment(text, 0) == 1 or am_parent_path(text, 0) == 1 then path + ": artifact must be a safe repository-relative path: " + text else if fs_read_byte(root + "/" + text, 0) < 0 then path + ": artifact does not exist: " + text else ""
+fn am_repository_valid(text, i, slashes) = if i >= count(text) then slashes == 1 else let c = at(text, i) in if c == "/" then if i == 0 or i + 1 == count(text) then 0 else am_repository_valid(text, i + 1, slashes + 1) else if c == "_" or c == "-" or c == "." or (c >= "A" and c <= "Z") or (c >= "a" and c <= "z") or am_digit(c) then am_repository_valid(text, i + 1, slashes) else 0
+fn am_claim_id_valid(text, i, dots) = if i >= count(text) then dots >= 1 else let c = at(text, i) in if c == "." then if i + 1 == count(text) then 0 else am_claim_id_valid(text, i + 1, dots + 1) else if c == "_" or (c >= "A" and c <= "Z") or am_digit(c) then am_claim_id_valid(text, i + 1, dots) else 0
+fn am_upper(text, i) = if i >= count(text) then "" else let c = at(text, i) in let up = if c >= "a" and c <= "z" then at("ABCDEFGHIJKLMNOPQRSTUVWXYZ", ord(c) - 97) else c in up + am_upper(text, i + 1)
+fn am_result_valid(text) = text == "PASS" or text == "FAIL" or text == "UNKNOWN"
+fn am_state_valid(text) = text == "shipped" or text == "partial" or text == "model" or text == "planned"
+fn am_issue_state_valid(text) = text == "OPEN" or text == "CLOSED"
+fn am_pr_state_valid(text) = am_issue_state_valid(text) or text == "MERGED"
