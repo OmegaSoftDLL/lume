@@ -71,7 +71,7 @@ for t in cc as ld; do
 done
 
 # stage N: use $1=lumec $2=lasm to build the next lumec+lasm+lcli into $OUT/*$3.
-# Identical to scripts/bootstrap.sh — only Lume binaries run; no cc/as/ld.
+# Legacy zero-C path pending migration to scripts/bootstrap.src.
 stage() {
   _lc=$1; _la=$2; _tag=$3
   "$_lc" < "$SRC/lumec.src" > "$OUT/lumec$_tag.s"
