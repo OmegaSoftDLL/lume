@@ -105,6 +105,9 @@ jobs:
         run: ./lume build tests/registry/gate.src -o build/bin/registry_gate
       - name: Verify real publication, resolution, discovery, and adversarial rejection
         run: ulimit -s unlimited 2>/dev/null || ulimit -s 524288 2>/dev/null || ulimit -s 65520 2>/dev/null || ulimit -s 32768 2>/dev/null || true; printf '@root %s\n' "$PWD" | build/bin/registry_gate
+      - name: Inspect failed publication manifest
+        if: failure()
+        run: wc -c build/registry-gate/publish.json && cat build/registry-gate/publish.json
 
   docs:
     name: Documentation & examples
