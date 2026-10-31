@@ -152,12 +152,25 @@ jobs:
       pull-requests: read
     steps:
       - uses: actions/checkout@v7
+      - name: Verify native runtime startup
+        run: ./lume build acceptance/runtime_probe.src -o build/bin/acceptance_runtime_probe && build/bin/acceptance_runtime_probe
+      - name: Verify native JSON module linkage
+        run: ./lume build acceptance/unicode_link_probe.src -o build/bin/acceptance_unicode_link_probe && build/bin/acceptance_unicode_link_probe
+      - name: Verify native JSON parsing
+        run: ./lume build acceptance/unicode_parse_probe.src -o build/bin/acceptance_unicode_parse_probe && build/bin/acceptance_unicode_parse_probe
+      - name: Verify native acceptance module linkage
+        run: ./lume build acceptance/entry_probe.src -o build/bin/acceptance_entry_probe && build/bin/acceptance_entry_probe
+      - name: Diagnose native linkage failure
+        if: failure()
+        run: ./lume agent ast acceptance/unicode_link_probe.src > build/unicode_link_ast.txt && grep -n -A4 -B4 'am_hex4' build/unicode_link_ast.txt; ./lume compile acceptance/entry_probe.src > build/acceptance_entry_probe.s && awk '/^_start:/{show=1} show' build/acceptance_entry_probe.s; sudo apt-get update && sudo apt-get install -y --no-install-recommends gdb && gdb -q -batch -ex 'set pagination off' -ex run -ex 'x/8i $rip' -ex 'x/24i 0x40d3c0' -ex 'x/24i 0x40b6d0' -ex 'info registers' -ex bt --args build/bin/acceptance_entry_probe
+      - name: Build native acceptance validator
+        run: ./lume build acceptance/matrix_assertions.src -o build/bin/acceptance_matrix
       - name: Validate artifacts, evidence, negative fixtures, and generated view
-        run: python3 scripts/check-acceptance-matrix.py --self-test --check-doc
+        run: ulimit -s unlimited 2>/dev/null || ulimit -s 524288 2>/dev/null || ulimit -s 65520 2>/dev/null || ulimit -s 32768 2>/dev/null || true; printf '@mode local\n@root %s\n' "$PWD" | build/bin/acceptance_matrix
       - name: Validate issue and pull request references
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python3 scripts/check-acceptance-matrix.py --online
+        run: ulimit -s unlimited 2>/dev/null || ulimit -s 524288 2>/dev/null || ulimit -s 65520 2>/dev/null || ulimit -s 32768 2>/dev/null || true; printf '@mode online\n@root %s\n@token %s\n' "$PWD" "${GITHUB_TOKEN:-}" | build/bin/acceptance_matrix
 
   bootstrap:
     name: Self-host bootstrap (stage2 == stage3)
