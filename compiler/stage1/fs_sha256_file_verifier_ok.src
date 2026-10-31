@@ -1,6 +1,8 @@
 use lcert
 
-fn fv_file_size(path, i) = if fs_read_byte(path, i) < 0 then i else fv_file_size(path, i + 1)
+fn fv_size_hi(path, step) = if fs_read_byte(path, step) < 0 then step else fv_size_hi(path, step * 2)
+fn fv_size_bin(path, lo, hi) = if lo + 1 >= hi then hi else let mid = (lo + hi) / 2 in if fs_read_byte(path, mid) < 0 then fv_size_bin(path, lo, mid) else fv_size_bin(path, mid, hi)
+fn fv_file_size(path, i) = if fs_read_byte(path, 0) < 0 then 0 else fv_size_bin(path, 0, fv_size_hi(path, 1))
 
 fn fv_msg_byte(msg, total, idx) = if idx < msg.len then fs_read_byte(msg.path, idx) else if idx == msg.len then 128 else if idx >= total - 8 then ((msg.len * 8) / sha_pow2(8 * (total - 1 - idx))) % 256 else 0
 

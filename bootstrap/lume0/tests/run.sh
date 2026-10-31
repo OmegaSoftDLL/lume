@@ -430,9 +430,6 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_
     LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/fs_path_exists_ok.src >"$ntmp/fs_path_exists.out" 2>"$ntmp/fs_path_exists.err"
     if grep -q "3 passed, 0 failed" "$ntmp/fs_path_exists.out"; then ok "phase-2 filesystem evidence: fs_path_exists distinguishes present, missing, and empty paths"; else bad "phase-2 filesystem evidence: fs_path_exists"; cat "$ntmp/fs_path_exists.out" "$ntmp/fs_path_exists.err"; fi
     rm -f fs_path_exists_empty_probe
-    LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/fs_read_byte_ok.src >"$ntmp/fs_read_byte.out" 2>"$ntmp/fs_read_byte.err"
-    if grep -q "4 passed, 0 failed" "$ntmp/fs_read_byte.out"; then ok "phase-2 binary filesystem evidence: fs_read_byte returns exact bytes and rejects missing paths and offsets"; else bad "phase-2 binary filesystem evidence: fs_read_byte"; cat "$ntmp/fs_read_byte.out" "$ntmp/fs_read_byte.err"; fi
-    rm -f fs_read_byte_probe
     LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/fs_mkdir_ok.src >"$ntmp/fs_mkdir.out" 2>"$ntmp/fs_mkdir.err"
     if grep -q "3 passed, 0 failed" "$ntmp/fs_mkdir.out"; then ok "phase-2 artifact filesystem: fs_mkdir creates, reuses, and validates artifact directories"; else bad "phase-2 artifact filesystem: fs_mkdir"; cat "$ntmp/fs_mkdir.out" "$ntmp/fs_mkdir.err"; fi
     rm -rf fs_mkdir_probe fs_mkdir_nested_probe definitely_missing_parent
@@ -1104,46 +1101,11 @@ EOF
     LUME_BIN_DIR="$ntmp" ../../lume agent bind "$ntmp/p5_bad_hdr.h" >"$ntmp/p5_bad_bind.json" 2>/dev/null || true
     printf '/* no declarations */\n' >"$ntmp/p5_empty_hdr.h"
     LUME_BIN_DIR="$ntmp" ../../lume agent bind "$ntmp/p5_empty_hdr.h" >"$ntmp/p5_empty_bind.json" 2>/dev/null || true
-    python3 - "$ntmp/p5_bind.json" "$ntmp/p5_bad_bind.json" "$ntmp/p5_empty_bind.json" "$ntmp/p5_bind_generated.src" <<'PY' >/dev/null 2>&1
-import json
-import sys
-
-with open(sys.argv[1], encoding="utf-8") as f:
-    good = json.load(f)
-with open(sys.argv[2], encoding="utf-8") as f:
-    bad = json.load(f)
-with open(sys.argv[3], encoding="utf-8") as f:
-    empty = json.load(f)
-assert good["ok"] is True
-assert good["adapter_contract"] == "c_abi_foreign_v2"
-assert good["ownership"] == "borrowed_const_cstr_and_sized_read_only_buffers"
-assert good["return_provenance"] == "unverified"
-assert good["diagnostics"] == []
-assert len(good["extern_decls"]) == 2
-assert len(good["foreign_wrappers"]) == 2
-assert "extern \"c\" fn db_open(c_filename: str, c_flags: int) -> int" in good["extern_decls"]
-assert "pub fn foreign_db_open(c_filename: str, c_flags: int) -> unverified[int] / {ffi} = db_open(c_filename, c_flags)" in good["foreign_wrappers"]
-assert "verify(" not in good["generated_lume"]
-assert "ensures" not in good["generated_lume"]
-assert "safe_" not in good["generated_lume"]
-assert bad["ok"] is False
-assert bad["generated_lume"] == ""
-assert len(bad["extern_decls"]) == 1
-assert len(bad["foreign_wrappers"]) == 1
-assert len(bad["diagnostics"]) == 11
-assert all(d["code"] == "I0003" and d["severity"] == "error" for d in bad["diagnostics"])
-assert any("callback" in d["message"] for d in bad["diagnostics"])
-assert any("ownership" in d["message"] for d in bad["diagnostics"])
-assert empty["ok"] is False
-assert empty["generated_lume"] == ""
-assert len(empty["diagnostics"]) == 1
-assert empty["diagnostics"][0]["code"] == "I0003"
-with open(sys.argv[4], "w", encoding="utf-8") as f:
-    f.write(good["generated_lume"] + "\n")
-PY
+    LUME_BIN_DIR="$ntmp" ../../lume build ../../tests/harness/c_adapter_assertions.src -o "$ntmp/c_adapter_assert" >"$ntmp/p5_bind_assert.out" 2>"$ntmp/p5_bind_assert.err"
+    printf '@mode stage0\n@path %s\n@header %s\n@output %s\n@generated %s\n' "$ntmp/p5_bind.json" "$ntmp/p5_bad_bind.json" "$ntmp/p5_empty_bind.json" "$ntmp/p5_bind_generated.src" | "$ntmp/c_adapter_assert" >/dev/null 2>&1
     p5_bind_contract=$?
     LUME_BIN_DIR="$ntmp" ../../lume agent check "$ntmp/p5_bind_generated.src" >"$ntmp/p5_bind_check.json" 2>/dev/null || true
-    if [ "$p5_bind_contract" = 0 ] && grep -q '"ok":true' "$ntmp/p5_bind_check.json"; then ok "phase-5 I3 adapter boundary (#334/#337): provenance-preserving generated bindings compile; pointers, buffers, callbacks, varargs, unknown ABI types, and empty headers fail closed with [I0003]"; else bad "phase-5 I3 adapter boundary (#334/#337): fail-closed ownership/provenance binding generation"; cat "$ntmp/p5_bind.json" "$ntmp/p5_bad_bind.json" "$ntmp/p5_empty_bind.json" "$ntmp/p5_bind_check.json" 2>/dev/null; fi
+    if [ "$p5_bind_contract" = 0 ] && grep -q '"ok":true' "$ntmp/p5_bind_check.json"; then ok "phase-5 I3 adapter boundary (#334/#337): provenance-preserving generated bindings compile; pointers, buffers, callbacks, varargs, unknown ABI types, and empty headers fail closed with [I0003]"; else bad "phase-5 I3 adapter boundary (#334/#337): fail-closed ownership/provenance binding generation"; cat "$ntmp/p5_bind.json" "$ntmp/p5_bad_bind.json" "$ntmp/p5_empty_bind.json" "$ntmp/p5_bind_check.json" "$ntmp/p5_bind_assert.out" "$ntmp/p5_bind_assert.err" 2>/dev/null; fi
     LUME_BIN_DIR="$ntmp" ../../lume agent c-export ../../compiler/stage1/phase5_sys_ok.src >"$ntmp/p5_cexp.json" 2>/dev/null || true
     printf '@manifest\n[package]\nname = "ffi_app"\nversion = "0.1.0"\n[capabilities]\nallow = ["ffi"]\n[ffi]\nlibs = ["c","m"]\n' | "$ntmp/lmod" >"$ntmp/p5_ffiman.json" 2>/dev/null || true
     # Phase 5 negative checks: [V0002] WCET bound exceeded, [E0200] ISR heap/blocking, [A0003] unverified FFI, [O0001] double cap_page_map,

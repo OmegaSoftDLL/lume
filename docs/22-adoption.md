@@ -67,18 +67,15 @@ verification status is a social and competitive signal no npm/cargo can show.
 Each track: goal · foothold (what already exists to build on) · acceptance.
 
 ### G0 — Single zero-C binary + one-command install *(foundation; fast)*
-- **Goal.** `curl … | sh` drops one static `lume` binary; `lume self update` manages versions;
-  Homebrew / apt / Scoop packages.
+- **Goal.** `curl … | sh` drops one static `lume` binary; `lume self update` manages versions and
+  platform archives without package definitions written in another language.
 - **Foothold.** Self-hosted, zero-C: a single static binary is already achievable and is itself a
   marketing asset (Go's single-binary story, but with a *provable* bootstrap).
 - **Acceptance.** Fresh machine → working `lume` in one command, no C toolchain, reproducible hash.
 
-The version-pinned Homebrew formula in `Formula/lume.rb` can be installed from a checkout by
-creating a local tap with `brew tap-new lume-local/tools`, copying the formula into its `Formula`
-directory, and running `brew install lume-local/tools/lume`. It uses the v0.2.0 archives for Linux x86-64
-and macOS arm64/x86-64. A public tap and automatic formula updates are not configured. CI installs
-and exercises the released toolchain on those platforms. Archive hashes check integrity, not
-publisher identity.
+Distribution uses the release workflow's Linux, Windows, and macOS archives with `SHA256SUMS` and
+per-package `MANIFEST.sha256`. No Homebrew formula is maintained; archive hashes check integrity,
+not publisher identity.
 
 ### G1 — Oracle-as-a-service + MCP tool *(Pillar B; the priority)*
 - **Goal.** Ship `lume` as an **MCP server** exposing `prove`, `fill`, `compile --json`, and the

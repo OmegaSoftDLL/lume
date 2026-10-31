@@ -24,7 +24,7 @@ Every language or compiler proposal follows a four-stage lifecycle:
 |---|---|---|
 | **1. Draft** | `evolve/proposals/<NNNN>_<name>/proposal.bundle` or `docs/<NN>-<topic>.md` | Specifies principles (`@principles`), capability ceiling (`@capability`), and assembly/WCET budget (`@max_asm_lines`). |
 | **2. Oracle Verification** | `./lume evolve verify <proposal.bundle>` | Runs static `QF_LIA` contract proofs, `lume prove --diff` (`[V0003]` zero proof regressions), and conformance tests. |
-| **3. Formal Core Check** | `lean formal/lean/LumeCore.lean` | Core typing, linearity (`O0001`), capability containment (`E0200`), or soundness changes must keep the Lean 4 mechanisation free of `sorry` and `axiom`. |
+| **3. Independent Core Check** | `./lume verify-cert --json <certificate.json>` | Core typing, linearity (`O0001`), capability containment (`E0200`), or soundness changes must be accepted by the independent Lume certificate kernel in `lcert.src`. |
 | **4. Signed Approval & Apply** | `./lume evolve approve --by <id> --sig <ed25519_hex>` | Verifies the RFC 8032 Ed25519 signature against `evolve/maintainers.pub` and applies the change only when `"can_merge": true`. |
 
 ---
