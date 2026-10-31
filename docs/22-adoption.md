@@ -10,7 +10,7 @@ to execute once Phases 1–5 and the correctness protection (provenance A3 + con
 > **Status note (`#196` — All Tracks G0–G9 Shipped).**
 > - **G0 (Zero-C installer & self-update):** `scripts/install.sh` installs the self-hosted zero-C toolchain (`lume`, `lumec`, `lasm`, `lcli`, `lcaas`, `lcert`, `ltarget`, `levolve`) with `MANIFEST.sha256`; `lume self status|verify|update` verifies SHA-256 digests and updates installations offline without a C compiler.
 > - **G1 (Oracle-as-a-service, MCP & Leaderboard):** `lume mcp` exposes 15 tools (`lume_check`, `lume_prove`, `lume_fill`, `lume_witness`, `lume_repair`, `lume_impact`, `lume_bind`, `lume_certify`, `lume_proof_diff`, `lume_check_rot`, `lume_share`, `lume_patch`, `lume_replay`, `lume_lineage`, `lume_compose`); `scripts/check-llm-gen-eval.sh --leaderboard` emits the machine-readable verified-correctness leaderboard (`proof_coverage_pct: 100`, `compiles_alone_rejected: true`).
-> - **G2 (Verified Sidecar Interop):** `examples/interop/sidecar/` (`payment_core.src`, `host_c.c`, `host_python.py`, `host_node.mjs`) exports proven C-ABI / WASM functions alongside their independently verified proof certificate.
+> - **G2 (Verified Sidecar Interop):** `examples/interop/sidecar/` (`payment_core.src`, `host_lume.src`) exports proven C-ABI / WASM functions alongside their independently verified proof certificate and exercises the C ABI from a native Lume host.
 > - **G3 (Independent Proof Certificate):** `lume certify` and `lume verify-cert` (`compiler/stage1/lcert.src`) independently re-derive Fourier–Motzkin `QF_LIA` proofs and verify FIPS-180-4 SHA-256 digests (`#183`).
 > - **G4 (Proof-Ranked Registry & Package Audit):** `lume pkg publish` enforces `lume certify` + `lume verify-cert` (`kernel_verified: true`) before publishing to a registry store (rejecting unproven/refuted packages with `[V0001]`), and `lume pkg audit` audits capabilities (`P26`), `lume.lock` SHA-256 integrity (`P32`), and proof certificates.
 > - **G5 (Proof-Diff Review Bot):** `lume prove --diff <old.src> <new.src>` (`@mode proof-diff`) computes AST hash deltas and proof obligation transitions (`preserved`, `strengthened`, `regressed`), failing with `[V0003]` and a Markdown review summary when any proven property regresses.
@@ -86,10 +86,11 @@ not publisher identity.
   **This is the move that makes Lume indispensable for programming with AI.**
 
 ### G2 — Verified sidecar / zero-migration export *(Pillar A)*
-- **Goal.** A proven Lume core compiles to `.so` / `.a` / WASM and is called from Python / Node /
-  Rust / Go, carrying its certificate (G3).
+- **Goal.** A proven Lume core compiles to `.so` / `.a` / WASM and is called from a native Lume host,
+  carrying its certificate (G3). External-language hosting is outside this Lume-only example.
 - **Foothold.** `docs/20` Track I5 (reverse `pub extern "c"` + WASM export).
-- **Acceptance.** A Python and a Node demo each call a proven Lume function and display its proof.
+- **Acceptance.** The Lume host verifies the certificate and calls the proven C-ABI functions,
+  rejecting invalid evidence and unexpected return values. In-process WASM execution remains unclaimed.
 
 ### G3 — The proof certificate *(Pillar C; the viral unit)*
 - **Goal.** `lume certify` emits a signed, **independently verifiable** artifact per proven
