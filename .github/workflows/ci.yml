@@ -71,9 +71,9 @@ jobs:
       - name: Build seed
         run: make -C bootstrap/lume0
       - name: Build Lume process probes
-        run: ./lume build compiler/stage1/os_run_probe.src -o build/bin/os_run_probe && ./lume build compiler/stage1/os_run_slow_probe.src -o build/bin/os_run_slow_probe
+        run: ./lume build compiler/stage1/os_run_probe.src -o build/bin/os_run_probe && ./lume build compiler/stage1/os_run_slow_probe.src -o build/bin/os_run_slow_probe && ./lume build compiler/stage1/os_run_input_probe.src -o build/bin/os_run_input_probe
       - name: Test native process execution
-        run: printf '%s' "$PWD/build/bin/os_run_probe" > os_run_probe_path && printf '%s' "$PWD/build/bin/os_run_slow_probe" > os_run_slow_probe_path && ./lume run compiler/stage1/os_run_trace.src && ./lume test compiler/stage1/os_run_ok.src
+        run: printf '%s' "$PWD/build/bin/os_run_probe" > os_run_probe_path && printf '%s' "$PWD/build/bin/os_run_slow_probe" > os_run_slow_probe_path && printf '%s' "$PWD/build/bin/os_run_input_probe" > os_run_input_probe_path && ./lume run compiler/stage1/os_run_trace.src && ./lume test compiler/stage1/os_run_ok.src
 
   economic-benchmark:
     name: Economic benchmark real-execution protocol (#337)

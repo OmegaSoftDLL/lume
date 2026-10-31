@@ -875,9 +875,13 @@ PY
     "$ntmp/lasm" <"$ntmp/os_run_slow_probe.s" >"$ntmp/os_run_slow_probe" 2>/dev/null
     chmod +x "$ntmp/os_run_slow_probe"
     printf '%s' "$ntmp/os_run_slow_probe" > os_run_slow_probe_path
+    "$ntmp/lc" <../../compiler/stage1/os_run_input_probe.src >"$ntmp/os_run_input_probe.s" 2>"$ntmp/os_run_input_probe.err"
+    "$ntmp/lasm" <"$ntmp/os_run_input_probe.s" >"$ntmp/os_run_input_probe" 2>/dev/null
+    chmod +x "$ntmp/os_run_input_probe"
+    printf '%s' "$ntmp/os_run_input_probe" > os_run_input_probe_path
     LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/os_run_ok.src >"$ntmp/os_run_test.out" 2>"$ntmp/os_run_test.err"
-    if grep -q "7 passed, 0 failed" "$ntmp/os_run_test.out"; then ok "phase-3 K7: os_run executes a Lume binary via fork+execve and reports wait status"; else bad "phase-3 K7: os_run native process execution"; cat "$ntmp/os_run_test.out" "$ntmp/os_run_test.err"; fi
-    rm -f os_run_probe_path os_run_slow_probe_path os_run_capture_stdout os_run_capture_stderr os_run_timeout_stdout os_run_timeout_stderr
+    if grep -q "9 passed, 0 failed" "$ntmp/os_run_test.out"; then ok "phase-3 K7: os_run executes a Lume binary via fork+execve and reports wait status"; else bad "phase-3 K7: os_run native process execution"; cat "$ntmp/os_run_test.out" "$ntmp/os_run_test.err"; fi
+    rm -f os_run_probe_path os_run_slow_probe_path os_run_input_probe_path os_run_capture_stdout os_run_capture_stderr os_run_timeout_stdout os_run_timeout_stderr os_run_input_data os_run_input_stdout os_run_input_stderr os_run_input_missing_stdout os_run_input_missing_stderr
     # S0001: unstructured `spawn` outside `scope`, capturing non-`Send` `rc[T]`, or capturing unmoved `var`/`mut` across `spawn`
     printf 'fn bad_unscoped() -> int = spawn(42)\nprint bad_unscoped()\n' >"$ntmp/s1a.src"
     "$ntmp/lc" <"$ntmp/s1a.src" >"$ntmp/s1a.s" 2>"$ntmp/s1a.err"; s1ac=$?
