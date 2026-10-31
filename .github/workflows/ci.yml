@@ -51,6 +51,17 @@ jobs:
       - name: Test semantic protocol under ASan/UBSan
         run: LUME_MESH_ONLY=1 make -C bootstrap/lume0 asan
 
+  c-adapters:
+    name: C adapters and native manifest oracle (#334/#337)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build seed
+        run: make -C bootstrap/lume0
+      - name: Test native manifest validation and real C interop
+        run: sh scripts/check-c-adapters.sh
+
   process-runtime:
     name: Native process execution (#337)
     runs-on: ubuntu-latest
