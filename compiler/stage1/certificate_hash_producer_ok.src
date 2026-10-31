@@ -1,6 +1,7 @@
-## Full-content SHA-256 producer regression (#340): NIST 56-byte vector and long distinct inputs.
+## Full-content SHA-256 producer regression (#340): NIST, long-input, and UTF-8 vectors.
 
 use lcaas
 
 print lc_sha256("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq")
 print lc_sha256("0123456789abcdefAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAsuffix-one")
+print lc_sha256("lume: contract verification error [V0001]: cannot prove 'ensures' postcondition of 'must_increase' — refuted with counterexample: x = 0 (result = 0) (fix-it: strengthen 'requires' precondition or fix implementation of 'must_increase')\n")

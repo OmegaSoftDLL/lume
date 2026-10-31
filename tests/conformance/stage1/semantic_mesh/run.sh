@@ -6,13 +6,22 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../../../.." && pwd)
 FIX="$ROOT/tests/conformance/stage1/semantic_mesh"
 OUT=$(mktemp -d)
 if [ -z "${LUME_BIN_DIR:-}" ]; then
-    LUME_BIN_DIR="$OUT/bin"
+    LUME_BIN_DIR="${TMPDIR:-/tmp}/lume_semantic_mesh_bin"
     export LUME_BIN_DIR
 fi
+mkdir -p "$LUME_BIN_DIR"
+ASSERT_BIN="$LUME_BIN_DIR/lmesh_assert"
 pass=0
 fail=0
 ok() { pass=$((pass + 1)); printf '  ok   %s\n' "$1"; }
 bad() { fail=$((fail + 1)); printf '  FAIL %s\n' "$1"; }
+
+if [ ! -x "$ASSERT_BIN" ]; then
+    "$ROOT/lume" build "$FIX/assertions.src" -o "$ASSERT_BIN" >"$OUT/assertions-build.out" 2>"$OUT/assertions-build.err" || {
+        cat "$OUT/assertions-build.out" "$OUT/assertions-build.err"
+        exit 1
+    }
+fi
 
 _mesh_invoke() {
     _mesh_name=$1
@@ -21,11 +30,11 @@ _mesh_invoke() {
 }
 _mesh_ok() {
     _mesh_invoke "$1"
-    [ "$_mesh_rc" -eq 0 ] && python3 "$FIX/assertions.py" "$2" "$OUT/$1.json"
+    [ "$_mesh_rc" -eq 0 ] && printf '@mode %s\n@path %s\n' "$2" "$OUT/$1.json" | "$ASSERT_BIN"
 }
 _mesh_err() {
     _mesh_invoke "$1"
-    [ "$_mesh_rc" -ne 0 ] && python3 "$FIX/assertions.py" error "$OUT/$1.json" "$2"
+    [ "$_mesh_rc" -ne 0 ] && printf '@mode error\n@path %s\n@other \n@code %s\n' "$OUT/$1.json" "$2" | "$ASSERT_BIN"
 }
 
 if _mesh_ok negotiate negotiate; then ok "P0 mesh (#337): negotiate goal/contracts/effects/resources/target with real compiler, target, and prover"; else bad "P0 mesh negotiation"; cat "$OUT/negotiate.json" "$OUT/negotiate.err" 2>/dev/null; fi
@@ -50,7 +59,7 @@ if [ -z "${LUME0_ASAN:-}" ]; then
     _mesh_ca_rc=$_mesh_rc
     _mesh_invoke canonical_b
     _mesh_cb_rc=$_mesh_rc
-    if [ "$_mesh_ca_rc" -eq 0 ] && [ "$_mesh_cb_rc" -eq 0 ] && python3 "$FIX/assertions.py" canonical "$OUT/canonical_a.json" "$OUT/canonical_b.json"; then ok "P0 mesh canonicalization: independent length-prefixed state and parent/node hashes resist delimiter adversaries"; else bad "P0 mesh canonicalization adversaries"; cat "$OUT/canonical_a.json" "$OUT/canonical_b.json" 2>/dev/null; fi
+    if [ "$_mesh_ca_rc" -eq 0 ] && [ "$_mesh_cb_rc" -eq 0 ] && printf '@mode canonical\n@path %s\n@other %s\n' "$OUT/canonical_a.json" "$OUT/canonical_b.json" | "$ASSERT_BIN"; then ok "P0 mesh canonicalization: independent length-prefixed state and parent/node hashes resist delimiter adversaries"; else bad "P0 mesh canonicalization adversaries"; cat "$OUT/canonical_a.json" "$OUT/canonical_b.json" 2>/dev/null; fi
 fi
 _mesh_cli_rc=0
 "$ROOT/lume" mesh --fixed-success >"$OUT/cli_bad.out" 2>"$OUT/cli_bad.err" || _mesh_cli_rc=$?
