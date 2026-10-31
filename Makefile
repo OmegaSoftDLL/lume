@@ -32,7 +32,9 @@ seed:
 ## shadow cc/gcc/clang/as/ld with failing stubs and rebuild stages 1-3 (Lume
 ## building Lume, assembled by lasm), asserting the stage 2 == stage 3 fixpoint.
 zero-c: amalgamate
-	./scripts/check-zero-c.sh
+	ulimit -s unlimited 2>/dev/null || ulimit -s 524288 2>/dev/null || ulimit -s 65520 2>/dev/null || ulimit -s 32768 2>/dev/null || true; \
+	./lume build scripts/zero_c.src -o build/zero_c_gate && \
+	printf '@root %s\n' "$(CURDIR)" | build/zero_c_gate
 
 ## Conformance suite (includes the self-host and zero-C-loop tests).
 test: amalgamate

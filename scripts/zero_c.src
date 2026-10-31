@@ -1,0 +1,41 @@
+use bootstrap
+
+fn zc_out(root) = root + "/build/zero-c"
+fn zc_shim(root) = zc_out(root) + "/shim"
+fn zc_run(path, args, out) = os_run_capture_timeout(path, args, out, out + ".err", 900000)
+fn zc_tool_names() = Cons("cc", Cons("gcc", Cons("clang", Cons("c++", Cons("g++", Cons("as", Cons("ld", Nil)))))))
+
+fn zc_freeze_line(root, line) = if count(line) < 67 or slice(line, 64, 66) != "  " then 0 else fs_sha256_file(root + "/" + slice(line, 66, count(line))) == slice(line, 0, 64)
+fn zc_freeze_lines(root, lines) = match lines
+    Nil => 1
+    Cons(h, t) => if zc_freeze_line(root, cs_chomp(h)) == 1 then zc_freeze_lines(root, t) else 0
+fn zc_freeze(root) = zc_freeze_lines(root, lc_split_lines(fs_read_file(root + "/bootstrap/lume0/SEED_FREEZE.sha256"), 0, count(fs_read_file(root + "/bootstrap/lume0/SEED_FREEZE.sha256"))))
+
+fn zc_prepare(root) = let parent = fs_mkdir(root + "/build") in if parent != 1 then 0 else let out = zc_out(root) in let removed = zc_run("/bin/rm", Cons("-rf", Cons(out, Nil)), root + "/build/zero-c-rm.out") in if removed != 0 then 0 else zc_run("/bin/mkdir", Cons("-p", Cons(zc_shim(root), Nil)), root + "/build/zero-c-mkdir.out") == 0
+
+fn zc_stage0(root) = let out = zc_out(root) in let a = bs_seed_tool_fresh(root, bs_src(root) + "/lumec.src", out + "/lumec0") in if a != 0 then "stage0 lumec failed with native status " + str(a) else let b = bs_seed_tool_fresh(root, bs_src(root) + "/lasm.src", out + "/lasm0") in if b != 0 then "stage0 lasm failed with native status " + str(b) else ""
+
+fn zc_copy(source, destination) = os_run_capture_timeout("/bin/cp", Cons(source, Cons(destination, Nil)), "/dev/null", "/dev/null", 10000)
+fn zc_install_shims(root, names) = match names
+    Nil => ""
+    Cons(h, t) => let copied = zc_copy(zc_shim(root) + "/blocker", zc_shim(root) + "/" + h) in if copied != 0 then "cannot install " + h + " blocker: native status " + str(copied) else zc_install_shims(root, t)
+fn zc_blocker(root) = let built = bs_compile(zc_out(root) + "/lumec0", zc_out(root) + "/lasm0", root + "/scripts/zero_c_blocker.src", zc_shim(root) + "/blocker") in if built != "" then built else zc_install_shims(root, zc_tool_names())
+fn zc_verify_shim(root, name) = let out = zc_out(root) + "/shim-" + name + ".out" in let path = "PATH=" + zc_shim(root) + ":/usr/local/bin:/usr/bin:/bin" in zc_run("/usr/bin/env", Cons(path, Cons(name, Nil)), out) == 24832
+fn zc_verify_shims(root, names) = match names
+    Nil => ""
+    Cons(h, t) => if zc_verify_shim(root, h) == 0 then h + " blocker was not selected by PATH or did not exit 97" else zc_verify_shims(root, t)
+
+fn zc_stage(root, lc, la, tag) = let out = zc_out(root) in let a = bs_compile(lc, la, bs_src(root) + "/lumec.src", out + "/lumec" + tag) in if a != "" then "stage " + tag + " lumec: " + a else let b = bs_compile(lc, la, bs_src(root) + "/lasm.src", out + "/lasm" + tag) in if b != "" then "stage " + tag + " lasm: " + b else let c = bs_compile(lc, la, bs_src(root) + "/lcli.src", out + "/lcli" + tag) in if c != "" then "stage " + tag + " lcli: " + c else ""
+fn zc_stages(root) = let out = zc_out(root) in let a = zc_stage(root, out + "/lumec0", out + "/lasm0", "1") in if a != "" then a else let b = zc_stage(root, out + "/lumec1", out + "/lasm1", "2") in if b != "" then b else zc_stage(root, out + "/lumec2", out + "/lasm2", "3")
+fn zc_same(a, b) = fs_files_equal(a, b) == 1
+fn zc_fixpoint(root) = let out = zc_out(root) in if zc_same(out + "/lumec2.s", out + "/lumec3.s") == 0 then "lumec assembly differs" else if zc_same(out + "/lumec2", out + "/lumec3") == 0 then "lumec binary differs" else if zc_same(out + "/lasm2.s", out + "/lasm3.s") == 0 then "lasm assembly differs" else if zc_same(out + "/lasm2", out + "/lasm3") == 0 then "lasm binary differs" else if zc_same(out + "/lcli2.s", out + "/lcli3.s") == 0 then "lcli assembly differs" else if zc_same(out + "/lcli2", out + "/lcli3") == 0 then "lcli binary differs" else ""
+fn zc_sanity(root) = let out = zc_out(root) in let source = out + "/t.src" in let written = fs_write_sync(source, "fn fib(n) = if n < 2 then n else fib(n - 1) + fib(n - 2)\nprint fib(10)\n") in if written != 1 then "cannot write sanity source" else let program = bs_compile(out + "/lumec3", out + "/lasm3", source, out + "/t") in if program != "" then "sanity compilation failed: " + program else let result = zc_run(out + "/t", Nil, out + "/t.out") in if result != 0 then bs_process_error("sanity execution", result, out + "/t.out", out + "/t.out.err") else if fs_read_file(out + "/t.out") != "55\n" then "sanity output mismatch" else ""
+
+fn zc_main(root) = if zc_freeze(root) == 0 then "frozen seed SHA-256 verification failed" else if zc_prepare(root) == 0 then "cannot prepare zero-C gate directory" else let amalgamated = bs_amalgamate(root) in if amalgamated != 1 then "amalgamation failed" else let seeded = zc_stage0(root) in if seeded != "" then seeded else let blocker = zc_blocker(root) in if blocker != "" then "native toolchain blocker failed: " + blocker else let shadowed = zc_verify_shims(root, zc_tool_names()) in if shadowed != "" then shadowed else let staged = zc_stages(root) in if staged != "" then staged else let fixed = zc_fixpoint(root) in if fixed != "" then fixed else zc_sanity(root)
+fn zc_dispatch(input) = let root = bs_root(input) in if root == "" then ctfail("zero-C gate requires @root\n") else let err_msg = zc_main(root) in if err_msg != "" then ctfail("zero-C gate failed: " + err_msg + "\n") else "OK: Lume-only zero-C gate verified the frozen seed, blocked the C toolchain, reached stage2 == stage3, and executed native code."
+
+fn test_freeze_rejects_wrong_digest() = zc_freeze_line(".", "0000000000000000000000000000000000000000000000000000000000000000  scripts/zero_c.src") == 0
+fn test_freeze_rejects_malformed_line() = zc_freeze_line(".", "not-a-seed-freeze-record") == 0
+fn test_shim_names_cover_the_complete_toolchain() = zc_tool_names() == Cons("cc", Cons("gcc", Cons("clang", Cons("c++", Cons("g++", Cons("as", Cons("ld", Nil)))))))
+
+print zc_dispatch(readall())
