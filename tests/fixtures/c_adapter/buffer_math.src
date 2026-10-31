@@ -1,0 +1,13 @@
+fn buffer_sum(bytes: str, bytes_len: int, i, acc) = if i >= bytes_len then acc else buffer_sum(bytes, bytes_len, i + 1, acc + ord(at(bytes, i)))
+
+pub extern "c" fn c_buffer_weighted_sum(bytes: str, bytes_len: int, weight: int) -> int = if bytes_len < 0 then 0 - 1 else buffer_sum(bytes, bytes_len, 0, 0) * weight + bytes_len
+
+fn text_sum(text: str, i, acc) = if i >= count(text) then acc else text_sum(text, i + 1, acc + (i + 1) * ord(at(text, i)))
+
+pub extern "c" fn c_text_checksum(text: str) -> int = text_sum(text, 0, 0)
+
+fn test_lume_buffer_weighted_sum() = c_buffer_weighted_sum("Lume", 4, 3) == 1213
+
+fn test_lume_buffer_rejects_negative_length() = c_buffer_weighted_sum("Lume", 0 - 1, 3) == 0 - 1
+
+fn test_lume_text_checksum() = c_text_checksum("Lume") == 1041

@@ -1,0 +1,5 @@
+use fs_sha256_file
+
+fn fp_probe() = let path = "../../bootstrap/lume0/lume0" in if fs_read_byte(path, 0) == 127 and fs_read_byte(path, 7) == 0 and fs_read_byte(path, 18) == 62 then fs_sha256_file(path) else ctfail("binary SHA-256 producer requires a real x86-64 ELF input")
+
+print fp_probe()

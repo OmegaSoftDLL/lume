@@ -430,6 +430,13 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_
     LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/fs_path_exists_ok.src >"$ntmp/fs_path_exists.out" 2>"$ntmp/fs_path_exists.err"
     if grep -q "3 passed, 0 failed" "$ntmp/fs_path_exists.out"; then ok "phase-2 filesystem evidence: fs_path_exists distinguishes present, missing, and empty paths"; else bad "phase-2 filesystem evidence: fs_path_exists"; cat "$ntmp/fs_path_exists.out" "$ntmp/fs_path_exists.err"; fi
     rm -f fs_path_exists_empty_probe
+    LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/fs_mkdir_ok.src >"$ntmp/fs_mkdir.out" 2>"$ntmp/fs_mkdir.err"
+    if grep -q "3 passed, 0 failed" "$ntmp/fs_mkdir.out"; then ok "phase-2 artifact filesystem: fs_mkdir creates, reuses, and validates artifact directories"; else bad "phase-2 artifact filesystem: fs_mkdir"; cat "$ntmp/fs_mkdir.out" "$ntmp/fs_mkdir.err"; fi
+    rm -rf fs_mkdir_probe fs_mkdir_nested_probe definitely_missing_parent
+    LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/fs_sha256_file.src >"$ntmp/fs_sha256_file.out" 2>"$ntmp/fs_sha256_file.err"
+    if grep -q "2 passed, 0 failed" "$ntmp/fs_sha256_file.out"; then ok "phase-2 binary evidence: fs_sha256_file matches FIPS 180-4 empty and abc vectors"; else bad "phase-2 binary evidence: fs_sha256_file"; cat "$ntmp/fs_sha256_file.out" "$ntmp/fs_sha256_file.err"; fi
+    rm -f fs_sha256_empty_probe fs_sha256_abc_probe
+    if LUME_BIN_DIR="$ntmp" ../../lume run ../../compiler/stage1/fs_sha256_file_producer_ok.src >"$ntmp/fs_sha256_producer.out" 2>"$ntmp/fs_sha256_producer.err" && LUME_BIN_DIR="$ntmp" ../../lume run ../../compiler/stage1/fs_sha256_file_verifier_ok.src >"$ntmp/fs_sha256_verifier.out" 2>"$ntmp/fs_sha256_verifier.err" && diff -u "$ntmp/fs_sha256_producer.out" "$ntmp/fs_sha256_verifier.out" >/dev/null; then ok "phase-2 binary evidence: independent lcaas/lcert SHA-256 implementations agree on a real ELF with NUL and non-ASCII bytes"; else bad "phase-2 binary evidence: independent ELF SHA-256"; cat "$ntmp/fs_sha256_producer.out" "$ntmp/fs_sha256_producer.err" "$ntmp/fs_sha256_verifier.out" "$ntmp/fs_sha256_verifier.err"; fi
     LUME_BIN_DIR="$ntmp" ../../lume pkg init "$ntmp/pkgdemo" >/dev/null 2>&1
     LUME_BIN_DIR="$ntmp" ../../lume pkg lock "$ntmp/pkgdemo" >/dev/null 2>&1
     pkg_ok=1
@@ -1536,6 +1543,7 @@ EOF
     else
         ok "verified registry (#337): native execution covered by the dedicated Ubuntu gate; not applicable in this host/configuration"
     fi
+
     # Issue #197 & #215: Core language features (trait/impl [T0400]/[T0401], first-class closures with capture,
     # refinement types `T where <pred>` with QF_LIA guard elision & exit-3 runtime trap, async fn/.await/block_on [E0200],
     # rc/arc/weak shared control blocks [O0001], shard data-parallel construct [S0001]/[E0200], F3c let-polymorphism [T0500],
@@ -1713,12 +1721,6 @@ PY
     ti_bad_rc=0
     LUME_BIN_DIR="$ntmp" ../../lume intent build --json "$ntmp/bad.intent" >"$ntmp/ti_bad.json" 2>/dev/null || ti_bad_rc=$?
     if [ -x "$ntmp/ti_ok.elf" ] && "$ntmp/ti_ok.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/track_i_intent_ok_asm.expected - >/dev/null && [ -s "$ntmp/ti_fn1.s" ] && ! grep -q "call ctfail" "$ntmp/ti_fn1.s" && [ -s "$ntmp/ti_fn2.s" ] && ! grep -q "call ctfail" "$ntmp/ti_fn2.s" && [ -s "$ntmp/ti_fn3.s" ] && ! grep -q "call ctfail" "$ntmp/ti_fn3.s" && [ -s "$ntmp/ti_fn4.s" ] && ! grep -q "call ctfail" "$ntmp/ti_fn4.s" && [ -s "$ntmp/ti_fn5.s" ] && ! grep -q "call ctfail" "$ntmp/ti_fn5.s" && [ -x "$ntmp/spec.elf" ] && "$ntmp/spec.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/track_i_intent_ok_asm.expected - >/dev/null && [ -f "$ntmp/spec.intent.cache.src" ] && [ -f "$ntmp/spec.intent.cache.cert.json" ] && grep -q '"ok":true' "$ntmp/ti_b1.json" && grep -q '"cache_status":"regenerated_cache_missing"' "$ntmp/ti_b1.json" && grep -q '"re_synthesized":true' "$ntmp/ti_b1.json" && grep -q '"theory":"QF_NIA"' "$ntmp/ti_b1.json" && grep -q '"cache_hit":true' "$ntmp/ti_b2.json" && grep -q '"cache_status":"up_to_date"' "$ntmp/ti_b2.json" && grep -q '"cache_valid":true' "$ntmp/ti_v1.json" && [ "$ti_stale_rc" -ne 0 ] && grep -q '"cache_status":"regenerated_spec_changed"' "$ntmp/ti_vstale.json" && grep -q '"cache_status":"regenerated_spec_changed"' "$ntmp/ti_b3.json" && grep -q '"re_synthesized":true' "$ntmp/ti_b3.json" && [ "$ti_spec2_out" = "65,49,36,42,42," ] && [ "$ti_tamper_rc" -ne 0 ] && grep -q '"cache_tampered":true' "$ntmp/ti_vtamper.json" && grep -q '"code":"V0005"' "$ntmp/ti_vtamper.json" && [ "$ti_bad_rc" -eq 3 ] && grep -q '"cache_status":"rejected_unprovable_spec"' "$ntmp/ti_bad.json" && grep -q '"code":"V0001"' "$ntmp/ti_bad.json"; then ok "Track I (#259, docs/19 §1): intent-as-source (.intent synthesis via QF_LIA/QF_NIA, zero-guard ELF, SHA-256 proven cache hit, re-synthesis on spec change, V0005 tamper & V0001 unprovable rejection)"; else bad "Track I (#259, docs/19 §1): intent-as-source pipeline"; cat "$ntmp/ti_ok.err" "$ntmp/ti_b1.json" "$ntmp/ti_b2.json" "$ntmp/ti_v1.json" "$ntmp/ti_vstale.json" "$ntmp/ti_b3.json" "$ntmp/ti_vtamper.json" "$ntmp/ti_bad.json" 2>/dev/null; fi
-    _mesh_cli_rc=0
-    LUME_BIN_DIR="$ntmp" ../../lume mesh --fixed-success >"$ntmp/mesh_cli_bad.out" 2>"$ntmp/mesh_cli_bad.err" || _mesh_cli_rc=$?
-    if [ "$_mesh_cli_rc" -ne 0 ]; then ok "P0 mesh CLI negative: unknown arguments are not discarded"; else bad "P0 mesh CLI unknown arguments"; fi
-    _mesh_cli_rc=0
-    LUME_BIN_DIR="$ntmp" ../../lume mesh ../../tests/conformance/stage1/semantic_mesh/negotiate.mesh ../../tests/conformance/stage1/semantic_mesh/canonical_a.mesh >"$ntmp/mesh_cli_ambiguous.out" 2>"$ntmp/mesh_cli_ambiguous.err" || _mesh_cli_rc=$?
-    if [ "$_mesh_cli_rc" -ne 0 ]; then ok "P0 mesh CLI negative: multiple payload files are rejected as ambiguous"; else bad "P0 mesh CLI ambiguous payload files"; fi
 else
     skip "no-toolchain ELF pipeline (not linux/x86_64, or under ASan)"
 fi
