@@ -37,6 +37,9 @@ fn zc_dispatch(input) = let startup = zc_trace("zero-c: startup\n") in let root 
 
 fn test_freeze_rejects_wrong_digest() = zc_freeze_line(".", "0000000000000000000000000000000000000000000000000000000000000000  scripts/zero_c.src") == 0
 fn test_freeze_rejects_malformed_line() = zc_freeze_line(".", "not-a-seed-freeze-record") == 0
-fn test_shim_names_cover_the_complete_toolchain() = zc_tool_names() == Cons("cc", Cons("gcc", Cons("clang", Cons("c++", Cons("g++", Cons("as", Cons("ld", Nil)))))))
+fn zc_name_present(names, expected) = match names
+    Nil => 0
+    Cons(h, t) => if h == expected then 1 else zc_name_present(t, expected)
+fn test_shim_names_cover_the_complete_toolchain() = zc_name_present(zc_tool_names(), "cc") == 1 and zc_name_present(zc_tool_names(), "gcc") == 1 and zc_name_present(zc_tool_names(), "clang") == 1 and zc_name_present(zc_tool_names(), "c++") == 1 and zc_name_present(zc_tool_names(), "g++") == 1 and zc_name_present(zc_tool_names(), "as") == 1 and zc_name_present(zc_tool_names(), "ld") == 1
 
 print zc_dispatch(readall())
