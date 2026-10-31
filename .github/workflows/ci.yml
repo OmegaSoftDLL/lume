@@ -28,6 +28,17 @@ jobs:
       - name: Test under ASan/UBSan
         run: make -C bootstrap/lume0 asan
 
+  renewable-evidence:
+    name: Portable renewable evidence (#335/#337)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build seed
+        run: make -C bootstrap/lume0
+      - name: Test portable renewable evidence
+        run: ./lume test compiler/stage1/levidence.src
+
   semantic-mesh:
     name: Semantic intent protocol (#337)
     runs-on: ubuntu-latest
@@ -40,6 +51,19 @@ jobs:
       - name: Test semantic protocol under ASan/UBSan
         run: LUME_MESH_ONLY=1 make -C bootstrap/lume0 asan
 
+  process-runtime:
+    name: Native process execution (#337)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build seed
+        run: make -C bootstrap/lume0
+      - name: Build Lume process probes
+        run: ./lume build compiler/stage1/os_run_probe.src -o build/bin/os_run_probe && ./lume build compiler/stage1/os_run_slow_probe.src -o build/bin/os_run_slow_probe
+      - name: Test native process execution
+        run: printf '%s' "$PWD/build/bin/os_run_probe" > os_run_probe_path && printf '%s' "$PWD/build/bin/os_run_slow_probe" > os_run_slow_probe_path && ./lume run compiler/stage1/os_run_trace.src && ./lume test compiler/stage1/os_run_ok.src
+
   economic-benchmark:
     name: Economic benchmark real-execution protocol (#337)
     runs-on: ubuntu-latest
@@ -48,7 +72,16 @@ jobs:
       - name: Build seed
         run: make -C bootstrap/lume0
       - name: Run real compilation, proof, native execution, and negative gates
+        env:
+          ECONOMIC_DEBUG_DIR: ${{ runner.temp }}/economic-debug
         run: sh scripts/check-economic-benchmark.sh
+      - name: Preserve report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: economic-report-${{ github.run_id }}
+          path: ${{ runner.temp }}/economic-debug
+          retention-days: 3
 
   verified-registry:
     name: Verified component registry and adversarial evidence (#337)
