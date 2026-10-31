@@ -857,6 +857,17 @@ PY
     if [ -x "$ntmp/conc.elf" ] && "$ntmp/conc.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/concurrency_ok_asm.expected - >/dev/null; then ok "phase-3 S1: structured 'scope'/'spawn' with 'arc[T]' (Send + Sync) and 'own' transfer compiles + runs"; else bad "phase-3 S1: concurrency_ok.src compile + run"; cat "$ntmp/conc.err"; fi
     if LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/concurrency.src 2>/dev/null | grep -q "5 passed, 0 failed"; then ok "phase-3 S2: concurrency.src (chan[T], deterministic select, par_map/par_for) passes native lume test"; else bad "phase-3 S2: concurrency.src unit tests"; fi
     if LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/actor.src 2>/dev/null | grep -q "5 passed, 0 failed"; then ok "phase-3 S3: actor.src (std.actor, supervisor one_for_one/one_for_all, std.time.logical) passes native lume test"; else bad "phase-3 S3: actor.src unit tests"; fi
+    "$ntmp/lc" <../../compiler/stage1/os_run_probe.src >"$ntmp/os_run_probe.s" 2>"$ntmp/os_run_probe.err"
+    "$ntmp/lasm" <"$ntmp/os_run_probe.s" >"$ntmp/os_run_probe" 2>/dev/null
+    chmod +x "$ntmp/os_run_probe"
+    printf '%s' "$ntmp/os_run_probe" > os_run_probe_path
+    "$ntmp/lc" <../../compiler/stage1/os_run_slow_probe.src >"$ntmp/os_run_slow_probe.s" 2>"$ntmp/os_run_slow_probe.err"
+    "$ntmp/lasm" <"$ntmp/os_run_slow_probe.s" >"$ntmp/os_run_slow_probe" 2>/dev/null
+    chmod +x "$ntmp/os_run_slow_probe"
+    printf '%s' "$ntmp/os_run_slow_probe" > os_run_slow_probe_path
+    LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/os_run_ok.src >"$ntmp/os_run_test.out" 2>"$ntmp/os_run_test.err"
+    if grep -q "7 passed, 0 failed" "$ntmp/os_run_test.out"; then ok "phase-3 K7: os_run executes a Lume binary via fork+execve and reports wait status"; else bad "phase-3 K7: os_run native process execution"; cat "$ntmp/os_run_test.out" "$ntmp/os_run_test.err"; fi
+    rm -f os_run_probe_path os_run_slow_probe_path os_run_capture_stdout os_run_capture_stderr os_run_timeout_stdout os_run_timeout_stderr
     # S0001: unstructured `spawn` outside `scope`, capturing non-`Send` `rc[T]`, or capturing unmoved `var`/`mut` across `spawn`
     printf 'fn bad_unscoped() -> int = spawn(42)\nprint bad_unscoped()\n' >"$ntmp/s1a.src"
     "$ntmp/lc" <"$ntmp/s1a.src" >"$ntmp/s1a.s" 2>"$ntmp/s1a.err"; s1ac=$?
