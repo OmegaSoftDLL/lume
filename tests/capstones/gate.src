@@ -17,7 +17,7 @@ fn cp_assert(tmp, mode) = let input = tmp + "/saas.in" in let out = tmp + "/saas
 fn cp_health(tmp, attempt) = if attempt >= 200 then "ledger server did not become healthy\n" + fs_read_file(tmp + "/saas-health.out") + fs_read_file(tmp + "/saas-health.out.err") else let err_msg = cp_assert(tmp, "health") in if err_msg == "" then "" else let slept = os_sleep_ms(50) in cp_health(tmp, attempt + 1)
 fn cp_stop(pid) = let killed = os_kill(pid, 15) in if killed != 0 then "cannot stop ledger server: native status " + str(killed) else let status = os_waitpid_status(pid) in if status == 0 or status == 15 then "" else "ledger server wait failed with native status " + str(status)
 fn cp_server_child(tmp) = let status = os_exec("/usr/bin/env", Cons("-C", Cons(tmp, Cons(tmp + "/ledger_server", Nil)))) in os_exit(status)
-fn cp_start_failure(pid, err_msg) = let stopped = cp_stop(pid) in {pid: -1, err_msg: err_msg + stopped}
+fn cp_start_failure(pid, err_msg) = let stopped = cp_stop(pid) in {pid: 0 - 1, err_msg: err_msg + stopped}
 fn cp_start(tmp) = let pid = os_fork() in if pid < 0 then {pid: pid, err_msg: "cannot fork ledger server: native status " + str(pid)} else if pid == 0 then cp_server_child(tmp) else let err_msg = cp_health(tmp, 0) in if err_msg != "" then cp_start_failure(pid, err_msg) else {pid: pid, err_msg: ""}
 fn cp_phase(tmp, pid, mode) = let assertion = cp_assert(tmp, mode) in let stopped = cp_stop(pid) in if stopped != "" then stopped else assertion
 fn cp_session(tmp, mode) = let started = cp_start(tmp) in if started.err_msg != "" then started.err_msg else cp_phase(tmp, started.pid, mode)

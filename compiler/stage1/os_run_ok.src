@@ -22,4 +22,4 @@ fn test_os_exec_missing_tool_returns_error() = let pid = os_fork() in if pid < 0
 
 fn test_os_kill_and_waitpid_status_report_sigterm() = let pid = os_fork() in if pid < 0 then 0 else if pid == 0 then let slept = os_sleep_ms(60000) in os_exit(0) else let paused = os_sleep_ms(10) in let killed = os_kill(pid, 15) in killed == 0 and os_waitpid_status(pid) == 15
 
-fn test_os_kill_rejects_invalid_pid() = os_kill(-999999, 15) < 0
+fn test_os_kill_rejects_invalid_pid() = os_kill(0 - 999999, 15) < 0
