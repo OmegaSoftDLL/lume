@@ -1,0 +1,17 @@
+use acceptance_json
+
+fn rg_json(value) = if value.kind == "string" then "\"" + cs_jesc(value.text) + "\"" else if value.kind == "array" then "[" + rg_json_items(value.items) + "]" else if value.kind == "object" then "{" + rg_json_fields(value.fields) + "}" else value.text
+fn rg_json_items(items) = match items
+    Nil => ""
+    Cons(h, t) => rg_json(h) + (if cs_isnil(t) == 1 then "" else "," + rg_json_items(t))
+fn rg_json_fields(fields) = match fields
+    Nil => ""
+    Cons(h, t) => "\"" + cs_jesc(h.key) + "\":" + rg_json(h.value) + (if cs_isnil(t) == 1 then "" else "," + rg_json_fields(t))
+fn rg_replace_once(text, old, replacement) = let p = cs_find_substr(text, old, 0, count(text), count(old)) in if p >= count(text) then text else slice(text, 0, p) + replacement + slice(text, p + count(old), count(text))
+fn rg_sha(path) = "sha256:" + sha256_hex(fs_read_file(path))
+fn rg_text_field(json, key) = am_get(json, key).text
+fn rg_artifact(manifest, key) = rg_text_field(am_get(manifest, "artifacts"), key)
+fn rg_publish_valid(manifest, input, entry) = if rg_text_field(manifest, "schema") != "lume-verified-component/0.1" then "invalid registry schema" else if rg_text_field(am_get(manifest, "evidence"), "status") != "PASS" then "registry evidence is not PASS" else if am_get(manifest, "public_contracts").num != 2 then "unexpected public contract count" else if fs_path_exists(entry) == 0 then "registry component directory is missing" else if rg_artifact(manifest, "adapter_sha256") != rg_sha(input + "/adapter.src") then "adapter digest mismatch" else if rg_artifact(manifest, "source_sha256") != rg_sha(input + "/source.src") then "source digest mismatch" else if rg_artifact(manifest, "tests_sha256") != rg_sha(input + "/tests.src") then "tests digest mismatch" else if rg_artifact(manifest, "proof_sha256") != rg_sha(entry + "/proof.cert.json") then "proof digest mismatch" else if rg_artifact(manifest, "test_output_sha256") != rg_sha(entry + "/test-output.txt") then "test output digest mismatch" else ""
+fn rg_discover_valid(found, other, cid) = let components = am_get(found, "components").items in let other_components = am_get(other, "components").items in if cs_isnil(components) == 0 or cs_isnil(cs_cvtl(components)) == 0 then "registry discovery did not return exactly one component" else if rg_text_field(cs_asthead(components), "cid") != cid then "registry discovery returned a different CID" else if cs_isnil(other_components) == 0 then "registry discovered a component with the wrong capability" else ""
+fn rg_error_code(path, expected) = if cs_has_substr(fs_read_file(path), "\"code\":\"" + expected + "\"") == 1 then "" else "expected " + expected + " in " + path
+fn rg_write(path, text) = if fs_write_sync(path, text) == 1 then "" else "cannot write " + path

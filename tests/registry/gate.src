@@ -1,0 +1,21 @@
+use gate_manifest
+use gate_publish
+use gate_adversarial
+
+fn rg_final_resolve(root, flow) = let path = root + "/build/registry-gate/final-resolve.json" in let raw = rg_lume(root, rg_resolve_args(flow.cid), path) in if raw != 0 then "final registry resolve failed" else if fs_read_file(path) != fs_read_file(flow.publish) then "final manifest differs from publication" else ""
+
+fn rg_main(root) = let flow = rg_publish_flow(root) in if flow.error != "" then flow.error else let resolved = rg_resolve_flow(root, flow) in if resolved != "" then resolved else let attacked = rg_adversarial(root, flow) in if attacked != "" then attacked else rg_final_resolve(root, flow)
+
+fn rg_at_line(xs, idx) = match xs
+    Nil => ""
+    Cons(h, t) => if idx == 0 then cs_chomp(h) else rg_at_line(t, idx - 1)
+
+fn rg_root(input) = let line = rg_at_line(lc_split_lines(input, 0, count(input)), 0) in if cs_startswith(line, "@root ") == 1 then slice(line, 6, count(line)) else ""
+
+fn rg_dispatch(input) = let root = rg_root(input) in let error = rg_main(root) in if error != "" then ctfail("verified registry gate failed: " + error + "\n") else "verified registry: publication, discovery, resolution, and adversarial checks passed"
+
+fn test_json_compact_round_trip() = rg_json(am_parse("{\"a\":[1,true,null]}")) == "{\"a\":[1,true,null]}"
+
+fn test_replace_once_does_not_duplicate_text() = rg_replace_once("abcabc", "ab", "x") == "xabc"
+
+print rg_dispatch(readall())

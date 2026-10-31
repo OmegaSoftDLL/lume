@@ -1527,8 +1527,9 @@ EOF
     rm -f "$_p0_real_log"
 
     if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_ASAN:-}" ] && [ -z "${LUME0_RUNNER:-}" ]; then
-        if LUME_CLI=../../lume LUME_BIN_DIR="$ntmp" sh ../../scripts/check-verified-registry.sh >"$ntmp/verified_registry.out" 2>&1; then ok "verified registry (#337): real artifact CIDs, independent proofs, native tests, discovery, freshness, target checks & adversarial rejection"; else bad "verified registry (#337): publication/resolution adversarial checks"; cat "$ntmp/verified_registry.out"; fi
-        if LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/lregistry_cid.src >"$ntmp/registry_cid_test.out" 2>"$ntmp/registry_cid_test.err" && grep -q "3 passed, 0 failed" "$ntmp/registry_cid_test.out"; then ok "verified registry (#337): Lume-native CID oracle recomputation, canonical capabilities, and schema rejection"; else bad "verified registry (#337): Lume-native CID oracle"; cat "$ntmp/registry_cid_test.err" "$ntmp/registry_cid_test.out"; fi
+        LUME_BIN_DIR="$ntmp" ../../lume build ../../tests/registry/gate.src -o "$ntmp/registry_gate" >"$ntmp/registry_gate_build.out" 2>"$ntmp/registry_gate_build.err" || true
+        if printf '@root %s\n' "$(CDPATH= cd -- ../.. && pwd)" | "$ntmp/registry_gate" >"$ntmp/verified_registry.out" 2>&1; then ok "verified registry (#337): real artifact CIDs, independent proofs, native tests, discovery, freshness, target checks & adversarial rejection"; else bad "verified registry (#337): publication/resolution adversarial checks"; cat "$ntmp/registry_gate_build.err" "$ntmp/verified_registry.out"; fi
+        if LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/lregistry_cid_lib.src >"$ntmp/registry_cid_test.out" 2>"$ntmp/registry_cid_test.err" && grep -q "3 passed, 0 failed" "$ntmp/registry_cid_test.out"; then ok "verified registry (#337): Lume-native CID oracle recomputation, canonical capabilities, and schema rejection"; else bad "verified registry (#337): Lume-native CID oracle"; cat "$ntmp/registry_cid_test.err" "$ntmp/registry_cid_test.out"; fi
     else
         ok "verified registry (#337): native execution covered by the dedicated Ubuntu gate; not applicable in this host/configuration"
     fi
