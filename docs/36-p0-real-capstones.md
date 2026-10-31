@@ -33,9 +33,12 @@ The build emits a raw MBR/Long Mode image, not a hosted ELF. The guest waits for
 cycle, reads hardware registers through ports `0x70`/`0x71`, and reports the observed values through
 the existing COM1 runtime. Acceptance covers the register format selected by QEMU in these runs.
 
-`tests/capstones/test_rtc_qemu.py` rejects hosted syscalls and invalid boot images, then runs
-`qemu-system-x86_64` twice with different `-rtc base=` values. It requires the guest timestamps to
-match the independent emulated clock settings; a fixed arithmetic result cannot pass.
+`tests/capstones/rtc_assertions.src` rejects hosted syscalls and invalid boot images in Lume. Native
+regressions also reject ELF images, impossible dates, nonexistent month days, non-leap February 29,
+and timestamps before the requested clock base, while accepting a valid leap day.
+The runner executes `qemu-system-x86_64` twice with different `-rtc base=` values, and the Lume oracle
+requires the guest timestamps to match the independent emulated clock settings; a fixed arithmetic
+result cannot pass.
 
 This is **not complete OS or driver-ecosystem acceptance**. PCI, MMIO/block storage, interrupts in
 this minimal driver, physical hardware, measured WCET, zero allocation, and the remaining #241/#297
@@ -48,7 +51,7 @@ those missing capabilities here.
 tests/capstones/run.sh
 ```
 
-The command requires Linux x86-64, Python 3, the repository Lume toolchain, and
-`qemu-system-x86_64`. Missing QEMU is a failed check, not a skipped acceptance claim. The HTTP test
-uses only Python's standard library; the kernel evidence comes from QEMU serial output and two
-independently controlled hardware-clock configurations.
+The command requires Linux x86-64, the repository Lume toolchain, and `qemu-system-x86_64`.
+Missing QEMU is a failed check, not a skipped acceptance claim. Both HTTP and kernel oracles run in
+native Lume; the kernel evidence comes from QEMU serial output and two independently controlled
+hardware-clock configurations.
