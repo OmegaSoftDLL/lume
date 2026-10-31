@@ -49,7 +49,7 @@ add/rename a `compiler/stage1/lume/NN_*.src` file — never edit the generated `
    `git show HEAD:compiler/stage1/lumec.src`.) Because the generated file is identical, the
    emitted `lumec`/`.s` is identical and `make bootstrap` stays stage2==stage3.
 2. **Build-pipeline change.** `lumec.src` is regenerated before anything compiles it.
-   `scripts/amalgamate.sh` is called at the start of `scripts/bootstrap.sh`, at the start of
+   `scripts/amalgamate.src` is called at the start of `scripts/bootstrap.src`, at the start of
    `bootstrap/lume0/tests/run.sh`, and in the `lume` CLI's `ensure_native_toolchain` before it
    builds `lumec` from source; `make amalgamate` (a prerequisite of `make bootstrap/test/asan`)
    runs it too.
