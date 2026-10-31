@@ -75,7 +75,7 @@ Each of these is a real body of work. The staged, test-first approach here delib
 - [x] **Zero-C self-host, staged (GCC/Rust/Go model).** `compiler/stage1/lasm.src` is an
       x86-64 assembler + ELF64 writer in Lume-Core (byte-level `emit`/`flush`), covering the
       full instruction set `lumec` emits incl. 64-bit immediates (`movabs`), ~18x faster after
-      the O(n) line-split fix. `scripts/bootstrap.sh` (`make bootstrap`) runs the staged build:
+      the O(n) line-split fix. `scripts/bootstrap.src` (`make bootstrap`) runs the staged build:
       Stage 0 (the **frozen C seed** `lume0`) mints `lumec` + `lasm`; stages 1–3 rebuild the
       whole toolchain from Lume source with **no C**, and it asserts **stage 2 == stage 3,
       bit for bit**. The C seed is kept only as the reproducibility root, never on the

@@ -22,7 +22,7 @@ stages, the fixpoint, and the `lume` CLI's native builds never touch C or `as`/`
 
 ## The staged bootstrap (where C lives, and where it does not)
 
-`scripts/bootstrap.sh` runs the GCC/Rust model:
+`scripts/bootstrap.src` runs the GCC/Rust model in native Lume:
 
 | Stage | Who runs | Uses C? | Uses `as`/`ld`? |
 |-------|----------|:------:|:---------------:|
