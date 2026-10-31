@@ -118,18 +118,19 @@ jobs:
           # --- Run-Verification Gate (docs/28 §7) ---
           VERIFY_DIR=$(mktemp -d)
 
-          # Gate A: Negative Tamper Test on docs/install.sh (must reject corrupted SHA-256)
+          # Gate A: Negative Tamper Test on docs/install.src (must reject corrupted SHA-256)
+          ./lume build docs/install.src -o build/release_installer
           mkdir -p "$VERIFY_DIR/tampered"
           cp "dist/${PKG_X64}.tar.gz" "$VERIFY_DIR/tampered/"
           printf '0000000000000000000000000000000000000000000000000000000000000000  %s.tar.gz\n' "${PKG_X64}" > "$VERIFY_DIR/tampered/SHA256SUMS"
-          if LUME_PREFIX="$VERIFY_DIR/bad-install" LUME_RELEASE_TAG="$VER" LUME_RELEASE_BASE_URL="file://$VERIFY_DIR/tampered" sh docs/install.sh > "$VERIFY_DIR/tamper.log" 2>&1; then
-            echo "FATAL: docs/install.sh accepted a tampered archive!" >&2
+          if printf '@prefix %s\n@platform linux-x86_64\n@tag %s\n@base file://%s\n' "$VERIFY_DIR/bad-install" "$VER" "$VERIFY_DIR/tampered" | build/release_installer > "$VERIFY_DIR/tamper.log" 2>&1; then
+            echo "FATAL: docs/install.src accepted a tampered archive!" >&2
             exit 1
           fi
           grep -q "SHA-256 mismatch — refusing to install" "$VERIFY_DIR/tamper.log"
 
-          # Gate B: Clean install & native execution of linux-x86_64 archive via docs/install.sh
-          LUME_PREFIX="$VERIFY_DIR/x64" LUME_RELEASE_TAG="$VER" LUME_RELEASE_BASE_URL="file://$PWD/dist" sh docs/install.sh
+          # Gate B: Clean install & native execution of linux-x86_64 archive via docs/install.src
+          printf '@prefix %s\n@platform linux-x86_64\n@tag %s\n@base file://%s\n' "$VERIFY_DIR/x64" "$VER" "$PWD/dist" | build/release_installer
           "$VERIFY_DIR/x64/bin/lume" --version | grep -q "lume 0.2.0"
           "$VERIFY_DIR/x64/bin/lume" self verify | grep -q '"manifest_verified":true'
           [ "$("$VERIFY_DIR/x64/bin/lume-target-check" | tr '\n' ',')" = "55,42," ]
@@ -139,8 +140,7 @@ jobs:
           [ "$_rc" -eq 3 ]
 
           # Gate C: Clean install & QEMU user-mode execution of linux-aarch64 archive
-          LUME_PREFIX="$VERIFY_DIR/a64" LUME_INSTALL_PLAT="linux-aarch64" LUME_SKIP_POST_VERIFY=1 \
-            LUME_RELEASE_TAG="$VER" LUME_RELEASE_BASE_URL="file://$PWD/dist" sh docs/install.sh
+          printf '@prefix %s\n@platform linux-aarch64\n@tag %s\n@base file://%s\n@skip 1\n' "$VERIFY_DIR/a64" "$VER" "$PWD/dist" | build/release_installer
           "$VERIFY_DIR/a64/bin/lume" self verify --prefix "$VERIFY_DIR/a64" | grep -q '"manifest_verified":true'
           [ "$(qemu-aarch64 "$VERIFY_DIR/a64/bin/lume-target-check" | tr '\n' ',')" = "55,42," ]
           _rc=0; qemu-aarch64 "$VERIFY_DIR/a64/bin/lume-target-trap" >/dev/null 2>&1 || _rc=$?
@@ -150,8 +150,7 @@ jobs:
           [ "$(LUME0_RUNNER="qemu-aarch64" LUME0_BIN="$VERIFY_DIR/a64/bin/lume0" "$VERIFY_DIR/a64/bin/lume" run stage/verify_ok.src | tr '\n' ',')" = "55,42," ]
 
           # Gate D: Clean install & QEMU user-mode execution of linux-riscv64 archive
-          LUME_PREFIX="$VERIFY_DIR/rv64" LUME_INSTALL_PLAT="linux-riscv64" LUME_SKIP_POST_VERIFY=1 \
-            LUME_RELEASE_TAG="$VER" LUME_RELEASE_BASE_URL="file://$PWD/dist" sh docs/install.sh
+          printf '@prefix %s\n@platform linux-riscv64\n@tag %s\n@base file://%s\n@skip 1\n' "$VERIFY_DIR/rv64" "$VER" "$PWD/dist" | build/release_installer
           "$VERIFY_DIR/rv64/bin/lume" self verify --prefix "$VERIFY_DIR/rv64" | grep -q '"manifest_verified":true'
           [ "$(qemu-riscv64 "$VERIFY_DIR/rv64/bin/lume-target-check" | tr '\n' ',')" = "55,42," ]
           _rc=0; qemu-riscv64 "$VERIFY_DIR/rv64/bin/lume-target-trap" >/dev/null 2>&1 || _rc=$?
@@ -239,18 +238,19 @@ jobs:
           # --- Run-Verification Gate on macOS (docs/28 §7) ---
           VERIFY_DIR=$(mktemp -d)
 
-          # Gate A: Negative Tamper Test on docs/install.sh
+          # Gate A: Negative Tamper Test on docs/install.src
+          ./lume build docs/install.src -o build/release_installer
           mkdir -p "$VERIFY_DIR/tampered"
           cp "dist/${PKG_MARM}.tar.gz" "$VERIFY_DIR/tampered/"
           printf '0000000000000000000000000000000000000000000000000000000000000000  %s.tar.gz\n' "${PKG_MARM}" > "$VERIFY_DIR/tampered/SHA256SUMS"
-          if LUME_PREFIX="$VERIFY_DIR/bad-install" LUME_RELEASE_TAG="$VER" LUME_RELEASE_BASE_URL="file://$VERIFY_DIR/tampered" sh docs/install.sh > "$VERIFY_DIR/tamper.log" 2>&1; then
-            echo "FATAL: docs/install.sh accepted a tampered archive on macOS!" >&2
+          if printf '@prefix %s\n@platform macos-aarch64\n@tag %s\n@base file://%s\n' "$VERIFY_DIR/bad-install" "$VER" "$VERIFY_DIR/tampered" | build/release_installer > "$VERIFY_DIR/tamper.log" 2>&1; then
+            echo "FATAL: docs/install.src accepted a tampered archive on macOS!" >&2
             exit 1
           fi
           grep -q "SHA-256 mismatch — refusing to install" "$VERIFY_DIR/tamper.log"
 
           # Gate B: Clean install & native execution of macos-aarch64 archive
-          LUME_PREFIX="$VERIFY_DIR/marm" LUME_RELEASE_TAG="$VER" LUME_RELEASE_BASE_URL="file://$PWD/dist" sh docs/install.sh
+          printf '@prefix %s\n@platform macos-aarch64\n@tag %s\n@base file://%s\n' "$VERIFY_DIR/marm" "$VER" "$PWD/dist" | build/release_installer
           "$VERIFY_DIR/marm/bin/lume" --version | grep -q "lume 0.2.0"
           "$VERIFY_DIR/marm/bin/lume" self verify | grep -q '"manifest_verified":true'
           [ "$("$VERIFY_DIR/marm/bin/lume-target-check" | tr '\n' ',')" = "55,42," ]
@@ -261,8 +261,7 @@ jobs:
           [ "$("$VERIFY_DIR/marm_built" | tr '\n' ',')" = "55,42," ]
 
           # Gate C: Clean install & verification of macos-x86_64 archive
-          LUME_PREFIX="$VERIFY_DIR/mx64" LUME_INSTALL_PLAT="macos-x86_64" LUME_SKIP_POST_VERIFY=1 \
-            LUME_RELEASE_TAG="$VER" LUME_RELEASE_BASE_URL="file://$PWD/dist" sh docs/install.sh
+          printf '@prefix %s\n@platform macos-x86_64\n@tag %s\n@base file://%s\n@skip 1\n' "$VERIFY_DIR/mx64" "$VER" "$PWD/dist" | build/release_installer
           "$VERIFY_DIR/mx64/bin/lume" self verify --prefix "$VERIFY_DIR/mx64" | grep -q '"manifest_verified":true'
           file "$VERIFY_DIR/mx64/bin/lume0" | grep -q "Mach-O 64-bit executable x86_64"
           file "$VERIFY_DIR/mx64/bin/lume-target-check" | grep -q "Mach-O 64-bit executable x86_64"
@@ -345,19 +344,20 @@ jobs:
           VERIFY_DIR=$(mktemp -d)
           WDIST=$(cd dist && pwd -W)
 
-          # Gate A: Negative Tamper Test on docs/install.sh
+          # Gate A: Negative Tamper Test on docs/install.src
           mkdir -p "$VERIFY_DIR/tampered"
           cp "dist/${PKG_WIN}.tar.gz" "$VERIFY_DIR/tampered/"
           printf '0000000000000000000000000000000000000000000000000000000000000000  %s.tar.gz\n' "${PKG_WIN}" > "$VERIFY_DIR/tampered/SHA256SUMS"
           WTAMPER=$(cd "$VERIFY_DIR/tampered" && pwd -W)
-          if LUME_PREFIX="$VERIFY_DIR/bad-install" LUME_RELEASE_TAG="$VER" LUME_RELEASE_BASE_URL="file:///$WTAMPER" sh docs/install.sh > "$VERIFY_DIR/tamper.log" 2>&1; then
-            echo "FATAL: docs/install.sh accepted a tampered archive on Windows!" >&2
+          ./lume build docs/install.src -o build/release_installer
+          if printf '@prefix %s\n@platform windows-x86_64\n@tag %s\n@base file:///%s\n' "$VERIFY_DIR/bad-install" "$VER" "$WTAMPER" | build/release_installer > "$VERIFY_DIR/tamper.log" 2>&1; then
+            echo "FATAL: docs/install.src accepted a tampered archive on Windows!" >&2
             exit 1
           fi
           grep -q "SHA-256 mismatch — refusing to install" "$VERIFY_DIR/tamper.log"
 
           # Gate B: Clean install & native execution of windows-x86_64 archive
-          LUME_PREFIX="$VERIFY_DIR/win" LUME_RELEASE_TAG="$VER" LUME_RELEASE_BASE_URL="file:///$WDIST" sh docs/install.sh
+          printf '@prefix %s\n@platform windows-x86_64\n@tag %s\n@base file:///%s\n' "$VERIFY_DIR/win" "$VER" "$WDIST" | build/release_installer
           "$VERIFY_DIR/win/bin/lume" --version | tr -d '\r' | grep -q "lume 0.2.0"
           "$VERIFY_DIR/win/bin/lume" self verify | tr -d '\r' | grep -q '"manifest_verified":true'
           [ "$("$VERIFY_DIR/win/bin/lume-target-check.exe" | tr -d '\r' | tr '\n' ',')" = "55,42," ]

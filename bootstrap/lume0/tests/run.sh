@@ -1899,7 +1899,7 @@ EOF
         if [ "$_mac_out" = "55,42," ] && [ "$_mac_trap_rc" -eq 3 ] && printf '%s' "$_mac_x64_file" | grep -q "Mach-O 64-bit executable x86_64" && [ "$_mac_wasm_out" = "55,42," ] && [ "$_mac_wasm_trap_rc" -eq 3 ]; then ok "phase-5 T2 (#206, #262): native Apple Silicon Mach-O 64 (aarch64-macos-macho), x86_64-macos-macho & wasm32-wasi execution on Darwin (55,42 & exit-3 trap)"; else bad "phase-5 T2 (#206, #262): Mach-O 64 execution (out='$_mac_out'/$_mac_trap_rc x64='$_mac_x64_file' wasm='$_mac_wasm_out'/$_mac_wasm_trap_rc)"; fi
     fi
 
-    # Issue #262: Network installer (docs/install.sh) clean-runner install, self-verify, and SHA-256 tamper rejection
+    # Issue #262: Network installer (docs/install.src) clean-runner install, self-verify, and SHA-256 tamper rejection
     _ni_d=$(mktemp -d)
     _ni_os=$(uname -s)
     _ni_arch=$(uname -m)
@@ -1923,13 +1923,14 @@ EOF
     else
         (cd "$_ni_d/dist" && shasum -a 256 "${_ni_pkg}.tar.gz" > SHA256SUMS)
     fi
-    _ni_pos_log=$(LUME_PREFIX="$_ni_d/clean" LUME_RELEASE_TAG="v0.2.0" LUME_RELEASE_BASE_URL="file://$_ni_d/dist" sh ../../docs/install.sh 2>&1 || true)
+    LUME_BIN_DIR="$ntmp" ../../lume build ../../docs/install.src -o "$ntmp/release_installer" >/dev/null 2>&1
+    _ni_pos_log=$(printf '@prefix %s\n@platform %s\n@tag v0.2.0\n@base file://%s\n' "$_ni_d/clean" "$_ni_plat_os-$_ni_plat_arch" "$_ni_d/dist" | "$ntmp/release_installer" 2>&1 || true)
     _ni_ver=$("$_ni_d/clean/bin/lume" --version 2>/dev/null || true)
     _ni_sv=$("$_ni_d/clean/bin/lume" self verify 2>/dev/null || true)
     cp "$_ni_d/dist/${_ni_pkg}.tar.gz" "$_ni_d/tampered/"
     printf '0000000000000000000000000000000000000000000000000000000000000000  %s.tar.gz\n' "$_ni_pkg" > "$_ni_d/tampered/SHA256SUMS"
     _ni_bad_rc=0
-    _ni_bad_log=$(LUME_PREFIX="$_ni_d/bad" LUME_RELEASE_TAG="v0.2.0" LUME_RELEASE_BASE_URL="file://$_ni_d/tampered" sh ../../docs/install.sh 2>&1) || _ni_bad_rc=$?
+    _ni_bad_log=$(printf '@prefix %s\n@platform %s\n@tag v0.2.0\n@base file://%s\n' "$_ni_d/bad" "$_ni_plat_os-$_ni_plat_arch" "$_ni_d/tampered" | "$ntmp/release_installer" 2>&1) || _ni_bad_rc=$?
     mkdir -p "$_ni_d/unverified" "$_ni_d/no-sha" "$_ni_d/no-tools"
     _ni_missing_rc=0
     _ni_missing_out=$(LUME_HOME="$_ni_d/unverified" ../../lume self verify 2>/dev/null) || _ni_missing_rc=$?
