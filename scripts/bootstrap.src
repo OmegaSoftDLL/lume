@@ -32,9 +32,11 @@ fn bs_seed_tool(root, source, out) = if source == bs_src(root) + "/lumec.src" an
 
 fn bs_stage0(root) = let out = bs_out(root) in let made = bs_mkdir(out) in let a = bs_seed_tool(root, bs_src(root) + "/lumec.src", out + "/lumec0") in if a != 0 then "stage0 lumec failed" else let b = bs_seed_tool(root, bs_src(root) + "/lasm.src", out + "/lasm0") in if b != 0 then "stage0 lasm failed" else let c = bs_seed_tool(root, bs_src(root) + "/lcli.src", out + "/lcli0") in if c != 0 then "stage0 lcli failed" else ""
 
-fn bs_compile(lc, la, input, out) = let asm = out + ".s" in let compiled = bs_run(lc, Cons(input, Nil), input, asm) in if compiled != 0 then compiled else let assembled = bs_run(la, Cons(asm, Nil), asm, out) in if assembled != 0 then assembled else bs_executable(out)
+fn bs_process_error(step, status, stdout_path, stderr_path) = if status == 0 then "" else step + " failed with native status " + str(status) + "\nstdout:\n" + fs_read_file(stdout_path) + "\nstderr:\n" + fs_read_file(stderr_path) + "\n"
 
-fn bs_stage(root, lc, la, tag) = let out = bs_out(root) in let a = bs_compile(lc, la, bs_src(root) + "/lumec.src", out + "/lumec" + tag) in if a != 0 then "stage " + tag + " lumec failed" else let b = bs_compile(lc, la, bs_src(root) + "/lasm.src", out + "/lasm" + tag) in if b != 0 then "stage " + tag + " lasm failed" else let c = bs_compile(lc, la, bs_src(root) + "/lcli.src", out + "/lcli" + tag) in if c != 0 then "stage " + tag + " lcli failed" else ""
+fn bs_compile(lc, la, input, out) = let asm = out + ".s" in let compiled = bs_run(lc, Cons(input, Nil), input, asm) in let compile_error = bs_process_error(lc + " " + input, compiled, asm, asm + ".err") in if compile_error != "" then compile_error else let assembled = bs_run(la, Cons(asm, Nil), asm, out) in let assemble_error = bs_process_error(la + " " + asm, assembled, out, out + ".err") in if assemble_error != "" then assemble_error else let executable = bs_executable(out) in if executable != 0 then "chmod " + out + " failed with native status " + str(executable) else ""
+
+fn bs_stage(root, lc, la, tag) = let out = bs_out(root) in let a = bs_compile(lc, la, bs_src(root) + "/lumec.src", out + "/lumec" + tag) in if a != "" then "stage " + tag + " lumec: " + a else let b = bs_compile(lc, la, bs_src(root) + "/lasm.src", out + "/lasm" + tag) in if b != "" then "stage " + tag + " lasm: " + b else let c = bs_compile(lc, la, bs_src(root) + "/lcli.src", out + "/lcli" + tag) in if c != "" then "stage " + tag + " lcli: " + c else ""
 
 fn bs_stages(root) = let a = bs_stage(root, bs_out(root) + "/lumec0", bs_out(root) + "/lasm0", "1") in if a != "" then a else let b = bs_stage(root, bs_out(root) + "/lumec1", bs_out(root) + "/lasm1", "2") in if b != "" then b else bs_stage(root, bs_out(root) + "/lumec2", bs_out(root) + "/lasm2", "3")
 
@@ -44,7 +46,7 @@ fn bs_files_equal(a, b) = if fs_read_byte(a, 4096) < 0 and fs_read_byte(b, 4096)
 
 fn bs_fixpoint(root) = let out = bs_out(root) in if bs_files_equal(out + "/lumec2.s", out + "/lumec3.s") == 0 then "lumec assembly differs" else if bs_files_equal(out + "/lumec2", out + "/lumec3") == 0 then "lumec binary differs" else if bs_files_equal(out + "/lasm2.s", out + "/lasm3.s") == 0 then "lasm assembly differs" else if bs_files_equal(out + "/lasm2", out + "/lasm3") == 0 then "lasm binary differs" else if bs_files_equal(out + "/lcli2.s", out + "/lcli3.s") == 0 then "lcli assembly differs" else if bs_files_equal(out + "/lcli2", out + "/lcli3") == 0 then "lcli binary differs" else ""
 
-fn bs_sanity(root) = let out = bs_out(root) in let source = out + "/t.src" in let written = fs_write_sync(source, "fn fib(n) = if n < 2 then n else fib(n - 1) + fib(n - 2)\nprint fib(10)\n") in let program = bs_compile(bs_out(root) + "/lumec3", bs_out(root) + "/lasm3", source, out + "/t") in if program != 0 then "sanity compilation failed" else let result = os_run_capture_timeout(out + "/t", Nil, out + "/t.out", out + "/t.err", 10000) in if result != 0 then "sanity execution failed" else if fs_read_file(out + "/t.out") != "55\n" then "sanity output mismatch" else ""
+fn bs_sanity(root) = let out = bs_out(root) in let source = out + "/t.src" in let written = fs_write_sync(source, "fn fib(n) = if n < 2 then n else fib(n - 1) + fib(n - 2)\nprint fib(10)\n") in let program = bs_compile(bs_out(root) + "/lumec3", bs_out(root) + "/lasm3", source, out + "/t") in if program != "" then "sanity compilation failed: " + program else let result = os_run_capture_timeout(out + "/t", Nil, out + "/t.out", out + "/t.err", 10000) in if result != 0 then bs_process_error("sanity execution", result, out + "/t.out", out + "/t.err") else if fs_read_file(out + "/t.out") != "55\n" then "sanity output mismatch" else ""
 
 fn bs_at_line(xs, idx) = match xs
     Nil => ""
@@ -61,5 +63,7 @@ fn test_binary_comparison_detects_difference() = let a = fs_write_sync("bs_same_
 fn test_binary_comparison_detects_length_difference() = let a = fs_write_sync("bs_same_a", "abc") in let b = fs_write_sync("bs_same_b", "abcd") in bs_same("bs_same_a", "bs_same_b", 0) == 0
 
 fn test_binary_comparison_accepts_nul() = let a = fs_write_sync("bs_same_a", "a\0b") in let b = fs_write_sync("bs_same_b", "a\0b") in bs_same("bs_same_a", "bs_same_b", 0) == 1
+
+fn test_process_failure_preserves_native_evidence() = let stdout_written = fs_write_sync("bs_process.out", "compiler stdout\n") in let stderr_written = fs_write_sync("bs_process.err", "stage 1 compiler stderr\n") in bs_process_error("stage 1 lumec", 139, "bs_process.out", "bs_process.err") == "stage 1 lumec failed with native status 139\nstdout:\ncompiler stdout\n\nstderr:\nstage 1 compiler stderr\n\n"
 
 print bs_dispatch(readall())
