@@ -2331,7 +2331,8 @@ cmd_self() {
             ;;
         update)
             [ -n "$_sfrom" ] || _sfrom="$BIN_DIR"
-            sh "$ROOT/scripts/install.sh" --prefix "$_sprefix" --from-dir "$_sfrom" >/dev/null
+            cmd_build "$ROOT/scripts/install.src" -o "$BIN_DIR/native_installer" >/dev/null
+            printf '@prefix %s\n@from-local %s\n@from-dir %s\n' "$_sprefix" "$ROOT" "$_sfrom" | "$BIN_DIR/native_installer" >/dev/null
             if [ -f "$_sprefix/MANIFEST.sha256" ]; then
                 _msha=$(sha256_file "$_sprefix/MANIFEST.sha256")
                 printf '{"ok":true,"command":"self-update","version":"0.2.0","edition":"2026","prefix":"%s","from":"%s","manifest_sha256":"%s","manifest_verified":true}\n' "$_sprefix" "$_sfrom" "$_msha"

@@ -73,7 +73,8 @@ jobs:
           ./lume build --target x86_64-linux-elf stage/verify_trap.src -o build/x86_64-bin/lume-target-trap
           chmod +x build/x86_64-bin/*
           PKG_X64="lume-${VER}-linux-x86_64"
-          sh scripts/install.sh --prefix "stage/${PKG_X64}" --from-local "$PWD" --from-dir "$PWD/build/x86_64-bin"
+          ./lume build scripts/install.src -o build/native_installer
+          printf '@prefix %s\n@from-local %s\n@from-dir %s\n' "stage/${PKG_X64}" "$PWD" "$PWD/build/x86_64-bin" | build/native_installer
           cp README.md CHANGELOG.md "stage/${PKG_X64}/" 2>/dev/null || true
           tar -C stage -czf "dist/${PKG_X64}.tar.gz" "${PKG_X64}"
 
@@ -87,7 +88,7 @@ jobs:
           ./lume build --target aarch64-linux-elf stage/verify_trap.src -o build/aarch64-bin/lume-target-trap
           chmod +x build/aarch64-bin/*
           PKG_A64="lume-${VER}-linux-aarch64"
-          sh scripts/install.sh --prefix "stage/${PKG_A64}" --from-local "$PWD" --from-dir "$PWD/build/aarch64-bin"
+          printf '@prefix %s\n@from-local %s\n@from-dir %s\n' "stage/${PKG_A64}" "$PWD" "$PWD/build/aarch64-bin" | build/native_installer
           cp README.md CHANGELOG.md "stage/${PKG_A64}/" 2>/dev/null || true
           tar -C stage -czf "dist/${PKG_A64}.tar.gz" "${PKG_A64}"
 
@@ -101,7 +102,7 @@ jobs:
           ./lume build --target riscv64-linux-elf stage/verify_trap.src -o build/riscv64-bin/lume-target-trap
           chmod +x build/riscv64-bin/*
           PKG_RV64="lume-${VER}-linux-riscv64"
-          sh scripts/install.sh --prefix "stage/${PKG_RV64}" --from-local "$PWD" --from-dir "$PWD/build/riscv64-bin"
+          printf '@prefix %s\n@from-local %s\n@from-dir %s\n' "stage/${PKG_RV64}" "$PWD" "$PWD/build/riscv64-bin" | build/native_installer
           cp README.md CHANGELOG.md "stage/${PKG_RV64}/" 2>/dev/null || true
           tar -C stage -czf "dist/${PKG_RV64}.tar.gz" "${PKG_RV64}"
 
@@ -212,7 +213,8 @@ jobs:
           ./lume build --target aarch64-macos-macho stage/verify_trap.src -o build/macos-aarch64-bin/lume-target-trap
           chmod +x build/macos-aarch64-bin/*
           PKG_MARM="lume-${VER}-macos-aarch64"
-          sh scripts/install.sh --prefix "stage/${PKG_MARM}" --from-local "$PWD" --from-dir "$PWD/build/macos-aarch64-bin"
+          ./lume build scripts/install.src -o build/native_installer
+          printf '@prefix %s\n@from-local %s\n@from-dir %s\n' "stage/${PKG_MARM}" "$PWD" "$PWD/build/macos-aarch64-bin" | build/native_installer
           cp README.md CHANGELOG.md "stage/${PKG_MARM}/" 2>/dev/null || true
           tar -C stage -czf "dist/${PKG_MARM}.tar.gz" "${PKG_MARM}"
 
@@ -226,7 +228,7 @@ jobs:
           ./lume build --target x86_64-macos-macho stage/verify_trap.src -o build/macos-x86_64-bin/lume-target-trap
           chmod +x build/macos-x86_64-bin/*
           PKG_MX64="lume-${VER}-macos-x86_64"
-          sh scripts/install.sh --prefix "stage/${PKG_MX64}" --from-local "$PWD" --from-dir "$PWD/build/macos-x86_64-bin"
+          printf '@prefix %s\n@from-local %s\n@from-dir %s\n' "stage/${PKG_MX64}" "$PWD" "$PWD/build/macos-x86_64-bin" | build/native_installer
           cp README.md CHANGELOG.md "stage/${PKG_MX64}/" 2>/dev/null || true
           tar -C stage -czf "dist/${PKG_MX64}.tar.gz" "${PKG_MX64}"
 
@@ -331,7 +333,8 @@ jobs:
           chmod +x build/win64-bin/*
 
           PKG_WIN="lume-${VER}-windows-x86_64"
-          sh scripts/install.sh --prefix "stage/${PKG_WIN}" --from-local "$PWD" --from-dir "$PWD/build/win64-bin"
+          ./lume build scripts/install.src -o build/native_installer
+          printf '@prefix %s\n@from-local %s\n@from-dir %s\n' "stage/${PKG_WIN}" "$PWD" "$PWD/build/win64-bin" | build/native_installer
           cp README.md CHANGELOG.md "stage/${PKG_WIN}/" 2>/dev/null || true
           tar -C stage -czf "dist/${PKG_WIN}.tar.gz" "${PKG_WIN}"
 

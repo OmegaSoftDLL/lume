@@ -252,7 +252,8 @@ jobs:
           pkg="lume-v0.2.0-windows-x86_64"
           mkdir -p "$tmp/win-bin" "$tmp/stage" "$tmp/dist" "$tmp/tampered"
           cp bootstrap/lume0/lume0.exe "$tmp/win-bin/lume0.exe"
-          sh scripts/install.sh --prefix "$tmp/stage/$pkg" --from-local "$PWD" --from-dir "$tmp/win-bin"
+          ./lume build scripts/install.src -o build/native_installer
+          printf '@prefix %s\n@from-local %s\n@from-dir %s\n' "$tmp/stage/$pkg" "$PWD" "$tmp/win-bin" | build/native_installer
           tar -C "$tmp/stage" -czf "$tmp/dist/${pkg}.tar.gz" "$pkg"
           (cd "$tmp/dist" && sha256sum "${pkg}.tar.gz" > SHA256SUMS)
           wdist=$(cd "$tmp/dist" && pwd -W)
