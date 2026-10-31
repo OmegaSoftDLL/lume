@@ -11,3 +11,5 @@ fn test_os_monotonic_ns_is_nondecreasing() = let first = os_monotonic_ns() in le
 fn test_os_run_capture_timeout_allows_fast_process() = let status = os_run_capture_timeout(fs_read_file("os_run_probe_path"), Nil, "os_run_timeout_stdout", "os_run_timeout_stderr", 1000) in status == 0 and os_last_timed_out() == 0 and fs_read_file("os_run_timeout_stdout") == "1\n"
 
 fn test_os_run_capture_timeout_kills_slow_process() = let status = os_run_capture_timeout(fs_read_file("os_run_slow_probe_path"), Nil, "os_run_timeout_stdout", "os_run_timeout_stderr", 10) in status != 0 and os_last_timed_out() == 1
+
+fn test_os_run_input_capture_timeout_reads_stdin_file() = let written = fs_write_sync("os_run_input_data", "native-stdin\n") in let status = os_run_input_capture_timeout(fs_read_file("os_run_input_probe_path"), Nil, "os_run_input_data", "os_run_input_stdout", "os_run_input_stderr", 1000) in status == 0 and os_last_timed_out() == 0 and fs_read_file("os_run_input_stdout") == "native-stdin\n" and fs_read_file("os_run_input_stderr") == ""

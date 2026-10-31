@@ -136,9 +136,9 @@ Every Phase 3 brick obeys the project's non-negotiable rules:
     PIDs, plus hardware `lock xaddq` `atomic_xadd64` and `spinlock_acquire`/`spinlock_release`, `#193`).
   - Direct process execution for Lume-only harnesses: `os_run(path, args)` builds a bounded argv,
     invokes `execve` without a shell, and returns the raw `wait4` status. `os_run_capture` additionally
-    redirects stdout and stderr to real files with `open` and `dup2`. `os_monotonic_ns` reads
-    `CLOCK_MONOTONIC` for real verification-time measurements. `os_run_capture_timeout` enforces
-    deadlines with `wait4(WNOHANG)`, `SIGKILL`, and final process reaping.
+    redirects stdout and stderr to real files with `open` and `dup2`. `os_run_input_capture_timeout`
+    also redirects stdin from a real file while enforcing deadlines with `wait4(WNOHANG)`, `SIGKILL`,
+    and final process reaping. `os_monotonic_ns` reads `CLOCK_MONOTONIC` for real verification-time measurements.
   - *Ref: Go channels/`select`, Rayon data parallelism.*
 
 - **S3 — `std.actor`, Erlang-style `supervisor`, and `std.time.logical` ✅**
