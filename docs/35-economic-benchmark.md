@@ -7,7 +7,7 @@ harness fixtures, not recorded model successes and not public benchmark scores.
 
 ## What protocol 0.1 measures
 
-`lume economy` calls `scripts/economic_benchmark.py`, which reads a
+`lume economy` runs `compiler/stage1/leconomy.src`, which reads a
 `lume-economic-benchmark-suite/0.1` manifest and executes each candidate attempt in order. It stops a
 task or revision after its first `PASS`. An attempt is `PASS` only when all of these checks succeed on
 the current checkout:
@@ -42,9 +42,12 @@ maintenance cost.
 ## Reproduce the harness self-test
 
 Requirements are a native Linux x86-64 host, the checked-out Lume repository, and POSIX shell. The
-current process runner also requires Python 3.8 or newer, using only its standard library; report
-validation runs natively in Lume. No third-party package, network service, AI API, credential, C
-compiler, external assembler, or external linker is used by the benchmark path.
+runner, report generation, and independent report validation are implemented in Lume. No third-party
+package, network service, AI API, credential, C compiler, external assembler, or external linker is
+used by the benchmark path. Binary artifact hashes are computed directly from exact file bytes by
+`fs_sha256_file`. Separate producer and verifier probes using `lcaas` and the independent `lcert`
+kernel must agree on a real x86-64 ELF containing NUL and non-ASCII bytes, in addition to the fixed
+empty and `abc` vectors.
 
 ```sh
 make -C bootstrap/lume0
