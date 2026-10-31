@@ -1916,7 +1916,8 @@ EOF
     esac
     _ni_pkg="lume-v0.2.0-${_ni_plat_os}-${_ni_plat_arch}"
     mkdir -p "$_ni_d/stage" "$_ni_d/dist" "$_ni_d/tampered"
-    printf '@prefix %s\n@from-local %s\n@from-dir %s\n' "$_ni_d/stage/$_ni_pkg" "$(CDPATH= cd -- ../.. && pwd)" "${ntmp:-$(CDPATH= cd -- ../../bootstrap/lume0 && pwd)}" | "$ntmp/native_installer" >/dev/null 2>&1
+    LUME_BIN_DIR="${ntmp:-}" ../../lume build ../../scripts/install.src -o "$_ni_d/native_installer" >/dev/null 2>&1
+    printf '@prefix %s\n@from-local %s\n@from-dir %s\n' "$_ni_d/stage/$_ni_pkg" "$(CDPATH= cd -- ../.. && pwd)" "${ntmp:-$(CDPATH= cd -- ../../bootstrap/lume0 && pwd)}" | "$_ni_d/native_installer" >/dev/null 2>&1
     tar -C "$_ni_d/stage" -czf "$_ni_d/dist/${_ni_pkg}.tar.gz" "$_ni_pkg"
     if command -v sha256sum >/dev/null 2>&1; then
         (cd "$_ni_d/dist" && sha256sum "${_ni_pkg}.tar.gz" > SHA256SUMS)

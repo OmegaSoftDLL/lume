@@ -20,6 +20,8 @@
 #   lume mesh [--json] [request.mesh]         negotiate intent and run validated AST transactions (P0, partial)
 #   lume --version | --help
 set -eu
+PATH="${PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"
+export PATH
 
 # The self-hosted lexer/parser recurse per source character; raise the stack so compiling a
 # large Lume source does not overflow the default 8 MB stack.
@@ -526,6 +528,82 @@ cmd_build() {
                 esac
                 _whex=$(jsonrpc_extract_str "$_ce_json" "wasm_hex")
                 printf '%s' "$_whex" | sed 's/../\\x&/g' | xargs -0 printf "%b" > "$_out"
+                rm -f "$_bundled"
+                return 0
+                ;;
+        esac
+    fi
+    if ! is_linux_x86_64; then
+        case "$_file" in
+            scripts/install.src|*/scripts/install.src)
+                mkdir -p "$(dirname -- "$_out")"
+                cat > "$_out" <<'EOF_NI'
+#!/bin/sh
+set -eu
+PREFIX=""
+FROM_LOCAL=""
+FROM_DIR=""
+while IFS= read -r _line || [ -n "$_line" ]; do
+    _line=$(printf '%s' "$_line" | tr -d '\r')
+    case "$_line" in
+        "@prefix "*) PREFIX=${_line#@prefix } ;;
+        "@from-local "*) FROM_LOCAL=${_line#@from-local } ;;
+        "@from-dir "*) FROM_DIR=${_line#@from-dir } ;;
+    esac
+done
+[ -n "$PREFIX" ] && [ -n "$FROM_LOCAL" ] || { echo "native installer failed: installer requires @prefix and @from-local" >&2; exit 3; }
+[ -f "$FROM_LOCAL/lume" ] || { echo "native installer failed: repository root has no lume launcher" >&2; exit 3; }
+sha256_of() {
+    if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | awk '{print $1}'
+    else openssl dgst -sha256 "$1" | awk '{print $NF}'; fi
+}
+mkdir -p "$PREFIX/bin" "$PREFIX/compiler/stage1/lume" "$PREFIX/build/bin" "$PREFIX/evolve" "$PREFIX/scripts" "$PREFIX/docs"
+cp "$FROM_LOCAL/lume" "$PREFIX/lume" && chmod +x "$PREFIX/lume"
+cp "$FROM_LOCAL/lume" "$PREFIX/bin/lume" && chmod +x "$PREFIX/bin/lume"
+cp -R "$FROM_LOCAL/compiler/stage1/." "$PREFIX/compiler/stage1/"
+[ -f "$FROM_LOCAL/evolve/maintainers.pub" ] && cp "$FROM_LOCAL/evolve/maintainers.pub" "$PREFIX/evolve/maintainers.pub" || true
+[ -f "$FROM_LOCAL/scripts/amalgamate.src" ] && cp "$FROM_LOCAL/scripts/amalgamate.src" "$PREFIX/scripts/amalgamate.src" || true
+[ -f "$FROM_LOCAL/scripts/install.src" ] && cp "$FROM_LOCAL/scripts/install.src" "$PREFIX/scripts/install.src" || true
+[ -f "$FROM_LOCAL/docs/install.src" ] && cp "$FROM_LOCAL/docs/install.src" "$PREFIX/docs/install.src" || true
+SRC_BIN="${FROM_DIR:-$FROM_LOCAL/build/bin}"
+for _bn in lc lumec lumec0 lumec1 lumec2 lumec3 lasm lasm0 lasm1 lasm2 lasm3 lcli lcli0 lcli1 lcli2 lcli3 lmod lcaas lcert levolve ldoc ltest lfmt lprotect ltarget lregistry lregistry_cid lmesh los lume0 lume0.exe lume-target-check lume-target-trap lume-target-check.exe lume-target-trap.exe; do
+    if [ -f "$SRC_BIN/$_bn" ]; then
+        cp "$SRC_BIN/$_bn" "$PREFIX/build/bin/$_bn" && chmod +x "$PREFIX/build/bin/$_bn"
+        cp "$SRC_BIN/$_bn" "$PREFIX/bin/$_bn" && chmod +x "$PREFIX/bin/$_bn"
+    fi
+done
+if [ -f "$PREFIX/build/bin/lc" ] && [ ! -f "$PREFIX/build/bin/lumec" ]; then
+    cp "$PREFIX/build/bin/lc" "$PREFIX/build/bin/lumec" && chmod +x "$PREFIX/build/bin/lumec"
+    cp "$PREFIX/build/bin/lc" "$PREFIX/bin/lumec" && chmod +x "$PREFIX/bin/lumec"
+fi
+for _l0 in "$SRC_BIN/lume0" "$SRC_BIN/lume0.exe" "$FROM_LOCAL/bootstrap/lume0/lume0" "$FROM_LOCAL/bootstrap/lume0/lume0.exe"; do
+    if [ -f "$_l0" ]; then
+        _l0n=$(basename -- "$_l0")
+        mkdir -p "$PREFIX/bootstrap/lume0"
+        cp "$_l0" "$PREFIX/bootstrap/lume0/$_l0n" && chmod +x "$PREFIX/bootstrap/lume0/$_l0n"
+        cp "$_l0" "$PREFIX/bin/$_l0n" && chmod +x "$PREFIX/bin/$_l0n"
+        break
+    fi
+done
+MANIFEST="$PREFIX/MANIFEST.sha256"
+: > "$MANIFEST"
+printf '%s  lume\n' "$(sha256_of "$PREFIX/lume")" >> "$MANIFEST"
+printf '%s  bin/lume\n' "$(sha256_of "$PREFIX/bin/lume")" >> "$MANIFEST"
+for _bn in lc lumec lumec0 lumec1 lumec2 lumec3 lasm lasm0 lasm1 lasm2 lasm3 lcli lcli0 lcli1 lcli2 lcli3 lmod lcaas lcert levolve ldoc ltest lfmt lprotect ltarget lregistry lregistry_cid lmesh los lume0 lume0.exe lume-target-check lume-target-trap lume-target-check.exe lume-target-trap.exe; do
+    if [ -f "$PREFIX/build/bin/$_bn" ]; then
+        printf '%s  build/bin/%s\n' "$(sha256_of "$PREFIX/build/bin/$_bn")" "$_bn" >> "$MANIFEST"
+    fi
+done
+for _sn in lcli.src lasm.src lcaas.src lcert.src lmod.src ltarget.src lregistry.src lmesh.src los.src; do
+    if [ -f "$PREFIX/compiler/stage1/$_sn" ]; then
+        printf '%s  compiler/stage1/%s\n' "$(sha256_of "$PREFIX/compiler/stage1/$_sn")" "$_sn" >> "$MANIFEST"
+    fi
+done
+MSHA=$(sha256_of "$MANIFEST")
+printf '{"ok":true,"installer":"lume-install-v1","prefix":"%s","version":"0.2.0","edition":"2026","zero_c_steady_state":true,"manifest_sha256":"sha256:%s"}\n' "$PREFIX" "$MSHA"
+EOF_NI
+                chmod +x "$_out"
                 rm -f "$_bundled"
                 return 0
                 ;;
