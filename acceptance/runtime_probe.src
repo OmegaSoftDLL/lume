@@ -1,0 +1,2 @@
+print "acceptance:runtime-ok"
+flush()

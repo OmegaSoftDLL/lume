@@ -152,11 +152,13 @@ jobs:
       pull-requests: read
     steps:
       - uses: actions/checkout@v7
+      - name: Verify native runtime startup
+        run: ./lume build acceptance/runtime_probe.src -o build/bin/acceptance_runtime_probe && build/bin/acceptance_runtime_probe
       - name: Verify native acceptance module linkage
         run: ./lume build acceptance/entry_probe.src -o build/bin/acceptance_entry_probe && build/bin/acceptance_entry_probe
       - name: Diagnose native linkage failure
         if: failure()
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gdb && gdb -q -batch -ex 'set pagination off' -ex run -ex 'x/8i $rip' -ex 'x/24i 0x40d3c0' -ex 'x/24i 0x40b6d0' -ex 'info registers' -ex bt --args build/bin/acceptance_entry_probe
+        run: awk '/^_start:/{show=1} show' build/bin/acceptance_runtime_probe.s build/bin/acceptance_entry_probe.s; sudo apt-get update && sudo apt-get install -y --no-install-recommends gdb && gdb -q -batch -ex 'set pagination off' -ex run -ex 'x/8i $rip' -ex 'x/24i 0x40d3c0' -ex 'x/24i 0x40b6d0' -ex 'info registers' -ex bt --args build/bin/acceptance_entry_probe
       - name: Build native acceptance validator
         run: ./lume build acceptance/matrix_assertions.src -o build/bin/acceptance_matrix
       - name: Validate artifacts, evidence, negative fixtures, and generated view
