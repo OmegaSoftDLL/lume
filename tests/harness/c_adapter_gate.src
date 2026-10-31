@@ -1,5 +1,6 @@
-fn ca_run(path, args, out) = os_run_capture_timeout(path, args, out, out + ".err", 900000)
-fn ca_input(path, args, input, out) = os_run_input_capture_timeout(path, args, input, out, out + ".err", 900000)
+fn ca_report(path, status) = let message = print "adapter:process " + path + " status=" + str(status) in let flushed = flush() in status
+fn ca_run(path, args, out) = ca_report(path, os_run_capture_timeout(path, args, out, out + ".err", 900000))
+fn ca_input(path, args, input, out) = ca_report(path, os_run_input_capture_timeout(path, args, input, out, out + ".err", 900000))
 fn ca_lume(root, args, out) = ca_run("/usr/bin/env", Cons("PATH=/usr/local/bin:/usr/bin:/bin", Cons(root + "/lume", args)), out)
 fn ca_build(root, source, out, log) = ca_lume(root, Cons("build", Cons(source, Cons("-o", Cons(out, Nil)))), log)
 fn ca_ok(step, status, out) = if status == 0 then "" else step + ": " + fs_read_file(out) + fs_read_file(out + ".err")
