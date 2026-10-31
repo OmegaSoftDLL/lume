@@ -1,0 +1,5 @@
+fn test_fs_mkdir_create_and_reuse() = let path = "fs_mkdir_probe" in let first = fs_mkdir(path) in let second = fs_mkdir(path) in first == 1 and second == 1 and fs_path_exists(path) == 1
+
+fn test_fs_mkdir_nested() = let parent = "fs_mkdir_nested_probe" in let child = parent + "/child" in fs_mkdir(parent) == 1 and fs_mkdir(child) == 1 and fs_path_exists(child) == 1
+
+fn test_fs_mkdir_missing_parent_fails() = fs_mkdir("definitely_missing_parent/child") == 0

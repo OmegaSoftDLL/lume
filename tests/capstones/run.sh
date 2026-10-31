@@ -12,7 +12,7 @@ trap 'if [ -n "${SERVER_PID:-}" ]; then kill "$SERVER_PID" 2>/dev/null || true; 
 
 SERVER_PID=
 start_server() {
-    (cd "$TMP" && "$TMP/ledger_server" >"$TMP/ledger-server.out" 2>"$TMP/ledger-server.err") &
+    (cd "$TMP" && exec "$TMP/ledger_server" >"$TMP/ledger-server.out" 2>"$TMP/ledger-server.err") &
     SERVER_PID=$!
     attempts=0
     until (cd "$TMP" && printf 'health' | "$TMP/saas_assert" >/dev/null 2>&1); do
