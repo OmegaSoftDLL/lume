@@ -9,11 +9,6 @@ if [ "$(uname -s)" != "Linux" ] || [ "$(uname -m)" != "x86_64" ]; then
     echo "C adapter interop tests require Linux x86-64" >&2
     exit 77
 fi
-${CC:-cc} --version >/dev/null 2>&1 || {
-    echo "missing C adapter test dependency: ${CC:-cc}" >&2
-    exit 77
-}
-
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 if [ -z "${LUME_BIN_DIR:-}" ]; then
@@ -22,7 +17,7 @@ if [ -z "${LUME_BIN_DIR:-}" ]; then
 fi
 
 "$LUME" build "$ROOT/tests/harness/c_adapter_assertions.src" -o "$TMP/c_adapter_assert"
-"${CC:-cc}" -shared -fPIC "$FIXTURES/buffer_math.c" -o "$TMP/libc_adapter_fixture.so"
+"$LUME" build "$FIXTURES/buffer_math.src" -o "$TMP/libc_adapter_fixture.so"
 "$LUME" adapt c --json "$FIXTURES/buffer_math.h" > "$TMP/adapter.json"
 printf '@mode manifest\n@path %s\n@header %s\n@output %s\n' "$TMP/adapter.json" "$FIXTURES/buffer_math.h" "$TMP/generated.src" | "$TMP/c_adapter_assert"
 
