@@ -285,7 +285,7 @@ fn lstmtexpr(er, t, mlocals) = let rest = lstmts(t, mlocals, er) in {funcs: rest
 
 ## --- the program: bss + rodata (oom_msg + string chunks) + text(funcs, runtime, _start, main) ---
 fn luses_fs_expr(e) = match e
-    Call(nm, args)  => if nm == "fs_write_sync" or nm == "fs_append_sync" or nm == "fs_read_file" or nm == "fs_path_exists" or nm == "fs_read_byte" then 1 else luses_fs_args(args)
+    Call(nm, args)  => if nm == "fs_write_sync" or nm == "fs_append_sync" or nm == "fs_read_file" or nm == "fs_path_exists" or nm == "fs_read_byte" or nm == "fs_mkdir" then 1 else luses_fs_args(args)
     LetIn(nm, v, b) => if luses_fs_expr(v) == 1 then 1 else luses_fs_expr(b)
     Bin(op, l, r)   => if luses_fs_expr(l) == 1 then 1 else luses_fs_expr(r)
     If(c, t, e2)    => if luses_fs_expr(c) == 1 or luses_fs_expr(t) == 1 then 1 else luses_fs_expr(e2)
