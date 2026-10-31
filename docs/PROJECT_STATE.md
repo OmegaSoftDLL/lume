@@ -36,7 +36,7 @@ protection. License: dual **MIT OR Apache-2.0** (like Rust).
   source language's version, not a shallow clone. If it is only a doc promise, say so.
 - **Edit the self-hosted compiler in `compiler/stage1/lume/NN_*.src`, NOT in `lumec.src`.**
   `compiler/stage1/lumec.src` is **generated** (git-ignored) by amalgamating the
-  `compiler/stage1/lume/*.src` modules in numeric order (`scripts/amalgamate.sh`, run as
+  `compiler/stage1/lume/*.src` modules in numeric order (`scripts/amalgamate.src`, run as
   `make amalgamate`). The concatenation is byte-identical to the old monolith, so the
   fixpoint is preserved. See `docs/13-module-split-plan.md` for the module map.
 - Keep this file and `docs/10-stage1-status.md` honest and current.

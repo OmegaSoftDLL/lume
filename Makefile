@@ -6,7 +6,10 @@
 ## (SQLite-style amalgamation). lumec.src is a build artifact, not a source file;
 ## edit the modules in compiler/stage1/lume/, never the generated lumec.src.
 amalgamate:
-	./scripts/amalgamate.sh
+	mkdir -p build
+	./bootstrap/lume0/lume0 run compiler/stage1/data_asm_cc.lume scripts/amalgamate.src build/amalgamate.s
+	./bootstrap/lume0/lume0 asm build/amalgamate.s build/amalgamate
+	printf '@root %s\n' "$(CURDIR)" | build/amalgamate
 
 ## Staged, self-verifying self-host: C seed -> lumec+lasm -> rebuild in Lume,
 ## asserting stage 2 == stage 3 bit-for-bit. The only step that uses C is the seed.
