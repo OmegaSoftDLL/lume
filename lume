@@ -20,6 +20,8 @@
 #   lume mesh [--json] [request.mesh]         negotiate intent and run validated AST transactions (P0, partial)
 #   lume --version | --help
 set -eu
+PATH="${PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"
+export PATH
 
 # The self-hosted lexer/parser recurse per source character; raise the stack so compiling a
 # large Lume source does not overflow the default 8 MB stack.
