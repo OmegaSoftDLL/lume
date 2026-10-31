@@ -25,7 +25,7 @@ with two different RTC bases, and verifies that each reported timestamp matches 
 emulated hardware clock:
 
 ```sh
-python3 tests/capstones/test_rtc_qemu.py /tmp/kernel_rtc.img /tmp/kernel_rtc.s
+tests/capstones/run.sh
 ```
 
 ## Explicitly open

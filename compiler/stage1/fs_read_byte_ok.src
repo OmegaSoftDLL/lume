@@ -7,3 +7,9 @@ fn test_fs_read_byte_second() = let written = frb_fixture() in written == 1 and 
 fn test_fs_read_byte_out_of_range() = let written = frb_fixture() in written == 1 and fs_read_byte("fs_read_byte_probe", 2) == 0 - 1
 
 fn test_fs_read_byte_missing() = fs_read_byte("../../compiler/stage1/definitely_missing_byte_probe", 0) == 0 - 1
+
+fn test_fs_read_byte_negative_offset() = fs_read_byte("../../bootstrap/lume0/lume0", 0 - 1) == 0 - 1
+
+fn test_fs_read_byte_native_nul() = fs_read_byte("../../bootstrap/lume0/lume0", 7) == 0
+
+fn test_fs_read_byte_native_header() = fs_read_byte("../../bootstrap/lume0/lume0", 0) == 127
