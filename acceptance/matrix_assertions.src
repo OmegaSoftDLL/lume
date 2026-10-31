@@ -18,6 +18,7 @@ fn test_json_trailing_data_is_rejected() = am_parse("{} trailing").ok == 0
 fn test_claim_id_requires_track_l_shape() = am_claim_id_valid("ASYNC.EPOLL", 0, 1) == 1 and am_claim_id_valid("async.epoll", 0, 1) == 0
 fn test_markdown_escapes_table_pipes() = am_md("a|b\nc", 0) == "a\\|b c"
 
+print "acceptance:entry"
 let am_debug_input = readall()
 print "acceptance:input"
 let am_debug_req = am_request(am_debug_input)
