@@ -27,13 +27,12 @@ accounting database.
 From the repository root:
 
 ```sh
-./lume build examples/apps/p0_tenant_ledger/ledger_server.src -o /tmp/ledger_server
-python3 tests/capstones/test_saas_http.py /tmp/ledger_server
+tests/capstones/run.sh
 ```
 
-The test is an independent Python `http.client`/raw-socket client. It checks real status codes and
-JSON bodies, adversarial cross-tenant requests, malformed framing, persistence across process
-restarts, and torn-frame recovery. It does not use Lume's HTTP client or parser to validate itself.
+The test is an independent native Lume HTTP/raw-socket client. It checks real status codes and JSON
+bodies, adversarial cross-tenant requests, malformed framing, persistence across process restarts,
+and torn-frame recovery. It does not use the server's HTTP parser to validate itself.
 
 ## Explicitly open
 
