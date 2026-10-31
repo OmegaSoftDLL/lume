@@ -1,4 +1,14 @@
-use lcaas
+fn cs_rtrimnl(s, e) = if e <= 0 then 0 else if at(s, e - 1) == "\n" or at(s, e - 1) == "\r" or at(s, e - 1) == " " then cs_rtrimnl(s, e - 1) else e
+fn cs_chomp(s) = slice(s, 0, cs_rtrimnl(s, count(s)))
+fn cs_startswith(s, p) = if count(s) < count(p) then 0 else if slice(s, 0, count(p)) == p then 1 else 0
+fn cs_lineend(s, i, n) = if i >= n then i else if at(s, i) == "\n" then i + 1 else cs_lineend(s, i + 1, n)
+fn lc_split_lines(s, i, n) = if i >= n then Nil else let le = cs_lineend(s, i, n) in Cons(slice(s, i, le), lc_split_lines(s, le, n))
+fn cs_find_substr(s, pat, i, n, m) = if i + m > n then n else if slice(s, i, i + m) == pat then i else cs_find_substr(s, pat, i + 1, n, m)
+fn cs_has_substr_i(s, pat, i, n, m) = if i + m > n then 0 else if slice(s, i, i + m) == pat then 1 else cs_has_substr_i(s, pat, i + 1, n, m)
+fn cs_has_substr(s, pat) = let n = count(s) in let m = count(pat) in if m == 0 then 1 else if m > n then 0 else cs_has_substr_i(s, pat, 0, n, m)
+fn lc_trim_r(s) = let n = count(s) in if n == 0 then "" else if at(s, n - 1) == " " or at(s, n - 1) == "\t" or at(s, n - 1) == ";" then lc_trim_r(slice(s, 0, n - 1)) else s
+fn lc_trim_l(s, i, n) = if i >= n then "" else if at(s, i) == " " or at(s, i) == "\t" then lc_trim_l(s, i + 1, n) else slice(s, i, n)
+fn lc_trim(s) = lc_trim_r(lc_trim_l(cs_chomp(s), 0, count(cs_chomp(s))))
 
 fn rt_number(serial, key) = let marker = key + "=" in let p = cs_find_substr(serial, marker, 0, count(serial), count(marker)) in if p >= count(serial) then 0 - 1 else toint(slice(serial, p + count(marker), count(serial)))
 
