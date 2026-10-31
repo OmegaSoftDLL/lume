@@ -165,9 +165,14 @@ fn deval_fast_lmod(raw: str) -> str
         if mlines.len() > 0
             out.push("## --- module " + mnm + " ---")
             if mnm == "lcaas" and sha_only
+                var keep_fn = false
                 for mln in mlines
                     let mtr = mln.trim()
-                    if mtr.starts_with("fn sha_") or mtr.starts_with("fn sha256_hex(") or mtr.starts_with("fn lc_sha256(") or mtr.starts_with("fn cs_intent_sha256(")
+                    if mtr.starts_with("fn ")
+                        keep_fn = mtr.starts_with("fn sha_") or mtr.starts_with("fn sha256_hex(") or mtr.starts_with("fn lc_sha256(") or mtr.starts_with("fn cs_intent_sha256(") or mtr.starts_with("fn cs_rtrimnl(") or mtr.starts_with("fn cs_chomp(") or mtr.starts_with("fn cs_startswith(") or mtr.starts_with("fn cs_jesc") or mtr.starts_with("fn cs_lineend(") or mtr.starts_with("fn lc_split_lines(") or mtr.starts_with("fn lc_find_ch(") or mtr.starts_with("fn cs_has_substr") or mtr.starts_with("fn cs_find_substr(")
+                    elif mtr == "" or mtr.starts_with("#") or mtr.starts_with("type ")
+                        keep_fn = false
+                    if keep_fn
                         out.push(mln)
             else
                 for mln in mlines

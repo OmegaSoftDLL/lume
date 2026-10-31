@@ -41,9 +41,10 @@ maintenance cost.
 
 ## Reproduce the harness self-test
 
-Requirements are a native Linux x86-64 host, the checked-out Lume repository, POSIX shell, and Python
-3.8 or newer. Python uses only its standard library. No third-party package, network service, AI API,
-credential, C compiler, external assembler, or external linker is used by the benchmark path.
+Requirements are a native Linux x86-64 host, the checked-out Lume repository, and POSIX shell. The
+current process runner also requires Python 3.8 or newer, using only its standard library; report
+validation runs natively in Lume. No third-party package, network service, AI API, credential, C
+compiler, external assembler, or external linker is used by the benchmark path.
 
 ```sh
 make -C bootstrap/lume0

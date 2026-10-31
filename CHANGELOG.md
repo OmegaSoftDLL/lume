@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Replaced the self-hosted assembler's linear symbol scan with 256 hash buckets while preserving
+  byte-identical ELF output, colliding-label behavior, native execution, and the assembler fixpoint.
+
 ### Added
 - **Verified component registry (#337):** Added local `lume registry publish|resolve|discover` with CIDs bound to real adapter/source/proof/test artifacts, independent `lcert` verification, native test re-execution, AST-derived capability/contract discovery, and fail-closed stale, tamper, malicious-recompute, and target/toolchain checks on `x86_64-linux-elf`.
 - **Stage 5 (Phase 5 — `docs/25-phase5-plan.md`, `docs/20-interop.md`, `docs/22-adoption.md`, `docs/23-horizon.md`): Systems, Interop, Realtime, Proof Certificates & `lume-os` Microkernel:**
