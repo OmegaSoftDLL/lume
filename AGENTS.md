@@ -13,7 +13,7 @@ is the short version.
 - **Do not use Rust** to implement Lume.
 - **Edit the self-hosted compiler in `compiler/stage1/lume/NN_*.src`, never the generated
   `compiler/stage1/lumec.src`.** `lumec.src` is a build artifact (git-ignored), amalgamated
-  from the modules in numeric order by `scripts/amalgamate.sh` (`make amalgamate`); the
+  from the modules in numeric order by `scripts/amalgamate.src` (`make amalgamate`); the
   concatenation is byte-identical to the historical monolith. See `docs/13-module-split-plan.md`.
 - **Do not fake completion.** The triple self-build (Phase 1 exit) **is done** — `stage 2 == stage 3` holds in CI (the `bootstrap` gate) — so never regress it, and never claim a milestone that is not real. Phases 1–5, the compiler-self-hosting inflection, verification/trust-layer hardening (`#183`, `#184`, `#185`, `#186`), P33 software protection (`#188`), `lume evolve` fixpoint/proof/benchmark gates + RFC 8032 Ed25519 asymmetric maintainer signature verification (`evolve/maintainers.pub`) + end-to-end `lume evolve apply` (`0003_decimal_clamp`, `#194`, `#203`), the self-hosted `lcli.src` CLI control plane (`#204`), the frozen C seed (`bootstrap/lume0/SEED_FREEZE.sha256`, `#205`), and `docs/19` §2 oracle `witness`/`repair`/`impact` queries (`#195`) are complete; remaining build-out items are tracked in `#191`–`#193`, `#196`–`#198`, `#206`. State features at their real level: shipped, a model/stub, or planned.
 - **C is the disposable seed only.** The end state is no C and no external `as`/`ld` (Lume
