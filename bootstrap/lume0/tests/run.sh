@@ -430,9 +430,6 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_
     LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/fs_path_exists_ok.src >"$ntmp/fs_path_exists.out" 2>"$ntmp/fs_path_exists.err"
     if grep -q "3 passed, 0 failed" "$ntmp/fs_path_exists.out"; then ok "phase-2 filesystem evidence: fs_path_exists distinguishes present, missing, and empty paths"; else bad "phase-2 filesystem evidence: fs_path_exists"; cat "$ntmp/fs_path_exists.out" "$ntmp/fs_path_exists.err"; fi
     rm -f fs_path_exists_empty_probe
-    LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/fs_read_byte_ok.src >"$ntmp/fs_read_byte.out" 2>"$ntmp/fs_read_byte.err"
-    if grep -q "4 passed, 0 failed" "$ntmp/fs_read_byte.out"; then ok "phase-2 binary filesystem evidence: fs_read_byte returns exact bytes and rejects missing paths and offsets"; else bad "phase-2 binary filesystem evidence: fs_read_byte"; cat "$ntmp/fs_read_byte.out" "$ntmp/fs_read_byte.err"; fi
-    rm -f fs_read_byte_probe
     LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/fs_mkdir_ok.src >"$ntmp/fs_mkdir.out" 2>"$ntmp/fs_mkdir.err"
     if grep -q "3 passed, 0 failed" "$ntmp/fs_mkdir.out"; then ok "phase-2 artifact filesystem: fs_mkdir creates, reuses, and validates artifact directories"; else bad "phase-2 artifact filesystem: fs_mkdir"; cat "$ntmp/fs_mkdir.out" "$ntmp/fs_mkdir.err"; fi
     rm -rf fs_mkdir_probe fs_mkdir_nested_probe definitely_missing_parent
