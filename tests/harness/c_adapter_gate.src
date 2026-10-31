@@ -1,6 +1,6 @@
 fn ca_run(path, args, out) = os_run_capture_timeout(path, args, out, out + ".err", 900000)
 fn ca_input(path, args, input, out) = os_run_input_capture_timeout(path, args, input, out, out + ".err", 900000)
-fn ca_lume(root, args, out) = ca_run(root + "/lume", args, out)
+fn ca_lume(root, args, out) = ca_run("/usr/bin/env", Cons("PATH=/usr/local/bin:/usr/bin:/bin", Cons(root + "/lume", args)), out)
 fn ca_build(root, source, out, log) = ca_lume(root, Cons("build", Cons(source, Cons("-o", Cons(out, Nil)))), log)
 fn ca_ok(step, status, out) = if status == 0 then "" else step + ": " + fs_read_file(out) + fs_read_file(out + ".err")
 fn ca_write(path, text) = if fs_write_sync(path, text) == 1 then "" else "cannot write " + path

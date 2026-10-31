@@ -579,7 +579,7 @@ cmd_build() {
                 printf '\n' >> "${_out%.so}.h"
             fi
             sed 's/\.globl _start/.globl __lume_mod_init/; s/^_start:/__lume_mod_init:/' "$_tmps" > "$_tmps.lib.s"
-            if ! ${CC:-cc} -shared -x assembler "$_tmps.lib.s" -o "$_out"; then
+            if ! ${CC:-cc} -shared -fno-lto -x assembler "$_tmps.lib.s" -o "$_out"; then
                 rm -f "$_bundled" "$_tmps" "$_tmps.lib.s" "$_out"
                 exit 1
             fi
