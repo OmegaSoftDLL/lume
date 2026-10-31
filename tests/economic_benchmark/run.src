@@ -1,0 +1,21 @@
+use assertions_lib
+
+fn eb_run(path, args, out) = os_run_capture_timeout(path, args, out, out + ".err", 900000)
+
+fn eb_lume(root, args, out) = eb_run(root + "/lume", args, out)
+
+fn eb_economy_args(tmp) = Cons("economy", Cons("--output", Cons(tmp + "/results.json", Cons("--artifacts", Cons(tmp + "/artifacts", Cons("--self-test", Nil))))))
+
+fn eb_assert_build_args(root, tmp) = Cons("build", Cons(root + "/tests/economic_benchmark/assertions.src", Cons("-o", Cons(tmp + "/economic_assert", Nil))))
+
+fn eb_at_line(xs, idx) = match xs
+    Nil => ""
+    Cons(h, t) => if idx == 0 then cs_chomp(h) else eb_at_line(t, idx - 1)
+
+fn eb_root(input) = let line = eb_at_line(lc_split_lines(input, 0, count(input)), 0) in if cs_startswith(line, "@root ") == 1 then slice(line, 6, count(line)) else ""
+
+fn eb_main(root) = let tmp = root + "/build/economic-gate" in let removed = os_run_capture_timeout("/bin/rm", Cons("-rf", Cons(tmp, Nil)), tmp + ".rm.log", tmp + ".rm.err", 10000) in let made = os_run_capture_timeout("/bin/mkdir", Cons("-p", Cons(tmp, Nil)), tmp + ".mkdir.log", tmp + ".mkdir.err", 10000) in let built = eb_lume(root, eb_assert_build_args(root, tmp), tmp + "/build.out") in if built != 0 then "cannot build economic oracle" else let summary = eb_lume(root, eb_economy_args(tmp), tmp + "/cli-summary.json") in if summary != 0 then "economic runner failed" else let legacy = eb_lume(root, Cons("mesh", Cons("bench", Nil)), tmp + "/legacy-bench.out") in if legacy == 0 then "legacy fixed-metrics command unexpectedly passed" else if cs_has_substr(fs_read_file(tmp + "/legacy-bench.out.err"), "use 'lume economy'") == 0 then "legacy command rejected without migration diagnostic" else let request = "@path " + tmp + "/results.json\n@cli " + tmp + "/cli-summary.json\n@base " + tmp + "\n@root " + root + "\n" in let verdict = ej_dispatch(request) in if verdict == "" then "economic oracle returned an empty verdict" else verdict
+
+fn eb_dispatch(input) = let root = eb_root(input) in let result = eb_main(root) in if cs_startswith(result, "economic benchmark:") == 0 then ctfail("economic gate failed: " + result + "\n") else result
+
+print eb_dispatch(readall())
