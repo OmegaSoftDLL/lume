@@ -18,5 +18,14 @@ fn test_json_trailing_data_is_rejected() = am_parse("{} trailing").ok == 0
 fn test_claim_id_requires_track_l_shape() = am_claim_id_valid("ASYNC.EPOLL", 0, 1) == 1 and am_claim_id_valid("async.epoll", 0, 1) == 0
 fn test_markdown_escapes_table_pipes() = am_md("a|b\nc", 0) == "a\\|b c"
 fn test_json_all_required_keys_use_original_fields() = am_check_keys(am_parse("{\"a\":1,\"b\":2}"), Cons("a", Cons("b", Nil)), "matrix") == ""
+fn test_json_unicode_ascii() = am_parse("\"\\u0041\"").text == "A"
+fn test_json_unicode_control() = let text = am_parse("\"\\u000b\"").text in count(text) == 1 and ord(at(text, 0)) == 11
+fn test_json_unicode_two_bytes() = am_parse("\"\\u00e9\"").text == "é"
+fn test_json_unicode_three_bytes() = am_parse("\"\\u20ac\"").text == "€"
+fn test_json_unicode_surrogate_pair() = am_parse("\"\\ud83d\\ude00\"").text == "😀"
+fn test_json_unicode_rejects_bad_hex() = am_parse("\"\\u00xz\"").ok == 0
+fn test_json_unicode_rejects_lone_high_surrogate() = am_parse("\"\\ud83dA\"").ok == 0
+fn test_json_unicode_rejects_lone_low_surrogate() = am_parse("\"\\ude00\"").ok == 0
+fn test_json_unicode_rejects_nul() = am_parse("\"\\u0000\"").ok == 0
 
 print am_dispatch(readall())
