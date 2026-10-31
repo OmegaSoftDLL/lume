@@ -78,12 +78,12 @@ Generate a self-contained shareable proof bundle with a `lume://verify/sha256:..
 
 ## Chapter 4 — Verified Sidecar Interop (`G2`, `#191`)
 
-Adopt Lume inside an existing C, Rust, Go, Python, or Node.js service by compiling one critical module as a **Verified Sidecar** (`examples/interop/sidecar/`):
+Compile a critical module as a **Verified Sidecar** and call it from Lume (`examples/interop/sidecar/`):
 
 1. Write `payment_core.src` with `pub extern "c" fn` exports and `requires`/`ensures` contracts.
 2. Run `./lume certify payment_core.src` and `./lume verify-cert payment_core.src`.
-3. Generate the C ABI header with `./lume build payment_core.src --emit-c-header payment_core.h -o payment_core`.
-4. Call from C (`host_c.c`), Python (`host_python.py`), or Node.js (`host_node.mjs`).
+3. Generate the C ABI header and shared library with `./lume build payment_core.src --emit-c-header payment_core.h -o payment_core.so`.
+4. Link and call the verified functions from the native Lume host (`host_lume.src`). External-language hosts and in-process WASM execution are not claimed by this example.
 
 ---
 
