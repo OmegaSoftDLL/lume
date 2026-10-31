@@ -122,7 +122,7 @@ lume/
 ## How Lume is built (no third language in the loop)
 
 This is a **staged, self-verifying bootstrap** — the model GCC, Rust and Go use — run by
-[`scripts/bootstrap.sh`](scripts/bootstrap.sh) (`make bootstrap`):
+[`scripts/bootstrap.src`](scripts/bootstrap.src) (`make bootstrap`):
 
 1. **Stage 0 — `lume0`** (C): the frozen bootstrap seed. It mints the first `lumec` (compiler)
    and `lasm` (assembler + ELF writer) once — exactly as GCC needs a system C compiler and Rust

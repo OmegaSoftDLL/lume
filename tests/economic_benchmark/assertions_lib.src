@@ -1,0 +1,101 @@
+use lcaas
+
+fn ej_skip_ws(s, i) = if i >= count(s) then i else let c = at(s, i) in if c == " " or c == "\n" or c == "\r" or c == "\t" then ej_skip_ws(s, i + 1) else i
+
+fn ej_string_end(s, i) = if i >= count(s) then i else if at(s, i) == "\"" then i else if at(s, i) == "\\" then ej_string_end(s, i + 2) else ej_string_end(s, i + 1)
+
+fn ej_scalar_end(s, i) = if i >= count(s) then i else let c = at(s, i) in if c == "," or c == "}" or c == "]" or c == " " or c == "\n" or c == "\r" or c == "\t" then i else ej_scalar_end(s, i + 1)
+
+fn ej_unescape(s, i, acc) = if i >= count(s) then {ok: 1, text: acc} else let c = at(s, i) in if c != "\\" then ej_unescape(s, i + 1, acc + c) else if i + 1 >= count(s) then {ok: 0, text: ""} else let e = at(s, i + 1) in let decoded = if e == "n" then "\n" else if e == "r" then "\r" else if e == "t" then "\t" else if e == "\\" then "\\" else if e == "\"" then "\"" else if e == "/" then "/" else "" in if count(decoded) == 0 then {ok: 0, text: ""} else ej_unescape(s, i + 2, acc + decoded)
+
+fn ej_text(s, key) = let marker = "\"" + key + "\":" in let p = cs_find_substr(s, marker, 0, count(s), count(marker)) in if p >= count(s) then "" else let start = ej_skip_ws(s, p + count(marker)) in if start < count(s) and at(s, start) == "\"" then let finish = ej_string_end(s, start + 1) in if finish >= count(s) then "" else (ej_unescape(slice(s, start + 1, finish), 0, "")).text else slice(s, start, ej_scalar_end(s, start))
+
+fn ej_number(s, key) = let text = ej_text(s, key) in if text == "" then 0 - 1 else if at(text, 0) == "-" then 0 - toint(slice(text, 1, count(text))) else toint(text)
+
+fn ej_after(s, marker) = let p = cs_find_substr(s, marker, 0, count(s), count(marker)) in if p >= count(s) then "" else slice(s, p + count(marker), count(s))
+
+fn ej_min(a, b) = if a < b then a else b
+
+fn ej_segment(s, marker, next_a, next_b) = let p = cs_find_substr(s, marker, 0, count(s), count(marker)) in if p >= count(s) then "" else let start = p + count(marker) in let a0 = cs_find_substr(s, next_a, start, count(s), count(next_a)) in let b0 = cs_find_substr(s, next_b, start, count(s), count(next_b)) in let a = if a0 >= count(s) then count(s) else a0 in let b = if b0 >= count(s) then count(s) else b0 in slice(s, p, ej_min(a, b))
+
+fn ej_previous_task(task_id) = if task_id == "safe_deposit_repair" then "clamp_nonnegative" else if task_id == "deposit_fee_spec_change" then "safe_deposit_repair" else if task_id == "negative_compile_failure" then "deposit_fee_spec_change" else if task_id == "negative_proof_failure" then "negative_compile_failure" else "negative_proof_failure"
+
+fn ej_task(report, task_id) = if task_id == "clamp_nonnegative" then ej_segment(report, "\"tasks\": [", "\"task_id\": \"safe_deposit_repair\"", "\"generated_at\":") else ej_segment(report, "\"task_id\": \"" + ej_previous_task(task_id) + "\"", "\"task_id\": \"" + task_id + "\"", "\"generated_at\":")
+
+fn ej_revision(report, revision_id) = if revision_id == "initial_without_fee" then ej_segment(report, "\"revisions\": [", "\"revision_id\": \"revised_with_fee\"", "\"task_id\":") else ej_segment(report, "\"revision_id\": \"initial_without_fee\"", "\"task_id\":", "\"generated_at\":")
+
+fn ej_nth_marker(s, marker, occurrence) = if cs_has_substr(s, marker) == 0 then 0 - 1 else let p = cs_find_substr(s, marker, 0, count(s), count(marker)) in if occurrence == 0 then p else let rest = ej_nth_marker(slice(s, p + count(marker), count(s)), marker, occurrence - 1) in if rest < 0 then 0 - 1 else p + count(marker) + rest
+
+fn ej_object_end(s, i, depth, in_string) = if i >= count(s) then i else let c = at(s, i) in if in_string == 1 then if c == "\\" then ej_object_end(s, i + 2, depth, 1) else if c == "\"" then ej_object_end(s, i + 1, depth, 0) else ej_object_end(s, i + 1, depth, 1) else if c == "\"" then ej_object_end(s, i + 1, depth, 1) else if c == "{" then ej_object_end(s, i + 1, depth + 1, 0) else if c == "}" then (if depth == 1 then i + 1 else ej_object_end(s, i + 1, depth - 1, 0)) else ej_object_end(s, i + 1, depth, 0)
+
+fn ej_attempt_raw(report, candidate, occurrence) = let marker = "\"candidate\": \"" + candidate + "\"" in let p = ej_nth_marker(report, marker, occurrence) in if p < 0 then "" else slice(report, p, ej_object_end(report, p + count(marker), 1, 0))
+
+fn ej_stage(attempt, name) = let marker = "\"" + name + "\": {" in let p = cs_find_substr(attempt, marker, 0, count(attempt), count(marker)) in if p >= count(attempt) then "" else slice(attempt, p, ej_object_end(attempt, p + count(marker), 1, 0))
+
+fn ej_status(attempt, name) = ej_text(ej_stage(attempt, name), "status")
+
+fn ej_count_marker(s, marker) = if cs_has_substr(s, marker) == 0 then 0 else let p = cs_find_substr(s, marker, 0, count(s), count(marker)) in 1 + ej_count_marker(slice(s, p + count(marker), count(s)), marker)
+
+fn ej_log_valid(attempt, stage, stream, base) = let scoped = ej_stage(attempt, stage) in if cs_has_substr(scoped, "\"logs\":") == 0 then 1 else let logs = ej_after(scoped, "\"logs\":") in let hashes = ej_after(scoped, "\"log_sha256\":") in let path = ej_text(logs, stream) in let expected = ej_text(hashes, stream) in if path == "" or fs_path_exists(base + "/" + path) == 0 then 0 else if sha256_hex(fs_read_file(base + "/" + path)) == expected then 1 else 0
+
+fn ej_attempt(report, candidate, occurrence, base) = let raw = ej_attempt_raw(report, candidate, occurrence) in let compile = ej_stage(raw, "compile") in let proof = ej_stage(raw, "proof") in let execution = ej_stage(raw, "execution") in let compile_status = ej_text(compile, "status") in let proof_status = ej_text(proof, "status") in let execution_status = ej_text(execution, "status") in let outcome = ej_text(raw, "outcome") in let derived = if compile_status == "PASS" and proof_status == "PASS" and execution_status == "PASS" then "PASS" else "FAIL" in let candidate_sha = ej_text(raw, "candidate_sha256") in let logs_ok = if ej_log_valid(raw, "compile", "stdout", base) == 1 and ej_log_valid(raw, "compile", "stderr", base) == 1 and ej_log_valid(raw, "proof", "stdout", base) == 1 and ej_log_valid(raw, "proof", "stderr", base) == 1 and ej_log_valid(raw, "execution", "stdout", base) == 1 and ej_log_valid(raw, "execution", "stderr", base) == 1 then 1 else 0 in let valid = if raw != "" and count(candidate_sha) == 64 and outcome == derived and ej_number(raw, "wall_time_ms") >= 0 and ej_number(compile, "wall_time_ms") >= 0 and ej_number(proof, "wall_time_ms") >= 0 and ej_number(execution, "wall_time_ms") >= 0 and logs_ok == 1 then 1 else 0 in {valid: valid, raw: raw, outcome: outcome, failed: ej_text(raw, "failed_stage"), defects: ej_count_marker(raw, "\"kind\":"), compile: compile_status, proof: proof_status, execution: execution_status, candidate_sha: candidate_sha, expected_sha: ej_text(execution, "expected_stdout_sha256"), actual_sha: ej_text(execution, "actual_stdout_sha256"), stdout_mismatch: ej_text(execution, "stdout_mismatch")}
+
+fn ej_attempts(report, base) = Cons(ej_attempt(report, "tasks/clamp_nonnegative/attempt1.src", 0, base), Cons(ej_attempt(report, "tasks/safe_deposit_repair/attempt1.src", 0, base), Cons(ej_attempt(report, "tasks/safe_deposit_repair/attempt2.src", 0, base), Cons(ej_attempt(report, "tasks/deposit_fee_spec_change/initial/attempt1.src", 0, base), Cons(ej_attempt(report, "tasks/deposit_fee_spec_change/initial/attempt1.src", 1, base), Cons(ej_attempt(report, "tasks/deposit_fee_spec_change/revised/attempt2.src", 0, base), Cons(ej_attempt(report, "tasks/negative_compile_failure/attempt1.src", 0, base), Cons(ej_attempt(report, "tasks/negative_proof_failure/attempt1.src", 0, base), Cons(ej_attempt(report, "tasks/negative_execution_failure/attempt1.src", 0, base), Nil)))))))))
+
+fn ej_all_valid(attempts) = match attempts
+    Nil => 1
+    Cons(h, t) => if h.valid == 1 then ej_all_valid(t) else 0
+
+fn ej_attempt_summaries(attempts) = match attempts
+    Nil => Nil
+    Cons(h, t) => Cons({valid: h.valid, outcome: h.outcome, failed: h.failed, defects: h.defects, compile: h.compile, proof: h.proof, execution: h.execution}, ej_attempt_summaries(t))
+
+fn ej_outcome_count(attempts, outcome) = match attempts
+    Nil => 0
+    Cons(h, t) => (if h.outcome == outcome then 1 else 0) + ej_outcome_count(t, outcome)
+
+fn ej_defect_sum(attempts) = match attempts
+    Nil => 0
+    Cons(h, t) => h.defects + ej_defect_sum(t)
+
+fn ej_attempt_at(attempts, idx) = match attempts
+    Nil => {valid: 0, raw: "", outcome: "", failed: "", defects: 0, compile: "", proof: "", execution: "", candidate_sha: "", expected_sha: "", actual_sha: "", stdout_mismatch: ""}
+    Cons(h, t) => if idx == 0 then h else ej_attempt_at(t, idx - 1)
+
+fn ej_unknown_fields(s, fields) = match fields
+    Nil => 1
+    Cons(h, t) => if ej_text(s, h) == "UNKNOWN" then ej_unknown_fields(s, t) else 0
+
+fn ej_task_times_valid(report, ids) = match ids
+    Nil => 1
+    Cons(h, t) => if ej_number(ej_after(report, "\"task_id\": \"" + h + "\""), "verification_wall_time_ms") >= 0 then ej_task_times_valid(report, t) else 0
+
+fn ej_legacy_absent(source, fields) = match fields
+    Nil => 1
+    Cons(h, t) => if cs_has_substr(source, h) == 0 then ej_legacy_absent(source, t) else 0
+
+fn ej_summary_ok(report, attempts) = if ej_number(report, "tasks_total") == 6 and ej_number(report, "tasks_passed") == 3 and ej_number(report, "tasks_failed") == 3 and ej_number(report, "attempts_total") == 9 and ej_number(report, "attempts_passed") == 4 and ej_number(report, "attempts_failed") == 5 and ej_number(report, "defects_observed") == 5 and ej_defect_sum(attempts) == 5 and ej_outcome_count(attempts, "PASS") == 4 and ej_outcome_count(attempts, "FAIL") == 5 then 1 else 0
+
+fn ej_attempt_text(attempt) = "valid=" + str(attempt.valid) + ",outcome=" + attempt.outcome + ",failed=" + attempt.failed + ",compile=" + attempt.compile + ",proof=" + attempt.proof + ",execution=" + attempt.execution
+
+fn ej_attempts_text(attempts) = match attempts
+    Nil => ""
+    Cons(h, t) => ej_attempt_text(h) + "\n" + ej_attempts_text(t)
+
+fn ej_negative_exit(attempt, stage) = if stage == "compile" then ej_number(ej_stage(attempt.raw, "compile"), "exit_code") == 1 else if stage == "proof" then ej_number(ej_stage(attempt.raw, "proof"), "exit_code") == 0 else ej_number(ej_stage(attempt.raw, "execution"), "exit_code") == 0 - 8
+
+fn ej_negative(attempt, stage) = attempt.valid == 1 and attempt.outcome == "FAIL" and attempt.failed == stage and (if stage == "compile" then attempt.compile else if stage == "proof" then attempt.proof else attempt.execution) == "FAIL" and ej_negative_exit(attempt, stage) == 1
+
+fn ej_report_valid(report, cli, base, mesh_source) = let attempts = ej_attempts(report, base) in let clamp = ej_task(report, "clamp_nonnegative") in let repair = ej_task(report, "safe_deposit_repair") in let maintenance = ej_task(report, "deposit_fee_spec_change") in let initial = ej_revision(report, "initial_without_fee") in let changed = ej_revision(report, "revised_with_fee") in let maintenance_metrics = ej_after(maintenance, "\"maintenance\":") in let initial_attempt = ej_attempt_at(attempts, 3) in let changed_first = ej_attempt_at(attempts, 4) in let changed_second = ej_attempt_at(attempts, 5) in let negative_compile = ej_attempt_at(attempts, 6) in let negative_proof = ej_attempt_at(attempts, 7) in let negative_execution = ej_attempt_at(attempts, 8) in let provider = ej_after(report, "\"provider\":") in let metrics = ej_after(report, "\"metrics\":") in let self_test = ej_after(report, "\"harness_self_test\":") in let setup = ej_after(report, "\"setup\":") in let summary_ok = ej_summary_ok(report, attempts) in let maintenance_ok = if ej_text(maintenance_metrics, "outcome") == "PASS" and ej_text(ej_after(initial, "\"attempts_to_pass\":"), "outcome") == "PASS" and ej_number(changed, "attempts_to_pass") == 2 and changed_first.outcome == "FAIL" and changed_first.failed == "execution" and changed_first.stdout_mismatch == "true" and changed_second.outcome == "PASS" and initial_attempt.candidate_sha == changed_first.candidate_sha and initial_attempt.actual_sha != changed_first.expected_sha and ej_number(maintenance_metrics, "attempts_executed") == 2 and ej_number(maintenance_metrics, "defects_observed") == 1 and ej_number(maintenance_metrics, "verification_wall_time_ms") >= 0 then 1 else 0 in let unknown_metrics = Cons("zero_shot_success", Cons("end_to_end_wall_time_ms", Cons("input_tokens", Cons("output_tokens", Cons("total_tokens", Cons("generation_cost_usd", Cons("verification_cost_usd", Cons("maintenance_cost_usd", Nil)))))))) in let unknown_maintenance = Cons("generation_wall_time_ms", Cons("human_wall_time_ms", Cons("input_tokens", Cons("output_tokens", Cons("total_tokens", Cons("cost_usd", Nil)))))) in let legacy = Cons("zero_shot_pass_rate_pct", Cons("lume_intent_tokens", Cons("baseline_raw_text_tokens", Cons("token_saving_pct", Cons("baseline_attempts_to_green", Cons("lume_escaped_defects", Cons("baseline_escaped_defects", Cons("maintenance_spec_change_tokens", Cons("baseline_maintenance_tokens", Nil))))))))) in ej_text(report, "schema") == "lume-economic-benchmark/0.1" and ej_text(cli, "schema") == "lume-economic-benchmark/0.1" and ej_number(cli, "attempts") == 9 and ej_text(report, "evaluation_kind") == "lume_only_harness_conformance" and ej_text(report, "source_origin") == "repository_fixture" and ej_text(provider, "id") == "UNKNOWN" and ej_text(provider, "model") == "UNKNOWN" and ej_unknown_fields(metrics, unknown_metrics) == 1 and ej_text(self_test, "outcome") == "PASS" and ej_text(setup, "outcome") == "PASS" and summary_ok == 1 and ej_all_valid(attempts) == 1 and ej_number(clamp, "attempts_to_pass") == 1 and ej_number(repair, "attempts_to_pass") == 2 and ej_number(repair, "defects_observed") == 1 and ej_negative(negative_compile, "compile") == 1 and ej_negative(negative_proof, "proof") == 1 and ej_negative(negative_execution, "execution") == 1 and negative_proof.compile == "PASS" and negative_execution.proof == "PASS" and maintenance_ok == 1 and ej_unknown_fields(maintenance_metrics, unknown_maintenance) == 1 and ej_task_times_valid(report, Cons("clamp_nonnegative", Cons("safe_deposit_repair", Cons("deposit_fee_spec_change", Cons("negative_compile_failure", Cons("negative_proof_failure", Cons("negative_execution_failure", Nil))))))) == 1 and ej_legacy_absent(mesh_source, legacy) == 1
+
+fn ej_at_line(xs, idx) = match xs
+    Nil => ""
+    Cons(h, t) => if idx == 0 then cs_chomp(h) else ej_at_line(t, idx - 1)
+
+fn ej_value(line, prefix) = if cs_startswith(line, prefix) == 1 then slice(line, count(prefix), count(line)) else ""
+
+fn ej_request(input) = let ls = lc_split_lines(input, 0, count(input)) in {path: ej_value(ej_at_line(ls, 0), "@path "), cli: ej_value(ej_at_line(ls, 1), "@cli "), base: ej_value(ej_at_line(ls, 2), "@base "), root: ej_value(ej_at_line(ls, 3), "@root ")}
+
+fn ej_dispatch(input) = let req = ej_request(input) in let report = fs_read_file(req.path) in let attempts = ej_attempts(report, req.base) in let ok = ej_report_valid(report, fs_read_file(req.cli), req.base, fs_read_file(req.root + "/compiler/stage1/lmesh.src")) in if ok == 1 then "economic benchmark: real execution, spec-change maintenance, and fail-closed gates passed" else ctfail("economic benchmark assertion failed: summary=" + str(ej_summary_ok(report, attempts)) + "\n" + ej_attempts_text(attempts))
+
+print ej_dispatch(readall())
