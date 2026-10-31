@@ -1,1 +1,1 @@
-print readall()
+print read()
