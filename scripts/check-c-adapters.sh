@@ -9,15 +9,6 @@ if [ "$(uname -s)" != "Linux" ] || [ "$(uname -m)" != "x86_64" ]; then
     echo "C adapter interop tests require Linux x86-64" >&2
     exit 77
 fi
-command -v python3 >/dev/null 2>&1 || {
-    echo "missing C adapter test dependency: python3" >&2
-    exit 77
-}
-${CC:-cc} --version >/dev/null 2>&1 || {
-    echo "missing C adapter test dependency: ${CC:-cc}" >&2
-    exit 77
-}
-
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 if [ -z "${LUME_BIN_DIR:-}" ]; then
@@ -25,54 +16,10 @@ if [ -z "${LUME_BIN_DIR:-}" ]; then
     export LUME_BIN_DIR
 fi
 
-"${CC:-cc}" -shared -fPIC "$FIXTURES/buffer_math.c" -o "$TMP/libc_adapter_fixture.so"
+"$LUME" build "$ROOT/tests/harness/c_adapter_assertions.src" -o "$TMP/c_adapter_assert"
+"$LUME" build "$FIXTURES/buffer_math.src" -o "$TMP/libc_adapter_fixture.so"
 "$LUME" adapt c --json "$FIXTURES/buffer_math.h" > "$TMP/adapter.json"
-python3 - "$FIXTURES/buffer_math.h" "$TMP/adapter.json" "$TMP/generated.src" <<'PY'
-import hashlib
-import json
-import pathlib
-import sys
-
-header = pathlib.Path(sys.argv[1]).read_bytes()
-adapter = json.loads(pathlib.Path(sys.argv[2]).read_text(encoding="utf-8"))
-assert adapter["ok"] is True
-assert adapter["adapter_contract"] == "c_abi_foreign_v2"
-assert adapter["source_hash"] == "sha256:" + hashlib.sha256(header).hexdigest()
-assert adapter["capabilities"] == ["ffi"]
-assert adapter["provenance_guard"] == "A0003"
-assert adapter["return_provenance"] == "unverified"
-assert adapter["diagnostics"] == []
-assert len(adapter["adapters"]) == 2
-buffer_fn = adapter["adapters"][0]
-assert buffer_fn["symbol"] == "c_buffer_weighted_sum"
-assert buffer_fn["return"] == {
-    "c_type": "int64_t",
-    "lume_type": "unverified[int]",
-    "provenance": "foreign",
-}
-assert buffer_fn["effects"] == ["ffi"]
-assert buffer_fn["parameters"][0] == {
-    "name": "bytes",
-    "c_type": "const char *",
-    "lume_type": "str",
-    "ownership": "borrowed_read_only",
-    "lifetime": "call",
-    "extent": "count(c_bytes)",
-    "length_parameter": "bytes_len",
-}
-assert buffer_fn["parameters"][1]["ownership"] == "value"
-assert adapter["extern_decls"][0] == (
-    'extern "c" fn c_buffer_weighted_sum('
-    "c_bytes: str, c_bytes_len: int, c_weight: int) -> int"
-)
-assert adapter["foreign_wrappers"][0] == (
-    "pub fn foreign_c_buffer_weighted_sum(c_bytes: str, c_weight: int) -> "
-    "unverified[int] / {ffi} = c_buffer_weighted_sum(c_bytes, count(c_bytes), c_weight)"
-)
-assert "verify(" not in adapter["generated_lume"]
-assert "ensures" not in adapter["generated_lume"]
-pathlib.Path(sys.argv[3]).write_text(adapter["generated_lume"] + "\n", encoding="utf-8")
-PY
+printf '@mode manifest\n@path %s\n@header %s\n@output %s\n' "$TMP/adapter.json" "$FIXTURES/buffer_math.h" "$TMP/generated.src" | "$TMP/c_adapter_assert"
 
 "$LUME" adapt c "$FIXTURES/buffer_math.h" > "$TMP/generated-stdout.src"
 "$LUME" adapt c "$FIXTURES/buffer_math.h" -o "$TMP/generated-output.src"
@@ -109,32 +56,13 @@ for header in "$FIXTURES"/invalid/*.h; do
     fi
     printf 'preserve-existing-output\n' > "$TMP/$name.expected"
     cmp "$TMP/$name.expected" "$TMP/$name.src"
-    python3 - "$TMP/$name.json" "$name" <<'PY'
-import json
-import pathlib
-import sys
-
-result = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
-assert result["ok"] is False, sys.argv[2]
-assert result["generated_lume"] == "", sys.argv[2]
-assert result["diagnostics"], sys.argv[2]
-assert all(d["code"] == "I0003" and d["severity"] == "error" for d in result["diagnostics"])
-PY
+    printf '@mode invalid\n@path %s\n' "$TMP/$name.json" | "$TMP/c_adapter_assert"
 done
 
 if "$LUME" agent bind "$FIXTURES/invalid/callback.h" > "$TMP/agent-callback.json" 2> "$TMP/agent-callback.err"; then
     echo "agent bind unexpectedly accepted a callback" >&2
     exit 1
 fi
-python3 - "$TMP/agent-callback.json" <<'PY'
-import json
-import pathlib
-import sys
-
-result = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
-assert result["ok"] is False
-assert result["generated_lume"] == ""
-assert any("callback" in d["message"] for d in result["diagnostics"])
-PY
+printf '@mode callback\n@path %s\n' "$TMP/agent-callback.json" | "$TMP/c_adapter_assert"
 
 printf 'C adapter generation, CLI, rejection, provenance, and real shared-library interop passed\n'
