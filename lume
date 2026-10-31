@@ -3009,7 +3009,52 @@ cmd_mesh() {
 }
 
 cmd_economy() {
-    sh "$ROOT/scripts/run-economic-benchmark.sh" "$@"
+    ensure_core_tool leconomy
+    _e_out=
+    _e_artifacts=
+    _e_self=0
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --output)
+                [ $# -ge 2 ] || return 64
+                _e_out=$2
+                shift 2
+                ;;
+            --artifacts)
+                [ $# -ge 2 ] || return 64
+                _e_artifacts=$2
+                shift 2
+                ;;
+            --self-test)
+                _e_self=1
+                shift
+                ;;
+            *)
+                echo "lume economy: unsupported argument: $1" >&2
+                return 64
+                ;;
+        esac
+    done
+    [ -n "$_e_out" ] || {
+        echo "lume economy: --output is required" >&2
+        return 64
+    }
+    _e_dir=$(dirname -- "$_e_out")
+    _e_file=$(basename -- "$_e_out")
+    mkdir -p "$_e_dir"
+    _e_dir_abs=$(CDPATH= cd -- "$_e_dir" && pwd)
+    _e_out="$_e_dir_abs/$_e_file"
+    if [ -z "$_e_artifacts" ]; then
+        _e_artifacts="${_e_out%.*}.artifacts"
+    fi
+    mkdir -p "$_e_artifacts"
+    _e_artifacts=$(CDPATH= cd -- "$_e_artifacts" && pwd)
+    _e_tmp=$(mktemp)
+    printf '@output %s\n@artifacts %s\n@base %s\n@root %s\n@self_test %s\n' \
+        "$_e_out" "$_e_artifacts" "$_e_dir_abs" "$ROOT" "$_e_self" >"$_e_tmp"
+    _e_result=$(run_core_tool leconomy "$_e_tmp")
+    rm -f "$_e_tmp"
+    printf '%s\n' "$_e_result"
 }
 
 [ $# -ge 1 ] || usage
