@@ -1923,14 +1923,14 @@ EOF
     else
         (cd "$_ni_d/dist" && shasum -a 256 "${_ni_pkg}.tar.gz" > SHA256SUMS)
     fi
-    LUME_BIN_DIR="$ntmp" ../../lume build ../../docs/install.src -o "$ntmp/release_installer" >/dev/null 2>&1
-    _ni_pos_log=$(printf '@prefix %s\n@platform %s\n@tag v0.2.0\n@base file://%s\n' "$_ni_d/clean" "$_ni_plat_os-$_ni_plat_arch" "$_ni_d/dist" | "$ntmp/release_installer" 2>&1 || true)
+    LUME_BIN_DIR="${ntmp:-}" ../../lume build ../../docs/install.src -o "$_ni_d/release_installer" >/dev/null 2>&1
+    _ni_pos_log=$(printf '@prefix %s\n@platform %s\n@tag v0.2.0\n@base file://%s\n' "$_ni_d/clean" "$_ni_plat_os-$_ni_plat_arch" "$_ni_d/dist" | "$_ni_d/release_installer" 2>&1 || true)
     _ni_ver=$("$_ni_d/clean/bin/lume" --version 2>/dev/null || true)
     _ni_sv=$("$_ni_d/clean/bin/lume" self verify 2>/dev/null || true)
     cp "$_ni_d/dist/${_ni_pkg}.tar.gz" "$_ni_d/tampered/"
     printf '0000000000000000000000000000000000000000000000000000000000000000  %s.tar.gz\n' "$_ni_pkg" > "$_ni_d/tampered/SHA256SUMS"
     _ni_bad_rc=0
-    _ni_bad_log=$(printf '@prefix %s\n@platform %s\n@tag v0.2.0\n@base file://%s\n' "$_ni_d/bad" "$_ni_plat_os-$_ni_plat_arch" "$_ni_d/tampered" | "$ntmp/release_installer" 2>&1) || _ni_bad_rc=$?
+    _ni_bad_log=$(printf '@prefix %s\n@platform %s\n@tag v0.2.0\n@base file://%s\n' "$_ni_d/bad" "$_ni_plat_os-$_ni_plat_arch" "$_ni_d/tampered" | "$_ni_d/release_installer" 2>&1) || _ni_bad_rc=$?
     mkdir -p "$_ni_d/unverified" "$_ni_d/no-sha" "$_ni_d/no-tools"
     _ni_missing_rc=0
     _ni_missing_out=$(LUME_HOME="$_ni_d/unverified" ../../lume self verify 2>/dev/null) || _ni_missing_rc=$?

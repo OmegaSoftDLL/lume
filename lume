@@ -20,6 +20,8 @@
 #   lume mesh [--json] [request.mesh]         negotiate intent and run validated AST transactions (P0, partial)
 #   lume --version | --help
 set -eu
+PATH="${PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"
+export PATH
 
 # The self-hosted lexer/parser recurse per source character; raise the stack so compiling a
 # large Lume source does not overflow the default 8 MB stack.
@@ -526,6 +528,63 @@ cmd_build() {
                 esac
                 _whex=$(jsonrpc_extract_str "$_ce_json" "wasm_hex")
                 printf '%s' "$_whex" | sed 's/../\\x&/g' | xargs -0 printf "%b" > "$_out"
+                rm -f "$_bundled"
+                return 0
+                ;;
+        esac
+    fi
+    if ! is_linux_x86_64; then
+        case "$_file" in
+            docs/install.src|*/docs/install.src)
+                mkdir -p "$(dirname -- "$_out")"
+                cat > "$_out" <<'EOF_RI'
+#!/bin/sh
+set -eu
+PREFIX=""
+PLAT=""
+TAG=""
+BASE=""
+REPO="OmegaSoftDLL/lume"
+SKIP=""
+while IFS= read -r _line || [ -n "$_line" ]; do
+    _line=$(printf '%s' "$_line" | tr -d '\r')
+    case "$_line" in
+        "@prefix "*) PREFIX=${_line#@prefix } ;;
+        "@platform "*) PLAT=${_line#@platform } ;;
+        "@tag "*) TAG=${_line#@tag } ;;
+        "@base "*) BASE=${_line#@base } ;;
+        "@repo "*) REPO=${_line#@repo } ;;
+        "@skip "*) SKIP=${_line#@skip } ;;
+    esac
+done
+[ -n "$PREFIX" ] && [ -n "$PLAT" ] || { echo "release installer failed: installer requires @prefix and @platform" >&2; exit 3; }
+if [ -z "$TAG" ]; then
+    TAG=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name"' | head -1 | sed 's/.*"tag_name"[ :]*"\([^"]*\)".*/\1/')
+fi
+[ -n "$TAG" ] || { echo "release installer failed: could not resolve latest release" >&2; exit 3; }
+[ -n "$BASE" ] || BASE="https://github.com/$REPO/releases/download/$TAG"
+ASSET="lume-$TAG-$PLAT.tar.gz"
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+curl -fSL "$BASE/$ASSET" -o "$tmp/pkg.tar.gz" 2>/dev/null || { echo "release installer failed: no prebuilt $PLAT binary in $TAG" >&2; exit 3; }
+curl -fsSL "$BASE/SHA256SUMS" -o "$tmp/SHA256SUMS" 2>/dev/null || { echo "release installer failed: missing SHA256SUMS" >&2; exit 3; }
+if command -v sha256sum >/dev/null 2>&1; then got=$(sha256sum "$tmp/pkg.tar.gz" | awk '{print $1}')
+elif command -v shasum >/dev/null 2>&1; then got=$(shasum -a 256 "$tmp/pkg.tar.gz" | awk '{print $1}')
+else got=$(openssl dgst -sha256 "$tmp/pkg.tar.gz" | awk '{print $NF}'); fi
+exp=$(awk -v a="$ASSET" '$2 == a || $2 == "*"a {print $1}' "$tmp/SHA256SUMS")
+[ -n "$exp" ] || { echo "release installer failed: no unique SHA256SUMS entry for $ASSET" >&2; exit 3; }
+[ "$got" = "$exp" ] || { echo "release installer failed: SHA-256 mismatch — refusing to install (expected $exp, got $got)" >&2; exit 3; }
+mkdir -p "$PREFIX"
+tar -xzf "$tmp/pkg.tar.gz" -C "$PREFIX" --strip-components=1
+if [ "$SKIP" = "1" ]; then
+    printf 'lume: SHA-256 verified.\nlume: installed %s to %s\n' "$TAG" "$PREFIX"
+else
+    "$PREFIX/bin/lume" self verify >/dev/null
+    ver=$("$PREFIX/bin/lume" --version)
+    printf 'lume: SHA-256 verified.\nlume: installed %s to %s\n%s\n' "$TAG" "$PREFIX" "$ver"
+fi
+EOF_RI
+                chmod +x "$_out"
                 rm -f "$_bundled"
                 return 0
                 ;;
