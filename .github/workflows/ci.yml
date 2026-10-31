@@ -60,7 +60,7 @@ jobs:
       - name: Build seed
         run: make -C bootstrap/lume0
       - name: Test native manifest validation and real C interop
-        run: sh -x scripts/check-c-adapters.sh
+        run: sh scripts/check-c-adapters.sh
 
   economic-benchmark:
     name: Economic benchmark real-execution protocol (#337)
