@@ -1,0 +1,39 @@
+fn am_module_paths(root) = Cons(root + "/compiler/stage1/lume/01_lexer.src", Cons(root + "/compiler/stage1/lume/02_parser.src", Cons(root + "/compiler/stage1/lume/03_comptime.src", Cons(root + "/compiler/stage1/lume/04_parser_decls.src", Cons(root + "/compiler/stage1/lume/05_codegen.src", Cons(root + "/compiler/stage1/lume/06_typecheck.src", Cons(root + "/compiler/stage1/lume/06b_phase3.src", Cons(root + "/compiler/stage1/lume/06c_phase4.src", Cons(root + "/compiler/stage1/lume/06d_phase5.src", Cons(root + "/compiler/stage1/lume/07_driver.src", Nil))))))))))
+
+fn am_append_modules(out, paths) = match paths
+    Nil => 1
+    Cons(h, t) => if fs_append_sync(out, fs_read_file(h)) == 1 then am_append_modules(out, t) else 0
+
+fn am_write_output(root, out, paths) = if fs_write_sync(out, "") == 1 then am_append_modules(out, paths) else 0
+
+fn am_line_end(s, i) = if i >= count(s) or at(s, i) == "\n" then i + 1 else am_line_end(s, i + 1)
+
+fn am_lines(s, i) = if i >= count(s) then Nil else let e = am_line_end(s, i) in Cons(slice(s, i, e), am_lines(s, e))
+
+fn am_chomp(s, e) = if e <= 0 then 0 else if at(s, e - 1) == "\n" or at(s, e - 1) == "\r" then am_chomp(s, e - 1) else e
+
+fn am_at_line(xs, idx) = match xs
+    Nil => ""
+    Cons(h, t) => if idx == 0 then slice(h, 0, am_chomp(h, count(h))) else am_at_line(t, idx - 1)
+
+fn am_startswith(s, p) = if count(s) < count(p) then 0 else if slice(s, 0, count(p)) == p then 1 else 0
+
+fn am_root(input) = let line = am_at_line(am_lines(input, 0), 0) in if am_startswith(line, "@root ") == 1 then slice(line, 6, count(line)) else ""
+
+fn am_dispatch(input) = let root = am_root(input) in let out = root + "/compiler/stage1/lumec.src" in if am_write_output(root, out, am_module_paths(root)) == 1 then "amalgamated " + out else ctfail("amalgamation failed")
+
+fn am_head(xs) = match xs
+    Nil => ""
+    Cons(h, t) => h
+
+fn am_last(xs) = match xs
+    Nil => ""
+    Cons(h, t) => if t == Nil then h else am_last(t)
+
+fn am_at(xs, index) = match xs
+    Nil => ""
+    Cons(h, t) => if index == 0 then h else am_at(t, index - 1)
+
+fn test_module_order() = let paths = am_module_paths("") in am_head(paths) == "/compiler/stage1/lume/01_lexer.src" and am_at(paths, 7) == "/compiler/stage1/lume/06c_phase4.src" and am_at(paths, 8) == "/compiler/stage1/lume/06d_phase5.src" and am_at(paths, 9) == "/compiler/stage1/lume/07_driver.src" and am_last(paths) == "/compiler/stage1/lume/07_driver.src"
+
+print am_dispatch(readall())
