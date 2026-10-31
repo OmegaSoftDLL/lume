@@ -1,6 +1,0 @@
-use matrix_validation
-use matrix_render
-use matrix_online
-
-print "acceptance:modules-linked"
-flush()

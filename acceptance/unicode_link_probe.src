@@ -1,4 +1,0 @@
-use acceptance_json
-
-print "acceptance:unicode-link-ok"
-flush()
