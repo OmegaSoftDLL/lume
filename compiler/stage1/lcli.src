@@ -2,7 +2,7 @@
 ## Implements the Lume CLI control-plane commands (`version`, `help`, `describe`,
 ## `compile-json`, `pkg-init`, `pkg-lock`, `pkg-tree`, `evolve-propose`) in Lume,
 ## compiled to native ELF by `lumec` + `lasm` and verified in the `stage2 == stage3`
-## bootstrap fixpoint (`scripts/bootstrap.sh`, `scripts/check-zero-c.sh`). Surface
+## bootstrap fixpoint (`scripts/bootstrap.src`, `scripts/check-zero-c.sh`). Surface
 ## `.lume` checking and testing use the seed lexer/parser/resolver directly.
 
 fn cli_is_ws(c) = c == " " or c == "\t" or c == "\r"

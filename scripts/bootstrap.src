@@ -1,0 +1,79 @@
+fn cs_startswith(s, p) = let m = count(p) in if m == 0 then 1 else if count(s) < m then 0 else if at(s, 0) != at(p, 0) then 0 else slice(s, 0, m) == p
+
+fn cs_chomp(s) = let n = count(s) in if n == 0 then "" else let c = at(s, n - 1) in if c == "\n" or c == "\r" or c == " " or c == "\t" then cs_chomp(slice(s, 0, n - 1)) else s
+
+fn lc_find_nl(s, i, n) = if i >= n then n else if at(s, i) == "\n" then i else lc_find_nl(s, i + 1, n)
+
+fn lc_split_lines(s, i, n) = if i >= n then Nil else let e = lc_find_nl(s, i, n) in Cons(slice(s, i, e), lc_split_lines(s, e + 1, n))
+
+fn bs_run(path, args, input, out) = os_run_input_capture_timeout(path, args, input, out, out + ".err", 900000)
+
+fn bs_l0(root) = root + "/bootstrap/lume0/lume0"
+
+fn bs_src(root) = root + "/compiler/stage1"
+
+fn bs_out(root) = root + "/build/bootstrap"
+
+fn bs_mkdir(path) = os_run_capture_timeout("/bin/mkdir", Cons("-p", Cons(path, Nil)), "/dev/null", "/dev/null", 10000)
+
+fn bs_executable(path) = os_run_capture_timeout("/bin/chmod", Cons("+x", Cons(path, Nil)), "/dev/null", "/dev/null", 10000)
+
+fn bs_modules(root) = Cons(bs_src(root) + "/lume/01_lexer.src", Cons(bs_src(root) + "/lume/02_parser.src", Cons(bs_src(root) + "/lume/03_comptime.src", Cons(bs_src(root) + "/lume/04_parser_decls.src", Cons(bs_src(root) + "/lume/05_codegen.src", Cons(bs_src(root) + "/lume/06_typecheck.src", Cons(bs_src(root) + "/lume/06b_phase3.src", Cons(bs_src(root) + "/lume/06c_phase4.src", Cons(bs_src(root) + "/lume/06d_phase5.src", Cons(bs_src(root) + "/lume/07_driver.src", Nil))))))))))
+
+fn bs_append(out, paths) = match paths
+    Nil => 1
+    Cons(h, t) => if fs_append_sync(out, fs_read_file(h)) == 1 then bs_append(out, t) else 0
+
+fn bs_amalgamate(root) = let out = bs_src(root) + "/lumec.src" in if fs_write_sync(out, "") == 1 then bs_append(out, bs_modules(root)) else 0
+
+fn bs_seed_tool_fresh(root, source, out) = let asm = out + ".s" in let compiled = os_run_capture_timeout(bs_l0(root), Cons("run", Cons(bs_src(root) + "/data_asm_cc.lume", Cons(source, Cons(asm, Nil)))), asm + ".log", asm + ".err", 900000) in if compiled != 0 then compiled else let assembled = os_run_input_capture_timeout(bs_l0(root), Cons("asm", Cons(asm, Cons(out, Nil))), asm, out + ".log", out + ".err", 900000) in if assembled != 0 then assembled else bs_executable(out)
+
+fn bs_seed_tool(root, source, out) = if source == bs_src(root) + "/lumec.src" and fs_path_exists(root + "/build/bin/lumec") == 1 then let copied = os_run_capture_timeout("/bin/cp", Cons(root + "/build/bin/lumec", Cons(out, Nil)), "/dev/null", "/dev/null", 10000) in if copied != 0 then copied else bs_executable(out) else bs_seed_tool_fresh(root, source, out)
+
+fn bs_stage0(root) = let out = bs_out(root) in let made = bs_mkdir(out) in let a = bs_seed_tool(root, bs_src(root) + "/lumec.src", out + "/lumec0") in if a != 0 then "stage0 lumec failed" else let b = bs_seed_tool(root, bs_src(root) + "/lasm.src", out + "/lasm0") in if b != 0 then "stage0 lasm failed" else let c = bs_seed_tool(root, bs_src(root) + "/lcli.src", out + "/lcli0") in if c != 0 then "stage0 lcli failed" else ""
+
+fn bs_process_error(step, status, stdout_path, stderr_path) = if status == 0 then "" else step + " failed with native status " + str(status) + "\nstdout:\n" + fs_read_file(stdout_path) + "\nstderr:\n" + fs_read_file(stderr_path) + "\n"
+
+fn bs_compile(lc, la, input, out) = let asm = out + ".s" in let compiled = bs_run(lc, Cons(input, Nil), input, asm) in let compile_error = bs_process_error(lc + " " + input, compiled, asm, asm + ".err") in if compile_error != "" then compile_error else let assembled = bs_run(la, Cons(asm, Nil), asm, out) in let assemble_error = bs_process_error(la + " " + asm, assembled, out, out + ".err") in if assemble_error != "" then assemble_error else let executable = bs_executable(out) in if executable != 0 then "chmod " + out + " failed with native status " + str(executable) else ""
+
+fn bs_stage(root, lc, la, tag) = let out = bs_out(root) in let a = bs_compile(lc, la, bs_src(root) + "/lumec.src", out + "/lumec" + tag) in if a != "" then "stage " + tag + " lumec: " + a else let b = bs_compile(lc, la, bs_src(root) + "/lasm.src", out + "/lasm" + tag) in if b != "" then "stage " + tag + " lasm: " + b else let c = bs_compile(lc, la, bs_src(root) + "/lcli.src", out + "/lcli" + tag) in if c != "" then "stage " + tag + " lcli: " + c else ""
+
+fn bs_stages(root) = let a = bs_stage(root, bs_out(root) + "/lumec0", bs_out(root) + "/lasm0", "1") in if a != "" then a else let b = bs_stage(root, bs_out(root) + "/lumec1", bs_out(root) + "/lasm1", "2") in if b != "" then b else bs_stage(root, bs_out(root) + "/lumec2", bs_out(root) + "/lasm2", "3")
+
+fn bs_same(a, b, i) = let av = fs_read_byte(a, i) in let bv = fs_read_byte(b, i) in if av != bv then 0 else if av < 0 then 1 else bs_same(a, b, i + 1)
+
+fn bs_files_equal(a, b) = fs_files_equal(a, b) == 1
+
+fn bs_fixpoint(root) = let out = bs_out(root) in if bs_files_equal(out + "/lumec2.s", out + "/lumec3.s") == 0 then "lumec assembly differs" else if bs_files_equal(out + "/lumec2", out + "/lumec3") == 0 then "lumec binary differs" else if bs_files_equal(out + "/lasm2.s", out + "/lasm3.s") == 0 then "lasm assembly differs" else if bs_files_equal(out + "/lasm2", out + "/lasm3") == 0 then "lasm binary differs" else if bs_files_equal(out + "/lcli2.s", out + "/lcli3.s") == 0 then "lcli assembly differs" else if bs_files_equal(out + "/lcli2", out + "/lcli3") == 0 then "lcli binary differs" else ""
+
+fn bs_sanity(root) = let out = bs_out(root) in let source = out + "/t.src" in let written = fs_write_sync(source, "fn fib(n) = if n < 2 then n else fib(n - 1) + fib(n - 2)\nprint fib(10)\n") in let program = bs_compile(bs_out(root) + "/lumec3", bs_out(root) + "/lasm3", source, out + "/t") in if program != "" then "sanity compilation failed: " + program else let result = os_run_capture_timeout(out + "/t", Nil, out + "/t.out", out + "/t.err", 10000) in if result != 0 then bs_process_error("sanity execution", result, out + "/t.out", out + "/t.err") else if fs_read_file(out + "/t.out") != "55\n" then "sanity output mismatch" else ""
+
+fn bs_at_line(xs, idx) = match xs
+    Nil => ""
+    Cons(h, t) => if idx == 0 then cs_chomp(h) else bs_at_line(t, idx - 1)
+
+fn bs_root(input) = let line = bs_at_line(lc_split_lines(input, 0, count(input)), 0) in if cs_startswith(line, "@root ") == 1 then slice(line, 6, count(line)) else ""
+
+fn bs_main(root) = let amalgamated = bs_amalgamate(root) in if amalgamated != 1 then "amalgamation failed" else let seeded = bs_stage0(root) in if seeded != "" then seeded else let staged = bs_stages(root) in if staged != "" then staged else let fixed = bs_fixpoint(root) in if fixed != "" then fixed else bs_sanity(root)
+
+fn bs_dispatch(input) = let root = bs_root(input) in let result = bs_main(root) in if result != "" then ctfail("native bootstrap failed: " + result + "\n") else "OK: Lume is self-hosted -- stages 1-3 use NO C, and stage 2 == stage 3 bit-identically."
+
+fn test_binary_comparison_detects_difference() = let a = fs_write_sync("bs_same_a", "abc") in let b = fs_write_sync("bs_same_b", "abd") in bs_same("bs_same_a", "bs_same_b", 0) == 0
+
+fn test_binary_comparison_detects_length_difference() = let a = fs_write_sync("bs_same_a", "abc") in let b = fs_write_sync("bs_same_b", "abcd") in bs_same("bs_same_a", "bs_same_b", 0) == 0
+
+fn test_binary_comparison_accepts_nul() = let a = fs_write_sync("bs_same_a", "a\0b") in let b = fs_write_sync("bs_same_b", "a\0b") in bs_same("bs_same_a", "bs_same_b", 0) == 1
+
+fn test_process_failure_preserves_native_evidence() = let stdout_written = fs_write_sync("bs_process.out", "compiler stdout\n") in let stderr_written = fs_write_sync("bs_process.err", "stage 1 compiler stderr\n") in bs_process_error("stage 1 lumec", 139, "bs_process.out", "bs_process.err") == "stage 1 lumec failed with native status 139\nstdout:\ncompiler stdout\n\nstderr:\nstage 1 compiler stderr\n\n"
+
+fn test_file_comparison_detects_content_difference() = let a = fs_write_sync("bs_compare_a", "abc") in let b = fs_write_sync("bs_compare_b", "abd") in fs_files_equal("bs_compare_a", "bs_compare_b") == 0
+
+fn test_file_comparison_detects_length_difference() = let a = fs_write_sync("bs_compare_a", "abc") in let b = fs_write_sync("bs_compare_b", "abcd") in fs_files_equal("bs_compare_a", "bs_compare_b") == 0
+
+fn test_file_comparison_accepts_nul() = let a = fs_write_sync("bs_compare_a", "a\0b") in let b = fs_write_sync("bs_compare_b", "a\0b") in fs_files_equal("bs_compare_a", "bs_compare_b") == 1
+
+fn test_file_comparison_rejects_missing_file() = fs_files_equal("definitely_missing_comparison_file", "bs_compare_a") < 0
+
+fn test_file_comparison_handles_multiple_blocks() = let text = fs_read_file("scripts/bootstrap.src") in let a = fs_write_sync("bs_compare_large_a", text) in let b = fs_write_sync("bs_compare_large_b", text) in let same = fs_files_equal("bs_compare_large_a", "bs_compare_large_b") in let appended = fs_append_sync("bs_compare_large_b", "x") in same == 1 and fs_files_equal("bs_compare_large_a", "bs_compare_large_b") == 0
+
+print bs_dispatch(readall())
