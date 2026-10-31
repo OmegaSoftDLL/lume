@@ -154,6 +154,9 @@ jobs:
       - uses: actions/checkout@v7
       - name: Verify native acceptance module linkage
         run: ./lume build acceptance/entry_probe.src -o build/bin/acceptance_entry_probe && build/bin/acceptance_entry_probe
+      - name: Diagnose native linkage failure
+        if: failure()
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gdb && gdb -q -batch -ex 'set pagination off' -ex run -ex 'x/8i $rip' -ex 'info registers' -ex bt --args build/bin/acceptance_entry_probe
       - name: Build native acceptance validator
         run: ./lume build acceptance/matrix_assertions.src -o build/bin/acceptance_matrix
       - name: Validate artifacts, evidence, negative fixtures, and generated view
