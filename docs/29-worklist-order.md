@@ -27,7 +27,7 @@ rule (`docs/28`): no brick is "done" until the real thing runs, with its guarant
 
 ## Parallel tracks (no gating either way — pick up by priority, any time)
 
-- **`#230` — LLM-generation eval as a CI gate.** *(Done — `scripts/check-llm-gen-eval.sh` + `tests/llm_gen_eval/`, wired into CI.)*
+- **`#230` — LLM-generation eval as a CI gate.** *(Done — `scripts/llm_gen_eval.src` + `tests/llm_gen_eval/`, wired into CI.)*
 - **`#214` — data track** (persist table / versioned / `money[CCY]` / `@soa`). *(Done — real on-disk WAL via `open`+`flock`+`write`+`fsync`+`close`, cross-process crash recovery, concurrent multi-process locking, `money[CCY]`, `versioned`/`@soa`.)*
 - **`#210` — `lume lsp` + `lume dap`.** *(Done — live multi-turn JSON-RPC-over-stdio `lume lsp` and `lume dap` servers.)*
 - **`#211` — `lume repl` + notebook/Jupyter kernel.** *(Done — interactive `lume repl` read-eval-print loop & stateful multi-message Jupyter `lume repl --kernel` protocol server.)*
