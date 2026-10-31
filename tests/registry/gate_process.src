@@ -1,0 +1,16 @@
+use acceptance_json
+
+fn rg_run(path, args, out, timeout) = let err = out + ".err" in os_run_capture_timeout(path, args, out, err, timeout)
+fn rg_run_quiet(path, args, timeout) = os_run_capture_timeout(path, args, "/dev/null", "/dev/null", timeout)
+fn rg_lume(root, args, out) = rg_run("/usr/bin/env", Cons("PATH=/usr/local/bin:/usr/bin:/bin", Cons(root + "/lume", args)), out, 900000)
+fn rg_store_args(root) = Cons("--store=" + root + "/build/registry-gate/store", Nil)
+fn rg_registry_args(root, adapter, source, tests) = cs_app(Cons("registry", Cons("publish", Cons("--adapter=" + adapter, Nil))), cs_app(Cons("--source=" + source, Cons("--tests=" + tests, Nil)), rg_store_args(root)))
+fn rg_registry_proof_args(root, adapter, source, tests, proof) = cs_app(Cons("registry", Cons("publish", Cons("--adapter=" + adapter, Nil))), cs_app(Cons("--source=" + source, Nil), cs_app(Cons("--tests=" + tests, Cons("--proof=" + proof, Nil)), rg_store_args(root))))
+fn rg_resolve_args(root, cid) = cs_app(Cons("registry", Cons("resolve", Cons("--cid=" + cid, Nil))), rg_store_args(root))
+fn rg_target_args(root, cid, target) = cs_app(Cons("registry", Cons("resolve", Cons("--cid=" + cid, Nil))), cs_app(Cons("--target=" + target, Nil), rg_store_args(root)))
+fn rg_discover_args(root, capability) = cs_app(Cons("registry", Cons("discover", Cons("--capability=" + capability, Nil))), rg_store_args(root))
+fn rg_discover_signature_args(root, signature) = cs_app(Cons("registry", Cons("discover", Cons("--capability=pure", Nil))), cs_app(Cons("--contract-signature=" + signature, Nil), rg_store_args(root)))
+fn rg_cp(source, dest) = rg_run_quiet("/bin/cp", Cons(source, Cons(dest, Nil)), 10000)
+fn rg_mv(source, dest) = rg_run_quiet("/bin/mv", Cons(source, Cons(dest, Nil)), 10000)
+fn rg_mkdir(path) = rg_run_quiet("/bin/mkdir", Cons("-p", Cons(path, Nil)), 10000)
+fn rg_rm(path) = rg_run_quiet("/bin/rm", Cons("-rf", Cons(path, Nil)), 10000)
