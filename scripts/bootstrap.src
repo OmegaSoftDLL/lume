@@ -22,7 +22,7 @@ fn bs_modules(root) = Cons(bs_src(root) + "/lume/01_lexer.src", Cons(bs_src(root
 
 fn bs_append(out, paths) = match paths
     Nil => 1
-    Cons(h, t) => if fs_append_sync(out, fs_read_file(h) + "\n") == 1 then bs_append(out, t) else 0
+    Cons(h, t) => if fs_append_sync(out, fs_read_file(h)) == 1 then bs_append(out, t) else 0
 
 fn bs_amalgamate(root) = let out = bs_src(root) + "/lumec.src" in if fs_write_sync(out, "") == 1 then bs_append(out, bs_modules(root)) else 0
 
@@ -54,7 +54,7 @@ fn bs_root(input) = let line = bs_at_line(lc_split_lines(input, 0, count(input))
 
 fn bs_main(root) = let amalgamated = bs_amalgamate(root) in if amalgamated != 1 then "amalgamation failed" else let seeded = bs_stage0(root) in if seeded != "" then seeded else let staged = bs_stages(root) in if staged != "" then staged else let fixed = bs_fixpoint(root) in if fixed != "" then fixed else bs_sanity(root)
 
-fn bs_dispatch(input) = let root = bs_root(input) in let result = bs_main(root) in if result != "" then ctfail("native bootstrap failed: " + result + "\n") else "OK: Lume is self-hosted — stages 1-3 use NO C, and stage 2 == stage 3 bit-identically."
+fn bs_dispatch(input) = let root = bs_root(input) in let result = bs_main(root) in if result != "" then ctfail("native bootstrap failed: " + result + "\n") else "OK: Lume is self-hosted -- stages 1-3 use NO C, and stage 2 == stage 3 bit-identically."
 
 fn test_binary_comparison_detects_difference() = let a = fs_write_sync("bs_same_a", "abc") in let b = fs_write_sync("bs_same_b", "abd") in bs_same("bs_same_a", "bs_same_b", 0) == 0
 
