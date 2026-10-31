@@ -154,6 +154,10 @@ jobs:
       - uses: actions/checkout@v7
       - name: Verify native runtime startup
         run: ./lume build acceptance/runtime_probe.src -o build/bin/acceptance_runtime_probe && build/bin/acceptance_runtime_probe
+      - name: Verify native JSON module linkage
+        run: ./lume build acceptance/unicode_link_probe.src -o build/bin/acceptance_unicode_link_probe && build/bin/acceptance_unicode_link_probe
+      - name: Verify native JSON parsing
+        run: ./lume build acceptance/unicode_parse_probe.src -o build/bin/acceptance_unicode_parse_probe && build/bin/acceptance_unicode_parse_probe
       - name: Verify native acceptance module linkage
         run: ./lume build acceptance/entry_probe.src -o build/bin/acceptance_entry_probe && build/bin/acceptance_entry_probe
       - name: Diagnose native linkage failure

@@ -1,0 +1,4 @@
+use acceptance_json
+
+print am_get(am_parse("{\"schema\":\"probe\"}"), "schema").text
+flush()
