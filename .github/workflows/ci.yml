@@ -150,12 +150,14 @@ jobs:
       pull-requests: read
     steps:
       - uses: actions/checkout@v7
+      - name: Build native acceptance validator
+        run: ./lume build acceptance/matrix_assertions.src -o build/bin/acceptance_matrix
       - name: Validate artifacts, evidence, negative fixtures, and generated view
-        run: python3 scripts/check-acceptance-matrix.py --self-test --check-doc
+        run: printf '@mode local\n@root %s\n' "$PWD" | build/bin/acceptance_matrix
       - name: Validate issue and pull request references
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python3 scripts/check-acceptance-matrix.py --online
+        run: printf '@mode online\n@root %s\n' "$PWD" | build/bin/acceptance_matrix
 
   bootstrap:
     name: Self-host bootstrap (stage2 == stage3)

@@ -9,7 +9,7 @@ is the short version.
 
 - **Converse in Portuguese (pt-BR). Write all code, docs, comments, filenames, commits and
   PRs in English.**
-- **Golden rule: zero bugs in Lume's own toolchain.** Every fix ships with a regression test.
+- **Golden rule: Lume generates Lume, with zero bugs in Lume's own toolchain.** Every fix ships with a regression test. Implementation and test logic must be in Lume. Existing non-Lume artifacts are migration liabilities, not precedent; remove them only after a verified Lume replacement exists.
 - **Do not use Rust** to implement Lume.
 - **Edit the self-hosted compiler in `compiler/stage1/lume/NN_*.src`, never the generated
   `compiler/stage1/lumec.src`.** `lumec.src` is a build artifact (git-ignored), amalgamated

@@ -1,0 +1,21 @@
+use acceptance_json
+use matrix_validation
+use matrix_render
+use matrix_online
+
+fn am_load(root) = am_parse(fs_read_file(root + "/acceptance/matrix.json"))
+fn am_local(root, matrix) = let error = am_validate(matrix, root) in if error != "" then error else let fixture_error = am_self_test(root) in if fixture_error != "" then fixture_error else let rendered = am_render(matrix) in if fs_read_file(root + "/docs/acceptance-matrix.md") != rendered then "docs/acceptance-matrix.md is stale; regenerate it with the native Lume validator" else ""
+fn am_write_doc(root, matrix) = let error = am_validate(matrix, root) in if error != "" then error else if fs_write_sync(root + "/docs/acceptance-matrix.md", am_render(matrix)) != 1 then "cannot write docs/acceptance-matrix.md" else ""
+fn am_at_line(xs, idx) = match xs
+    Nil => ""
+    Cons(h, t) => if idx == 0 then cs_chomp(h) else am_at_line(t, idx - 1)
+fn am_directive(line, prefix) = if cs_startswith(line, prefix) == 1 then slice(line, count(prefix), count(line)) else ""
+fn am_request(input) = let lines = lc_split_lines(input, 0, count(input)) in {mode: am_directive(am_at_line(lines, 0), "@mode "), root: am_directive(am_at_line(lines, 1), "@root ")}
+fn am_dispatch(input) = let req = am_request(input) in let parsed = am_load(req.root) in if parsed.ok == 0 then ctfail("acceptance matrix JSON error: " + parsed.text) else let error = if req.mode == "local" then am_local(req.root, parsed) else if req.mode == "online" then am_first(am_validate(parsed, req.root), am_online(req.root, parsed)) else if req.mode == "write-doc" then am_write_doc(req.root, parsed) else "unsupported mode: " + req.mode in if error != "" then ctfail("acceptance matrix validation failed: " + error) else "{\"ok\":true,\"claims\":" + str(cs_len(am_get(parsed, "claims").items)) + ",\"mode\":\"" + req.mode + "\"}"
+
+fn test_json_duplicate_keys_are_rejected() = am_check_keys(am_parse("{\"schema\":1,\"schema\":2}"), Cons("schema", Nil), "matrix") != ""
+fn test_json_trailing_data_is_rejected() = am_parse("{} trailing").ok == 0
+fn test_claim_id_requires_track_l_shape() = am_claim_id_valid("ASYNC.EPOLL", 0, 1) == 1 and am_claim_id_valid("async.epoll", 0, 1) == 0
+fn test_markdown_escapes_table_pipes() = am_md("a|b\nc", 0) == "a\\|b c"
+
+print am_dispatch(readall())
