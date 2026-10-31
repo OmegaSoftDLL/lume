@@ -11,8 +11,8 @@ work becomes possible.
 The split is done by **amalgamation**, exactly like SQLite's single-file build: the editable
 sources are the per-module files in `compiler/stage1/lume/NN_*.src`, and `lumec.src` is the
 **generated** concatenation of them, in lexicographic (= numeric `NN`) order. `lumec.src` is no
-longer a source file — it is a build artifact (git-ignored) produced by `scripts/amalgamate.sh`
-(`cat compiler/stage1/lume/*.src > compiler/stage1/lumec.src`).
+longer a source file — it is a build artifact (git-ignored) produced by `scripts/amalgamate.src`
+in numeric module order.
 
 This was chosen over the module-system (`lmod`) route on purpose: amalgamation is a **pure
 textual rearrangement** whose output is, by construction, **byte-identical** to the historical
@@ -49,10 +49,10 @@ add/rename a `compiler/stage1/lume/NN_*.src` file — never edit the generated `
    `git show HEAD:compiler/stage1/lumec.src`.) Because the generated file is identical, the
    emitted `lumec`/`.s` is identical and `make bootstrap` stays stage2==stage3.
 2. **Build-pipeline change.** `lumec.src` is regenerated before anything compiles it.
-   `scripts/amalgamate.src` is called at the start of `scripts/bootstrap.src`, at the start of
-   `bootstrap/lume0/tests/run.sh`, and in the `lume` CLI's `ensure_native_toolchain` before it
-   builds `lumec` from source; `make amalgamate` (a prerequisite of `make bootstrap/test/asan`)
-   runs it too.
+   The native `scripts/bootstrap.src` runner performs the same ordered concatenation before
+   staging. `scripts/amalgamate.src` is called at the start of `bootstrap/lume0/tests/run.sh`,
+   and in the `lume` CLI's `ensure_native_toolchain` before it builds `lumec` from source;
+   `make amalgamate` (a prerequisite of `make bootstrap/test/asan`) runs it too.
 3. **Core-quiescence (sequencing).** The split rewrites the file layout wholesale, so it runs
    under a short core freeze (F/C/M/D hold edits): split in one PR, verify byte-identical +
    fixpoint, merge, unfreeze. Thereafter each track owns a module file and the freeze is no longer
@@ -61,5 +61,5 @@ add/rename a `compiler/stage1/lume/NN_*.src` file — never edit the generated `
 ## What a contributor does now
 Edit the relevant `compiler/stage1/lume/NN_*.src` module — **not** the generated `lumec.src`.
 Any build entry point regenerates `lumec.src` first; to regenerate by hand, run
-`make amalgamate` (or `scripts/amalgamate.sh`). Distinct files = zero merge collisions across
+`make amalgamate` (or `scripts/amalgamate.src`). Distinct files = zero merge collisions across
 tracks, which is the real unlock for 3+ parallel contributors.
