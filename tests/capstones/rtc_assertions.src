@@ -1,0 +1,53 @@
+use lcaas
+
+fn rt_number(serial, key) = let marker = key + "=" in let p = cs_find_substr(serial, marker, 0, count(serial), count(marker)) in if p >= count(serial) then 0 - 1 else toint(slice(serial, p + count(marker), count(serial)))
+
+fn rt_serial(serial) = let year = rt_number(serial, "year") in let month = rt_number(serial, "month") in let day = rt_number(serial, "day") in let hour = rt_number(serial, "hour") in let minute = rt_number(serial, "minute") in let second = rt_number(serial, "second") in let status = rt_number(serial, "status_b") in let valid = if cs_has_substr(serial, "p0_rtc_kernel=ok year=") == 1 and year >= 2000 and month >= 1 and month <= 12 and day >= 1 and day <= rt_month_days(year, month) and hour >= 0 and hour <= 23 and minute >= 0 and minute <= 59 and second >= 0 and second <= 59 and status >= 0 and status <= 255 then 1 else 0 in {valid: valid, year: year, month: month, day: day, hour: hour, minute: minute, second: second, status_b: status}
+
+fn rt_base(text) = {valid: 1, year: toint(slice(text, 0, 4)), month: toint(slice(text, 5, 7)), day: toint(slice(text, 8, 10)), hour: toint(slice(text, 11, 13)), minute: toint(slice(text, 14, 16)), second: toint(slice(text, 17, 19)), status_b: 0}
+
+fn rt_cmp1(a, b) = if a < b then 0 - 1 else if a > b then 1 else 0
+
+fn rt_compare(a, b) = let y = rt_cmp1(a.year, b.year) in if y != 0 then y else let m = rt_cmp1(a.month, b.month) in if m != 0 then m else let d = rt_cmp1(a.day, b.day) in if d != 0 then d else let h = rt_cmp1(a.hour, b.hour) in if h != 0 then h else let mi = rt_cmp1(a.minute, b.minute) in if mi != 0 then mi else rt_cmp1(a.second, b.second)
+
+fn rt_leap(year) = if year % 400 == 0 then 1 else if year % 100 == 0 then 0 else if year % 4 == 0 then 1 else 0
+
+fn rt_month_days(year, month) = if month == 2 then 28 + rt_leap(year) else if month == 4 or month == 6 or month == 9 or month == 11 then 30 else 31
+
+fn rt_next_date(base) = if base.day < rt_month_days(base.year, base.month) then {valid: 1, year: base.year, month: base.month, day: base.day + 1, hour: 0, minute: 0, second: 0, status_b: 0} else if base.month < 12 then {valid: 1, year: base.year, month: base.month + 1, day: 1, hour: 0, minute: 0, second: 0, status_b: 0} else {valid: 1, year: base.year + 1, month: 1, day: 1, hour: 0, minute: 0, second: 0, status_b: 0}
+
+fn rt_upper(base) = let total = base.hour * 3600 + base.minute * 60 + base.second + 10 in if total < 86400 then {valid: 1, year: base.year, month: base.month, day: base.day, hour: total / 3600, minute: (total % 3600) / 60, second: total % 60, status_b: 0} else let next = rt_next_date(base) in {valid: 1, year: next.year, month: next.month, day: next.day, hour: 0, minute: 0, second: total - 86400, status_b: 0}
+
+fn rt_within(observed, base) = rt_compare(observed, base) >= 0 and rt_compare(observed, rt_upper(base)) <= 0
+
+fn rt_no_syscall(lines) = match lines
+    Nil => 1
+    Cons(h, t) => if lc_trim(h) == "syscall" then 0 else rt_no_syscall(t)
+
+fn rt_image_valid(image, assembly) = (fs_read_byte(image, 0) != 127 or fs_read_byte(image, 1) != 69) and fs_read_byte(image, 510) == 85 and fs_read_byte(image, 511) == 170 and fs_read_byte(image, 512) >= 0 and cs_has_substr(assembly, ".kernel") == 1 and cs_has_substr(assembly, "port_in8:") == 1 and cs_has_substr(assembly, "inb %dx, %al") == 1 and cs_has_substr(assembly, "port_out8:") == 1 and cs_has_substr(assembly, "outb %al, %dx") == 1 and rt_no_syscall(lc_split_lines(assembly, 0, count(assembly))) == 1
+
+fn rt_at_line(xs, idx) = match xs
+    Nil => ""
+    Cons(h, t) => if idx == 0 then cs_chomp(h) else rt_at_line(t, idx - 1)
+
+fn rt_value(line, prefix) = if cs_startswith(line, prefix) == 1 then slice(line, count(prefix), count(line)) else ""
+
+fn rt_request(input) = let ls = lc_split_lines(input, 0, count(input)) in {image: rt_value(rt_at_line(ls, 0), "@image "), assembly: rt_value(rt_at_line(ls, 1), "@asm "), first: rt_value(rt_at_line(ls, 2), "@first "), second: rt_value(rt_at_line(ls, 3), "@second "), first_base: rt_value(rt_at_line(ls, 4), "@first_base "), second_base: rt_value(rt_at_line(ls, 5), "@second_base ")}
+
+fn rt_dispatch(input) = let req = rt_request(input) in let first_serial = fs_read_file(req.first) in let second_serial = fs_read_file(req.second) in let first = rt_serial(first_serial) in let second = rt_serial(second_serial) in let ok = if rt_image_valid(req.image, fs_read_file(req.assembly)) == 1 and first.valid == 1 and second.valid == 1 and rt_within(first, rt_base(req.first_base)) == 1 and rt_within(second, rt_base(req.second_base)) == 1 and rt_compare(first, second) != 0 and first.year == 2024 and second.year == 2031 then 1 else 0 in if ok == 1 then "PASS: " + lc_trim(first_serial) + "\nPASS: " + lc_trim(second_serial) else ctfail("RTC capstone assertion failed")
+
+fn test_rtc_rejects_elf_image() = rt_image_valid("../../bootstrap/lume0/lume0", ".kernel\nport_in8:\n    inb %dx, %al\nport_out8:\n    outb %al, %dx\n") == 0
+
+fn test_rtc_rejects_hosted_syscall() = rt_no_syscall(lc_split_lines("cli\nsyscall\n", 0, 12)) == 0
+
+fn test_rtc_rejects_impossible_date() = rt_serial("p0_rtc_kernel=ok year=2024 month=13 day=1 hour=0 minute=0 second=0 status_b=0\n").valid == 0
+
+fn test_rtc_rejects_nonexistent_calendar_day() = rt_serial("p0_rtc_kernel=ok year=2024 month=2 day=30 hour=0 minute=0 second=0 status_b=0\n").valid == 0
+
+fn test_rtc_rejects_non_leap_day() = rt_serial("p0_rtc_kernel=ok year=2023 month=2 day=29 hour=0 minute=0 second=0 status_b=0\n").valid == 0
+
+fn test_rtc_accepts_leap_day() = rt_serial("p0_rtc_kernel=ok year=2024 month=2 day=29 hour=0 minute=0 second=0 status_b=0\n").valid == 1
+
+fn test_rtc_rejects_time_before_base() = rt_within(rt_base("2023-06-15T12:34:56"), rt_base("2024-06-15T12:34:56")) == 0
+
+print rt_dispatch(readall())
