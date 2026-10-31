@@ -7,5 +7,5 @@ fn am_online_claims(root, repository, claims, token) = match claims
     Cons(h, t) => let issue_error = am_online_refs(root, repository, "issues", am_get(h, "issues").items, token) in if issue_error != "" then issue_error else let pull_error = am_online_refs(root, repository, "pulls", am_get(h, "pull_requests").items, token) in if pull_error != "" then pull_error else am_online_claims(root, repository, t, token)
 fn am_online_refs(root, repository, kind, refs, token) = match refs
     Nil => ""
-    Cons(h, t) => let error = am_online_ref(root, repository, kind, h, token) in if error != "" then error else am_online_refs(root, repository, kind, t, token)
+    Cons(h, t) => let err_msg = am_online_ref(root, repository, kind, h, token) in if err_msg != "" then err_msg else am_online_refs(root, repository, kind, t, token)
 fn am_online(root, matrix, token) = am_online_claims(root, am_get(matrix, "repository").text, am_get(matrix, "claims").items, token)
