@@ -104,7 +104,7 @@ jobs:
       - name: Build native registry gate
         run: ./lume build tests/registry/gate.src -o build/bin/registry_gate
       - name: Verify real publication, resolution, discovery, and adversarial rejection
-        run: printf '@root %s\n' "$PWD" | build/bin/registry_gate
+        run: ulimit -s unlimited 2>/dev/null || true; printf '@root %s\n' "$PWD" | build/bin/registry_gate
 
   docs:
     name: Documentation & examples

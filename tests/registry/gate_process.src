@@ -2,7 +2,7 @@ use acceptance_json
 
 fn rg_run(path, args, out, timeout) = let err = out + ".err" in os_run_capture_timeout(path, args, out, err, timeout)
 fn rg_run_quiet(path, args, timeout) = os_run_capture_timeout(path, args, "/dev/null", "/dev/null", timeout)
-fn rg_lume(root, args, out) = rg_run(root + "/lume", args, out, 900000)
+fn rg_lume(root, args, out) = rg_run("/usr/bin/env", Cons("PATH=/usr/local/bin:/usr/bin:/bin", Cons(root + "/lume", args)), out, 900000)
 fn rg_store_args(root) = Cons("--store=" + root + "/build/registry-gate/store", Nil)
 fn rg_registry_args(root, adapter, source, tests) = cs_app(Cons("registry", Cons("publish", Cons("--adapter=" + adapter, Nil))), cs_app(Cons("--source=" + source, Cons("--tests=" + tests, Nil)), rg_store_args(root)))
 fn rg_registry_proof_args(root, adapter, source, tests, proof) = cs_app(Cons("registry", Cons("publish", Cons("--adapter=" + adapter, Nil))), cs_app(Cons("--source=" + source, Nil), cs_app(Cons("--tests=" + tests, Cons("--proof=" + proof, Nil)), rg_store_args(root))))
