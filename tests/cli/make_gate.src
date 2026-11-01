@@ -2,9 +2,15 @@ fn mg_expected(root) = let dir = root + "/compiler/stage1/lume/" in fs_read_file
 
 fn mg_line_end(text, i) = if i >= count(text) or at(text, i) == "\n" then i else mg_line_end(text, i + 1)
 
+fn mg_first_difference(actual, expected, i) = if i >= count(actual) or i >= count(expected) or at(actual, i) != at(expected, i) then i else mg_first_difference(actual, expected, i + 1)
+
+fn mg_byte_at(text, i) = if i >= count(text) then 0 - 1 else ord(at(text, i))
+
+fn mg_mismatch(actual, expected) = let i = mg_first_difference(actual, expected, 0) in "native amalgamate output differs: actual bytes " + str(count(actual)) + ", expected bytes " + str(count(expected)) + ", first difference " + str(i) + ", actual byte " + str(mg_byte_at(actual, i)) + ", expected byte " + str(mg_byte_at(expected, i))
+
 fn mg_root(input) = if count(input) < 6 or slice(input, 0, 6) != "@root " then "" else slice(input, 6, mg_line_end(input, 0))
 
-fn mg_main(root) = let output = root + "/build/lume-make-gate.out" in let errors = root + "/build/lume-make-gate.err" in let status = os_run_capture_timeout(root + "/build/bin/lume_make", Cons("amalgamate", Nil), output, errors, 900000) in if status != 0 then "native amalgamate command failed with native status " + str(status) + "\nstdout:\n" + fs_read_file(output) + "\nstderr:\n" + fs_read_file(errors) else if fs_read_file(root + "/compiler/stage1/lumec.src") != mg_expected(root) then "native amalgamate output differs from the exact compiler module concatenation" else ""
+fn mg_main(root) = let output = root + "/build/lume-make-gate.out" in let errors = root + "/build/lume-make-gate.err" in let status = os_run_capture_timeout(root + "/build/bin/lume_make", Cons("amalgamate", Nil), output, errors, 900000) in if status != 0 then "native amalgamate command failed with native status " + str(status) + "\nstdout:\n" + fs_read_file(output) + "\nstderr:\n" + fs_read_file(errors) else let actual = fs_read_file(root + "/compiler/stage1/lumec.src") in let expected = mg_expected(root) in if actual != expected then mg_mismatch(actual, expected) else ""
 
 fn mg_dispatch(input) = let root = mg_root(input) in if root == "" then ctfail("native make gate requires @root\n") else let problem = mg_main(root) in if problem != "" then ctfail("native make gate failed: " + problem + "\n") else "native lume_make amalgamate reproduced the exact compiler source"
 
