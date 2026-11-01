@@ -96,7 +96,7 @@ jobs:
       - name: Build native driver and Lume tools
         run: ./lume build compiler/stage1/lcli.src -o build/bin/lcli && ./lume build compiler/stage1/lmod.src -o build/bin/lmod && ./lume build compiler/stage1/ltarget.src -o build/bin/ltarget && ./lume build compiler/stage1/lume_driver.src -o build/bin/lume_driver && ./lume build tests/cli/driver_gate.src -o build/bin/native_driver_gate
       - name: Locate native driver startup failure
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gdb && gdb -q -batch -ex run -ex 'x/12i $pc-24' -ex 'info registers' -ex bt -ex 'set $caller = *(unsigned long*)($rbp+8)' -ex 'x/30i $caller-60' --args build/bin/lume_driver --version
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gdb && gdb -q -batch -ex run -ex 'x/12i $pc-24' -ex 'info registers' -ex bt -ex 'set $caller = *(unsigned long*)$rsp' -ex 'x/40i $caller-100' --args build/bin/lume_driver --version
       - name: Execute native driver acceptance in Lume
         run: printf '@root %s\n' "$PWD" | build/bin/native_driver_gate
 
