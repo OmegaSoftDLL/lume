@@ -8,7 +8,9 @@ fn ld_root() = let bin = ld_dir(os_arg_at(0)) in let parent = ld_dir(bin) in if 
 
 fn ld_tool(root, name) = root + "/build/bin/" + name
 
-fn ld_request(root, tool, request) = let input = root + "/build/lume-driver.in" in let output = root + "/build/lume-driver.out" in let errors = root + "/build/lume-driver.err" in let written = fs_write_sync(input, request) in if written != 1 then ctfail("native driver cannot write tool request\n") else let status = os_run_input_capture_timeout(ld_tool(root, tool), Nil, input, output, errors, 120000) in if status != 0 then ctfail("native driver tool failed: " + tool + " status " + str(status) + "\nstdout:\n" + fs_read_file(output) + "\nstderr:\n" + fs_read_file(errors)) else fs_read_file(output)
+fn ld_chomp(text) = if count(text) > 0 and at(text, count(text) - 1) == "\n" then slice(text, 0, count(text) - 1) else text
+
+fn ld_request(root, tool, request) = let input = root + "/build/lume-driver.in" in let output = root + "/build/lume-driver.out" in let errors = root + "/build/lume-driver.err" in let written = fs_write_sync(input, request) in if written != 1 then ctfail("native driver cannot write tool request\n") else let status = os_run_input_capture_timeout(ld_tool(root, tool), Nil, input, output, errors, 120000) in if status != 0 then ctfail("native driver tool failed: " + tool + " status " + str(status) + "\nstdout:\n" + fs_read_file(output) + "\nstderr:\n" + fs_read_file(errors)) else ld_chomp(fs_read_file(output))
 
 fn ld_contains_at(text, part, i) = if i + count(part) > count(text) then 0 else if slice(text, i, i + count(part)) == part then 1 else ld_contains_at(text, part, i + 1)
 
@@ -64,4 +66,6 @@ fn ld_info(root) = if os_arg_count() != 2 then ctfail("usage: lume_driver --vers
 
 fn ld_entry(root) = if os_arg_count() >= 2 and os_arg_at(1) == "build" then (if os_arg_count() != 5 or os_arg_at(3) != "-o" then ctfail("usage: lume_driver build <source> -o <out>\n") else os_exit(ld_build(root, os_arg_at(2), os_arg_at(4)))) else if os_arg_count() >= 3 and os_arg_at(1) == "run" then os_exit(ld_run(root, os_arg_at(2))) else print ld_info(root)
 
-ld_entry(ld_root())
+fn ld_diagnose() = let argc = print os_arg_count() in let argv0 = print os_arg_at(0) in let argv1 = print os_arg_at(1) in let bin = print ld_dir(os_arg_at(0)) in let root = print ld_root() in ld_entry(ld_root())
+
+ld_diagnose()

@@ -1,4 +1,6 @@
-fn dg_run(root, args, name) = let output = root + "/build/cli-" + name + ".out" in let errors = root + "/build/cli-" + name + ".err" in let status = os_run_capture_timeout(root + "/build/bin/lume_driver", args, output, errors, 120000) in {status: status, output: fs_read_file(output), errors: fs_read_file(errors)}
+fn dg_wait_exit(raw) = if raw < 0 or raw % 256 == 127 then 1 else if raw % 256 == 0 then raw / 256 else 128 + raw % 128
+
+fn dg_run(root, args, name) = let output = root + "/build/cli-" + name + ".out" in let errors = root + "/build/cli-" + name + ".err" in let status = os_run_capture_timeout(root + "/build/bin/lume_driver", args, output, errors, 120000) in {status: dg_wait_exit(status), output: fs_read_file(output), errors: fs_read_file(errors)}
 
 fn dg_exact(root, name, args, expected) = let result = dg_run(root, args, name) in if result.status != 0 then name + " failed with status " + str(result.status) + "\nstdout:\n" + result.output + "\nstderr:\n" + result.errors else if result.output != expected then name + " output mismatch: " + result.output else ""
 
