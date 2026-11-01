@@ -79,6 +79,19 @@ jobs:
       - name: Verify exact native argc/argv behavior
         run: ./lume build compiler/stage1/os_argv_probe.src -o build/bin/os_argv_probe && test "$(build/bin/os_argv_probe alpha 'with space' '')" = "argv:ok"
 
+  native-cli:
+    name: Native CLI driver (Lume only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build seed
+        run: make -C bootstrap/lume0
+      - name: Build native driver and Lume tools
+        run: ./lume build compiler/stage1/lcli.src -o build/bin/lcli && ./lume build compiler/stage1/ltarget.src -o build/bin/ltarget && ./lume build compiler/stage1/lume_driver.src -o build/bin/lume_driver && ./lume build tests/cli/driver_gate.src -o build/bin/native_driver_gate
+      - name: Execute native driver acceptance in Lume
+        run: printf '@root %s\n' "$PWD" | build/bin/native_driver_gate
+
   economic-benchmark:
     name: Economic benchmark real-execution protocol (#337)
     runs-on: ubuntu-latest

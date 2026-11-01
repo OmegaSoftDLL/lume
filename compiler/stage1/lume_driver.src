@@ -1,0 +1,15 @@
+fn ld_rfind_slash(path, i) = if i < 0 then 0 - 1 else if at(path, i) == "/" then i else ld_rfind_slash(path, i - 1)
+
+fn ld_dir(path) = let slash = ld_rfind_slash(path, count(path) - 1) in if slash < 0 then "" else if slash == 0 then "/" else slice(path, 0, slash)
+
+fn ld_base(path) = let slash = ld_rfind_slash(path, count(path) - 1) in slice(path, slash + 1, count(path))
+
+fn ld_root() = let bin = ld_dir(os_arg_at(0)) in let parent = ld_dir(bin) in if ld_base(parent) == "build" then let root = ld_dir(parent) in if root == "" then "." else root else parent
+
+fn ld_tool(root, name) = root + "/build/bin/" + name
+
+fn ld_request(root, tool, request) = let input = root + "/build/lume-driver.in" in let output = root + "/build/lume-driver.out" in let errors = root + "/build/lume-driver.err" in let written = fs_write_sync(input, request) in if written != 1 then ctfail("native driver cannot write tool request\n") else let status = os_run_input_capture_timeout(ld_tool(root, tool), Nil, input, output, errors, 120000) in if status != 0 then ctfail("native driver tool failed: " + tool + "\n" + fs_read_file(errors)) else fs_read_file(output)
+
+fn ld_dispatch(root) = if os_arg_count() != 2 then ctfail("usage: lume_driver --version|--help|describe|targets\n") else let command = os_arg_at(1) in if command == "--version" or command == "version" then ld_request(root, "lcli", "@cmd version\n") else if command == "--help" or command == "-h" or command == "help" then ld_request(root, "lcli", "@cmd help\n") else if command == "describe" or command == "--describe" then ld_request(root, "lcli", "@cmd describe\n") else if command == "targets" or command == "--targets" then ld_request(root, "ltarget", "@targets-json\n") else ctfail("unknown native driver command: " + command + "\n")
+
+print ld_dispatch(ld_root())

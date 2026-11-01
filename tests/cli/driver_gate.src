@@ -1,0 +1,21 @@
+fn dg_run(root, args, name) = let output = root + "/build/cli-" + name + ".out" in let errors = root + "/build/cli-" + name + ".err" in let status = os_run_capture_timeout(root + "/build/bin/lume_driver", args, output, errors, 120000) in {status: status, output: fs_read_file(output), errors: fs_read_file(errors)}
+
+fn dg_exact(root, name, args, expected) = let result = dg_run(root, args, name) in if result.status != 0 then name + " failed: " + result.errors else if result.output != expected then name + " output mismatch: " + result.output else ""
+
+fn dg_contains_at(text, part, i) = if i + count(part) > count(text) then 0 else if slice(text, i, i + count(part)) == part then 1 else dg_contains_at(text, part, i + 1)
+
+fn dg_contains(text, part) = dg_contains_at(text, part, 0)
+
+fn dg_part(root, name, args, expected) = let result = dg_run(root, args, name) in if result.status != 0 then name + " failed: " + result.errors else if dg_contains(result.output, expected) == 0 then name + " is missing expected output: " + expected else ""
+
+fn dg_unknown(root) = let result = dg_run(root, Cons("not-a-command", Nil), "unknown") in if result.status == 0 then "unknown command unexpectedly succeeded" else ""
+
+fn dg_line_end(text, i) = if i >= count(text) or at(text, i) == "\n" then i else dg_line_end(text, i + 1)
+
+fn dg_root(input) = if count(input) < 6 or slice(input, 0, 6) != "@root " then "" else slice(input, 6, dg_line_end(input, 0))
+
+fn dg_main(root) = let version = dg_exact(root, "version", Cons("--version", Nil), "lume 0.2.0 (edition 2026)\n") in if version != "" then version else let help = dg_part(root, "help", Cons("--help", Nil), "lume build [--target <triple>]") in if help != "" then help else let description = dg_part(root, "describe", Cons("describe", Nil), "\"stage\": \"self-hosted (lumec + lasm + lcli)\"") in if description != "" then description else let targets = dg_part(root, "targets", Cons("targets", Nil), "x86_64-windows-pe") in if targets != "" then targets else dg_unknown(root)
+
+fn dg_dispatch(input) = let root = dg_root(input) in if root == "" then ctfail("native driver gate requires @root\n") else let problem = dg_main(root) in if problem != "" then ctfail("native driver gate failed: " + problem + "\n") else "native driver version, help, describe, targets, and rejection checks passed"
+
+print dg_dispatch(readall())
