@@ -8,7 +8,7 @@ to execute once Phases 1–5 and the correctness protection (provenance A3 + con
 `QF_LIA` proof) have landed.
 
 > **Status note (`#196` — All Tracks G0–G9 Shipped).**
-> - **G0 (Zero-C installer & self-update):** `scripts/install.sh` installs the self-hosted zero-C toolchain (`lume`, `lumec`, `lasm`, `lcli`, `lcaas`, `lcert`, `ltarget`, `levolve`) with `MANIFEST.sha256`; `lume self status|verify|update` verifies SHA-256 digests and updates installations offline without a C compiler.
+> - **G0 (Zero-C installer & self-update):** `scripts/install.src` installs the self-hosted zero-C toolchain (`lume`, `lumec`, `lasm`, `lcli`, `lcaas`, `lcert`, `ltarget`, `levolve`) with `MANIFEST.sha256`; `lume self status|verify|update` verifies SHA-256 digests and updates installations offline without a C compiler.
 > - **G1 (Oracle-as-a-service, MCP & Leaderboard):** `lume mcp` exposes 15 tools (`lume_check`, `lume_prove`, `lume_fill`, `lume_witness`, `lume_repair`, `lume_impact`, `lume_bind`, `lume_certify`, `lume_proof_diff`, `lume_check_rot`, `lume_share`, `lume_patch`, `lume_replay`, `lume_lineage`, `lume_compose`); `scripts/check-llm-gen-eval.sh --leaderboard` emits the machine-readable verified-correctness leaderboard (`proof_coverage_pct: 100`, `compiles_alone_rejected: true`).
 > - **G2 (Verified Sidecar Interop):** `examples/interop/sidecar/` (`payment_core.src`, `host_lume.src`) exports proven C-ABI / WASM functions alongside their independently verified proof certificate and exercises the C ABI from a native Lume host.
 > - **G3 (Independent Proof Certificate):** `lume certify` and `lume verify-cert` (`compiler/stage1/lcert.src`) independently re-derive Fourier–Motzkin `QF_LIA` proofs and verify FIPS-180-4 SHA-256 digests (`#183`).

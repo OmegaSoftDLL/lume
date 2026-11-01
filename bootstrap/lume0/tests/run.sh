@@ -1595,7 +1595,7 @@ EOF
     if [ -x "$ntmp/cf_ok.elf" ] && "$ntmp/cf_ok.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/core_features_ok_asm.expected - >/dev/null && [ -s "$ntmp/cf_dpos.s" ] && ! grep -q "call ctfail" "$ntmp/cf_dpos.s" && [ -s "$ntmp/cf_spos.s" ] && ! grep -q "call ctfail" "$ntmp/cf_spos.s" && [ "$_cf_trap_rc" -eq 3 ] && grep -q "runtime contract violation" "$ntmp/cf_rt_trap.err" && [ "$cfb400" -eq 3 ] && grep -q "\[T0400\]" "$ntmp/cf_b_t400.err" && [ "$cfb401" -eq 3 ] && grep -q "\[T0401\]" "$ntmp/cf_b_t401.err" && [ "$cfbref" -eq 3 ] && grep -q "\[V0001\]" "$ntmp/cf_b_ref.err" && [ "$cfbaw" -eq 3 ] && grep -q "\[E0200\]" "$ntmp/cf_b_aw.err" && [ "$cfbrc" -eq 3 ] && grep -q "\[O0001\]" "$ntmp/cf_b_rc.err" && [ "$cfbsh1" -eq 3 ] && grep -q "\[S0001\]" "$ntmp/cf_b_sh1.err" && [ "$cfbsh2" -eq 3 ] && grep -q "\[E0200\]" "$ntmp/cf_b_sh2.err" && [ "$cfbhm" -eq 3 ] && grep -q "\[T0500\]" "$ntmp/cf_b_hm.err" && [ "$cfbpr" -eq 3 ] && grep -q "\[T2001\]" "$ntmp/cf_b_pr.err" && [ "$cfbsig" -eq 3 ] && grep -q "\[T2001\]" "$ntmp/cf_b_sig.err"; then ok "core language features (#197, #215): trait/impl [T0400/T0401], closures, refinement types (QF_LIA elision + exit-3 trap), async/await [E0200], rc/arc/weak [O0001], shard [S0001/E0200], let-polymorphism [T0500] & promise/signal [T2001]"; else bad "core language features (#197, #215)"; cat "$ntmp/cf_ok.err" "$ntmp/cf_rt_trap.err" "$ntmp/cf_b_t400.err" "$ntmp/cf_b_t401.err" "$ntmp/cf_b_ref.err" "$ntmp/cf_b_aw.err" "$ntmp/cf_b_rc.err" "$ntmp/cf_b_sh1.err" "$ntmp/cf_b_sh2.err" "$ntmp/cf_b_hm.err" "$ntmp/cf_b_pr.err" "$ntmp/cf_b_sig.err" 2>/dev/null; fi
 
     # Issue #196 (Adoption & Distribution G0-G9) & #198 (Horizon H1-H5 & Intent-as-Source §3-§5):
-    sh ../../scripts/install.sh --prefix "$ntmp/inst" --from-dir "$ntmp" >/dev/null 2>&1
+    LUME_BIN_DIR="$ntmp" ../../lume build ../../scripts/install.src -o "$ntmp/native_installer" >/dev/null 2>&1 && printf '@prefix %s\n@from-local %s\n@from-dir %s\n' "$ntmp/inst" "$(CDPATH= cd -- ../.. && pwd)" "$ntmp" | "$ntmp/native_installer" >/dev/null 2>&1
     _g0_ok=$(LUME_BIN_DIR="$ntmp" ../../lume self verify --prefix "$ntmp/inst" 2>/dev/null || true)
     cp "$ntmp/inst/MANIFEST.sha256" "$ntmp/inst/MANIFEST.sha256.bak"
     printf '0000000000000000000000000000000000000000000000000000000000000000  bin/lume\n' >"$ntmp/inst/MANIFEST.sha256"
@@ -1920,7 +1920,8 @@ EOF
     esac
     _ni_pkg="lume-v0.2.0-${_ni_plat_os}-${_ni_plat_arch}"
     mkdir -p "$_ni_d/stage" "$_ni_d/dist" "$_ni_d/tampered"
-    sh ../../scripts/install.sh --prefix "$_ni_d/stage/$_ni_pkg" --from-local "$(cd ../.. && pwd)" --from-dir "${ntmp:-$(cd ../../bootstrap/lume0 && pwd)}" >/dev/null 2>&1
+    LUME_BIN_DIR="${ntmp:-}" ../../lume build ../../scripts/install.src -o "$_ni_d/native_installer" >/dev/null 2>&1
+    printf '@prefix %s\n@from-local %s\n@from-dir %s\n' "$_ni_d/stage/$_ni_pkg" "$(CDPATH= cd -- ../.. && pwd)" "${ntmp:-$(CDPATH= cd -- ../../bootstrap/lume0 && pwd)}" | "$_ni_d/native_installer" >/dev/null 2>&1
     tar -C "$_ni_d/stage" -czf "$_ni_d/dist/${_ni_pkg}.tar.gz" "$_ni_pkg"
     if command -v sha256sum >/dev/null 2>&1; then
         (cd "$_ni_d/dist" && sha256sum "${_ni_pkg}.tar.gz" > SHA256SUMS)
