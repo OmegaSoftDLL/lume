@@ -10,11 +10,9 @@ fn nr_request(input) = let lines = nr_lines(input, 0) in {prefix: nr_value(lines
 fn nr_run(path, args) = os_run_capture_timeout(path, args, "/dev/null", "/dev/null", 900000)
 fn nr_capture(path, args, out) = os_run_capture_timeout(path, args, out, out + ".err", 900000)
 fn nr_mktemp() = let out = "/tmp/lume-install-mktemp-" + str(os_getpid()) + ".out" in let status = nr_capture("/bin/mktemp", Cons("-d", Nil), out) in if status != 0 then "" else nr_chomp(fs_read_file(out))
-fn nr_find_tag(json, i) = if i + 11 > count(json) then "" else if slice(json, i, i + 11) == "\"tag_name\"" then nr_tag_value(json, i + 11) else nr_find_tag(json, i + 1)
-fn nr_tag_value(json, i) = if i >= count(json) then "" else if at(json, i) == "\"" then nr_tag_end(json, i + 1) else nr_tag_value(json, i + 1)
-fn nr_tag_end(json, i) = if i >= count(json) then "" else if at(json, i) == "\"" then slice(json, nr_tag_start(json, 0, i), i) else nr_tag_end(json, i + 1)
-fn nr_tag_start(json, i, end_pos) = if i + 11 > count(json) then 0 else if slice(json, i, i + 11) == "\"tag_name\"" then nr_tag_quote(json, i + 11) else nr_tag_start(json, i + 1, end_pos)
-fn nr_tag_quote(json, i) = if at(json, i) == "\"" then i + 1 else nr_tag_quote(json, i + 1)
+fn nr_find_tag(json, i) = if i + 10 > count(json) then "" else if slice(json, i, i + 10) == "\"tag_name\"" then nr_tag_value(json, i + 10) else nr_find_tag(json, i + 1)
+fn nr_tag_value(json, i) = if i >= count(json) then "" else if at(json, i) == "\"" then nr_tag_end(json, i + 1, i + 1) else nr_tag_value(json, i + 1)
+fn nr_tag_end(json, start_pos, i) = if i >= count(json) then "" else if at(json, i) == "\"" then slice(json, start_pos, i) else nr_tag_end(json, start_pos, i + 1)
 fn nr_latest(req) = if req.tag != "" then req.tag else let repo = if req.repo == "" then "OmegaSoftDLL/lume" else req.repo in let out = "/tmp/lume-latest-" + str(os_getpid()) + ".json" in let status = nr_capture("/bin/curl", Cons("-fsSL", Cons("https://api.github.com/repos/" + repo + "/releases/latest", Nil)), out) in if status != 0 then "" else nr_find_tag(fs_read_file(out), 0)
 fn nr_expected_lines(lines, asset, found, digest) = match lines
     Nil => if found == 1 then digest else ""
