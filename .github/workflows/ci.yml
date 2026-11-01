@@ -130,6 +130,9 @@ jobs:
       - name: Inspect native capability collection on failure
         if: failure()
         run: printf '@mode registry-interface\n' > build/effect-debug.in && cat build/capstone-gate/effect-exec-1.src >> build/effect-debug.in && build/bin/lcaas < build/effect-debug.in
+      - name: Inspect native effect source and character load on failure
+        if: failure()
+        run: od -An -tx1 -v build/capstone-gate/effect-exec-1.src; objdump -d --disassemble=at build/bin/lcaas
       - name: Preserve native capability trace on failure
         if: failure()
         run: test ! -f build/capability-trace.txt || cp build/capability-trace.txt build/lcaas-capability-trace.txt; test ! -f build/parser-trace.txt || cp build/parser-trace.txt build/lcaas-parser-trace.txt
