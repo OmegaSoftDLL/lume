@@ -114,6 +114,16 @@ jobs:
         run: ./lume build compiler/stage1/lcaas.src -o build/bin/lcaas.capstone && mv build/bin/lcaas.capstone build/bin/lcaas
       - name: Execute native SaaS and two-clock RTC acceptance
         run: printf '@root %s\n@bin %s\n' "$PWD" "$PWD/build/bin" | ./lume run tests/capstones/gate.src
+      - name: Preserve native analysis assembly on failure
+        if: failure()
+        run: ./lume compile compiler/stage1/lcaas.src > build/lcaas.s
+      - name: Upload native analysis assembly
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-capstone-analysis-${{ github.run_id }}
+          path: build/lcaas.s
+          retention-days: 3
 
   economic-benchmark:
     name: Economic benchmark real-execution protocol (#337)
