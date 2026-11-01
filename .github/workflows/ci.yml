@@ -95,10 +95,23 @@ jobs:
         run: make -C bootstrap/lume0
       - name: Build native driver and Lume tools
         run: ./lume build compiler/stage1/lcli.src -o build/bin/lcli && ./lume build compiler/stage1/lmod.src -o build/bin/lmod && ./lume build compiler/stage1/ltarget.src -o build/bin/ltarget && ./lume build compiler/stage1/lume_driver.src -o build/bin/lume_driver && ./lume build tests/cli/driver_gate.src -o build/bin/native_driver_gate
-      - name: Trace native driver startup
-        run: strace -f -o build/lume-driver.strace build/bin/lume_driver --version || { status=$?; tail -n 100 build/lume-driver.strace; exit "$status"; }
+      - name: Locate native driver startup failure
+        run: gdb -q -batch -ex run -ex 'x/12i $pc-24' -ex 'info registers' -ex bt --args build/bin/lume_driver --version
       - name: Execute native driver acceptance in Lume
         run: printf '@root %s\n' "$PWD" | build/bin/native_driver_gate
+
+  native-assembly:
+    name: Native assembler fixtures (Lume only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build seed
+        run: make -C bootstrap/lume0
+      - name: Build native assembly acceptance gate
+        run: ./lume build tests/harness/lasm_gate.src -o build/bin/lasm_gate
+      - name: Execute Lume-generated assembly acceptance
+        run: printf '@root %s\n' "$PWD" | build/bin/lasm_gate
 
   economic-benchmark:
     name: Economic benchmark real-execution protocol (#337)
