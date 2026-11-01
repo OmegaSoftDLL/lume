@@ -880,7 +880,7 @@ PY
     chmod +x "$ntmp/os_run_input_probe"
     printf '%s' "$ntmp/os_run_input_probe" > os_run_input_probe_path
     LUME_BIN_DIR="$ntmp" ../../lume test ../../compiler/stage1/os_run_ok.src >"$ntmp/os_run_test.out" 2>"$ntmp/os_run_test.err"
-    if grep -q "9 passed, 0 failed" "$ntmp/os_run_test.out"; then ok "phase-3 K7: os_run executes a Lume binary via fork+execve and reports wait status"; else bad "phase-3 K7: os_run native process execution"; cat "$ntmp/os_run_test.out" "$ntmp/os_run_test.err"; fi
+    if grep -q "13 passed, 0 failed" "$ntmp/os_run_test.out"; then ok "phase-3 K7: os_run executes a Lume binary via fork+execve and reports wait status"; else bad "phase-3 K7: os_run native process execution"; cat "$ntmp/os_run_test.out" "$ntmp/os_run_test.err"; fi
     rm -f os_run_probe_path os_run_slow_probe_path os_run_input_probe_path os_run_capture_stdout os_run_capture_stderr os_run_timeout_stdout os_run_timeout_stderr os_run_input_data os_run_input_stdout os_run_input_stderr os_run_input_missing_stdout os_run_input_missing_stderr
     # S0001: unstructured `spawn` outside `scope`, capturing non-`Send` `rc[T]`, or capturing unmoved `var`/`mut` across `spawn`
     printf 'fn bad_unscoped() -> int = spawn(42)\nprint bad_unscoped()\n' >"$ntmp/s1a.src"
@@ -1537,7 +1537,7 @@ EOF
     if diff -u ../../tests/conformance/stage1/track_o_os_ok_asm.expected "$ntmp/to_ok.out" >/dev/null && printf '%s' "$_to_vcert" | grep -q '"kernel_verified":true' && printf '%s' "$_to_los_t" | grep -q "6 passed, 0 failed"; then ok "track-O (#241): general-purpose OS stack (block WAL/CRC-32, VFS ramfs/lumefs, IPv4/ICMP/TCP, Ring-3/Ring-0 syscalls, shell/coreutils, RTC/PCI/PS2 drivers) + proof certificate"; else bad "track-O (#241): general-purpose OS stack"; diff -u ../../tests/conformance/stage1/track_o_os_ok_asm.expected "$ntmp/to_ok.out" | head -30; cat "$ntmp/to_ok.err" "$ntmp/to_los.cert.json" 2>/dev/null; printf '%s\n' "$_to_vcert" "$_to_los_t"; fi
 
     _p0_real_log=$(mktemp)
-    if LUME_BIN_DIR="$ntmp" sh ../../tests/capstones/run.sh >"$_p0_real_log" 2>&1; then ok "priority-0 real capstone slices (#337/#332/#241): independent HTTP/WAL tenant tests and freestanding RTC in QEMU"; else bad "priority-0 real capstone slices (#337/#332/#241)"; cat "$_p0_real_log"; fi
+    if printf '@root %s\n@bin %s\n' "$(CDPATH= cd -- ../.. && pwd)" "$ntmp" | LUME_BIN_DIR="$ntmp" ../../lume run ../../tests/capstones/gate.src >"$_p0_real_log" 2>&1; then ok "priority-0 real capstone slices (#337/#332/#241): independent HTTP/WAL tenant tests and freestanding RTC in QEMU"; else bad "priority-0 real capstone slices (#337/#332/#241)"; cat "$_p0_real_log"; fi
     rm -f "$_p0_real_log"
 
     if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_ASAN:-}" ] && [ -z "${LUME0_RUNNER:-}" ]; then
