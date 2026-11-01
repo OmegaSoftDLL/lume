@@ -182,10 +182,11 @@ fn eval(e) = match e
 
 ## Install
 
-One line (self-updating — re-run to get the latest release as Lume evolves):
+Build the Lume-native release installer, then re-run it to update as Lume evolves:
 
 ```sh
-curl -fsSL https://omegasoftdll.github.io/lume/install.sh | sh
+./lume build docs/install.src -o build/bin/release_installer
+printf '@prefix %s\n@platform linux-x86_64\n' "$HOME/.lume" | build/bin/release_installer
 export PATH="$HOME/.lume/bin:$PATH"
 lume self verify      # checks MANIFEST.sha256
 ```
