@@ -85,6 +85,19 @@ jobs:
       - name: Verify native LLM generation evaluation gate (#230/#337)
         run: ./lume test scripts/llm_gen_eval.src && ./lume build scripts/llm_gen_eval.src -o build/bin/llm_gen_eval && printf '@root %s\n@mode summary\n' "$PWD" | build/bin/llm_gen_eval | grep -q '"pass_at_1":3,"pass_at_2":4' && printf '@root %s\n@mode leaderboard\n' "$PWD" | build/bin/llm_gen_eval | grep -q '"leaderboard":' && rm -rf build/llm-gen-eval
 
+  native-assembly:
+    name: Native assembler fixtures (Lume only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build seed
+        run: make -C bootstrap/lume0
+      - name: Build native assembly acceptance gate
+        run: ./lume build tests/harness/lasm_gate.src -o build/bin/lasm_gate
+      - name: Execute Lume-generated assembly acceptance
+        run: printf '@root %s\n' "$PWD" | build/bin/lasm_gate
+
   economic-benchmark:
     name: Economic benchmark real-execution protocol (#337)
     runs-on: ubuntu-latest
