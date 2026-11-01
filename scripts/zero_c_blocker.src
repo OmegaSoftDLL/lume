@@ -1,0 +1,3 @@
+print "ZERO-C VIOLATION: the steady-state build invoked a shadowed C toolchain program"
+flush()
+os_exit(97)

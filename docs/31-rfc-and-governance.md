@@ -11,7 +11,7 @@ This document defines the open governance model, the **Proof-Carrying RFC Proces
 Lume's governance is anchored in three non-negotiable technical invariants enforced by CI and the self-evolution engine (`lume evolve`):
 
 1. **Proof-Carrying Evolution (`P30`, `P31`):** No compiler pass, standard library module, or language surface change merges without passing the 6 automated `lume evolve` gates (`compile`, `conformance`, `api_compat`, `capability`, `budget`, `fixpoint`) and Ed25519 cryptographic maintainer sign-off (`evolve/maintainers.pub`).
-2. **Zero-C Steady State (`scripts/check-zero-c.sh`):** The self-hosted compiler (`lumec`), assembler (`lasm`), target emitter (`ltarget`), proof kernel (`lcert`), and CLI (`lcli`) build and reach a byte-identical `stage2 == stage3` binary fixpoint without invoking `cc`, `gcc`, `clang`, `as`, or `ld`.
+2. **Zero-C Steady State (`scripts/zero_c.src`):** The self-hosted compiler (`lumec`), assembler (`lasm`), target emitter (`ltarget`), proof kernel (`lcert`), and CLI (`lcli`) build and reach a byte-identical `stage2 == stage3` binary fixpoint without invoking `cc`, `gcc`, `clang`, `as`, or `ld`.
 3. **Anti-Theater Delivery Rule (`docs/28-delivery-rules.md`):** Every shipped feature must be a genuine compiler/runtime mechanism with both positive end-to-end execution proofs and negative compile-time or runtime rejection tests.
 
 ---
