@@ -80,6 +80,10 @@ jobs:
         run: ./lume build compiler/stage1/os_argv_probe.src -o build/bin/os_argv_probe && test "$(build/bin/os_argv_probe alpha 'with space' '')" = "argv:ok"
       - name: Verify native installer build and execution (#196/#337)
         run: ./lume test scripts/install.src && ./lume build scripts/install.src -o build/bin/native_installer && tmp=$(mktemp -d) && printf '@prefix %s\n@from-local %s\n@from-dir %s\n' "$tmp/inst" "$PWD" "$PWD/build/bin" | build/bin/native_installer && ./lume self verify --prefix "$tmp/inst" | grep -q '"manifest_verified":true' && rm -rf "$tmp"
+      - name: Verify native release installer build and unit tests (#262/#337)
+        run: ./lume test docs/install.src && ./lume build docs/install.src -o build/bin/release_installer
+      - name: Verify native LLM generation evaluation gate (#230/#337)
+        run: ./lume test scripts/llm_gen_eval.src && ./lume build scripts/llm_gen_eval.src -o build/bin/llm_gen_eval && printf '@root %s\n@mode summary\n' "$PWD" | build/bin/llm_gen_eval | grep -q '"pass_at_1":3,"pass_at_2":4' && printf '@root %s\n@mode leaderboard\n' "$PWD" | build/bin/llm_gen_eval | grep -q '"leaderboard":' && rm -rf build/llm-gen-eval
 
   economic-benchmark:
     name: Economic benchmark real-execution protocol (#337)
@@ -124,7 +128,7 @@ jobs:
                    docs/00-catalog.md docs/01-survey.md docs/02-principles.md \
                    docs/03-specification.md docs/04-roadmap.md docs/05-vision.md \
                    grammar/lume.ebnf examples/README.md \
-                   tests/llm_gen_eval/system_prompt.md scripts/check-llm-gen-eval.sh; do
+                   tests/llm_gen_eval/system_prompt.md scripts/llm_gen_eval.src; do
             test -f "$f" || { echo "missing $f"; exit 1; }
           done
       - name: Every example is listed in examples/README.md
@@ -252,7 +256,7 @@ jobs:
           }
           $global:LASTEXITCODE = 0
           exit 0
-      - name: Verify docs/install.sh clean install & SHA-256 tamper rejection on Windows (#262)
+      - name: Verify docs/install.src clean install & SHA-256 tamper rejection on Windows (#262)
         shell: bash
         run: |
           set -eu
@@ -265,14 +269,15 @@ jobs:
           tar -C "$tmp/stage" -czf "$tmp/dist/${pkg}.tar.gz" "$pkg"
           (cd "$tmp/dist" && sha256sum "${pkg}.tar.gz" > SHA256SUMS)
           wdist=$(cd "$tmp/dist" && pwd -W)
-          LUME_PREFIX="$tmp/clean" LUME_RELEASE_TAG="v0.2.0" LUME_RELEASE_BASE_URL="file:///$wdist" sh docs/install.sh
+          ./lume build docs/install.src -o build/release_installer
+          printf '@prefix %s\n@platform windows-x86_64\n@tag v0.2.0\n@base file:///%s\n' "$tmp/clean" "$wdist" | build/release_installer
           "$tmp/clean/bin/lume" --version | tr -d '\r' | grep -q "lume 0.2.0"
           "$tmp/clean/bin/lume" self verify | tr -d '\r' | grep -q '"manifest_verified":true'
           cp "$tmp/dist/${pkg}.tar.gz" "$tmp/tampered/"
           printf '0000000000000000000000000000000000000000000000000000000000000000  %s.tar.gz\n' "$pkg" > "$tmp/tampered/SHA256SUMS"
           wtamper=$(cd "$tmp/tampered" && pwd -W)
-          if LUME_PREFIX="$tmp/bad" LUME_RELEASE_TAG="v0.2.0" LUME_RELEASE_BASE_URL="file:///$wtamper" sh docs/install.sh > "$tmp/tamper.log" 2>&1; then
-            echo "FATAL: docs/install.sh accepted a tampered archive on Windows!" >&2
+          if printf '@prefix %s\n@platform windows-x86_64\n@tag v0.2.0\n@base file:///%s\n' "$tmp/bad" "$wtamper" | build/release_installer > "$tmp/tamper.log" 2>&1; then
+            echo "FATAL: docs/install.src accepted a tampered archive on Windows!" >&2
             exit 1
           fi
           grep -q "SHA-256 mismatch — refusing to install" "$tmp/tamper.log"

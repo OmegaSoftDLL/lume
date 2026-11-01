@@ -1,0 +1,31 @@
+use fs_sha256_file
+
+fn nr_chomp(s) = let n = count(s) in if n == 0 then "" else let c = at(s, n - 1) in if c == "\n" or c == "\r" or c == " " or c == "\t" then nr_chomp(slice(s, 0, n - 1)) else s
+fn nr_line_end(s, i) = if i >= count(s) or at(s, i) == "\n" then i else nr_line_end(s, i + 1)
+fn nr_lines(s, i) = if i >= count(s) then Nil else let e = nr_line_end(s, i) in Cons(slice(s, i, e), nr_lines(s, e + 1))
+fn nr_value(lines, prefix) = match lines
+    Nil => ""
+    Cons(h, t) => let line = nr_chomp(h) in if count(line) >= count(prefix) and slice(line, 0, count(prefix)) == prefix then slice(line, count(prefix), count(line)) else nr_value(t, prefix)
+fn nr_request(input) = let lines = nr_lines(input, 0) in {prefix: nr_value(lines, "@prefix "), platform: nr_value(lines, "@platform "), tag: nr_value(lines, "@tag "), base: nr_value(lines, "@base "), repo: nr_value(lines, "@repo "), skip: nr_value(lines, "@skip ")}
+fn nr_run(path, args) = os_run_capture_timeout(path, args, "/dev/null", "/dev/null", 900000)
+fn nr_capture(path, args, out) = os_run_capture_timeout(path, args, out, out + ".err", 900000)
+fn nr_mktemp() = let out = "/tmp/lume-install-mktemp-" + str(os_getpid()) + ".out" in let status = nr_capture("/bin/mktemp", Cons("-d", Nil), out) in if status != 0 then "" else nr_chomp(fs_read_file(out))
+fn nr_find_tag(json, i) = if i + 10 > count(json) then "" else if slice(json, i, i + 10) == "\"tag_name\"" then nr_tag_value(json, i + 10) else nr_find_tag(json, i + 1)
+fn nr_tag_value(json, i) = if i >= count(json) then "" else if at(json, i) == "\"" then nr_tag_end(json, i + 1, i + 1) else nr_tag_value(json, i + 1)
+fn nr_tag_end(json, start_pos, i) = if i >= count(json) then "" else if at(json, i) == "\"" then slice(json, start_pos, i) else nr_tag_end(json, start_pos, i + 1)
+fn nr_latest(req) = if req.tag != "" then req.tag else let repo = if req.repo == "" then "OmegaSoftDLL/lume" else req.repo in let out = "/tmp/lume-latest-" + str(os_getpid()) + ".json" in let status = nr_capture("/bin/curl", Cons("-fsSL", Cons("https://api.github.com/repos/" + repo + "/releases/latest", Nil)), out) in if status != 0 then "" else nr_find_tag(fs_read_file(out), 0)
+fn nr_expected_lines(lines, asset, found, digest) = match lines
+    Nil => if found == 1 then digest else ""
+    Cons(h, t) => let line = nr_chomp(h) in if count(line) == 66 + count(asset) and slice(line, 64, 66) == "  " and slice(line, 66, count(line)) == asset then (if found == 1 then "" else nr_expected_lines(t, asset, 1, slice(line, 0, 64))) else nr_expected_lines(t, asset, found, digest)
+fn nr_expected(path, asset) = nr_expected_lines(nr_lines(fs_read_file(path), 0), asset, 0, "")
+fn nr_sha256(path) = let out = "/tmp/lume-nr-sha-" + str(os_getpid()) + ".out" in let status = nr_capture("/usr/bin/sha256sum", Cons(path, Nil), out) in let text = if status == 0 then fs_read_file(out) else "" in if count(text) >= 64 then slice(text, 0, 64) else fs_sha256_file(path)
+fn nr_verify(tmp, base, asset) = let sums = tmp + "/SHA256SUMS" in let status = nr_run("/bin/curl", Cons("-fsSL", Cons(base + "/SHA256SUMS", Cons("-o", Cons(sums, Nil))))) in if status != 0 then "missing SHA256SUMS" else let expected = nr_expected(sums, asset) in if expected == "" then "no unique SHA256SUMS entry for " + asset else let actual = nr_sha256(tmp + "/pkg.tar.gz") in if actual != expected then "SHA-256 mismatch — refusing to install (expected " + expected + ", got " + actual + ")" else ""
+fn nr_post(prefix, tag) = let verified = nr_run(prefix + "/bin/lume", Cons("self", Cons("verify", Nil))) in if verified != 0 then "installed toolchain failed self verification" else let out = "/tmp/lume-version-" + str(os_getpid()) + ".out" in let status = nr_capture(prefix + "/bin/lume", Cons("--version", Nil), out) in if status != 0 then "installed toolchain failed version check" else "lume: SHA-256 verified.\nlume: installed " + tag + " to " + prefix + "\n" + fs_read_file(out)
+fn nr_main(req) = if req.prefix == "" or req.platform == "" then "installer requires @prefix and @platform" else let tmp = nr_mktemp() in if tmp == "" then "cannot create temporary directory" else let tag = nr_latest(req) in if tag == "" then "could not resolve latest release" else let asset = "lume-" + tag + "-" + req.platform + ".tar.gz" in let base = if req.base == "" then "https://github.com/" + (if req.repo == "" then "OmegaSoftDLL/lume" else req.repo) + "/releases/download/" + tag else req.base in let downloaded = nr_run("/bin/curl", Cons("-fSL", Cons(base + "/" + asset, Cons("-o", Cons(tmp + "/pkg.tar.gz", Nil))))) in if downloaded != 0 then "no prebuilt " + req.platform + " binary in " + tag else let verified = nr_verify(tmp, base, asset) in if verified != "" then verified else let made = nr_run("/bin/mkdir", Cons("-p", Cons(req.prefix, Nil))) in if made != 0 then "cannot create prefix" else let extracted = nr_run("/bin/tar", Cons("-xzf", Cons(tmp + "/pkg.tar.gz", Cons("-C", Cons(req.prefix, Cons("--strip-components=1", Nil)))))) in if extracted != 0 then "cannot extract verified release" else let result = if req.skip == "1" then "lume: SHA-256 verified.\nlume: installed " + tag + " to " + req.prefix + "\n" else nr_post(req.prefix, tag) in let cleaned = nr_run("/bin/rm", Cons("-rf", Cons(tmp, Nil))) in result
+fn nr_dispatch(input) = let req = nr_request(input) in let result = nr_main(req) in if count(result) >= 5 and slice(result, 0, 5) == "lume:" then result else ctfail("release installer failed: " + result + "\n")
+
+fn test_expected_digest_requires_exact_asset() = let text = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  lume-v1-linux-x86_64.tar.gz\n" in nr_expected_lines(nr_lines(text, 0), "lume-v1-linux-x86_64.tar.gz", 0, "") == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+fn test_expected_digest_rejects_missing_asset() = nr_expected_lines(Nil, "missing.tar.gz", 0, "") == ""
+fn test_tag_extraction_reads_github_response() = nr_find_tag("{\"tag_name\":\"v0.3.0-p0.3\",\"name\":\"release\"}", 0) == "v0.3.0-p0.3"
+
+print nr_dispatch(readall())

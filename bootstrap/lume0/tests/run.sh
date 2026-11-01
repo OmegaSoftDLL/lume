@@ -1332,7 +1332,10 @@ EOF
 EOF
     LUME_BIN_DIR="$ntmp" ../../lume repl --kernel <"$ntmp/repl_kernel.in" >"$ntmp/repl_kernel.out" 2>/dev/null
     # 5. LLM-generatability CI regression gate (#230):
-    LUME_BIN_DIR="$ntmp" sh ../../scripts/check-llm-gen-eval.sh >"$ntmp/llm_gen_eval.json" 2>/dev/null || true
+    mkdir -p ../../build/bin
+    cp -f "$ntmp"/l* ../../build/bin/ 2>/dev/null || true
+    LUME_BIN_DIR="$ntmp" ../../lume build ../../scripts/llm_gen_eval.src -o "$ntmp/llm_gen_eval" >/dev/null 2>&1 && printf '@root %s\n@mode summary\n' "$(CDPATH= cd -- ../.. && pwd)" | "$ntmp/llm_gen_eval" >"$ntmp/llm_gen_eval.json" 2>/dev/null || true
+    rm -rf ../../build/llm-gen-eval ../../build/bin
     if grep -q '"mode":"hashes"' "$ntmp/sub_hashes.json" && grep -Eq '"ast_hash":"sha256:[0-9a-f]{64}"' "$ntmp/sub_hashes.json" && grep -q '"proof_status":"proven"' "$ntmp/sub_hashes.json" && grep -q '"mode":"grammar"' "$ntmp/sub_grammar.json" && grep -q '"format":"lume-constrained-grammar-v1"' "$ntmp/sub_grammar.json" && grep -q '"mode":"project"' "$ntmp/sub_project.json" && grep -q '"roundtrip_ast_equal":true' "$ntmp/sub_project.json" && grep -q '"code":"V0001"' "$ntmp/lsp_session.out" && grep -q '"diagnostics":\[\],"proofs":\[{"name":"step_up","kind":"contract","status":"proven"' "$ntmp/lsp_session.out" && grep -q 'Proof status: `proven`' "$ntmp/lsp_session.out" && grep -q "Content-Length:" "$ntmp/lsp_framed.out" && grep -q '"command":"stepBack","body":{"step":2,"replay":true}' "$ntmp/dap_session.out" && grep -q '"traceHistory":"1,2,3,2"' "$ntmp/dap_session.out" && grep -q '"command":"evaluate","body":{"result":"42"' "$ntmp/dap_session.out" && grep -q '"event":"terminated"' "$ntmp/dap_session.out" && grep -q "\[1\] defined" "$ntmp/repl_interactive.out" && grep -q "^42$" "$ntmp/repl_interactive.out" && grep -q "^error:" "$ntmp/repl_interactive.out" && grep -q "^17$" "$ntmp/repl_interactive.out" && grep -q '"msg_type":"kernel_info_reply"' "$ntmp/repl_kernel.out" && grep -q '"msg_type":"execute_reply","execution_count":2' "$ntmp/repl_kernel.out" && grep -q '"text/plain":"42"' "$ntmp/repl_kernel.out" && grep -q '"msg_type":"execute_reply","execution_count":3' "$ntmp/repl_kernel.out" && grep -q '"mime":"application/vnd.lume.table+json"' "$ntmp/repl_kernel.out" && grep -q '"msg_type":"shutdown_reply"' "$ntmp/repl_kernel.out" && grep -q '"gate":"llm-gen-eval"' "$ntmp/llm_gen_eval.json" && grep -q '"pass_at_1":3,"pass_at_2":4' "$ntmp/llm_gen_eval.json" && grep -q '"compiles_alone_rejected":true' "$ntmp/llm_gen_eval.json"; then ok "tooling, live stdio servers & LLM eval (#209, #210, #211, #230): live lume lsp/dap stdio servers, interactive lume repl & Jupyter kernel, and LLM-gen eval gate"; else bad "tooling, live stdio servers & LLM eval (#209, #210, #211, #230)"; cat "$ntmp/lsp_session.out" "$ntmp/lsp_framed.out" "$ntmp/dap_session.out" "$ntmp/repl_interactive.out" "$ntmp/repl_kernel.out" "$ntmp/llm_gen_eval.json" 2>/dev/null; fi
 
     # 6. Phase 3 Track S (#193) + K7: Real OS Multi-Process Parallelism (`sys_fork` + `sys_pipe` + `sys_wait4`) & Hardware Atomics (`lock xaddq`, spinlocks):
@@ -1601,7 +1604,10 @@ EOF
     printf '0000000000000000000000000000000000000000000000000000000000000000  bin/lume\n' >"$ntmp/inst/MANIFEST.sha256"
     _g0_bad=$(LUME_BIN_DIR="$ntmp" ../../lume self verify --prefix "$ntmp/inst" 2>/dev/null || true)
     mv "$ntmp/inst/MANIFEST.sha256.bak" "$ntmp/inst/MANIFEST.sha256"
-    _g1_lb=$(LUME_BIN_DIR="$ntmp" sh ../../scripts/check-llm-gen-eval.sh --leaderboard 2>/dev/null || true)
+    mkdir -p ../../build/bin
+    cp -f "$ntmp"/l* ../../build/bin/ 2>/dev/null || true
+    _g1_lb=$(printf '@root %s\n@mode leaderboard\n' "$(CDPATH= cd -- ../.. && pwd)" | "$ntmp/llm_gen_eval" 2>/dev/null || true)
+    rm -rf ../../build/llm-gen-eval ../../build/bin
     "$ntmp/lc" <../../examples/interop/sidecar/payment_core.src >"$ntmp/sc.s" 2>/dev/null
     "$ntmp/lasm" <"$ntmp/sc.s" >"$ntmp/sc.elf" 2>/dev/null; chmod +x "$ntmp/sc.elf"
     _g2_out=$("$ntmp/sc.elf" 2>/dev/null | tr '\n' ',' || true)
@@ -1903,7 +1909,7 @@ EOF
         if [ "$_mac_out" = "55,42," ] && [ "$_mac_trap_rc" -eq 3 ] && printf '%s' "$_mac_x64_file" | grep -q "Mach-O 64-bit executable x86_64" && [ "$_mac_wasm_out" = "55,42," ] && [ "$_mac_wasm_trap_rc" -eq 3 ]; then ok "phase-5 T2 (#206, #262): native Apple Silicon Mach-O 64 (aarch64-macos-macho), x86_64-macos-macho & wasm32-wasi execution on Darwin (55,42 & exit-3 trap)"; else bad "phase-5 T2 (#206, #262): Mach-O 64 execution (out='$_mac_out'/$_mac_trap_rc x64='$_mac_x64_file' wasm='$_mac_wasm_out'/$_mac_wasm_trap_rc)"; fi
     fi
 
-    # Issue #262: Network installer (docs/install.sh) clean-runner install, self-verify, and SHA-256 tamper rejection
+    # Issue #262: Network installer (docs/install.src) clean-runner install, self-verify, and SHA-256 tamper rejection
     _ni_d=$(mktemp -d)
     _ni_os=$(uname -s)
     _ni_arch=$(uname -m)
@@ -1928,13 +1934,14 @@ EOF
     else
         (cd "$_ni_d/dist" && shasum -a 256 "${_ni_pkg}.tar.gz" > SHA256SUMS)
     fi
-    _ni_pos_log=$(LUME_PREFIX="$_ni_d/clean" LUME_RELEASE_TAG="v0.2.0" LUME_RELEASE_BASE_URL="file://$_ni_d/dist" sh ../../docs/install.sh 2>&1 || true)
+    LUME_BIN_DIR="${ntmp:-}" ../../lume build ../../docs/install.src -o "$_ni_d/release_installer" >/dev/null 2>&1
+    _ni_pos_log=$(printf '@prefix %s\n@platform %s\n@tag v0.2.0\n@base file://%s\n' "$_ni_d/clean" "$_ni_plat_os-$_ni_plat_arch" "$_ni_d/dist" | "$_ni_d/release_installer" 2>&1 || true)
     _ni_ver=$("$_ni_d/clean/bin/lume" --version 2>/dev/null || true)
     _ni_sv=$("$_ni_d/clean/bin/lume" self verify 2>/dev/null || true)
     cp "$_ni_d/dist/${_ni_pkg}.tar.gz" "$_ni_d/tampered/"
     printf '0000000000000000000000000000000000000000000000000000000000000000  %s.tar.gz\n' "$_ni_pkg" > "$_ni_d/tampered/SHA256SUMS"
     _ni_bad_rc=0
-    _ni_bad_log=$(LUME_PREFIX="$_ni_d/bad" LUME_RELEASE_TAG="v0.2.0" LUME_RELEASE_BASE_URL="file://$_ni_d/tampered" sh ../../docs/install.sh 2>&1) || _ni_bad_rc=$?
+    _ni_bad_log=$(printf '@prefix %s\n@platform %s\n@tag v0.2.0\n@base file://%s\n' "$_ni_d/bad" "$_ni_plat_os-$_ni_plat_arch" "$_ni_d/tampered" | "$_ni_d/release_installer" 2>&1) || _ni_bad_rc=$?
     mkdir -p "$_ni_d/unverified" "$_ni_d/no-sha" "$_ni_d/no-tools"
     _ni_missing_rc=0
     _ni_missing_out=$(LUME_HOME="$_ni_d/unverified" ../../lume self verify 2>/dev/null) || _ni_missing_rc=$?
