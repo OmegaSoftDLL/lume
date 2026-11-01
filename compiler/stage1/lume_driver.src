@@ -64,6 +64,6 @@ fn ld_run(root, source) = let binary = root + "/build/lume-driver-run" in let bu
 
 fn ld_info(root) = if os_arg_count() != 2 then ctfail("usage: lume_driver --version|--help|describe|targets|build <source> -o <out>|run <source> [args]\n") else let command = os_arg_at(1) in if command == "--version" or command == "version" then ld_request(root, "lcli", "@cmd version\n") else if command == "--help" or command == "-h" or command == "help" then ld_request(root, "lcli", "@cmd help\n") else if command == "describe" or command == "--describe" then ld_request(root, "lcli", "@cmd describe\n") else if command == "targets" or command == "--targets" then ld_request(root, "ltarget", "@targets-json\n") else ctfail("unknown native driver command: " + command + "\n")
 
-fn ld_entry(root) = if os_arg_count() >= 2 and os_arg_at(1) == "build" then (if os_arg_count() != 5 or os_arg_at(3) != "-o" then ctfail("usage: lume_driver build <source> -o <out>\n") else os_exit(ld_build(root, os_arg_at(2), os_arg_at(4)))) else if os_arg_count() >= 3 and os_arg_at(1) == "run" then os_exit(ld_run(root, os_arg_at(2))) else print ld_info(root)
+fn ld_entry(root) = if os_arg_count() >= 2 and os_arg_at(1) == "build" then (if os_arg_count() != 5 or os_arg_at(3) != "-o" then ctfail("usage: lume_driver build <source> -o <out>\n") else os_exit(ld_build(root, os_arg_at(2), os_arg_at(4)))) else if os_arg_count() >= 3 and os_arg_at(1) == "run" then os_exit(ld_run(root, os_arg_at(2))) else ld_info(root)
 
-ld_entry(ld_root())
+print ld_entry(ld_root())
