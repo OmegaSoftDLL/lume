@@ -14,7 +14,45 @@ fn ld_contains_at(text, part, i) = if i + count(part) > count(text) then 0 else 
 
 fn ld_has_import(source) = let text = fs_read_file(source) in if slice(text, 0, 4) == "use " then 1 else ld_contains_at(text, "\nuse ", 0)
 
-fn ld_build(root, source, out) = if fs_path_exists(source) == 0 then ctfail("native build cannot read " + source + "\n") else if ld_has_import(source) == 1 then ctfail("native build module bundling is not migrated yet: " + source + "\n") else let assembly = out + ".s" in let compile_errors = out + ".compile.err" in let compiled = os_run_input_capture_timeout(ld_tool(root, "lumec"), Nil, source, assembly, compile_errors, 120000) in if compiled != 0 then ctfail("native build compiler failed:\n" + fs_read_file(compile_errors)) else let assemble_errors = out + ".assemble.err" in let assembled = os_run_input_capture_timeout(ld_tool(root, "lasm"), Nil, assembly, out, assemble_errors, 120000) in if assembled != 0 then ctfail("native build assembler failed:\n" + fs_read_file(assemble_errors)) else os_run("/bin/chmod", Cons("+x", Cons(out, Nil)))
+fn ld_ltrim(s, i) = if i >= count(s) then "" else if at(s, i) == " " or at(s, i) == "\t" or at(s, i) == "\r" then ld_ltrim(s, i + 1) else slice(s, i, count(s))
+
+fn ld_rtrim(s) = if count(s) == 0 then "" else if at(s, count(s) - 1) == " " or at(s, count(s) - 1) == "\t" or at(s, count(s) - 1) == "\r" or at(s, count(s) - 1) == "\n" then ld_rtrim(slice(s, 0, count(s) - 1)) else s
+
+fn ld_trim(s) = ld_rtrim(ld_ltrim(s, 0))
+
+fn ld_line_end(s, i) = if i >= count(s) or at(s, i) == "\n" then i else ld_line_end(s, i + 1)
+
+fn ld_lines(s, i) = if i >= count(s) then Nil else let e = ld_line_end(s, i) in Cons(slice(s, i, e), ld_lines(s, e + 1))
+
+fn ld_starts(s, prefix) = if count(s) < count(prefix) then 0 else slice(s, 0, count(prefix)) == prefix
+
+fn ld_delim(s, i) = if i >= count(s) then i else if at(s, i) == " " or at(s, i) == "\t" or at(s, i) == "(" then i else ld_delim(s, i + 1)
+
+fn ld_import_line(line) = let tr = ld_trim(line) in if ld_starts(tr, "use ") == 0 then "" else let raw = ld_trim(slice(tr, 4, count(tr))) in let no_std = if ld_starts(raw, "std.") == 1 then slice(raw, 4, count(raw)) else raw in slice(no_std, 0, ld_delim(no_std, 0))
+
+fn ld_imports(path) = ld_import_lines(ld_lines(fs_read_file(path), 0))
+
+fn ld_import_lines(lines) = match lines
+    Nil => Nil
+    Cons(h, t) => let name = ld_import_line(h) in if name == "" then ld_import_lines(t) else Cons(name, ld_import_lines(t))
+
+fn ld_member(names, name) = match names
+    Nil => 0
+    Cons(h, t) => if h == name then 1 else ld_member(t, name)
+
+fn ld_find_module(root, dir, name) = let local = dir + "/" + name + ".src" in let nested = dir + "/src/" + name + ".src" in let dependency = dir + "/deps/" + name + ".src" in let shared = root + "/compiler/stage1/" + name + ".src" in if fs_path_exists(local) == 1 then local else if fs_path_exists(nested) == 1 then nested else if fs_path_exists(dependency) == 1 then dependency else if fs_path_exists(shared) == 1 then shared else ctfail("native bundling cannot resolve module: " + name + "\n")
+
+fn ld_append(out, text) = if fs_append_sync(out, text) == 1 then 1 else ctfail("native bundling cannot append request: " + out + "\n")
+
+fn ld_collect(root, dir, out, names, seen) = match names
+    Nil => seen
+    Cons(h, t) => if ld_member(seen, h) == 1 then ld_collect(root, dir, out, t, seen) else let path = ld_find_module(root, dir, h) in let written = ld_append(out, "@module " + h + "\n" + fs_read_file(path) + "\n@end\n") in let next_seen = ld_collect(root, dir, out, ld_imports(path), Cons(h, seen)) in ld_collect(root, dir, out, t, next_seen)
+
+fn ld_entry_name(source) = let base = ld_base(source) in if count(base) > 4 and slice(base, count(base) - 4, count(base)) == ".src" then slice(base, 0, count(base) - 4) else base
+
+fn ld_bundle(root, source, out) = let bundled = out + ".bundled.src" in if ld_has_import(source) == 0 then let written = fs_write_sync(bundled, fs_read_file(source)) in if written != 1 then ctfail("native bundling cannot copy source\n") else bundled else let request = out + ".bundle.in" in let started = fs_write_sync(request, "@grant io\n") in if started != 1 then ctfail("native bundling cannot initialize request\n") else let dir = ld_dir(source) in let collected = ld_collect(root, dir, request, ld_imports(source), Cons(ld_entry_name(source), Nil)) in let entry = ld_append(request, "@entry " + ld_entry_name(source) + "\n" + fs_read_file(source) + "\n@end\n") in let errors = out + ".bundle.err" in let status = os_run_input_capture_timeout(ld_tool(root, "lmod"), Nil, request, bundled, errors, 120000) in if status != 0 then ctfail("native bundling failed:\n" + fs_read_file(errors)) else bundled
+
+fn ld_build(root, source, out) = if fs_path_exists(source) == 0 then ctfail("native build cannot read " + source + "\n") else let bundled = ld_bundle(root, source, out) in let assembly = out + ".s" in let compile_errors = out + ".compile.err" in let compiled = os_run_input_capture_timeout(ld_tool(root, "lumec"), Nil, bundled, assembly, compile_errors, 120000) in if compiled != 0 then ctfail("native build compiler failed:\n" + fs_read_file(compile_errors)) else let assemble_errors = out + ".assemble.err" in let assembled = os_run_input_capture_timeout(ld_tool(root, "lasm"), Nil, assembly, out, assemble_errors, 120000) in if assembled != 0 then ctfail("native build assembler failed:\n" + fs_read_file(assemble_errors)) else os_run("/bin/chmod", Cons("+x", Cons(out, Nil)))
 
 fn ld_args_from(i) = if i >= os_arg_count() then Nil else Cons(os_arg_at(i), ld_args_from(i + 1))
 
