@@ -6,7 +6,7 @@ fn mm_base(path) = let slash = mm_rfind_slash(path, count(path) - 1) in slice(pa
 
 fn mm_root() = let bin = mm_dir(os_arg_at(0)) in let parent = mm_dir(bin) in if mm_base(parent) == "build" then let root = mm_dir(parent) in if root == "" then "." else root else parent
 
-fn mm_build(root, source, out) = let log = root + "/build/lume-make-build.out" in let errors = root + "/build/lume-make-build.err" in let status = os_run_capture_timeout(root + "/build/bin/lume_driver", Cons("build", Cons(source, Cons("-o", Cons(out, Nil)))), log, errors, 900000) in if status != 0 then ctfail("native build orchestrator failed to build " + source + ":\n" + fs_read_file(errors)) else 0
+fn mm_build(root, source, out) = let log = root + "/build/lume-make-build.out" in let errors = root + "/build/lume-make-build.err" in let status = os_run_capture_timeout(root + "/build/bin/lume_driver", Cons("build", Cons(source, Cons("-o", Cons(out, Nil)))), log, errors, 900000) in if status != 0 then ctfail("native build orchestrator failed to build " + source + " with native status " + str(status) + ":\nstdout:\n" + fs_read_file(log) + "\nstderr:\n" + fs_read_file(errors)) else 0
 
 fn mm_run(root, path, name) = let input = root + "/build/lume-make-" + name + ".in" in let output = root + "/build/lume-make-" + name + ".out" in let errors = root + "/build/lume-make-" + name + ".err" in let written = fs_write_sync(input, "@root " + root + "\n") in if written != 1 then ctfail("native build orchestrator cannot write root request\n") else let status = os_run_input_capture_timeout(path, Nil, input, output, errors, 900000) in if status != 0 then ctfail("native build orchestrator command failed: " + name + "\n" + fs_read_file(output) + fs_read_file(errors)) else fs_read_file(output)
 
