@@ -111,6 +111,23 @@ jobs:
       - name: Execute Lume-generated assembly acceptance
         run: printf '@root %s\n' "$PWD" | build/bin/lasm_gate
 
+  native-capstones:
+    name: Native SaaS and RTC capstones (Lume only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install QEMU
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends qemu-system-x86
+      - name: Build seed
+        run: make -C bootstrap/lume0
+      - name: Build native assembler
+        run: ./lume build compiler/stage1/lasm.src -o build/bin/lasm.capstone && mv build/bin/lasm.capstone build/bin/lasm
+      - name: Build native analysis oracle from this revision
+        run: ./lume build compiler/stage1/lcaas.src -o build/bin/lcaas.capstone && mv build/bin/lcaas.capstone build/bin/lcaas
+      - name: Execute native SaaS and two-clock RTC acceptance
+        run: printf '@root %s\n@bin %s\n' "$PWD" "$PWD/build/bin" | ./lume run tests/capstones/gate.src
+
   economic-benchmark:
     name: Economic benchmark real-execution protocol (#337)
     runs-on: ubuntu-latest

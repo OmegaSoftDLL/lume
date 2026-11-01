@@ -15,3 +15,11 @@ fn test_os_run_capture_timeout_kills_slow_process() = let status = os_run_captur
 fn test_os_run_input_capture_timeout_reads_stdin_file() = let written = fs_write_sync("os_run_input_data", "native-stdin\n") in let status = os_run_input_capture_timeout(fs_read_file("os_run_input_probe_path"), Nil, "os_run_input_data", "os_run_input_stdout", "os_run_input_stderr", 1000) in status == 0 and os_last_timed_out() == 0 and fs_read_file("os_run_input_stdout") == "native-stdin\n" and fs_read_file("os_run_input_stderr") == ""
 
 fn test_os_run_input_capture_timeout_rejects_missing_input() = let status = os_run_input_capture_timeout(fs_read_file("os_run_input_probe_path"), Nil, "os_run_input_missing", "os_run_input_missing_stdout", "os_run_input_missing_stderr", 1000) in status != 0 and os_last_timed_out() == 0
+
+fn test_os_exec_replaces_child_process() = let pid = os_fork() in if pid < 0 then 0 else if pid == 0 then let status = os_exec(fs_read_file("os_run_probe_path"), Cons("--native-lume-argument", Nil)) in os_exit(127) else os_waitpid_status(pid) == 0
+
+fn test_os_exec_missing_tool_returns_error() = let pid = os_fork() in if pid < 0 then 0 else if pid == 0 then let status = os_exec("/definitely/missing-lume-tool", Nil) in os_exit(if status < 0 then 97 else 0) else os_waitpid_status(pid) == 24832
+
+fn test_os_kill_and_waitpid_status_report_sigterm() = let pid = os_fork() in if pid < 0 then 0 else if pid == 0 then let slept = os_sleep_ms(60000) in os_exit(0) else let paused = os_sleep_ms(10) in let killed = os_kill(pid, 15) in killed == 0 and os_waitpid_status(pid) == 15
+
+fn test_os_kill_rejects_invalid_pid() = os_kill(0 - 999999, 15) < 0
