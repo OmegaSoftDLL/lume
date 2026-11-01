@@ -10,11 +10,11 @@ fn mm_build(root, source, out) = let log = root + "/build/lume-make-build.out" i
 
 fn mm_run(root, path, name) = let input = root + "/build/lume-make-" + name + ".in" in let output = root + "/build/lume-make-" + name + ".out" in let errors = root + "/build/lume-make-" + name + ".err" in let written = fs_write_sync(input, "@root " + root + "\n") in if written != 1 then ctfail("native build orchestrator cannot write root request\n") else let status = os_run_input_capture_timeout(path, Nil, input, output, errors, 900000) in if status != 0 then ctfail("native build orchestrator command failed: " + name + "\n" + fs_read_file(output) + fs_read_file(errors)) else fs_read_file(output)
 
-fn mm_amalgamate(root) = let built = mm_build(root, root + "/scripts/amalgamate.src", root + "/build/bin/amalgamate") in print mm_run(root, root + "/build/bin/amalgamate", "amalgamate")
+fn mm_amalgamate(root) = let built = mm_build(root, root + "/scripts/amalgamate.src", root + "/build/bin/amalgamate") in mm_run(root, root + "/build/bin/amalgamate", "amalgamate")
 
-fn mm_bootstrap(root) = let amalgamated = mm_amalgamate(root) in let built = mm_build(root, root + "/scripts/bootstrap.src", root + "/build/bootstrap_runner") in print mm_run(root, root + "/build/bootstrap_runner", "bootstrap")
+fn mm_bootstrap(root) = let amalgamated = mm_amalgamate(root) in let built = mm_build(root, root + "/scripts/bootstrap.src", root + "/build/bootstrap_runner") in mm_run(root, root + "/build/bootstrap_runner", "bootstrap")
 
-fn mm_zero_c(root) = let amalgamated = mm_amalgamate(root) in let built = mm_build(root, root + "/scripts/zero_c.src", root + "/build/zero_c_gate") in print mm_run(root, root + "/build/zero_c_gate", "zero-c")
+fn mm_zero_c(root) = let amalgamated = mm_amalgamate(root) in let built = mm_build(root, root + "/scripts/zero_c.src", root + "/build/zero_c_gate") in mm_run(root, root + "/build/zero_c_gate", "zero-c")
 
 fn mm_seed_sources(root) = root + "/bootstrap/lume0/main.c " + root + "/bootstrap/lume0/lexer.c " + root + "/bootstrap/lume0/diag.c " + root + "/bootstrap/lume0/ast.c " + root + "/bootstrap/lume0/parser.c " + root + "/bootstrap/lume0/value.c " + root + "/bootstrap/lume0/interp.c " + root + "/bootstrap/lume0/lbe.c " + root + "/bootstrap/lume0/asmgen.c " + root + "/bootstrap/lume0/elf.c " + root + "/bootstrap/lume0/resolve.c"
 
@@ -24,4 +24,4 @@ fn mm_clean(root) = let output = root + "/build/lume-clean.out" in let errors = 
 
 fn mm_entry(root) = if os_arg_count() != 2 then ctfail("usage: lume_make amalgamate|bootstrap|zero-c|seed|clean\n") else let command = os_arg_at(1) in if command == "amalgamate" then mm_amalgamate(root) else if command == "bootstrap" then mm_bootstrap(root) else if command == "zero-c" then mm_zero_c(root) else if command == "seed" then mm_seed(root) else if command == "clean" then mm_clean(root) else ctfail("unsupported native build command: " + command + "\n")
 
-mm_entry(mm_root())
+print mm_entry(mm_root())

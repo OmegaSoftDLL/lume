@@ -99,9 +99,6 @@ jobs:
         run: printf '@root %s\n' "$PWD" | build/bin/native_driver_gate
       - name: Verify native amalgamation in Lume
         run: printf '@root %s\n' "$PWD" | build/bin/native_make_gate
-      - name: Inspect native orchestrator crash on failure
-        if: failure()
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gdb && gdb -batch -ex 'set pagination off' -ex run -ex bt --args build/bin/lume_make amalgamate
 
   native-assembly:
     name: Native assembler fixtures (Lume only)
