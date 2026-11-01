@@ -95,20 +95,8 @@ jobs:
         run: make -C bootstrap/lume0
       - name: Build native driver and Lume tools
         run: ./lume build compiler/stage1/lcli.src -o build/bin/lcli && ./lume build compiler/stage1/lmod.src -o build/bin/lmod && ./lume build compiler/stage1/ltarget.src -o build/bin/ltarget && ./lume build compiler/stage1/lume_driver.src -o build/bin/lume_driver && ./lume build tests/cli/driver_gate.src -o build/bin/native_driver_gate
-      - name: Locate native driver startup failure
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gdb && gdb -q -batch -ex run -ex 'x/12i $pc-24' -ex 'info registers' -ex bt -ex 'set $caller = *(unsigned long*)$rsp' -ex 'x/40i $caller-100' --args build/bin/lume_driver --version
       - name: Execute native driver acceptance in Lume
         run: printf '@root %s\n' "$PWD" | build/bin/native_driver_gate
-      - name: Preserve exact native driver assembly on failure
-        if: failure()
-        run: ./lume compile compiler/stage1/lume_driver.src > build/lume_driver.s
-      - name: Upload native driver assembly
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: native-driver-assembly-${{ github.run_id }}
-          path: build/lume_driver.s
-          retention-days: 3
 
   native-assembly:
     name: Native assembler fixtures (Lume only)

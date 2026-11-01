@@ -66,6 +66,4 @@ fn ld_info(root) = if os_arg_count() != 2 then ctfail("usage: lume_driver --vers
 
 fn ld_entry(root) = if os_arg_count() >= 2 and os_arg_at(1) == "build" then (if os_arg_count() != 5 or os_arg_at(3) != "-o" then ctfail("usage: lume_driver build <source> -o <out>\n") else os_exit(ld_build(root, os_arg_at(2), os_arg_at(4)))) else if os_arg_count() >= 3 and os_arg_at(1) == "run" then os_exit(ld_run(root, os_arg_at(2))) else print ld_info(root)
 
-fn ld_diagnose() = let argc = print os_arg_count() in let argv0 = print os_arg_at(0) in let argv1 = print os_arg_at(1) in let bin = print ld_dir(os_arg_at(0)) in let root = print ld_root() in ld_entry(ld_root())
-
-ld_diagnose()
+ld_entry(ld_root())
