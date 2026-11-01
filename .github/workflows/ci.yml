@@ -99,6 +99,16 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gdb && printf '@cmd help\n' > build/lcli-help.in && gdb -q -batch -ex 'run < build/lcli-help.in' -ex 'x/12i $pc-24' -ex 'info registers' -ex bt --args build/bin/lcli
       - name: Execute native driver acceptance in Lume
         run: printf '@root %s\n' "$PWD" | build/bin/native_driver_gate
+      - name: Preserve native CLI assembly on failure
+        if: failure()
+        run: ./lume compile compiler/stage1/lcli.src > build/lcli.s
+      - name: Upload native CLI assembly
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-cli-assembly-${{ github.run_id }}
+          path: build/lcli.s
+          retention-days: 3
 
   native-assembly:
     name: Native assembler fixtures (Lume only)
