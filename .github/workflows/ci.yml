@@ -78,6 +78,8 @@ jobs:
         run: printf '%s' "$PWD/build/bin/os_run_probe" > os_run_probe_path && printf '%s' "$PWD/build/bin/os_run_slow_probe" > os_run_slow_probe_path && printf '%s' "$PWD/build/bin/os_run_input_probe" > os_run_input_probe_path && ./lume run compiler/stage1/os_run_trace.src && ./lume test compiler/stage1/os_run_ok.src && ./lume test compiler/stage1/os_argv_ok.src
       - name: Verify exact native argc/argv behavior
         run: ./lume build compiler/stage1/os_argv_probe.src -o build/bin/os_argv_probe && test "$(build/bin/os_argv_probe alpha 'with space' '')" = "argv:ok"
+      - name: Verify native installer build and execution (#196/#337)
+        run: ./lume test scripts/install.src && ./lume build scripts/install.src -o build/bin/native_installer && tmp=$(mktemp -d) && printf '@prefix %s\n@from-local %s\n@from-dir %s\n' "$tmp/inst" "$PWD" "$PWD/build/bin" | build/bin/native_installer && ./lume self verify --prefix "$tmp/inst" | grep -q '"manifest_verified":true' && rm -rf "$tmp"
       - name: Verify native release installer build and unit tests (#262/#337)
         run: ./lume test docs/install.src && ./lume build docs/install.src -o build/bin/release_installer
 
@@ -260,7 +262,8 @@ jobs:
           pkg="lume-v0.2.0-windows-x86_64"
           mkdir -p "$tmp/win-bin" "$tmp/stage" "$tmp/dist" "$tmp/tampered"
           cp bootstrap/lume0/lume0.exe "$tmp/win-bin/lume0.exe"
-          sh scripts/install.sh --prefix "$tmp/stage/$pkg" --from-local "$PWD" --from-dir "$tmp/win-bin"
+          ./lume build scripts/install.src -o build/native_installer
+          printf '@prefix %s\n@from-local %s\n@from-dir %s\n' "$tmp/stage/$pkg" "$PWD" "$tmp/win-bin" | build/native_installer
           tar -C "$tmp/stage" -czf "$tmp/dist/${pkg}.tar.gz" "$pkg"
           (cd "$tmp/dist" && sha256sum "${pkg}.tar.gz" > SHA256SUMS)
           wdist=$(cd "$tmp/dist" && pwd -W)
