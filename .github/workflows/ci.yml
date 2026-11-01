@@ -109,7 +109,7 @@ jobs:
       - name: Build seed
         run: make -C bootstrap/lume0
       - name: Build native assembler
-        run: ./lume build compiler/stage1/lasm.src -o build/bin/lasm
+        run: ./lume build compiler/stage1/lasm.src -o build/bin/lasm.capstone && mv build/bin/lasm.capstone build/bin/lasm
       - name: Execute native SaaS and two-clock RTC acceptance
         run: printf '@root %s\n@bin %s\n' "$PWD" "$PWD/build/bin" | ./lume run tests/capstones/gate.src
 
