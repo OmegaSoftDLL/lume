@@ -10,7 +10,8 @@ capability isn't listed as working, it isn't ready yet (see the honest boundary 
 
 **From a release / local checkout — the self-hosted toolchain:**
 ```sh
-sh scripts/install.sh --prefix "$HOME/.lume"      # writes MANIFEST.sha256 over every binary + module
+./lume build scripts/install.src -o build/bin/native_installer
+printf '@prefix %s\n@from-local %s\n' "$HOME/.lume" "$PWD" | build/bin/native_installer
 export PATH="$HOME/.lume/bin:$PATH"
 lume self verify                                  # {"ok":true,...,"manifest_verified":true}
 ```
