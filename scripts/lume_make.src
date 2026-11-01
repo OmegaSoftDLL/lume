@@ -1,0 +1,27 @@
+fn mm_rfind_slash(path, i) = if i < 0 then 0 - 1 else if at(path, i) == "/" then i else mm_rfind_slash(path, i - 1)
+
+fn mm_dir(path) = let slash = mm_rfind_slash(path, count(path) - 1) in if slash < 0 then "" else if slash == 0 then "/" else slice(path, 0, slash)
+
+fn mm_base(path) = let slash = mm_rfind_slash(path, count(path) - 1) in slice(path, slash + 1, count(path))
+
+fn mm_root() = let bin = mm_dir(os_arg_at(0)) in let parent = mm_dir(bin) in if mm_base(parent) == "build" then let root = mm_dir(parent) in if root == "" then "." else root else parent
+
+fn mm_build(root, source, out) = let log = root + "/build/lume-make-build.out" in let errors = root + "/build/lume-make-build.err" in let status = os_run_capture_timeout(root + "/build/bin/lume_driver", Cons("build", Cons(source, Cons("-o", Cons(out, Nil)))), log, errors, 900000) in if status != 0 then ctfail("native build orchestrator failed to build " + source + " with native status " + str(status) + ":\nstdout:\n" + fs_read_file(log) + "\nstderr:\n" + fs_read_file(errors)) else 0
+
+fn mm_run(root, path, name) = let input = root + "/build/lume-make-" + name + ".in" in let output = root + "/build/lume-make-" + name + ".out" in let errors = root + "/build/lume-make-" + name + ".err" in let written = fs_write_sync(input, "@root " + root + "\n") in if written != 1 then ctfail("native build orchestrator cannot write root request\n") else let status = os_run_input_capture_timeout(path, Nil, input, output, errors, 900000) in if status != 0 then ctfail("native build orchestrator command failed: " + name + "\n" + fs_read_file(output) + fs_read_file(errors)) else fs_read_file(output)
+
+fn mm_amalgamate(root) = let built = mm_build(root, root + "/scripts/amalgamate.src", root + "/build/bin/amalgamate") in mm_run(root, root + "/build/bin/amalgamate", "amalgamate")
+
+fn mm_bootstrap(root) = let amalgamated = mm_amalgamate(root) in let built = mm_build(root, root + "/scripts/bootstrap.src", root + "/build/bootstrap_runner") in mm_run(root, root + "/build/bootstrap_runner", "bootstrap")
+
+fn mm_zero_c(root) = let amalgamated = mm_amalgamate(root) in let built = mm_build(root, root + "/scripts/zero_c.src", root + "/build/zero_c_gate") in mm_run(root, root + "/build/zero_c_gate", "zero-c")
+
+fn mm_seed_sources(root) = root + "/bootstrap/lume0/main.c " + root + "/bootstrap/lume0/lexer.c " + root + "/bootstrap/lume0/diag.c " + root + "/bootstrap/lume0/ast.c " + root + "/bootstrap/lume0/parser.c " + root + "/bootstrap/lume0/value.c " + root + "/bootstrap/lume0/interp.c " + root + "/bootstrap/lume0/lbe.c " + root + "/bootstrap/lume0/asmgen.c " + root + "/bootstrap/lume0/elf.c " + root + "/bootstrap/lume0/resolve.c"
+
+fn mm_seed(root) = let response = root + "/build/lume-seed.rsp" in let output = root + "/build/lume-seed.out" in let errors = root + "/build/lume-seed.err" in let flags = "-std=c11 -O2 -Wall -Wextra -Wpedantic -Werror -Wshadow -Wconversion -Wno-sign-conversion " in let output_flag = "-o " + root + "/bootstrap/lume0/lume0 " in let written = fs_write_sync(response, flags + output_flag + mm_seed_sources(root) + " -lm\n") in if written != 1 then ctfail("native seed build cannot write compiler response file\n") else let status = os_run_capture_timeout("/usr/bin/cc", Cons("@" + response, Nil), output, errors, 120000) in if status != 0 then ctfail("native seed build failed:\n" + fs_read_file(output) + fs_read_file(errors)) else "frozen seed built"
+
+fn mm_clean(root) = let output = root + "/build/lume-clean.out" in let errors = root + "/build/lume-clean.err" in let status = os_run_capture_timeout("/bin/rm", Cons("-rf", Cons(root + "/build", Cons(root + "/bootstrap/lume0/lume0", Nil))), output, errors, 120000) in if status != 0 then ctfail("native clean failed:\n" + fs_read_file(output) + fs_read_file(errors)) else "build artifacts removed"
+
+fn mm_entry(root) = if os_arg_count() != 2 then ctfail("usage: lume_make amalgamate|bootstrap|zero-c|seed|clean\n") else let command = os_arg_at(1) in if command == "amalgamate" then mm_amalgamate(root) else if command == "bootstrap" then mm_bootstrap(root) else if command == "zero-c" then mm_zero_c(root) else if command == "seed" then mm_seed(root) else if command == "clean" then mm_clean(root) else ctfail("unsupported native build command: " + command + "\n")
+
+print mm_entry(mm_root())
