@@ -1,0 +1,28 @@
+use lasm_fixtures
+
+fn la_run(path, args, out) = os_run_capture_timeout(path, args, out, out + ".err", 120000)
+fn la_input(path, input, out) = os_run_input_capture_timeout(path, Nil, input, out, out + ".err", 120000)
+fn la_lume(root, args, out) = la_run(root + "/lume", args, out)
+fn la_seed(root) = root + "/bootstrap/lume0/lume0"
+fn la_chmod(path) = la_run("/bin/chmod", Cons("+x", Cons(path, Nil)), path + ".chmod.out")
+
+fn la_prepare(root, tmp) = let parent = fs_mkdir(root + "/build") in if parent != 1 then "cannot create assembly gate parent" else let removed = la_run("/bin/rm", Cons("-rf", Cons(tmp, Nil)), tmp + ".rm.out") in if removed != 0 then "cannot reset assembly gate directory" else let made = la_run("/bin/mkdir", Cons("-p", Cons(tmp, Nil)), tmp + ".mkdir.out") in if made != 0 then "cannot create assembly gate directory" else let built = la_lume(root, Cons("build", Cons(root + "/compiler/stage1/lasm.src", Cons("-o", Cons(tmp + "/lasm", Nil)))), tmp + "/lasm-build.out") in if built != 0 then "cannot build native lasm: " + fs_read_file(tmp + "/lasm-build.out.err") else ""
+
+fn la_execute(path, expected, out) = let status = la_run(path, Nil, out) in if status != 0 then "native executable failed with status " + str(status) + ": " + fs_read_file(out + ".err") else if fs_read_file(out) != expected then "native executable output mismatch: " + fs_read_file(out) else ""
+
+fn la_hello(root, tmp) = let source = lf_write(tmp, "elf_hello") in if source != 1 then "cannot generate ELF hello fixture" else let binary = tmp + "/elf_hello" in let assembled = la_run(la_seed(root), Cons("asm", Cons(tmp + "/elf_hello.s", Cons(binary, Nil))), tmp + "/elf-hello-asm.out") in if assembled != 0 then "seed assembler rejected ELF hello" else let executable = la_chmod(binary) in if executable != 0 then "cannot mark ELF hello executable" else la_execute(binary, "lume native elf\n", tmp + "/elf-hello-run.out")
+
+fn la_collisions(root, tmp) = let source = lf_write(tmp, "symbol_collisions") in if source != 1 then "cannot generate symbol collision fixture" else let native = tmp + "/collisions-native" in let seed = tmp + "/collisions-seed" in let assembled = la_input(tmp + "/lasm", tmp + "/symbol_collisions.s", native) in if assembled != 0 then "native lasm rejected symbol collisions" else let oracle = la_run(la_seed(root), Cons("asm", Cons(tmp + "/symbol_collisions.s", Cons(seed, Nil))), tmp + "/collisions-seed.out") in if oracle != 0 then "seed assembler rejected symbol collisions" else if fs_files_equal(native, seed) != 1 then "native and seed ELFs differ for symbol collisions" else let executable = la_chmod(native) in if executable != 0 then "cannot mark collision ELF executable" else la_execute(native, "", tmp + "/collisions-run.out")
+
+fn la_local_labels(root, tmp) = let source = lf_write(tmp, "local_labels") in if source != 1 then "cannot generate local label fixture" else let native = tmp + "/local-native" in let seed = tmp + "/local-seed" in let assembled = la_input(tmp + "/lasm", tmp + "/local_labels.s", native) in if assembled != 0 then "native lasm rejected local labels" else let oracle = la_run(la_seed(root), Cons("asm", Cons(tmp + "/local_labels.s", Cons(seed, Nil))), tmp + "/local-seed.out") in if oracle != 0 then "seed assembler rejected local labels" else let native_executable = la_chmod(native) in let seed_executable = la_chmod(seed) in if native_executable != 0 or seed_executable != 0 then "cannot mark local label ELFs executable" else let correct = la_execute(native, "ok\n", tmp + "/local-native-run.out") in if correct != "" then correct else let wrong = la_run(seed, Nil, tmp + "/local-seed-run.out") in if wrong == 0 and fs_read_file(tmp + "/local-seed-run.out") == "ok\n" then "seed unexpectedly resolved reused local labels correctly" else ""
+
+fn la_movabs(root, tmp) = let source = lf_write(tmp, "movabs_boundaries") in if source != 1 then "cannot generate movabs boundary fixture" else let native = tmp + "/movabs-native" in let seed = tmp + "/movabs-seed" in let assembled = la_input(tmp + "/lasm", tmp + "/movabs_boundaries.s", native) in if assembled != 0 then "native lasm rejected movabs boundaries" else let oracle = la_run(la_seed(root), Cons("asm", Cons(tmp + "/movabs_boundaries.s", Cons(seed, Nil))), tmp + "/movabs-seed.out") in if oracle != 0 then "seed assembler rejected movabs boundaries" else if fs_files_equal(native, seed) != 1 then "native and seed ELFs differ for movabs boundaries" else ""
+
+fn la_line_end(text, i) = if i >= count(text) or at(text, i) == "\n" then i else la_line_end(text, i + 1)
+fn la_root(input) = if count(input) < 6 or slice(input, 0, 6) != "@root " then "" else slice(input, 6, la_line_end(input, 0))
+
+fn la_main(root) = if lf_self_test() == 0 then "assembly fixture integrity check failed" else let tmp = root + "/build/lasm-gate" in let prepared = la_prepare(root, tmp) in if prepared != "" then prepared else let hello = la_hello(root, tmp) in if hello != "" then hello else let collisions = la_collisions(root, tmp) in if collisions != "" then collisions else let locals = la_local_labels(root, tmp) in if locals != "" then locals else la_movabs(root, tmp)
+
+fn la_dispatch(input) = let root = la_root(input) in if root == "" then ctfail("native assembly gate requires @root\n") else let problem = la_main(root) in if problem != "" then ctfail("native assembly gate failed: " + problem + "\n") else "native Lume-generated assembly fixtures passed execution, ELF identity, collisions, and local-label checks"
+
+print la_dispatch(readall())

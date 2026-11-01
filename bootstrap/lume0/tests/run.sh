@@ -152,8 +152,6 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && command -v as 
     if as -o "$atmp/rl.o" "$atmp/rl.s" 2>/dev/null && ld -o "$atmp/rlb" "$atmp/rl.o" 2>/dev/null && "$atmp/rlb" 2>/dev/null | diff -u ../../tests/conformance/stage1/reclist_asm.expected - >/dev/null; then ok "ML-core native: records + lists -> x86-64, no C"; else bad "ML-core native: records + lists, no C"; fi
     $BIN run ../../compiler/stage1/data_asm_cc.lume ../../compiler/stage1/calc.src "$atmp/ca.s" >/dev/null 2>&1
     if as -o "$atmp/ca.o" "$atmp/ca.s" 2>/dev/null && ld -o "$atmp/cab" "$atmp/ca.o" 2>/dev/null && "$atmp/cab" 2>/dev/null | diff -u ../../tests/conformance/stage1/calc_asm.expected - >/dev/null; then ok "FULL core compiler (calc.src) -> x86-64 native, NO C"; else bad "FULL core compiler -> native, no C"; fi
-    $BIN asm ../../compiler/stage1/elf_hello.s "$atmp/eh" >/dev/null 2>&1
-    if "$atmp/eh" 2>/dev/null | diff -u ../../tests/conformance/stage1/elf_hello.expected - >/dev/null; then ok "lume0 asm: x86-64 -> static ELF -> runs, no as/ld/cc"; else bad "lume0 asm: x86-64 -> static ELF, no as/ld/cc"; fi
     rm -rf "$atmp"
 else
     skip "x86-64 asm backend (not linux/x86_64 or no as/ld)"
@@ -249,7 +247,6 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_
     if "$ntmp/lc" <"$ntmp/fx.src" >"$ntmp/gen1.s" 2>/dev/null && $BIN asm "$ntmp/gen1.s" "$ntmp/lc2" >/dev/null 2>&1 && "$ntmp/lc2" <"$ntmp/fx.src" >"$ntmp/gen2.s" 2>/dev/null && [ -s "$ntmp/gen1.s" ] && cmp -s "$ntmp/gen1.s" "$ntmp/gen2.s"; then ok "self-host fixpoint (verbatim): lumec -> lumec2 recompiles its own source bit-identically"; else bad "self-host fixpoint (verbatim): lumec -> lumec2 recompiles its own source bit-identically"; fi
     # self-host asm: lasm (an x86-64 assembler + ELF64 writer written in Lume-Core) reads a .s on stdin and emits a runnable ELF to stdout -- no C, no as/ld. lumec compiles lasm to native; lasm then assembles the .s lumec emits for nfib, and the resulting ELF must print the expected output.
     if "$ntmp/lc" <../../compiler/stage1/lasm.src >"$ntmp/lasm.s" 2>/dev/null && $BIN asm "$ntmp/lasm.s" "$ntmp/lasm" >/dev/null 2>&1 && "$ntmp/lc" <../../compiler/stage1/nfib.src >"$ntmp/nfib_for_lasm.s" 2>/dev/null && "$ntmp/lasm" <"$ntmp/nfib_for_lasm.s" >"$ntmp/nfib_lasm.elf" 2>/dev/null && chmod +x "$ntmp/nfib_lasm.elf" && "$ntmp/nfib_lasm.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/nfib_asm.expected - >/dev/null; then ok "self-host asm: lasm (Lume assembler) assembles nfib to a running ELF"; else bad "self-host asm: lasm (Lume assembler) assembles nfib to a running ELF"; fi
-    if "$ntmp/lasm" <../../tests/conformance/stage1/lasm_symbol_collisions.s >"$ntmp/sc_l.elf" 2>/dev/null && $BIN asm ../../tests/conformance/stage1/lasm_symbol_collisions.s "$ntmp/sc_o.elf" >/dev/null 2>&1 && [ -s "$ntmp/sc_o.elf" ] && cmp -s "$ntmp/sc_l.elf" "$ntmp/sc_o.elf" && chmod +x "$ntmp/sc_l.elf" && "$ntmp/sc_l.elf"; then ok "self-host asm: hash-bucket symbol lookup preserves colliding labels and ELF bytes"; else bad "self-host asm: hash-bucket symbol lookup preserves colliding labels and ELF bytes"; fi
     # movabs: lumec emits `movq $imm, %reg` with imm64 literals (bigints.src); lasm must encode those as REX.W B8+r imm64 (10 bytes) like the oracle, not truncate them to imm32.
     if "$ntmp/lc" <../../compiler/stage1/bigints.src >"$ntmp/bi_for_lasm.s" 2>/dev/null && "$ntmp/lasm" <"$ntmp/bi_for_lasm.s" >"$ntmp/bi_lasm.elf" 2>/dev/null && chmod +x "$ntmp/bi_lasm.elf" && "$ntmp/bi_lasm.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/bigints_asm.expected - >/dev/null; then ok "self-host asm: lasm assembles bigints (movabs/imm64) to a running ELF"; else bad "self-host asm: lasm assembles bigints (movabs/imm64) to a running ELF"; fi
     # byte-PERFECT: lasm no longer appends a trailing newline, so its ELF must equal the lume0 asm
@@ -274,14 +271,6 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] && [ -z "${LUME0_
     "$ntmp/lc" <../../compiler/stage1/toplevel_expr.src >"$ntmp/te_l.s" 2>/dev/null; "$ntmp/lasm" <"$ntmp/te_l.s" >"$ntmp/te_l.elf" 2>/dev/null; chmod +x "$ntmp/te_l.elf"
     $BIN run ../../compiler/stage1/data_asm_cc.lume ../../compiler/stage1/toplevel_expr.src "$ntmp/te_o.s" >/dev/null 2>&1; $BIN asm "$ntmp/te_o.s" "$ntmp/te_o.elf" >/dev/null 2>&1; chmod +x "$ntmp/te_o.elf"
     if [ -x "$ntmp/te_l.elf" ] && "$ntmp/te_l.elf" 2>/dev/null | diff -u "$te_exp" - >/dev/null && [ -x "$ntmp/te_o.elf" ] && "$ntmp/te_o.elf" 2>/dev/null | diff -u "$te_exp" - >/dev/null; then ok "top-level expression statement (emit/flush, value discarded): lumec and data_asmgen oracle both -> native 'Hi!'"; else bad "top-level expression statement (emit/flush): lumec and oracle -> native"; fi
-    # movabs boundaries: imm32 edges stay C7, anything outside becomes movabs; negatives and r8+ destinations must match the oracle byte for byte (whole file now; lasm appends no trailing newline).
-    printf '.section .text\n.globl _start\n_start:\n    movq $-2147483649, %%rax\n    movq $2147483648, %%rcx\n    movq $-9223372036854775808, %%r8\n    movq $9223372036854775807, %%r15\n    movq $-4294967296, %%rdx\n    movq $-4294967297, %%rbx\n    movq $-2147483648, %%rsi\n    movq $2147483647, %%rdi\n    movq $4294967295, %%r9\n    movq $-1234567890123456789, %%r11\n    movq $60, %%rax\n    movq $0, %%rdi\n    syscall\n' >"$ntmp/mvabs.s"
-    if "$ntmp/lasm" <"$ntmp/mvabs.s" >"$ntmp/mvabs_l.elf" 2>/dev/null && $BIN asm "$ntmp/mvabs.s" "$ntmp/mvabs_o.elf" >/dev/null 2>&1 && [ -s "$ntmp/mvabs_o.elf" ] && cmp -s "$ntmp/mvabs_l.elf" "$ntmp/mvabs_o.elf"; then ok "self-host asm: lasm movabs boundaries/negatives match the oracle byte for byte"; else bad "self-host asm: lasm movabs boundaries/negatives match the oracle byte for byte"; fi
-    # GAS local numeric labels: a hand-written .s REUSES `1:` and uses `1f`/`1b`; each reference must resolve to the NEAREST definition (forward / backward). lasm must run it and print "ok"; the one-name-per-number oracle (elf.c) cannot, so its ELF must NOT print "ok" (timeout guards a hang) -- lasm is strictly stronger than the oracle here.
-    ll_exp=../../tests/conformance/stage1/local_labels_asm.expected
-    "$ntmp/lasm" <../../compiler/stage1/local_labels.s >"$ntmp/ll_l.elf" 2>/dev/null; chmod +x "$ntmp/ll_l.elf"
-    $BIN asm ../../compiler/stage1/local_labels.s "$ntmp/ll_o.elf" >/dev/null 2>&1; chmod +x "$ntmp/ll_o.elf"
-    if [ -s "$ntmp/ll_l.elf" ] && timeout 10 "$ntmp/ll_l.elf" 2>/dev/null | diff -u "$ll_exp" - >/dev/null && ! { [ -x "$ntmp/ll_o.elf" ] && timeout 5 "$ntmp/ll_o.elf" 2>/dev/null | diff -u "$ll_exp" - >/dev/null; }; then ok "self-host asm: lasm resolves GAS local numeric labels (1f/1b) by nearest, reused numbers OK"; else bad "self-host asm: lasm resolves GAS local numeric labels (1f/1b) by nearest, reused numbers OK"; fi
     # zero-C loop: after the one-time bootstrap (lasm built via lume0 asm above), the whole pipeline needs NO lume0 asm.
     # lumec compiles its own source to gen.s; LASM (not lume0 asm) assembles gen.s into a working lumecB ELF; lumecB
     # recompiles its own source to gen2.s and must reproduce gen.s bit-for-bit (fixpoint via lasm), and lumecB must
@@ -1332,7 +1321,10 @@ EOF
 EOF
     LUME_BIN_DIR="$ntmp" ../../lume repl --kernel <"$ntmp/repl_kernel.in" >"$ntmp/repl_kernel.out" 2>/dev/null
     # 5. LLM-generatability CI regression gate (#230):
-    LUME_BIN_DIR="$ntmp" sh ../../scripts/check-llm-gen-eval.sh >"$ntmp/llm_gen_eval.json" 2>/dev/null || true
+    mkdir -p ../../build/bin
+    cp -f "$ntmp"/l* ../../build/bin/ 2>/dev/null || true
+    LUME_BIN_DIR="$ntmp" ../../lume build ../../scripts/llm_gen_eval.src -o "$ntmp/llm_gen_eval" >/dev/null 2>&1 && printf '@root %s\n@mode summary\n' "$(CDPATH= cd -- ../.. && pwd)" | "$ntmp/llm_gen_eval" >"$ntmp/llm_gen_eval.json" 2>/dev/null || true
+    rm -rf ../../build/llm-gen-eval ../../build/bin
     if grep -q '"mode":"hashes"' "$ntmp/sub_hashes.json" && grep -Eq '"ast_hash":"sha256:[0-9a-f]{64}"' "$ntmp/sub_hashes.json" && grep -q '"proof_status":"proven"' "$ntmp/sub_hashes.json" && grep -q '"mode":"grammar"' "$ntmp/sub_grammar.json" && grep -q '"format":"lume-constrained-grammar-v1"' "$ntmp/sub_grammar.json" && grep -q '"mode":"project"' "$ntmp/sub_project.json" && grep -q '"roundtrip_ast_equal":true' "$ntmp/sub_project.json" && grep -q '"code":"V0001"' "$ntmp/lsp_session.out" && grep -q '"diagnostics":\[\],"proofs":\[{"name":"step_up","kind":"contract","status":"proven"' "$ntmp/lsp_session.out" && grep -q 'Proof status: `proven`' "$ntmp/lsp_session.out" && grep -q "Content-Length:" "$ntmp/lsp_framed.out" && grep -q '"command":"stepBack","body":{"step":2,"replay":true}' "$ntmp/dap_session.out" && grep -q '"traceHistory":"1,2,3,2"' "$ntmp/dap_session.out" && grep -q '"command":"evaluate","body":{"result":"42"' "$ntmp/dap_session.out" && grep -q '"event":"terminated"' "$ntmp/dap_session.out" && grep -q "\[1\] defined" "$ntmp/repl_interactive.out" && grep -q "^42$" "$ntmp/repl_interactive.out" && grep -q "^error:" "$ntmp/repl_interactive.out" && grep -q "^17$" "$ntmp/repl_interactive.out" && grep -q '"msg_type":"kernel_info_reply"' "$ntmp/repl_kernel.out" && grep -q '"msg_type":"execute_reply","execution_count":2' "$ntmp/repl_kernel.out" && grep -q '"text/plain":"42"' "$ntmp/repl_kernel.out" && grep -q '"msg_type":"execute_reply","execution_count":3' "$ntmp/repl_kernel.out" && grep -q '"mime":"application/vnd.lume.table+json"' "$ntmp/repl_kernel.out" && grep -q '"msg_type":"shutdown_reply"' "$ntmp/repl_kernel.out" && grep -q '"gate":"llm-gen-eval"' "$ntmp/llm_gen_eval.json" && grep -q '"pass_at_1":3,"pass_at_2":4' "$ntmp/llm_gen_eval.json" && grep -q '"compiles_alone_rejected":true' "$ntmp/llm_gen_eval.json"; then ok "tooling, live stdio servers & LLM eval (#209, #210, #211, #230): live lume lsp/dap stdio servers, interactive lume repl & Jupyter kernel, and LLM-gen eval gate"; else bad "tooling, live stdio servers & LLM eval (#209, #210, #211, #230)"; cat "$ntmp/lsp_session.out" "$ntmp/lsp_framed.out" "$ntmp/dap_session.out" "$ntmp/repl_interactive.out" "$ntmp/repl_kernel.out" "$ntmp/llm_gen_eval.json" 2>/dev/null; fi
 
     # 6. Phase 3 Track S (#193) + K7: Real OS Multi-Process Parallelism (`sys_fork` + `sys_pipe` + `sys_wait4`) & Hardware Atomics (`lock xaddq`, spinlocks):
@@ -1595,13 +1587,16 @@ EOF
     if [ -x "$ntmp/cf_ok.elf" ] && "$ntmp/cf_ok.elf" 2>/dev/null | diff -u ../../tests/conformance/stage1/core_features_ok_asm.expected - >/dev/null && [ -s "$ntmp/cf_dpos.s" ] && ! grep -q "call ctfail" "$ntmp/cf_dpos.s" && [ -s "$ntmp/cf_spos.s" ] && ! grep -q "call ctfail" "$ntmp/cf_spos.s" && [ "$_cf_trap_rc" -eq 3 ] && grep -q "runtime contract violation" "$ntmp/cf_rt_trap.err" && [ "$cfb400" -eq 3 ] && grep -q "\[T0400\]" "$ntmp/cf_b_t400.err" && [ "$cfb401" -eq 3 ] && grep -q "\[T0401\]" "$ntmp/cf_b_t401.err" && [ "$cfbref" -eq 3 ] && grep -q "\[V0001\]" "$ntmp/cf_b_ref.err" && [ "$cfbaw" -eq 3 ] && grep -q "\[E0200\]" "$ntmp/cf_b_aw.err" && [ "$cfbrc" -eq 3 ] && grep -q "\[O0001\]" "$ntmp/cf_b_rc.err" && [ "$cfbsh1" -eq 3 ] && grep -q "\[S0001\]" "$ntmp/cf_b_sh1.err" && [ "$cfbsh2" -eq 3 ] && grep -q "\[E0200\]" "$ntmp/cf_b_sh2.err" && [ "$cfbhm" -eq 3 ] && grep -q "\[T0500\]" "$ntmp/cf_b_hm.err" && [ "$cfbpr" -eq 3 ] && grep -q "\[T2001\]" "$ntmp/cf_b_pr.err" && [ "$cfbsig" -eq 3 ] && grep -q "\[T2001\]" "$ntmp/cf_b_sig.err"; then ok "core language features (#197, #215): trait/impl [T0400/T0401], closures, refinement types (QF_LIA elision + exit-3 trap), async/await [E0200], rc/arc/weak [O0001], shard [S0001/E0200], let-polymorphism [T0500] & promise/signal [T2001]"; else bad "core language features (#197, #215)"; cat "$ntmp/cf_ok.err" "$ntmp/cf_rt_trap.err" "$ntmp/cf_b_t400.err" "$ntmp/cf_b_t401.err" "$ntmp/cf_b_ref.err" "$ntmp/cf_b_aw.err" "$ntmp/cf_b_rc.err" "$ntmp/cf_b_sh1.err" "$ntmp/cf_b_sh2.err" "$ntmp/cf_b_hm.err" "$ntmp/cf_b_pr.err" "$ntmp/cf_b_sig.err" 2>/dev/null; fi
 
     # Issue #196 (Adoption & Distribution G0-G9) & #198 (Horizon H1-H5 & Intent-as-Source §3-§5):
-    sh ../../scripts/install.sh --prefix "$ntmp/inst" --from-dir "$ntmp" >/dev/null 2>&1
+    LUME_BIN_DIR="$ntmp" ../../lume build ../../scripts/install.src -o "$ntmp/native_installer" >/dev/null 2>&1 && printf '@prefix %s\n@from-local %s\n@from-dir %s\n' "$ntmp/inst" "$(CDPATH= cd -- ../.. && pwd)" "$ntmp" | "$ntmp/native_installer" >/dev/null 2>&1
     _g0_ok=$(LUME_BIN_DIR="$ntmp" ../../lume self verify --prefix "$ntmp/inst" 2>/dev/null || true)
     cp "$ntmp/inst/MANIFEST.sha256" "$ntmp/inst/MANIFEST.sha256.bak"
     printf '0000000000000000000000000000000000000000000000000000000000000000  bin/lume\n' >"$ntmp/inst/MANIFEST.sha256"
     _g0_bad=$(LUME_BIN_DIR="$ntmp" ../../lume self verify --prefix "$ntmp/inst" 2>/dev/null || true)
     mv "$ntmp/inst/MANIFEST.sha256.bak" "$ntmp/inst/MANIFEST.sha256"
-    _g1_lb=$(LUME_BIN_DIR="$ntmp" sh ../../scripts/check-llm-gen-eval.sh --leaderboard 2>/dev/null || true)
+    mkdir -p ../../build/bin
+    cp -f "$ntmp"/l* ../../build/bin/ 2>/dev/null || true
+    _g1_lb=$(printf '@root %s\n@mode leaderboard\n' "$(CDPATH= cd -- ../.. && pwd)" | "$ntmp/llm_gen_eval" 2>/dev/null || true)
+    rm -rf ../../build/llm-gen-eval ../../build/bin
     "$ntmp/lc" <../../examples/interop/sidecar/payment_core.src >"$ntmp/sc.s" 2>/dev/null
     "$ntmp/lasm" <"$ntmp/sc.s" >"$ntmp/sc.elf" 2>/dev/null; chmod +x "$ntmp/sc.elf"
     _g2_out=$("$ntmp/sc.elf" 2>/dev/null | tr '\n' ',' || true)
@@ -1903,7 +1898,7 @@ EOF
         if [ "$_mac_out" = "55,42," ] && [ "$_mac_trap_rc" -eq 3 ] && printf '%s' "$_mac_x64_file" | grep -q "Mach-O 64-bit executable x86_64" && [ "$_mac_wasm_out" = "55,42," ] && [ "$_mac_wasm_trap_rc" -eq 3 ]; then ok "phase-5 T2 (#206, #262): native Apple Silicon Mach-O 64 (aarch64-macos-macho), x86_64-macos-macho & wasm32-wasi execution on Darwin (55,42 & exit-3 trap)"; else bad "phase-5 T2 (#206, #262): Mach-O 64 execution (out='$_mac_out'/$_mac_trap_rc x64='$_mac_x64_file' wasm='$_mac_wasm_out'/$_mac_wasm_trap_rc)"; fi
     fi
 
-    # Issue #262: Network installer (docs/install.sh) clean-runner install, self-verify, and SHA-256 tamper rejection
+    # Issue #262: Network installer (docs/install.src) clean-runner install, self-verify, and SHA-256 tamper rejection
     _ni_d=$(mktemp -d)
     _ni_os=$(uname -s)
     _ni_arch=$(uname -m)
@@ -1920,20 +1915,22 @@ EOF
     esac
     _ni_pkg="lume-v0.2.0-${_ni_plat_os}-${_ni_plat_arch}"
     mkdir -p "$_ni_d/stage" "$_ni_d/dist" "$_ni_d/tampered"
-    sh ../../scripts/install.sh --prefix "$_ni_d/stage/$_ni_pkg" --from-local "$(cd ../.. && pwd)" --from-dir "${ntmp:-$(cd ../../bootstrap/lume0 && pwd)}" >/dev/null 2>&1
+    LUME_BIN_DIR="${ntmp:-}" ../../lume build ../../scripts/install.src -o "$_ni_d/native_installer" >/dev/null 2>&1
+    printf '@prefix %s\n@from-local %s\n@from-dir %s\n' "$_ni_d/stage/$_ni_pkg" "$(CDPATH= cd -- ../.. && pwd)" "${ntmp:-$(CDPATH= cd -- ../../bootstrap/lume0 && pwd)}" | "$_ni_d/native_installer" >/dev/null 2>&1
     tar -C "$_ni_d/stage" -czf "$_ni_d/dist/${_ni_pkg}.tar.gz" "$_ni_pkg"
     if command -v sha256sum >/dev/null 2>&1; then
         (cd "$_ni_d/dist" && sha256sum "${_ni_pkg}.tar.gz" > SHA256SUMS)
     else
         (cd "$_ni_d/dist" && shasum -a 256 "${_ni_pkg}.tar.gz" > SHA256SUMS)
     fi
-    _ni_pos_log=$(LUME_PREFIX="$_ni_d/clean" LUME_RELEASE_TAG="v0.2.0" LUME_RELEASE_BASE_URL="file://$_ni_d/dist" sh ../../docs/install.sh 2>&1 || true)
+    LUME_BIN_DIR="${ntmp:-}" ../../lume build ../../docs/install.src -o "$_ni_d/release_installer" >/dev/null 2>&1
+    _ni_pos_log=$(printf '@prefix %s\n@platform %s\n@tag v0.2.0\n@base file://%s\n' "$_ni_d/clean" "$_ni_plat_os-$_ni_plat_arch" "$_ni_d/dist" | "$_ni_d/release_installer" 2>&1 || true)
     _ni_ver=$("$_ni_d/clean/bin/lume" --version 2>/dev/null || true)
     _ni_sv=$("$_ni_d/clean/bin/lume" self verify 2>/dev/null || true)
     cp "$_ni_d/dist/${_ni_pkg}.tar.gz" "$_ni_d/tampered/"
     printf '0000000000000000000000000000000000000000000000000000000000000000  %s.tar.gz\n' "$_ni_pkg" > "$_ni_d/tampered/SHA256SUMS"
     _ni_bad_rc=0
-    _ni_bad_log=$(LUME_PREFIX="$_ni_d/bad" LUME_RELEASE_TAG="v0.2.0" LUME_RELEASE_BASE_URL="file://$_ni_d/tampered" sh ../../docs/install.sh 2>&1) || _ni_bad_rc=$?
+    _ni_bad_log=$(printf '@prefix %s\n@platform %s\n@tag v0.2.0\n@base file://%s\n' "$_ni_d/bad" "$_ni_plat_os-$_ni_plat_arch" "$_ni_d/tampered" | "$_ni_d/release_installer" 2>&1) || _ni_bad_rc=$?
     mkdir -p "$_ni_d/unverified" "$_ni_d/no-sha" "$_ni_d/no-tools"
     _ni_missing_rc=0
     _ni_missing_out=$(LUME_HOME="$_ni_d/unverified" ../../lume self verify 2>/dev/null) || _ni_missing_rc=$?
