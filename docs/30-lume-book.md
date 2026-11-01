@@ -11,7 +11,8 @@ This book is the step-by-step developer and AI-agent guide to **Lume (Edition 20
 Install the prebuilt self-hosted Lume toolchain (`lume`, `lumec`, `lasm`, `lcli`, `lcaas`, `lcert`, `ltarget`, `levolve`) with no C compiler required:
 
 ```sh
-sh scripts/install.sh --prefix "$HOME/.lume"
+./lume build scripts/install.src -o build/bin/native_installer
+printf '@prefix %s\n@from-local %s\n' "$HOME/.lume" "$PWD" | build/bin/native_installer
 export PATH="$HOME/.lume/bin:$PATH"
 lume self verify
 ```
