@@ -117,9 +117,9 @@ jobs:
       - name: Inspect native capability collection on failure
         if: failure()
         run: printf '@mode registry-interface\n' > build/effect-debug.in && cat build/capstone-gate/effect-exec-1.src >> build/effect-debug.in && build/bin/lcaas < build/effect-debug.in
-      - name: Locate native capability functions on failure
+      - name: Preserve native capability trace on failure
         if: failure()
-        run: nm -n build/bin/lcaas | grep -E 'cs_reg_cap_add|cs_kchk_fn|cs_kcollect_caps' || true
+        run: test ! -f build/capability-trace.txt || cp build/capability-trace.txt build/lcaas-capability-trace.txt
       - name: Preserve native analysis assembly on failure
         if: failure()
         run: ./lume compile compiler/stage1/lcaas.src > build/lcaas.s
@@ -128,7 +128,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: native-capstone-analysis-${{ github.run_id }}
-          path: build/lcaas.s
+          path: |
+            build/lcaas.s
+            build/lcaas-capability-trace.txt
           retention-days: 3
 
   economic-benchmark:
