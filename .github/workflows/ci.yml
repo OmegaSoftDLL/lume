@@ -114,6 +114,9 @@ jobs:
         run: ./lume build compiler/stage1/lcaas.src -o build/bin/lcaas.capstone && mv build/bin/lcaas.capstone build/bin/lcaas
       - name: Execute native SaaS and two-clock RTC acceptance
         run: printf '@root %s\n@bin %s\n' "$PWD" "$PWD/build/bin" | ./lume run tests/capstones/gate.src
+      - name: Inspect native capability collection on failure
+        if: failure()
+        run: printf '@mode registry-interface\n' > build/effect-debug.in && cat build/capstone-gate/effect-exec-1.src >> build/effect-debug.in && build/bin/lcaas < build/effect-debug.in
       - name: Preserve native analysis assembly on failure
         if: failure()
         run: ./lume compile compiler/stage1/lcaas.src > build/lcaas.s
