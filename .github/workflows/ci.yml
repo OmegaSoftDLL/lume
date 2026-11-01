@@ -82,6 +82,8 @@ jobs:
         run: ./lume test scripts/install.src && ./lume build scripts/install.src -o build/bin/native_installer && tmp=$(mktemp -d) && printf '@prefix %s\n@from-local %s\n@from-dir %s\n' "$tmp/inst" "$PWD" "$PWD/build/bin" | build/bin/native_installer && ./lume self verify --prefix "$tmp/inst" | grep -q '"manifest_verified":true' && rm -rf "$tmp"
       - name: Verify native release installer build and unit tests (#262/#337)
         run: ./lume test docs/install.src && ./lume build docs/install.src -o build/bin/release_installer
+      - name: Verify native LLM generation evaluation gate (#230/#337)
+        run: ./lume test scripts/llm_gen_eval.src && ./lume build scripts/llm_gen_eval.src -o build/bin/llm_gen_eval && printf '@root %s\n@mode summary\n' "$PWD" | build/bin/llm_gen_eval | grep -q '"pass_at_1":3,"pass_at_2":4' && printf '@root %s\n@mode leaderboard\n' "$PWD" | build/bin/llm_gen_eval | grep -q '"leaderboard":' && rm -rf build/llm-gen-eval
 
   economic-benchmark:
     name: Economic benchmark real-execution protocol (#337)
@@ -126,7 +128,7 @@ jobs:
                    docs/00-catalog.md docs/01-survey.md docs/02-principles.md \
                    docs/03-specification.md docs/04-roadmap.md docs/05-vision.md \
                    grammar/lume.ebnf examples/README.md \
-                   tests/llm_gen_eval/system_prompt.md scripts/check-llm-gen-eval.sh; do
+                   tests/llm_gen_eval/system_prompt.md scripts/llm_gen_eval.src; do
             test -f "$f" || { echo "missing $f"; exit 1; }
           done
       - name: Every example is listed in examples/README.md
