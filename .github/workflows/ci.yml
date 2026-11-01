@@ -110,6 +110,8 @@ jobs:
         run: make -C bootstrap/lume0
       - name: Build native assembler
         run: ./lume build compiler/stage1/lasm.src -o build/bin/lasm.capstone && mv build/bin/lasm.capstone build/bin/lasm
+      - name: Build native analysis oracle from this revision
+        run: ./lume build compiler/stage1/lcaas.src -o build/bin/lcaas.capstone && mv build/bin/lcaas.capstone build/bin/lcaas
       - name: Execute native SaaS and two-clock RTC acceptance
         run: printf '@root %s\n@bin %s\n' "$PWD" "$PWD/build/bin" | ./lume run tests/capstones/gate.src
 
