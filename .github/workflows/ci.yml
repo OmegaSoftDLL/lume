@@ -85,6 +85,19 @@ jobs:
       - name: Verify native LLM generation evaluation gate (#230/#337)
         run: ./lume test scripts/llm_gen_eval.src && ./lume build scripts/llm_gen_eval.src -o build/bin/llm_gen_eval && printf '@root %s\n@mode summary\n' "$PWD" | build/bin/llm_gen_eval | grep -q '"pass_at_1":3,"pass_at_2":4' && printf '@root %s\n@mode leaderboard\n' "$PWD" | build/bin/llm_gen_eval | grep -q '"leaderboard":' && rm -rf build/llm-gen-eval
 
+  native-cli:
+    name: Native CLI driver (Lume only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build seed
+        run: make -C bootstrap/lume0
+      - name: Build native driver and Lume tools
+        run: ./lume build compiler/stage1/lcli.src -o build/bin/lcli && ./lume build compiler/stage1/lmod.src -o build/bin/lmod && ./lume build compiler/stage1/ltarget.src -o build/bin/ltarget && ./lume build compiler/stage1/lume_driver.src -o build/bin/lume_driver && ./lume build tests/cli/driver_gate.src -o build/bin/native_driver_gate
+      - name: Execute native driver acceptance in Lume
+        run: printf '@root %s\n' "$PWD" | build/bin/native_driver_gate
+
   native-assembly:
     name: Native assembler fixtures (Lume only)
     runs-on: ubuntu-latest
