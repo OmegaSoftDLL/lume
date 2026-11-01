@@ -1,0 +1,11 @@
+fn mg_expected(root) = let dir = root + "/compiler/stage1/lume/" in fs_read_file(dir + "01_lexer.src") + fs_read_file(dir + "02_parser.src") + fs_read_file(dir + "03_comptime.src") + fs_read_file(dir + "04_parser_decls.src") + fs_read_file(dir + "05_codegen.src") + fs_read_file(dir + "06_typecheck.src") + fs_read_file(dir + "06b_phase3.src") + fs_read_file(dir + "06c_phase4.src") + fs_read_file(dir + "06d_phase5.src") + fs_read_file(dir + "07_driver.src")
+
+fn mg_line_end(text, i) = if i >= count(text) or at(text, i) == "\n" then i else mg_line_end(text, i + 1)
+
+fn mg_root(input) = if count(input) < 6 or slice(input, 0, 6) != "@root " then "" else slice(input, 6, mg_line_end(input, 0))
+
+fn mg_main(root) = let output = root + "/build/lume-make-gate.out" in let errors = root + "/build/lume-make-gate.err" in let status = os_run_capture_timeout(root + "/build/bin/lume_make", Cons("amalgamate", Nil), output, errors, 900000) in if status != 0 then "native amalgamate command failed: " + fs_read_file(errors) else if fs_read_file(root + "/compiler/stage1/lumec.src") != mg_expected(root) then "native amalgamate output differs from the exact compiler module concatenation" else ""
+
+fn mg_dispatch(input) = let root = mg_root(input) in if root == "" then ctfail("native make gate requires @root\n") else let problem = mg_main(root) in if problem != "" then ctfail("native make gate failed: " + problem + "\n") else "native lume_make amalgamate reproduced the exact compiler source"
+
+print mg_dispatch(readall())
