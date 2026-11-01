@@ -81,6 +81,19 @@ jobs:
       - name: Verify native installer build and execution (#196/#337)
         run: ./lume test scripts/install.src && ./lume build scripts/install.src -o build/bin/native_installer && tmp=$(mktemp -d) && printf '@prefix %s\n@from-local %s\n@from-dir %s\n' "$tmp/inst" "$PWD" "$PWD/build/bin" | build/bin/native_installer && ./lume self verify --prefix "$tmp/inst" | grep -q '"manifest_verified":true' && rm -rf "$tmp"
 
+  native-assembly:
+    name: Native assembler fixtures (Lume only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build seed
+        run: make -C bootstrap/lume0
+      - name: Build native assembly acceptance gate
+        run: ./lume build tests/harness/lasm_gate.src -o build/bin/lasm_gate
+      - name: Execute Lume-generated assembly acceptance
+        run: printf '@root %s\n' "$PWD" | build/bin/lasm_gate
+
   economic-benchmark:
     name: Economic benchmark real-execution protocol (#337)
     runs-on: ubuntu-latest
