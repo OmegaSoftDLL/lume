@@ -8,7 +8,7 @@ fn ld_root() = let bin = ld_dir(os_arg_at(0)) in let parent = ld_dir(bin) in if 
 
 fn ld_tool(root, name) = root + "/build/bin/" + name
 
-fn ld_request(root, tool, request) = let input = root + "/build/lume-driver.in" in let output = root + "/build/lume-driver.out" in let errors = root + "/build/lume-driver.err" in let written = fs_write_sync(input, request) in if written != 1 then ctfail("native driver cannot write tool request\n") else let status = os_run_input_capture_timeout(ld_tool(root, tool), Nil, input, output, errors, 120000) in if status != 0 then ctfail("native driver tool failed: " + tool + "\n" + fs_read_file(errors)) else fs_read_file(output)
+fn ld_request(root, tool, request) = let input = root + "/build/lume-driver.in" in let output = root + "/build/lume-driver.out" in let errors = root + "/build/lume-driver.err" in let written = fs_write_sync(input, request) in if written != 1 then ctfail("native driver cannot write tool request\n") else let status = os_run_input_capture_timeout(ld_tool(root, tool), Nil, input, output, errors, 120000) in if status != 0 then ctfail("native driver tool failed: " + tool + " status " + str(status) + "\nstdout:\n" + fs_read_file(output) + "\nstderr:\n" + fs_read_file(errors)) else fs_read_file(output)
 
 fn ld_contains_at(text, part, i) = if i + count(part) > count(text) then 0 else if slice(text, i, i + count(part)) == part then 1 else ld_contains_at(text, part, i + 1)
 
