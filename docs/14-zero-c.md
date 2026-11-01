@@ -60,18 +60,19 @@ strongest honest claim, and it is the one the gate below enforces.
 
 A claim that the steady state is C-free is only worth the proof behind it, so the gate
 does not merely *avoid* calling C — it makes calling C **impossible** and shows the build
-still succeeds. `scripts/check-zero-c.sh`:
+still succeeds. `scripts/zero_c.src` implements the gate in Lume:
 
-1. Builds the seed and mints `lumec0`/`lasm0` (the one place C is allowed).
-2. **Shadows** `cc`, `gcc`, `clang`, `c++`, `g++`, `as`, and `ld` on `PATH` with stubs
-   that fail loudly (exit 97) if invoked, and verifies the shims are actually first.
+1. Verifies the frozen seed hashes and mints `lumec0`/`lasm0` (the one place C is allowed).
+2. **Shadows** `cc`, `gcc`, `clang`, `c++`, `g++`, `as`, and `ld` on `PATH` with copies of
+   `scripts/zero_c_blocker.src`, a native Lume executable that fails loudly (exit 97)
+   if invoked, and verifies every blocker is actually selected and returns 97.
 3. Runs stages 1-3 under that shadowed toolchain and asserts **stage 2 == stage 3**
    (both the `.s` and the native binaries), then compiles and runs a sample program
    whose output must be `55`.
 
-If any C compiler or external `as`/`ld` had crept into the steady-state path, a stub
-would fire and the build would fail. Green means: stages 1-3 built Lume-with-Lume and
-assembled native ELF with `lasm`, and `cc`/`gcc`/`clang`/`as`/`ld` were never invoked.
+If any C compiler or external `as`/`ld` had crept into the steady-state path, a native
+blocker would fire and the build would fail. Green means: stages 1-3 built Lume-with-Lume
+and assembled native ELF with `lasm`, and `cc`/`gcc`/`clang`/`as`/`ld` were never invoked.
 
 Run it locally with `make zero-c`; in CI it is the job *"Zero-C steady state
 (no cc/as/ld)"*, alongside the self-host fixpoint gate (`make bootstrap`).
@@ -81,7 +82,7 @@ Run it locally with `make zero-c`; in CI it is the job *"Zero-C steady state
 Now that the self-host loop is closed, **`bootstrap/lume0/*.c` and `bootstrap/lume0/*.h` are strictly frozen**:
 
 1. **Cryptographic seed freeze (`bootstrap/lume0/SEED_FREEZE.sha256`):**
-   `scripts/check-zero-c.sh` verifies the exact SHA-256 of every `.c` and `.h` file in
+   `scripts/zero_c.src` verifies the exact SHA-256 of every `.c` and `.h` file in
    `bootstrap/lume0/` before minting stage 0. New language features, directives (such as
    `.byte` for P33 `.rodata` protection), and target formats **must** be implemented in
    Lume (`compiler/stage1/lasm.src`, `compiler/stage1/lume/*.src`), never by growing the C
