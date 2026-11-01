@@ -75,7 +75,9 @@ jobs:
       - name: Build Lume process probes
         run: ./lume build compiler/stage1/os_run_probe.src -o build/bin/os_run_probe && ./lume build compiler/stage1/os_run_slow_probe.src -o build/bin/os_run_slow_probe && ./lume build compiler/stage1/os_run_input_probe.src -o build/bin/os_run_input_probe
       - name: Test native process execution
-        run: printf '%s' "$PWD/build/bin/os_run_probe" > os_run_probe_path && printf '%s' "$PWD/build/bin/os_run_slow_probe" > os_run_slow_probe_path && printf '%s' "$PWD/build/bin/os_run_input_probe" > os_run_input_probe_path && ./lume run compiler/stage1/os_run_trace.src && ./lume test compiler/stage1/os_run_ok.src
+        run: printf '%s' "$PWD/build/bin/os_run_probe" > os_run_probe_path && printf '%s' "$PWD/build/bin/os_run_slow_probe" > os_run_slow_probe_path && printf '%s' "$PWD/build/bin/os_run_input_probe" > os_run_input_probe_path && ./lume run compiler/stage1/os_run_trace.src && ./lume test compiler/stage1/os_run_ok.src && ./lume test compiler/stage1/os_argv_ok.src
+      - name: Verify exact native argc/argv behavior
+        run: ./lume build compiler/stage1/os_argv_probe.src -o build/bin/os_argv_probe && test "$(build/bin/os_argv_probe alpha 'with space' '')" = "argv:ok"
 
   economic-benchmark:
     name: Economic benchmark real-execution protocol (#337)
@@ -103,8 +105,10 @@ jobs:
       - uses: actions/checkout@v7
       - name: Build seed
         run: make -C bootstrap/lume0
+      - name: Build native registry gate
+        run: ./lume build tests/registry/gate.src -o build/bin/registry_gate
       - name: Verify real publication, resolution, discovery, and adversarial rejection
-        run: sh scripts/check-verified-registry.sh
+        run: ulimit -s unlimited 2>/dev/null || ulimit -s 524288 2>/dev/null || ulimit -s 65520 2>/dev/null || ulimit -s 32768 2>/dev/null || true; printf '@root %s\n' "$PWD" | build/bin/registry_gate
 
   docs:
     name: Documentation & examples

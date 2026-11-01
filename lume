@@ -3016,14 +3016,23 @@ cmd_registry() {
     while [ $# -gt 0 ]; do
         case "$1" in
             --store) [ $# -ge 2 ] || usage; _rc_store=$2; shift 2 ;;
+            --store=*) _rc_store=${1#--store=}; shift ;;
             --target) [ $# -ge 2 ] || usage; _rc_target=$2; shift 2 ;;
+            --target=*) _rc_target=${1#--target=}; shift ;;
             --adapter) [ $# -ge 2 ] || usage; _rc_adapter=$2; shift 2 ;;
+            --adapter=*) _rc_adapter=${1#--adapter=}; shift ;;
             --source) [ $# -ge 2 ] || usage; _rc_source=$2; shift 2 ;;
+            --source=*) _rc_source=${1#--source=}; shift ;;
             --proof) [ $# -ge 2 ] || usage; _rc_proof=$2; shift 2 ;;
+            --proof=*) _rc_proof=${1#--proof=}; shift ;;
             --tests) [ $# -ge 2 ] || usage; _rc_tests=$2; shift 2 ;;
+            --tests=*) _rc_tests=${1#--tests=}; shift ;;
             --cid) [ $# -ge 2 ] || usage; _rc_cid=$2; shift 2 ;;
+            --cid=*) _rc_cid=${1#--cid=}; shift ;;
             --capability) [ $# -ge 2 ] || usage; _rc_capability=$2; shift 2 ;;
+            --capability=*) _rc_capability=${1#--capability=}; shift ;;
             --contract-signature) [ $# -ge 2 ] || usage; _rc_contract=$2; shift 2 ;;
+            --contract-signature=*) _rc_contract=${1#--contract-signature=}; shift ;;
             --json) shift ;;
             *) usage ;;
         esac
