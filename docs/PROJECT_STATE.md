@@ -114,9 +114,9 @@ see the Phase 1–5 entries in §5 for the current state.
   labels incl. GAS numeric (`1:`/`1f`/`2b`); .rodata/.ascii/.asciz; .lcomm bss.
 - **Self-hosted assembler symbol lookup:** `lasm.src` uses 256 hash buckets with an
   association-list fallback instead of scanning every symbol for every relocation.
-  `tests/harness/lasm_fixtures.src` generates the colliding-label, local-label, and ELF hello
-  assembly fixtures in Lume; `tests/harness/lasm_gate.src` requires byte-identical ELF output
-  with the `lume0 asm` oracle plus successful native execution and nearest-label behavior.
+  `tests/harness/lasm_fixtures.src` generates the colliding-label, local-label, ELF hello, and
+  movabs-boundary assembly fixtures in Lume; `tests/harness/lasm_gate.src` requires byte-identical
+  ELF output with the `lume0 asm` oracle plus successful native execution and nearest-label behavior.
 - **Semantic `check`** (`resolve.c`): `R0200` undefined name, `T0001` literal type mismatch
   vs annotation, `D0001` duplicate parameter, `D0002` duplicate top-level function.
 - **P35 test coverage warning** (`compiler/stage1/lcaas.src`): `lume agent check` reports
