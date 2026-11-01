@@ -132,7 +132,7 @@ jobs:
         run: printf '@mode registry-interface\n' > build/effect-debug.in && cat build/capstone-gate/effect-exec-1.src >> build/effect-debug.in && build/bin/lcaas < build/effect-debug.in
       - name: Preserve native capability trace on failure
         if: failure()
-        run: test ! -f build/capability-trace.txt || cp build/capability-trace.txt build/lcaas-capability-trace.txt
+        run: test ! -f build/capability-trace.txt || cp build/capability-trace.txt build/lcaas-capability-trace.txt; test ! -f build/parser-trace.txt || cp build/parser-trace.txt build/lcaas-parser-trace.txt
       - name: Preserve native analysis assembly on failure
         if: failure()
         run: ./lume compile compiler/stage1/lcaas.src > build/lcaas.s
@@ -144,6 +144,7 @@ jobs:
           path: |
             build/lcaas.s
             build/lcaas-capability-trace.txt
+            build/lcaas-parser-trace.txt
           retention-days: 3
 
   economic-benchmark:
