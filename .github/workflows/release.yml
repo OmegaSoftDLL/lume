@@ -24,7 +24,7 @@ jobs:
     name: Build & Run-Verify Linux Release Archives (x86_64, aarch64, riscv64)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install QEMU user-mode emulators & cross-compilers for aarch64 and riscv64
         run: |
@@ -176,7 +176,7 @@ jobs:
     name: Build & Run-Verify macOS Release Archives (macos-aarch64, macos-x86_64)
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Package & run-verify macos-aarch64 and macos-x86_64 archives (#262)
         run: |
@@ -296,7 +296,7 @@ jobs:
       - name: Configure git LF line endings
         run: git config --global core.autocrlf false
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Package & run-verify windows-x86_64 archive (#262)
         run: |
@@ -384,7 +384,7 @@ jobs:
     needs: [package-linux, package-macos, package-windows]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Download all verified platform archives
         uses: actions/download-artifact@v4
