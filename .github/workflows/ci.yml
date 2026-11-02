@@ -94,9 +94,11 @@ jobs:
       - name: Build seed
         run: make -C bootstrap/lume0
       - name: Build native driver and Lume tools
-        run: ./lume build compiler/stage1/lcli.src -o build/bin/lcli && ./lume build compiler/stage1/lmod.src -o build/bin/lmod && ./lume build compiler/stage1/ltarget.src -o build/bin/ltarget && ./lume build compiler/stage1/lume_driver.src -o build/bin/lume_driver && ./lume build tests/cli/driver_gate.src -o build/bin/native_driver_gate
+        run: ./lume build compiler/stage1/lcli.src -o build/bin/lcli && ./lume build compiler/stage1/lmod.src -o build/bin/lmod && ./lume build compiler/stage1/ltarget.src -o build/bin/ltarget && ./lume build compiler/stage1/lcaas.src -o build/bin/lcaas && ./lume build compiler/stage1/lume_driver.src -o build/bin/lume_driver && ./lume build tests/cli/driver_gate.src -o build/bin/native_driver_gate && ./lume build scripts/lume_make.src -o build/bin/lume_make && ./lume build tests/cli/make_gate.src -o build/bin/native_make_gate
       - name: Execute native driver acceptance in Lume
         run: printf '@root %s\n' "$PWD" | build/bin/native_driver_gate
+      - name: Verify native amalgamation in Lume
+        run: printf '@root %s\n' "$PWD" | build/bin/native_make_gate
 
   native-assembly:
     name: Native assembler fixtures (Lume only)
