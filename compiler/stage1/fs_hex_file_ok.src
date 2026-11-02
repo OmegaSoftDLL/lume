@@ -1,0 +1,33 @@
+fn fhf_binary() = fs_write_hex_file("fs_hex_binary_probe", "00410aff7f")
+
+fn fhf_preserved() = fs_write_sync("fs_hex_preserved_probe", "keep")
+
+fn test_hex_write_success() = fhf_binary() == 1
+
+fn test_hex_nul_byte() = let written = fhf_binary() in written == 1 and fs_read_byte("fs_hex_binary_probe", 0) == 0
+
+fn test_hex_ascii_byte() = let written = fhf_binary() in written == 1 and fs_read_byte("fs_hex_binary_probe", 1) == 65
+
+fn test_hex_newline_byte() = let written = fhf_binary() in written == 1 and fs_read_byte("fs_hex_binary_probe", 2) == 10
+
+fn test_hex_high_byte() = let written = fhf_binary() in written == 1 and fs_read_byte("fs_hex_binary_probe", 3) == 255
+
+fn test_hex_last_byte() = let written = fhf_binary() in written == 1 and fs_read_byte("fs_hex_binary_probe", 4) == 127
+
+fn test_hex_out_of_range() = let written = fhf_binary() in written == 1 and fs_read_byte("fs_hex_binary_probe", 5) == 0 - 1
+
+fn test_hex_uppercase() = fs_write_hex_file("fs_hex_upper_probe", "AB") == 1 and fs_read_byte("fs_hex_upper_probe", 0) == 171
+
+fn test_hex_lowercase() = fs_write_hex_file("fs_hex_lower_probe", "ab") == 1 and fs_read_byte("fs_hex_lower_probe", 0) == 171
+
+fn test_hex_empty_file() = fs_write_hex_file("fs_hex_empty_probe", "") == 1 and fs_read_file("fs_hex_empty_probe") == ""
+
+fn test_hex_odd_input_preserves_file() = let original = fhf_preserved() in original == 1 and fs_write_hex_file("fs_hex_preserved_probe", "0") == 0 and fs_read_file("fs_hex_preserved_probe") == "keep"
+
+fn test_hex_invalid_input_preserves_file() = let original = fhf_preserved() in original == 1 and fs_write_hex_file("fs_hex_preserved_probe", "gg") == 0 and fs_read_file("fs_hex_preserved_probe") == "keep"
+
+fn test_hex_invalid_input_creates_nothing() = fs_write_hex_file("definitely_missing_hex_probe", "xyz") == 0 and fs_path_exists("definitely_missing_hex_probe") == 0
+
+fn fs_hex_data_gate() = if test_hex_write_success() and test_hex_nul_byte() and test_hex_ascii_byte() and test_hex_newline_byte() and test_hex_high_byte() and test_hex_last_byte() and test_hex_out_of_range() and test_hex_uppercase() and test_hex_lowercase() and test_hex_empty_file() and test_hex_odd_input_preserves_file() and test_hex_invalid_input_preserves_file() and test_hex_invalid_input_creates_nothing() then "native hexadecimal binary writes passed" else ctfail("native hexadecimal binary write gate failed\n")
+
+print fs_hex_data_gate()
